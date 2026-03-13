@@ -1,0 +1,11 @@
+{
+    "mcpServers": {
+        "laravel-boost": {
+            "command": "/var/home/linuxbrew/.linuxbrew/Cellar/php@8.4/8.4.18/bin/php",
+            "args": [
+                "/var/home/mrwilde/Projects/MrWilde/Apps/CanEye-Project/can-eye-budget-v2/artisan",
+                "boost:mcp"
+            ]
+        }
+    }
+}
