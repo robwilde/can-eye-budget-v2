@@ -1,0 +1,30 @@
+# phpstan.neon.dist
+
+includes:
+    - ./vendor/larastan/larastan/extension.neon
+    - phpstan-baseline.neon
+
+parameters:
+    paths:
+        - app
+        - bootstrap
+        - config
+        - database/factories
+        - database/seeders
+        - routes
+
+    # Be pragmatic; move towards 9 over time.
+    level: 6
+
+    # Ignore vendor and storage noise.
+    excludePaths:
+        - %rootDir%/../../../vendor/*
+        - %rootDir%/../../../storage/*
+        - %rootDir%/../../../bootstrap/cache/*
+
+    reportUnmatchedIgnoredErrors: false
+
+    ignoreErrors:
+        - '#Unsafe usage of new static#'
+        - '#Call to an undefined method Illuminate\\Support\\Collection::#'
+        - '#Call to an undefined method Illuminate\\Contracts\\Pagination\\LengthAwarePaginator::#'
