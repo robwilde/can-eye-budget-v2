@@ -93,6 +93,49 @@ Created missing `phpstan-baseline.neon` file referenced by `phpstan.neon.dist`.
 
 - `vendor/bin/phpstan analyse --no-progress --memory-limit=512M` — Runs successfully (3 pre-existing errors, no config/baseline errors)
 
+## 2026-03-14 — Issue #3: Create Transaction Model, Migration, Factory, and Seeder
+
+### The Change
+
+Built the Transaction domain layer with a prerequisite Category model, enums, migrations, factories, seeders, and full test coverage.
+
+**Files created:**
+- `app/Enums/TransactionDirection.php` — 2-case string-backed enum (debit, credit)
+- `app/Enums/TransactionStatus.php` — 2-case string-backed enum (posted, pending)
+- `database/migrations/2026_03_14_000000_create_categories_table.php` — Self-referencing categories with nullable parent_id FK (nullOnDelete)
+- `database/migrations/2026_03_14_000001_create_transactions_table.php` — Full transaction schema: user/account/category FKs, amount in cents, direction, description, post_date, Basiq fields, enrich_data JSON, composite index on [user_id, post_date]
+- `app/Models/Category.php` — Eloquent model with self-referencing parent/children relationships + transactions HasMany
+- `app/Models/Transaction.php` — Eloquent model with enum casts, date casts, array cast for enrich_data, BelongsTo relationships
+- `database/factories/CategoryFactory.php` — Default category + withParent() state
+- `database/factories/TransactionFactory.php` — Default debit transaction with Australian merchant data + 5 states (debit, credit, withCategory, fromBasiq, pending)
+- `database/seeders/CategorySeeder.php` — 12 parent categories with 30+ subcategories
+- `database/seeders/TransactionSeeder.php` — 20 varied transactions for test user across multiple accounts
+- `tests/Feature/Models/TransactionTest.php` — 22 feature tests covering factory validity, all states, relationships, cascade/null-on-delete, enum casting, date casting, JSON casting, unique basiq_id
+- `tests/Unit/Enums/TransactionDirectionTest.php` — 3 unit tests
+- `tests/Unit/Enums/TransactionStatusTest.php` — 3 unit tests
+
+**Files modified:**
+- `app/Models/User.php` — Added `transactions(): HasMany` relationship
+- `app/Models/Account.php` — Added `transactions(): HasMany` relationship
+- `database/seeders/DatabaseSeeder.php` — Added CategorySeeder and TransactionSeeder calls
+
+### The Reasoning
+
+- **Categories as prerequisite**: The transaction schema specifies `category_id` as a FK to `categories`. Creating a minimal Category model/migration first keeps the FK constraint valid and avoids tech debt of a missing reference.
+- **Consistent FK behaviour**: `user_id` and `account_id` use `cascadeOnDelete` (matching Account pattern — when the owner goes, so do their transactions). `category_id` uses `nullOnDelete` because categories are classification metadata, not ownership — deleting a category shouldn't delete transactions.
+- **Factory user consistency**: The TransactionFactory creates `$user` once and passes it to both `user_id` and `Account::factory()->for($user)`, ensuring the transaction's user and its account's user are always the same entity.
+- **Composite index [user_id, post_date]**: Most budget queries will be "show me my transactions for this date range" — this index makes that query efficient.
+
+### The Tech Debt
+
+- None introduced.
+
+### Verification
+
+- `php artisan migrate:fresh --seed --no-interaction` — All 7 migrations and 3 seeders run cleanly
+- `php artisan test --compact` — 85 tests pass (170 assertions)
+- `vendor/bin/pint --dirty --format agent` — All PHP files pass formatting
+
 ## 2026-03-14 — Create comprehensive op.conf for Can Eye Budget V2
 
 ### The Change
