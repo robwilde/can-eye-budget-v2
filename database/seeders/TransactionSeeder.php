@@ -21,17 +21,17 @@ final class TransactionSeeder extends Seeder
             throw new RuntimeException('TransactionSeeder requires accounts. Run AccountSeeder first.');
         }
 
-        $categories = Category::whereNull('parent_id')->get();
-
         $transactionAccount = $accounts->firstWhere('name', 'Everyday Transaction') ?? $accounts->first();
         $savingsAccount = $accounts->firstWhere('name', 'Goal Saver') ?? $transactionAccount;
         $creditCardAccount = $accounts->firstWhere('name', 'Low Rate Visa') ?? $transactionAccount;
 
-        $groceries = $categories->firstWhere('name', 'Groceries');
-        $transport = $categories->firstWhere('name', 'Transport');
-        $dining = $categories->firstWhere('name', 'Dining');
-        $utilities = $categories->firstWhere('name', 'Utilities');
-        $income = $categories->firstWhere('name', 'Income');
+        $groceries = Category::where('name', 'Groceries')->whereNotNull('parent_id')->first();
+        $fuel = Category::where('name', 'Fuel')->whereNotNull('parent_id')->first();
+        $rideshare = Category::where('name', 'Rideshare')->whereNotNull('parent_id')->first();
+        $takeaway = Category::where('name', 'Takeaway')->whereNotNull('parent_id')->first();
+        $electricity = Category::where('name', 'Electricity')->whereNotNull('parent_id')->first();
+        $phone = Category::where('name', 'Phone')->whereNotNull('parent_id')->first();
+        $salary = Category::where('name', 'Salary')->whereNotNull('parent_id')->first();
 
         Transaction::factory()->for($user)->for($transactionAccount)->fromBasiq()->create([
             'description' => 'WOOLWORTHS 1234 SYDNEY',
@@ -54,14 +54,14 @@ final class TransactionSeeder extends Seeder
             'clean_description' => 'BP Geelong',
             'amount' => 9800,
             'post_date' => '2026-03-08',
-            'category_id' => $transport?->id,
+            'category_id' => $fuel?->id,
         ]);
 
         Transaction::factory()->for($user)->for($transactionAccount)->create([
             'description' => 'UBER TRIP SYDNEY',
             'amount' => 2350,
             'post_date' => '2026-03-07',
-            'category_id' => $transport?->id,
+            'category_id' => $rideshare?->id,
         ]);
 
         Transaction::factory()->for($user)->for($transactionAccount)->fromBasiq()->create([
@@ -69,14 +69,14 @@ final class TransactionSeeder extends Seeder
             'clean_description' => 'McDonalds Parramatta',
             'amount' => 1495,
             'post_date' => '2026-03-06',
-            'category_id' => $dining?->id,
+            'category_id' => $takeaway?->id,
         ]);
 
         Transaction::factory()->for($user)->for($transactionAccount)->create([
             'description' => 'ORIGIN ENERGY BILL',
             'amount' => 18500,
             'post_date' => '2026-03-05',
-            'category_id' => $utilities?->id,
+            'category_id' => $electricity?->id,
         ]);
 
         Transaction::factory()->credit()->for($user)->for($transactionAccount)->fromBasiq()->create([
@@ -84,7 +84,7 @@ final class TransactionSeeder extends Seeder
             'clean_description' => 'Salary - Acme Pty Ltd',
             'amount' => 450000,
             'post_date' => '2026-03-01',
-            'category_id' => $income?->id,
+            'category_id' => $salary?->id,
         ]);
 
         Transaction::factory()->credit()->for($user)->for($transactionAccount)->create([
@@ -169,7 +169,7 @@ final class TransactionSeeder extends Seeder
             'description' => 'TELSTRA MOBILE BILL',
             'amount' => 8900,
             'post_date' => '2026-03-05',
-            'category_id' => $utilities?->id,
+            'category_id' => $phone?->id,
         ]);
     }
 }

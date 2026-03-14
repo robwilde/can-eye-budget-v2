@@ -14,6 +14,12 @@ return new class extends Migration
             $table->id();
             $table->string('name');
             $table->foreignId('parent_id')->nullable()->constrained('categories')->nullOnDelete();
+            $table->string('anzsic_division')->nullable();
+            $table->string('anzsic_subdivision')->nullable();
+            $table->string('anzsic_group')->nullable();
+            $table->string('anzsic_class')->nullable();
+            $table->string('icon')->nullable();
+            $table->string('color')->nullable();
             $table->timestamps();
         });
     }

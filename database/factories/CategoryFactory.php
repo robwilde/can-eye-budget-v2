@@ -22,10 +22,62 @@ final class CategoryFactory extends Factory
         ];
     }
 
-    public function withParent(Category $parent): static
+    public function withParent(Category $parent): self
     {
         return $this->state(fn (array $attributes) => [
             'parent_id' => $parent->id,
+        ]);
+    }
+
+    public function division(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'name' => 'Retail Trade',
+            'anzsic_division' => 'G',
+        ]);
+    }
+
+    public function subdivision(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'name' => 'Food Retailing',
+            'anzsic_division' => 'G',
+            'anzsic_subdivision' => '41',
+        ]);
+    }
+
+    public function group(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'name' => 'Supermarket and Grocery Stores',
+            'anzsic_division' => 'G',
+            'anzsic_subdivision' => '41',
+            'anzsic_group' => '411',
+        ]);
+    }
+
+    public function anzsicClass(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'name' => 'Supermarkets',
+            'anzsic_division' => 'G',
+            'anzsic_subdivision' => '41',
+            'anzsic_group' => '411',
+            'anzsic_class' => '4110',
+        ]);
+    }
+
+    public function withIcon(string $icon = 'shopping-cart'): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'icon' => $icon,
+        ]);
+    }
+
+    public function withColor(string $color = '#4F46E5'): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'color' => $color,
         ]);
     }
 }
