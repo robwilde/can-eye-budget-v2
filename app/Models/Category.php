@@ -21,6 +21,12 @@ final class Category extends Model
     protected $fillable = [
         'name',
         'parent_id',
+        'anzsic_division',
+        'anzsic_subdivision',
+        'anzsic_group',
+        'anzsic_class',
+        'icon',
+        'color',
     ];
 
     /** @return BelongsTo<self, $this> */
