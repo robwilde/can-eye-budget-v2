@@ -1,3 +1,28 @@
+# DDEV Environment & OpCode Aliases
+
+**This project runs inside DDEV docker containers. NEVER run `php`, `artisan`, `composer`, `npm`, or `vendor/bin/*` commands directly via Bash.**
+
+All shell commands MUST use the `op` (OpCode) aliases defined in `op.conf`. These route through `ddev exec` automatically.
+
+**Key aliases:**
+
+| Task | Command |
+|------|---------|
+| Run all tests | `op test` |
+| Run filtered tests | `op test.filter <name>` |
+| Run unit tests only | `op test.unit` |
+| Run feature tests only | `op test.feature` |
+| Lint dirty files (Pint) | `op lint.dirty` |
+| Lint all files | `op lint` |
+| Run seeders | `op seed` |
+| Fresh migrate + seed | `op migrate.fresh` |
+| Run migrations | `op migrate` |
+| Create model | `op make.model <Name> [--migration] [--factory] [--seed]` |
+| Create test | `op make.test <Name>` |
+| Full CI check | `op ci` |
+
+See `op.conf` for the complete list. When in doubt, read the file.
+
 <laravel-boost-guidelines>
 === foundation rules ===
 

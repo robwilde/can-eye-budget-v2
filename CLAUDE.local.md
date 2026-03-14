@@ -4,6 +4,34 @@ This file contains project-specific guidelines for the Can Eye Budget V2 project
 
 ---
 
+## DDEV Environment (CRITICAL)
+
+**This project runs inside DDEV docker containers. NEVER run any of these directly via Bash:**
+- `php artisan ...`
+- `composer ...`
+- `npm ...`
+- `vendor/bin/pint ...`
+- `vendor/bin/phpstan ...`
+
+**NEVER use Laravel Boost MCP tools (`tinker`, etc.) as a workaround for running shell commands.**
+
+**Always use `op` (OpCode) aliases from `op.conf`.** These automatically route through `ddev exec`.
+
+Common examples:
+```bash
+op test                    # Run all tests
+op test.filter CategoryTest  # Run filtered tests
+op lint.dirty              # Pint on dirty files
+op migrate.fresh           # Fresh migrate + seed
+op seed                    # Run seeders
+op make.model User --migration --factory --seed
+op make.test UserTest
+```
+
+Run `cat op.conf` or read the file if you need to check available aliases.
+
+---
+
 ## Git Commands
 
 **NEVER run any git commands (add, commit, push, checkout, branch, etc.) unless the user explicitly asks you to.** This includes:
@@ -14,6 +42,19 @@ This file contains project-specific guidelines for the Can Eye Budget V2 project
 - Any other git operations
 
 Wait for explicit instructions before touching git.
+
+---
+
+## Pull Request Base Branch
+
+**All PRs MUST target the `develop` branch. NEVER target `main`.**
+
+When creating a PR, always use:
+```bash
+gh pr create --base develop
+```
+
+This is non-negotiable. There are zero exceptions to this rule.
 
 ---
 
