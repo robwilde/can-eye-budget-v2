@@ -17,6 +17,19 @@ Wait for explicit instructions before touching git.
 
 ---
 
+## Pull Request Base Branch
+
+**All PRs MUST target the `develop` branch. NEVER target `main`.**
+
+When creating a PR, always use:
+```bash
+gh pr create --base develop
+```
+
+This is non-negotiable. There are zero exceptions to this rule.
+
+---
+
 ## GitHub Project Board
 
 Track project tasks and roadmap at: https://github.com/users/robwilde/projects/2
