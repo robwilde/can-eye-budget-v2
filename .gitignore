@@ -22,3 +22,4 @@ yarn-error.log
 /.vscode
 /.zed
 /op.conf
+/context/todo/commit-context.md
