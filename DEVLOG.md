@@ -306,3 +306,41 @@ Added architecture enforcement tests and mutation testing capability.
 
 - `op test` — 160 tests pass (355 assertions), up from 154/307
 - `op lint.dirty` — All PHP files pass formatting
+
+## 2026-03-16 — Issue #11: Implement BasiqService with Token Caching
+
+### The Change
+
+Created the `BasiqService` — the first Basiq API integration piece. Handles authentication (server + client tokens) and provides a pre-configured HTTP client for downstream consumers.
+
+**Files created:**
+- `app/Services/BasiqService.php` — Final service class with `serverToken()` (cached 20min), `clientToken()` (uncached, user-scoped), and `api()` (returns authenticated `PendingRequest`)
+- `tests/Feature/Services/BasiqServiceTest.php` — 10 tests covering auth requests, cache behaviour, PendingRequest config, error handling, and singleton resolution
+
+**Files modified:**
+- `config/services.php` — Added `basiq` config array (`api_key`, `base_url`)
+- `.env.example` — Added `BASIQ_API_KEY=`
+- `app/Providers/AppServiceProvider.php` — Registered `BasiqService` singleton binding
+
+**Files deleted:**
+- `app/Services/.gitkeep` — No longer needed now that a real service class exists
+
+### The Reasoning
+
+- **Constructor injection over config facade**: `BasiqService` receives `$apiKey` and `$baseUrl` as constructor params via the container binding. This makes the class fully testable without touching config, and follows Laravel's DI best practices.
+- **1200s (20min) cache TTL**: Basiq server tokens expire after 60 minutes. The 20-minute TTL gives a safe 3x margin while avoiding redundant HTTP calls per request cycle.
+- **Client tokens NOT cached**: They're user-specific and short-lived — caching would require per-user cache keys and invalidation logic that isn't justified at this stage.
+- **`->throw()` on all HTTP calls**: Converts 4xx/5xx responses into `RequestException` for fail-fast behaviour. Callers handle errors at their level.
+- **`api()` is public**: Downstream consumers like `SyncTransactionsJob` (Issue #12+) need `$basiq->api()->get(...)`.
+
+### The Tech Debt
+
+- None introduced. The service is ready for consumption by Issue #12+ (Basiq user creation, sync jobs).
+
+### Verification
+
+- `op test.filter BasiqServiceTest` — 10 tests pass (19 assertions)
+- `op test.filter Arch` — 7 tests pass (52 assertions), architecture constraints hold
+- `op test` — 170 tests pass (374 assertions), full suite green
+- `op lint.dirty` — All PHP files pass formatting
+- Pre-existing CI issues: `pint --test` reports 46 files with style issues (all predating this change), PHPStan has 1 pre-existing error in `Logout.php`
