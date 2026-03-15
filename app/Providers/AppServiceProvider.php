@@ -1,21 +1,27 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Providers;
 
+use App\Services\BasiqService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
-class AppServiceProvider extends ServiceProvider
+final class AppServiceProvider extends ServiceProvider
 {
     /**
      * Register any application services.
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(BasiqService::class, fn (): BasiqService => new BasiqService(
+            apiKey: (string) config('services.basiq.api_key'),
+            baseUrl: (string) config('services.basiq.base_url'),
+        ));
     }
 
     /**
@@ -37,7 +43,7 @@ class AppServiceProvider extends ServiceProvider
             app()->isProduction(),
         );
 
-        Password::defaults(fn (): ?Password => app()->isProduction()
+        Password::defaults(static fn (): ?Password => app()->isProduction()
             ? Password::min(12)
                 ->mixedCase()
                 ->letters()
