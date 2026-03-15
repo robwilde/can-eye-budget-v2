@@ -8,6 +8,7 @@ use App\Enums\TransactionDirection;
 use App\Enums\TransactionStatus;
 use Carbon\CarbonImmutable;
 use Database\Factories\TransactionFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -74,6 +75,15 @@ final class Transaction extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeWithRelations(Builder $query): Builder
+    {
+        return $query->with(['account', 'category']);
     }
 
     /**

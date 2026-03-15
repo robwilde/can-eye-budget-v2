@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Enums\AccountClass;
 use App\Enums\AccountStatus;
 use Database\Factories\AccountFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -41,6 +42,15 @@ final class Account extends Model
     public function transactions(): HasMany
     {
         return $this->hasMany(Transaction::class);
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeWithRelations(Builder $query): Builder
+    {
+        return $query->with(['user', 'transactions']);
     }
 
     /**
