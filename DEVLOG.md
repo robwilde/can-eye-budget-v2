@@ -275,3 +275,34 @@ Completed the domain enum layer: added missing `SyncStatus` enum, added `Fortnig
 - `op test.unit` — 29 tests pass (56 assertions)
 - `op test.filter BudgetTest` — 21 tests pass (30 assertions)
 - `op lint.dirty` — All PHP files pass formatting
+
+---
+
+## 2026-03-16 — Issue #10: Set Up Pest Architecture Presets and Mutation Testing
+
+### The Change
+
+Added architecture enforcement tests and mutation testing capability.
+
+**Files created:**
+- `tests/Arch.php` — 6 architecture tests: `laravel` preset, `security` preset, services must be final, models cannot use `floatval()`, DTOs must be readonly, enums must be string-backed
+
+**Files modified:**
+- `phpunit.xml` — Added `Arch` test suite pointing to `tests/Arch.php` so arch tests run with the full suite
+- `op.conf` — Added `test.mutate` alias (`--mutate --min=85 --covered-only`)
+
+### The Reasoning
+
+- **`phpunit.xml` change required**: `tests/Arch.php` sits at the test root, outside the `Unit/` and `Feature/` directories. Without registering it as its own test suite, PHPUnit (and therefore Pest) silently skips it. Adding a dedicated `Arch` suite keeps the file at the conventional location while ensuring it runs with `op test`.
+- **Vacuous arch rules on empty namespaces**: `App\Services` and `App\DTOs` only contain `.gitkeep` — the arch tests pass now but will enforce conventions (final services, readonly DTOs) as soon as real classes are added.
+- **`not->toUse(['floatval'])` on models**: Protects the integer-cents pattern established by `MoneyCast`. If someone accidentally calls `floatval()` in a model, the arch test catches it at test time.
+- **Mutation testing via runtime flag**: No config file changes needed — `--mutate --min=85 --covered-only` is passed at runtime through the `op test.mutate` alias.
+
+### The Tech Debt
+
+- Mutation testing score threshold (85%) may need tuning once the first full run completes — it could be too low or too high for the current test suite.
+
+### Verification
+
+- `op test` — 160 tests pass (355 assertions), up from 154/307
+- `op lint.dirty` — All PHP files pass formatting
