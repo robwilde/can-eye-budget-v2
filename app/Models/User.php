@@ -64,6 +64,12 @@ final class User extends Authenticatable
         return $this->hasMany(Transaction::class);
     }
 
+    /** @return HasMany<Budget, $this> */
+    public function budgets(): HasMany
+    {
+        return $this->hasMany(Budget::class);
+    }
+
     /**
      * Get the attributes that should be cast.
      *
