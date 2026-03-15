@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Casts\MoneyCast;
 use App\Enums\AccountClass;
 use App\Enums\AccountStatus;
 use Database\Factories\AccountFactory;
@@ -61,7 +62,7 @@ final class Account extends Model
         return [
             'type' => AccountClass::class,
             'status' => AccountStatus::class,
-            'balance' => 'integer',
+            'balance' => MoneyCast::class,
         ];
     }
 }

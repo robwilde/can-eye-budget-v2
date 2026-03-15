@@ -198,3 +198,45 @@ Built the Budget domain layer: BudgetPeriod enum, migration, model, factory, see
 - `op test.filter BudgetPeriodTest` — 3 tests pass (7 assertions)
 - `op test` — 121 tests pass (240 assertions), full suite green
 - `op lint.dirty` — All PHP files pass formatting
+
+## 2026-03-15 — Issue #7: Eager Loading Scopes and Relationship Traversal Tests
+
+### The Change
+
+Added `withRelations` scopes and feature tests for relationship traversals across all models.
+
+*(Completed in prior sessions — see commits 6289832, 1a4b832, 21e4a82)*
+
+## 2026-03-15 — Issue #8: Implement Integer-Cents Money Accessors
+
+### The Change
+
+Created a reusable `MoneyCast` Eloquent cast to centralise money column handling, replacing ad-hoc `'integer'` casts on all money columns.
+
+**Files created:**
+- `app/Casts/MoneyCast.php` — Custom `CastsAttributes` implementation with `get()`/`set()` (int coercion) and `static format(int $cents): string` using pure integer arithmetic (no floats)
+- `tests/Unit/Casts/MoneyCastTest.php` — 11 unit tests: cast get/set, format edge cases (zero, negative, large, padded cents), and model integration assertions
+
+**Files modified:**
+- `app/Models/Account.php` — `'balance' => MoneyCast::class`
+- `app/Models/Transaction.php` — `'amount' => MoneyCast::class`
+- `app/Models/Budget.php` — `'limit_amount' => MoneyCast::class`
+
+### The Reasoning
+
+- **Behaviour-preserving refactor**: `MoneyCast::get()` and `set()` do `(int) $value` — identical to the built-in `'integer'` cast — so all existing code and tests continue working without changes.
+- **`format()` uses pure integer arithmetic**: `intdiv()` + `%` avoids floating-point entirely. `number_format()` is called with an integer argument (no decimal places) so it only adds thousand separators.
+- **Single source of truth**: Any future money formatting, validation, or conversion logic has one place to live rather than being scattered across Blade views or controllers.
+
+### The Tech Debt
+
+- None introduced. The `format()` method is available but not yet consumed by any views — that will come when UI components are built.
+
+### Verification
+
+- `op test.filter MoneyCastTest` — 11 tests pass (11 assertions)
+- `op test.filter AccountTest` — 16 tests pass (26 assertions)
+- `op test.filter TransactionTest` — 22 tests pass (36 assertions)
+- `op test.filter BudgetTest` — 20 tests pass (29 assertions)
+- `op test` — 150 tests pass (295 assertions), full suite green
+- `op lint.dirty` — Pint fixed import ordering and style, re-verified all tests pass

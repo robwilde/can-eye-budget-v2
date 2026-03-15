@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Casts\MoneyCast;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionStatus;
 use Carbon\CarbonImmutable;
@@ -94,7 +95,7 @@ final class Transaction extends Model
         return [
             'direction' => TransactionDirection::class,
             'status' => TransactionStatus::class,
-            'amount' => 'integer',
+            'amount' => MoneyCast::class,
             'post_date' => 'date',
             'transaction_date' => 'date',
             'enrich_data' => 'array',
