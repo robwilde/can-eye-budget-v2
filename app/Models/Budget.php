@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Casts\MoneyCast;
 use App\Enums\BudgetPeriod;
 use Carbon\CarbonImmutable;
 use Database\Factories\BudgetFactory;
@@ -82,7 +83,7 @@ final class Budget extends Model
     {
         return [
             'period' => BudgetPeriod::class,
-            'limit_amount' => 'integer',
+            'limit_amount' => MoneyCast::class,
             'start_date' => 'date',
             'end_date' => 'date',
         ];
