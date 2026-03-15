@@ -8,6 +8,7 @@ use App\Enums\AccountClass;
 use App\Enums\AccountStatus;
 use App\Models\Account;
 use App\Models\User;
+use Illuminate\Database\QueryException;
 
 test('factory creates a valid account', function () {
     $account = Account::factory()->create();
@@ -68,7 +69,7 @@ test('basiq_account_id must be unique', function () {
     Account::factory()->create(['basiq_account_id' => $basiqId]);
 
     expect(fn () => Account::factory()->create(['basiq_account_id' => $basiqId]))
-        ->toThrow(Exception::class);
+        ->toThrow(QueryException::class);
 });
 
 test('account belongs to a user', function () {
@@ -82,7 +83,7 @@ test('user has many accounts', function () {
     Account::factory()->count(3)->for($user)->create();
 
     expect($user->accounts)->toHaveCount(3)
-        ->each->toBeInstanceOf(Account::class);
+        ->each(fn (Pest\Expectation $account) => $account->toBeInstanceOf(Account::class));
 });
 
 test('deleting a user cascades to accounts', function () {

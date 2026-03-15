@@ -25,6 +25,7 @@ final class User extends Authenticatable
     protected $fillable = [
         'name',
         'email',
+        'basiq_user_id',
         'password',
     ];
 
