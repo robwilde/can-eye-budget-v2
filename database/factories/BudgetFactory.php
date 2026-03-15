@@ -53,6 +53,13 @@ final class BudgetFactory extends Factory
         ]);
     }
 
+    public function fortnightly(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'period' => BudgetPeriod::Fortnightly,
+        ]);
+    }
+
     public function yearly(): self
     {
         return $this->state(fn (array $attributes) => [
