@@ -6,7 +6,8 @@ namespace App\Enums;
 
 enum BudgetPeriod: string
 {
-    case Monthly = 'monthly';
     case Weekly = 'weekly';
+    case Fortnightly = 'fortnightly';
+    case Monthly = 'monthly';
     case Yearly = 'yearly';
 }

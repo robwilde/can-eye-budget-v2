@@ -161,6 +161,12 @@ test('weekly state produces weekly period', function () {
     expect($budget->period)->toBe(BudgetPeriod::Weekly);
 });
 
+test('fortnightly state produces fortnightly period', function () {
+    $budget = Budget::factory()->fortnightly()->create();
+
+    expect($budget->period)->toBe(BudgetPeriod::Fortnightly);
+});
+
 test('yearly state produces yearly period', function () {
     $budget = Budget::factory()->yearly()->create();
 
