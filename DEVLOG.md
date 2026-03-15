@@ -240,3 +240,38 @@ Created a reusable `MoneyCast` Eloquent cast to centralise money column handling
 - `op test.filter BudgetTest` — 20 tests pass (29 assertions)
 - `op test` — 150 tests pass (295 assertions), full suite green
 - `op lint.dirty` — Pint fixed import ordering and style, re-verified all tests pass
+
+## 2026-03-16 — Issue #9: Create Domain Enums
+
+### The Change
+
+Completed the domain enum layer: added missing `SyncStatus` enum, added `Fortnightly` case to `BudgetPeriod`, normalized `declare(strict_types=1)` across all enum files, and added corresponding tests and factory states.
+
+**Files created:**
+- `app/Enums/SyncStatus.php` — 4-case string-backed enum (Pending, InProgress, Completed, Failed) with kebab-case backing values matching `AccountClass` convention
+- `tests/Unit/Enums/SyncStatusTest.php` — 3 unit tests for case count, backing values, from() resolution
+
+**Files modified:**
+- `app/Enums/AccountClass.php` — Added `declare(strict_types=1)` to match other enums
+- `app/Enums/AccountStatus.php` — Added `declare(strict_types=1)` to match other enums
+- `app/Enums/BudgetPeriod.php` — Added `Fortnightly` case, reordered to frequency-ascending (Weekly, Fortnightly, Monthly, Yearly)
+- `database/factories/BudgetFactory.php` — Added `fortnightly()` state method
+- `tests/Unit/Enums/BudgetPeriodTest.php` — Updated count to 4, added Fortnightly assertions
+- `tests/Feature/Models/BudgetTest.php` — Added fortnightly factory state test
+
+### The Reasoning
+
+- **Naming: `TransactionDirection` not `TransactionType`**: Issue #9 spec says `TransactionType`, but the codebase already uses `TransactionDirection` — which matches the Basiq API field name and the DB column. No rename needed.
+- **`SyncStatus` standalone**: No model or migration wiring yet — this enum is for Phase 2 Basiq sync integration. Created now to complete the domain enum inventory.
+- **Frequency-ascending ordering**: Cases ordered Weekly → Fortnightly → Monthly → Yearly so the progression is self-documenting.
+- **Kebab-case `'in-progress'`**: Matches the convention in `AccountClass` (`'credit-card'`, `'term-deposit'`).
+
+### The Tech Debt
+
+- `SyncStatus` awaits Phase 2 model wiring (Basiq sync tables).
+
+### Verification
+
+- `op test.unit` — 29 tests pass (56 assertions)
+- `op test.filter BudgetTest` — 21 tests pass (30 assertions)
+- `op lint.dirty` — All PHP files pass formatting
