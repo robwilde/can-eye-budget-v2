@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Livewire;
 
-use App\Services\BasiqService;
+use App\Contracts\BasiqServiceContract;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
 use Livewire\Attributes\Validate;
@@ -15,7 +17,11 @@ final class ConnectBank extends Component
     #[Validate('in:connect,manage')]
     public string $action = 'connect';
 
-    public function connect(BasiqService $basiqService): void
+    /**
+     * @throws RequestException
+     * @throws ConnectionException
+     */
+    public function connect(BasiqServiceContract $basiqService): void
     {
         $this->validate();
 
@@ -31,7 +37,7 @@ final class ConnectBank extends Component
         $state = Str::random(40);
         session()->put('basiq_consent_state', $state);
 
-        $consentUrl = config('services.basiq.consent_url').'/home?'.http_build_query([
+        $consentUrl = mb_rtrim(config('services.basiq.consent_url'), '/').'/home?'.http_build_query([
             'token' => $token,
             'action' => $this->action,
             'state' => $state,
