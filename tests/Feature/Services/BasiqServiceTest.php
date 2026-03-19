@@ -6,6 +6,10 @@
 
 declare(strict_types=1);
 
+use App\DTOs\BasiqAccount;
+use App\DTOs\BasiqJob;
+use App\DTOs\BasiqTransaction;
+use App\DTOs\BasiqUser;
 use App\Services\BasiqService;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Request;
@@ -190,3 +194,192 @@ test('service is resolvable from container as singleton', function () {
         ->toBeInstanceOf(BasiqService::class)
         ->and($first)->toBe($second);
 });
+
+test('createUser sends POST with email and returns BasiqUser', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users' => Http::response(['id' => 'usr-1', 'email' => 'jane@example.com']),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $user = $service->createUser('jane@example.com');
+
+    expect($user)
+        ->toBeInstanceOf(BasiqUser::class)
+        ->id->toBe('usr-1')
+        ->email->toBe('jane@example.com')
+        ->mobile->toBeNull();
+
+    Http::assertSent(fn (Request $r) => $r->url() === 'https://au-api.basiq.io/users'
+        && $r->method() === 'POST'
+        && $r['email'] === 'jane@example.com'
+        && ! isset($r['mobile']));
+});
+
+test('createUser includes mobile when provided', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users' => Http::response(['id' => 'usr-2', 'email' => 'joe@example.com', 'mobile' => '+61400000000']),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $user = $service->createUser('joe@example.com', '+61400000000');
+
+    expect($user->mobile)->toBe('+61400000000');
+
+    Http::assertSent(fn (Request $r) => $r->url() === 'https://au-api.basiq.io/users'
+        && $r['mobile'] === '+61400000000');
+});
+
+test('createUser throws RequestException on API error', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users' => Http::response(['error' => 'invalid'], 422),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $service->createUser('bad@example.com');
+})->throws(RequestException::class);
+
+test('getAccounts returns collection of BasiqAccount DTOs', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users/usr-1/accounts' => Http::response([
+            'data' => [
+                ['id' => 'acc-1', 'name' => 'Savings', 'class' => ['type' => 'savings'], 'balance' => '5000', 'currency' => 'AUD', 'status' => 'active'],
+                ['id' => 'acc-2', 'name' => 'Credit', 'type' => 'credit', 'currency' => 'AUD'],
+            ],
+        ]),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $accounts = $service->getAccounts('usr-1');
+
+    expect($accounts)
+        ->toHaveCount(2)
+        ->each
+        ->toBeInstanceOf(BasiqAccount::class)
+        ->and($accounts->first())
+        ->id->toBe('acc-1')
+        ->type->toBe('savings')
+        ->balance->toBe('5000');
+});
+
+test('getAccounts returns empty collection when no accounts', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users/usr-1/accounts' => Http::response(['data' => []]),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $accounts = $service->getAccounts('usr-1');
+
+    expect($accounts)->toBeEmpty();
+});
+
+test('paginateTransactions returns transactions from single page', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users/usr-1/transactions*' => Http::response([
+            'data' => [
+                ['id' => 'txn-1', 'amount' => '-10.00', 'direction' => 'debit'],
+                ['id' => 'txn-2', 'amount' => '20.00', 'direction' => 'credit'],
+            ],
+            'links' => ['next' => null],
+        ]),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $transactions = $service->paginateTransactions('usr-1')->all();
+
+    expect($transactions)
+        ->toHaveCount(2)
+        ->each->toBeInstanceOf(BasiqTransaction::class);
+});
+
+test('paginateTransactions follows pagination links across multiple pages', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users/usr-1/transactions' => Http::sequence()
+            ->push([
+                'data' => [['id' => 'txn-1', 'amount' => '10.00', 'direction' => 'debit']],
+                'links' => ['next' => 'https://au-api.basiq.io/users/usr-1/transactions?cursor=abc'],
+            ])
+            ->push([
+                'data' => [['id' => 'txn-2', 'amount' => '20.00', 'direction' => 'credit']],
+                'links' => ['next' => null],
+            ]),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $transactions = $service->paginateTransactions('usr-1')->all();
+
+    expect($transactions)
+        ->toHaveCount(2)
+        ->and($transactions[0]->id)->toBe('txn-1')
+        ->and($transactions[1]->id)->toBe('txn-2');
+});
+
+test('paginateTransactions sends filter as comma-separated query param', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users/usr-1/transactions*' => Http::response([
+            'data' => [],
+            'links' => ['next' => null],
+        ]),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $service->paginateTransactions('usr-1', ['account.id.eq(acc-1)', 'direction.eq(debit)'])->all();
+
+    Http::assertSent(fn (Request $r) => str_contains($r->url(), 'transactions')
+        && str_contains($r->url(), 'filter=account.id.eq%28acc-1%29%2Cdirection.eq%28debit%29'));
+});
+
+test('paginateTransactions sends no filter param when null', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users/usr-1/transactions*' => Http::response([
+            'data' => [],
+            'links' => ['next' => null],
+        ]),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $service->paginateTransactions('usr-1')->all();
+
+    Http::assertSent(fn (Request $r) => str_contains($r->url(), 'transactions')
+        && ! str_contains($r->url(), 'filter='));
+});
+
+test('getJob returns BasiqJob with derived status', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/jobs/job-1' => Http::response([
+            'id' => 'job-1',
+            'steps' => [
+                ['title' => 'verify-credentials', 'status' => 'success'],
+                ['title' => 'retrieve-accounts', 'status' => 'success'],
+            ],
+        ]),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $job = $service->getJob('job-1');
+
+    expect($job)
+        ->toBeInstanceOf(BasiqJob::class)
+        ->id->toBe('job-1')
+        ->status->toBe('success')
+        ->steps->toHaveCount(2);
+});
+
+test('getJob throws RequestException on 404', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/jobs/bad-id' => Http::response(['error' => 'not found'], 404),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $service->getJob('bad-id');
+})->throws(RequestException::class);
