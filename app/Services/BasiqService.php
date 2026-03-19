@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Contracts\BasiqServiceContract;
 use App\DTOs\BasiqAccount;
 use App\DTOs\BasiqJob;
 use App\DTOs\BasiqTransaction;
@@ -17,7 +18,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\LazyCollection;
 use RuntimeException;
 
-final readonly class BasiqService
+final readonly class BasiqService implements BasiqServiceContract
 {
     public function __construct(
         private string $apiKey,
@@ -77,7 +78,6 @@ final readonly class BasiqService
     /**
      * @param  array<int, string>|null  $filter
      * @return LazyCollection<int, BasiqTransaction>
-     *
      */
     public function paginateTransactions(string $basiqUserId, ?array $filter = null): LazyCollection
     {

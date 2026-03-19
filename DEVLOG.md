@@ -1,5 +1,32 @@
 # Dev Log
 
+## 2026-03-19 — Extract BasiqServiceContract Interface for Testability
+
+### The Change
+
+Extracted `BasiqServiceContract` interface from `BasiqService` (which is `final readonly` and cannot be mocked by Mockery). Refactored `ConnectBank` component and its tests to use the interface.
+
+**Files created:**
+- `app/Contracts/BasiqServiceContract.php` — New interface with all 7 public methods from `BasiqService`, carrying over PHPDoc `@throws` and generic return type annotations.
+
+**Files modified:**
+- `app/Services/BasiqService.php` — Added `implements BasiqServiceContract`.
+- `app/Providers/AppServiceProvider.php` — Singleton binding now keyed on `BasiqServiceContract::class`. Added `alias()` so existing code resolving `BasiqService::class` (e.g. `BasiqServiceTest`) continues working.
+- `app/Livewire/ConnectBank.php` — `connect()` method now type-hints `BasiqServiceContract` instead of `BasiqService`.
+- `tests/Feature/Livewire/ConnectBankTest.php` — Replaced `Http::fake()` with Mockery mock of `BasiqServiceContract`. Uses `shouldReceive`/`shouldNotReceive` expectations. Extracted `fakeBasiqService()` helper with sensible defaults and optional callback for per-test overrides.
+
+### The Reasoning
+
+- `BasiqService` is `final readonly` — Mockery cannot extend it to create test doubles. The only way to mock it is via an interface.
+- `Http::fake()` coupled tests to the Basiq API's HTTP contract (URLs, request shapes). Mocking at the interface boundary tests the component's logic, not the service's HTTP internals.
+- The `alias()` binding in AppServiceProvider ensures backward compatibility: any code that resolves `BasiqService::class` from the container still gets the same singleton instance.
+
+### The Tech Debt
+
+- None introduced. This is a net improvement in testability.
+
+---
+
 ## 2026-03-19 — PR #39: Address Copilot Review Comments
 
 ### The Change
