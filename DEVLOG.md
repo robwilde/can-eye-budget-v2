@@ -1,5 +1,34 @@
 # Dev Log
 
+## 2026-03-19 — Issue #12: Refactor DTOs to Use Spatie Laravel Data v4
+
+### The Change
+
+Refactored 4 hand-rolled DTOs (`BasiqUser`, `BasiqAccount`, `BasiqTransaction`, `BasiqJob`) to extend `Spatie\LaravelData\Dto`. Replaced manual `fromArray()` factory methods with the inherited `from()` and `collect()` pipeline.
+
+**Files modified:**
+- `app/DTOs/BasiqUser.php` — Extends `Dto`, removed `fromArray()` (direct mapping via `from()`)
+- `app/DTOs/BasiqAccount.php` — Extends `Dto`, replaced `fromArray()` with `prepareForPipeline()` for `class.type` fallback
+- `app/DTOs/BasiqTransaction.php` — Extends `Dto`, replaced `fromArray()` with `prepareForPipeline()` for `enrich` destructuring
+- `app/DTOs/BasiqJob.php` — Extends `Dto`, uses `#[Computed]` for derived `status` property
+- `app/Services/BasiqService.php` — All `fromArray()` calls → `from()`, `collect()->map()` → `BasiqAccount::collect()`
+- `tests/Arch.php` — DTO arch constraint changed from `toBeReadonly()` → `toExtend(Dto::class)->toBeFinal()`
+
+**Files moved:**
+- `tests/Unit/DTOs/*Test.php` → `tests/Feature/DTOs/*Test.php` (Dto::from() requires the Laravel service container)
+
+### The Reasoning
+
+- `readonly class` is incompatible with `extends Dto` in PHP 8.4 (parent must also be readonly). Used `final class` with `public readonly` constructor-promoted properties instead — still immutable at the property level.
+- DTO tests moved to Feature/ because `Dto::from()` resolves through the service container (`app(DataConfig::class)` internally), which isn't available in Pest Unit tests (per `tests/Pest.php:14-16`).
+- `prepareForPipeline()` chosen over `#[MapInputName]` for `BasiqAccount` and `BasiqTransaction` because they need multi-source fallbacks and destructuring that dot-notation mapping can't express.
+
+### The Tech Debt
+
+- None introduced. This is a pure refactor — all 195 tests pass, no API changes to `BasiqService` consumers.
+
+---
+
 ## 2026-03-13 — Issue #1: Scaffold Laravel 12 with Livewire Starter Kit
 
 ### The Change
@@ -344,3 +373,44 @@ Created the `BasiqService` — the first Basiq API integration piece. Handles au
 - `op test` — 170 tests pass (374 assertions), full suite green
 - `op lint.dirty` — All PHP files pass formatting
 - Pre-existing CI issues: `pint --test` reports 46 files with style issues (all predating this change), PHPStan has 1 pre-existing error in `Logout.php`
+
+## 2026-03-19 — Issue #12: Build BasiqService Data Retrieval Methods
+
+### The Change
+
+Extended `BasiqService` with four data retrieval methods and created four DTOs to map Basiq API JSON responses into typed PHP objects.
+
+**Files created:**
+- `app/DTOs/BasiqUser.php` — `final readonly` DTO for user creation responses (`id`, `email`, `?mobile`)
+- `app/DTOs/BasiqAccount.php` — `final readonly` DTO for account data with nested `class.type` extraction
+- `app/DTOs/BasiqTransaction.php` — `final readonly` DTO with nested `enrich` field destructuring (`merchant`, `anzsic`, full `enrichData`)
+- `app/DTOs/BasiqJob.php` — `final readonly` DTO with `resolveStatus()` deriving status from step array (failed > pending > success)
+- `tests/Unit/DTOs/BasiqUserTest.php` — 2 tests: full mapping, missing optional mobile
+- `tests/Unit/DTOs/BasiqAccountTest.php` — 3 tests: nested class.type, top-level type fallback, all optionals null
+- `tests/Unit/DTOs/BasiqTransactionTest.php` — 3 tests: full enrich, missing enrich, partial enrich
+- `tests/Unit/DTOs/BasiqJobTest.php` — 4 tests: success/failed/pending resolution, step result preservation
+
+**Files modified:**
+- `app/Services/BasiqService.php` — Added `createUser()`, `getAccounts()`, `paginateTransactions()`, `getJob()` methods
+- `tests/Feature/Services/BasiqServiceTest.php` — Added 11 feature tests covering all 4 methods including pagination, filter params, and error handling
+
+**Files deleted:**
+- `app/DTOs/.gitkeep` — Replaced by real DTO classes
+
+### The Reasoning
+
+- **DTOs use raw strings, not enums**: Type/status/direction fields stay as strings at the transport layer. Enum casting happens at the persistence layer (models) — this keeps DTOs as pure data containers decoupled from domain logic.
+- **`balance` as string**: Basiq returns balance as a decimal string. Cents conversion belongs in the model layer where `MoneyCast` handles it, not in the DTO.
+- **`paginateTransactions` uses `LazyCollection::make()` + Generator**: Cursor-based pagination via `links.next` yields one transaction at a time. Memory stays at O(page_size) regardless of total transaction count — critical for users with years of bank history.
+- **`$query` cleared after first request**: Subsequent `links.next` URLs include their own query parameters, so re-sending the filter would duplicate/conflict.
+- **`resolveStatus()` is private static**: Job status isn't a direct API field — it's derived from step statuses with clear priority: any `failed` → failed, any non-`success` → pending, all `success` → success.
+
+### The Tech Debt
+
+- None introduced. All DTOs are sealed (`final readonly`), service methods follow the existing `api()->throw()` pattern.
+
+### Verification
+
+- `op lint.dirty` — Pint applied `final_class` to all 4 DTOs (project convention)
+- `op test` — 195 tests pass (457 assertions), full suite green
+- All arch constraints hold (DTOs readonly, services final)

@@ -19,7 +19,7 @@
         "livewire-development",
         "pest-testing",
         "tailwindcss-development",
-        "developing-with-fortify",
+        "fortify-development",
         "debugging-output-and-previewing-html-using-ray",
         "spatie-laravel-php-standards"
     ]
