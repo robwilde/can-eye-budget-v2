@@ -19,6 +19,7 @@ return [
     'basiq' => [
         'api_key' => env('BASIQ_API_KEY'),
         'base_url' => env('BASIQ_BASE_URL', 'https://au-api.basiq.io'),
+        'consent_url' => env('BASIQ_CONSENT_URL', 'https://consent.basiq.io'),
     ],
 
     'postmark' => [
