@@ -15,7 +15,8 @@ arch('models do not use floatval')
 
 arch('dtos')
     ->expect('App\DTOs')
-    ->toBeReadonly();
+    ->toExtend(Spatie\LaravelData\Dto::class)
+    ->toBeFinal();
 
 arch('enums are string backed')
     ->expect('App\Enums')
