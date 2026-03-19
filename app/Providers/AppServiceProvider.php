@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Contracts\BasiqServiceContract;
 use App\Services\BasiqService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
@@ -18,10 +19,12 @@ final class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->singleton(BasiqService::class, fn (): BasiqService => new BasiqService(
+        $this->app->singleton(BasiqServiceContract::class, fn (): BasiqService => new BasiqService(
             apiKey: (string) config('services.basiq.api_key'),
             baseUrl: (string) config('services.basiq.base_url'),
         ));
+
+        $this->app->alias(BasiqServiceContract::class, BasiqService::class);
     }
 
     /**
