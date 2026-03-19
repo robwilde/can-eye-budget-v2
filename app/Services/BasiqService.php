@@ -4,11 +4,17 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\DTOs\BasiqAccount;
+use App\DTOs\BasiqJob;
+use App\DTOs\BasiqTransaction;
+use App\DTOs\BasiqUser;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\LazyCollection;
 use RuntimeException;
 
 final readonly class BasiqService
@@ -38,6 +44,68 @@ final readonly class BasiqService
             ->withToken($this->serverToken())
             ->withHeaders(['basiq-version' => '3.0'])
             ->throw();
+    }
+
+    /**
+     * @throws ConnectionException
+     */
+    public function createUser(string $email, ?string $mobile = null): BasiqUser
+    {
+        $payload = ['email' => $email];
+
+        if ($mobile !== null) {
+            $payload['mobile'] = $mobile;
+        }
+
+        $response = $this->api()->post('/users', $payload)->json();
+
+        return BasiqUser::from($response);
+    }
+
+    /**
+     * @return Collection<int, BasiqAccount>
+     *
+     * @throws ConnectionException
+     */
+    public function getAccounts(string $basiqUserId): Collection
+    {
+        $response = $this->api()->get("/users/$basiqUserId/accounts")->json();
+
+        return BasiqAccount::collect($response['data'] ?? [], Collection::class);
+    }
+
+    /**
+     * @param  array<int, string>|null  $filter
+     * @return LazyCollection<int, BasiqTransaction>
+     *
+     */
+    public function paginateTransactions(string $basiqUserId, ?array $filter = null): LazyCollection
+    {
+        return LazyCollection::make(function () use ($basiqUserId, $filter) {
+            $url = "/users/$basiqUserId/transactions";
+            $query = $filter !== null ? ['filter' => implode(',', $filter)] : [];
+
+            do {
+                $response = $this->api()->get($url, $query)->json();
+                $query = [];
+
+                foreach ($response['data'] ?? [] as $item) {
+                    yield BasiqTransaction::from($item);
+                }
+
+                $url = $response['links']['next'] ?? null;
+            } while ($url !== null);
+        });
+    }
+
+    /**
+     * @throws ConnectionException
+     */
+    public function getJob(string $jobId): BasiqJob
+    {
+        $response = $this->api()->get("/jobs/{$jobId}")->json();
+
+        return BasiqJob::from($response);
     }
 
     /**
