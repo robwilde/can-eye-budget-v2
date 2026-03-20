@@ -31,6 +31,7 @@
     "nunomaduro/collision": "^8.9.1",
     "pestphp/pest": "^3.8.6",
     "pestphp/pest-plugin-laravel": "^3.2",
+    "phpro/grumphp": "^2.19",
     "rector/rector": "^2.3.8",
     "spatie/boost-spatie-guidelines": "^1.1"
   },
@@ -104,7 +105,8 @@
     "sort-packages": true,
     "allow-plugins": {
       "pestphp/pest-plugin": true,
-      "php-http/discovery": true
+      "php-http/discovery": true,
+      "phpro/grumphp": true
     }
   },
   "minimum-stability": "stable",
