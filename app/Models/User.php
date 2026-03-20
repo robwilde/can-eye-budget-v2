@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -12,6 +13,7 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Str;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 
+/** @property CarbonImmutable|null $last_synced_at */
 final class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
@@ -26,6 +28,7 @@ final class User extends Authenticatable
         'name',
         'email',
         'basiq_user_id',
+        'last_synced_at',
         'password',
     ];
 
@@ -80,6 +83,7 @@ final class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
+            'last_synced_at' => 'datetime',
             'password' => 'hashed',
         ];
     }
