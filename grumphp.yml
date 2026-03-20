@@ -13,7 +13,3 @@ grumphp:
             configuration: phpstan.neon.dist
             use_grumphp_paths: false
             memory_limit: 512M
-
-        pest:
-            config_file: phpunit.xml
-            always_execute: true
