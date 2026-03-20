@@ -34,16 +34,29 @@ gh project view 1 --owner robwilde --web
 
 ## Dev Log Requirement
 
-Since context resets between sessions, we use `DEVLOG.md` to track our work.
+Since context resets between sessions, we use devlogs to track our work. Devlogs are saved as individual Obsidian-flavoured Markdown files in the Obsidian
+vault.
 
-**At the completion of a task**, append an entry summarizing:
-1. **The Change:** High-level summary of files touched
-2. **The Reasoning:** Why specific structural decisions were made
-3. **The Tech Debt:** Any corners cut that need future attention
+**Vault Path:** `/var/home/mrwilde/Projects/Obsidian/ClaudeCodeVault`
+**Devlog Directory:** `DevLogs/CanEyeBudget/`
+**Full Path:** `/var/home/mrwilde/Projects/Obsidian/ClaudeCodeVault/DevLogs/CanEyeBudget/`
 
-**Goal:** If a new developer (or a new AI session) joins tomorrow, they should be able to read `DEVLOG.md` and understand the state of the project immediately.
+### Devlog File Format
 
-**Operational Rule:** After every interaction that includes a code change, you must append an entry to `DEVLOG.md` before finishing. This is mandatory.
+Each devlog entry is a separate `.md` file using the naming convention: `YYYY-MM-DD_short-description.md`
+
+Example: `2026-03-17_add-builder-avatar-upload.md`
+
+Every devlog file **must** include YAML frontmatter and use Obsidian syntax (wikilinks, callouts, tags):
+
+```markdown
+---
+date: 2026-03-17
+project: Can Eye Budget v2
+tags:
+  - devlog
+  - compare-build
+---
 
 ---
 
