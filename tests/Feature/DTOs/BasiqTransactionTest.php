@@ -19,6 +19,8 @@ test('from maps all fields with enrich data', function () {
         'description' => 'WOOLWORTHS 1234',
         'postDate' => '2026-03-10',
         'account' => 'acc-1',
+        'status' => 'posted',
+        'transactionDate' => '2026-03-09',
         'enrich' => $enrich,
     ]);
 
@@ -29,6 +31,8 @@ test('from maps all fields with enrich data', function () {
         ->description->toBe('WOOLWORTHS 1234')
         ->postDate->toBe('2026-03-10')
         ->account->toBe('acc-1')
+        ->status->toBe('posted')
+        ->transactionDate->toBe('2026-03-09')
         ->merchant->toBe('Woolworths')
         ->anzsic->toBe('4111')
         ->enrichData->toBe($enrich);
@@ -48,6 +52,8 @@ test('from handles missing enrich data', function () {
         ->description->toBeNull()
         ->postDate->toBeNull()
         ->account->toBeNull()
+        ->status->toBeNull()
+        ->transactionDate->toBeNull()
         ->merchant->toBeNull()
         ->anzsic->toBeNull()
         ->enrichData->toBeNull();
