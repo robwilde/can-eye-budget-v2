@@ -32,6 +32,7 @@ final class UserFactory extends Factory
             'email_verified_at' => now(),
             'password' => self::$password ??= Hash::make('password'),
             'basiq_user_id' => null,
+            'last_synced_at' => null,
             'remember_token' => Str::random(10),
             'two_factor_secret' => null,
             'two_factor_recovery_codes' => null,
