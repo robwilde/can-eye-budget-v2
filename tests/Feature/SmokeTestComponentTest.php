@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /** @noinspection StaticClosureCanBeUsedInspection */
 
 use App\Livewire\SmokeTest;

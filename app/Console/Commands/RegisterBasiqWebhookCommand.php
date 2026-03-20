@@ -47,7 +47,7 @@ final class RegisterBasiqWebhookCommand extends Command
             $this->line("BASIQ_WEBHOOK_SECRET={$secret}");
         } else {
             $this->components->warn('Webhook registered but no secret was returned.');
-            $this->components->info('Response: '. json_encode($response, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT));
+            $this->components->info('Response: '.json_encode($response, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT));
         }
 
         return self::SUCCESS;

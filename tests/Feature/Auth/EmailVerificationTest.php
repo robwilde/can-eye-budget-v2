@@ -1,5 +1,9 @@
 <?php
 
+/** @noinspection StaticClosureCanBeUsedInspection */
+
+declare(strict_types=1);
+
 use App\Models\User;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Support\Facades\Event;

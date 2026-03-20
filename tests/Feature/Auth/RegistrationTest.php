@@ -1,5 +1,11 @@
 <?php
 
+/** @noinspection PhpUnhandledExceptionInspection */
+
+/** @noinspection StaticClosureCanBeUsedInspection */
+
+declare(strict_types=1);
+
 test('registration screen can be rendered', function () {
     $response = $this->get(route('register'));
 

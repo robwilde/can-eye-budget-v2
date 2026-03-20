@@ -1,0 +1,15 @@
+grumphp:
+    process_timeout: 480
+    stop_on_failure: false
+    hide_circumvention_tip: true
+
+    tasks:
+        shell:
+            scripts:
+                - ['-c', 'php vendor/bin/pint --test --config pint.json']
+            triggered_by: [php]
+
+        phpstan:
+            configuration: phpstan.neon.dist
+            use_grumphp_paths: false
+            memory_limit: 512M

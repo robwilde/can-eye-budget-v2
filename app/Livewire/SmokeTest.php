@@ -1,11 +1,13 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Livewire;
 
 use Illuminate\View\View;
 use Livewire\Component;
 
-class SmokeTest extends Component
+final class SmokeTest extends Component
 {
     public int $count = 0;
 
