@@ -29,3 +29,7 @@ parameters:
         - '#Call to an undefined method Illuminate\\Support\\Collection::#'
         - '#Call to an undefined method Illuminate\\Contracts\\Pagination\\LengthAwarePaginator::#'
         - '#Call to an undefined method Mockery\\ExpectationInterface::#'
+        -
+            message: '#Call to an undefined method PHPUnit\\Framework\\TestCase::#'
+            paths:
+                - tests/*
