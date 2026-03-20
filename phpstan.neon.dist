@@ -28,3 +28,4 @@ parameters:
         - '#Unsafe usage of new static#'
         - '#Call to an undefined method Illuminate\\Support\\Collection::#'
         - '#Call to an undefined method Illuminate\\Contracts\\Pagination\\LengthAwarePaginator::#'
+        - '#Call to an undefined method Mockery\\ExpectationInterface::#'
