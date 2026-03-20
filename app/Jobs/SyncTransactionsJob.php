@@ -23,8 +23,8 @@ final class SyncTransactionsJob implements ShouldQueue
     public int $backoff = 5;
 
     public function __construct(
-        public readonly string $jobId,
         public readonly User $user,
+        public readonly ?string $jobId = null,
     ) {}
 
     /**
@@ -32,18 +32,20 @@ final class SyncTransactionsJob implements ShouldQueue
      */
     public function handle(BasiqServiceContract $basiqService): void
     {
-        $job = $basiqService->getJob($this->jobId);
+        if ($this->jobId !== null) {
+            $job = $basiqService->getJob($this->jobId);
 
-        if ($job->status === 'pending') {
-            $this->release($this->backoff);
+            if ($job->status === 'pending') {
+                $this->release($this->backoff);
 
-            return;
-        }
+                return;
+            }
 
-        if ($job->status === 'failed') {
-            Log::warning('Basiq job failed', ['jobId' => $this->jobId, 'userId' => $this->user->id]);
+            if ($job->status === 'failed') {
+                Log::warning('Basiq job failed', ['jobId' => $this->jobId, 'userId' => $this->user->id]);
 
-            return;
+                return;
+            }
         }
 
         $accountMap = $this->syncAccounts($basiqService);
