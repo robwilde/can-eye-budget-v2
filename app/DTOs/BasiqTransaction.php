@@ -16,6 +16,8 @@ final class BasiqTransaction extends Dto
         public readonly ?string $description = null,
         public readonly ?string $postDate = null,
         public readonly ?string $account = null,
+        public readonly ?string $status = null,
+        public readonly ?string $transactionDate = null,
         public readonly ?string $merchant = null,
         public readonly ?string $anzsic = null,
         public readonly ?array $enrichData = null,
