@@ -28,7 +28,7 @@ final class BasiqCallbackController extends Controller
             return to_route('dashboard')->with('error', 'Bank connection failed. Please try again.');
         }
 
-        SyncTransactionsJob::dispatch($jobId, $request->user());
+        SyncTransactionsJob::dispatch($request->user(), $jobId);
 
         return to_route('dashboard')->with('success', 'Bank connected successfully. Your transactions are syncing.');
     }

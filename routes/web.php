@@ -3,9 +3,15 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\BasiqCallbackController;
+use App\Http\Controllers\BasiqWebhookController;
+use App\Http\Middleware\VerifyBasiqWebhook;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome')->name('home');
+
+Route::post('webhooks/basiq', BasiqWebhookController::class)
+    ->middleware(VerifyBasiqWebhook::class)
+    ->name('webhooks.basiq');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');

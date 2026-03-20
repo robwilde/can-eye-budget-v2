@@ -30,15 +30,18 @@ function fakeBasiqJobService(string $status = 'success', ?callable $configure = 
 
     $mock = Mockery::mock(BasiqServiceContract::class);
 
-    $mock->shouldReceive('getJob')
+    $mock
+        ->shouldReceive('getJob')
         ->andReturn(BasiqJob::from(['id' => 'job-1', 'steps' => $steps]))
         ->byDefault();
 
-    $mock->shouldReceive('getAccounts')
-        ->andReturn(new Collection)
+    $mock
+        ->shouldReceive('getAccounts')
+        ->andReturn(new Collection())
         ->byDefault();
 
-    $mock->shouldReceive('paginateTransactions')
+    $mock
+        ->shouldReceive('paginateTransactions')
         ->andReturn(LazyCollection::empty())
         ->byDefault();
 
@@ -51,6 +54,7 @@ function fakeBasiqJobService(string $status = 'success', ?callable $configure = 
     return $mock;
 }
 
+/** @param  array<string, mixed>  $overrides */
 function makeBasiqAccount(string $id = 'basiq-acc-1', array $overrides = []): BasiqAccount
 {
     return BasiqAccount::from(array_merge([
@@ -78,13 +82,30 @@ function makeBasiqTransaction(string $id = 'txn-1', string $account = 'basiq-acc
     ], $overrides));
 }
 
+test('null jobId skips polling and syncs directly', function () {
+    $user = User::factory()->withBasiq()->create();
+
+    $mock = fakeBasiqJobService('success', function (MockInterface $mock) {
+        $mock
+            ->shouldReceive('getAccounts')
+            ->once()
+            ->andReturn(new Collection([makeBasiqAccount()]));
+    });
+
+    $mock->shouldNotReceive('getJob');
+
+    new SyncTransactionsJob($user)->handle(app(BasiqServiceContract::class));
+
+    expect(Account::count())->toBe(1);
+});
+
 test('pending job releases back to queue', function () {
     Queue::fake();
     $user = User::factory()->withBasiq()->create();
 
     fakeBasiqJobService('pending');
 
-    $job = new SyncTransactionsJob('job-1', $user);
+    $job = new SyncTransactionsJob($user, 'job-1');
     $job->handle(app(BasiqServiceContract::class));
 
     expect($job->job)->toBeNull();
@@ -99,9 +120,10 @@ test('failed job logs warning and stops', function () {
 
     fakeBasiqJobService('failed');
 
-    new SyncTransactionsJob('job-1', $user)->handle(app(BasiqServiceContract::class));
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
 
-    expect(Account::count())->toBe(0)
+    expect(Account::count())
+        ->toBe(0)
         ->and(Transaction::count())->toBe(0);
 });
 
@@ -109,7 +131,8 @@ test('successful job syncs accounts via updateOrCreate', function () {
     $user = User::factory()->withBasiq()->create();
 
     fakeBasiqJobService('success', function (MockInterface $mock) {
-        $mock->shouldReceive('getAccounts')
+        $mock
+            ->shouldReceive('getAccounts')
             ->once()
             ->andReturn(new Collection([
                 makeBasiqAccount('basiq-acc-1', ['name' => 'Everyday', 'balance' => '500.00']),
@@ -117,7 +140,7 @@ test('successful job syncs accounts via updateOrCreate', function () {
             ]));
     });
 
-    new SyncTransactionsJob('job-1', $user)->handle(app(BasiqServiceContract::class));
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
 
     expect(Account::count())->toBe(2);
 
@@ -137,10 +160,12 @@ test('successful job syncs transactions with correct field mapping', function ()
     ];
 
     fakeBasiqJobService('success', function (MockInterface $mock) use ($enrich) {
-        $mock->shouldReceive('getAccounts')
+        $mock
+            ->shouldReceive('getAccounts')
             ->andReturn(new Collection([makeBasiqAccount()]));
 
-        $mock->shouldReceive('paginateTransactions')
+        $mock
+            ->shouldReceive('paginateTransactions')
             ->andReturn(LazyCollection::make([
                 makeBasiqTransaction('txn-1', 'basiq-acc-1', [
                     'amount' => '-42.50',
@@ -154,7 +179,7 @@ test('successful job syncs transactions with correct field mapping', function ()
             ]));
     });
 
-    new SyncTransactionsJob('job-1', $user)->handle(app(BasiqServiceContract::class));
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
 
     $txn = Transaction::where('basiq_id', 'txn-1')->first();
     expect($txn)
@@ -175,10 +200,12 @@ test('amount conversion handles positive, negative, and zero values', function (
     $user = User::factory()->withBasiq()->create();
 
     fakeBasiqJobService('success', function (MockInterface $mock) use ($input) {
-        $mock->shouldReceive('getAccounts')
+        $mock
+            ->shouldReceive('getAccounts')
             ->andReturn(new Collection([makeBasiqAccount()]));
 
-        $mock->shouldReceive('paginateTransactions')
+        $mock
+            ->shouldReceive('paginateTransactions')
             ->andReturn(LazyCollection::make([
                 makeBasiqTransaction('txn-1', 'basiq-acc-1', [
                     'amount' => $input,
@@ -187,7 +214,7 @@ test('amount conversion handles positive, negative, and zero values', function (
             ]));
     });
 
-    new SyncTransactionsJob('job-1', $user)->handle(app(BasiqServiceContract::class));
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
 
     expect(Transaction::first()->amount)->toBe($expected);
 })->with([
@@ -203,16 +230,18 @@ test('incremental sync uses postDate filter when last_synced_at is set', functio
     ]);
 
     fakeBasiqJobService('success', function (MockInterface $mock) use ($user) {
-        $mock->shouldReceive('getAccounts')
+        $mock
+            ->shouldReceive('getAccounts')
             ->andReturn(new Collection([makeBasiqAccount()]));
 
-        $mock->shouldReceive('paginateTransactions')
+        $mock
+            ->shouldReceive('paginateTransactions')
             ->once()
             ->with($user->basiq_user_id, ["transaction.postDate.gt('2026-03-15')"])
             ->andReturn(LazyCollection::empty());
     });
 
-    new SyncTransactionsJob('job-1', $user)->handle(app(BasiqServiceContract::class));
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
 });
 
 test('full sync uses no filter when last_synced_at is null', function () {
@@ -221,16 +250,18 @@ test('full sync uses no filter when last_synced_at is null', function () {
     ]);
 
     fakeBasiqJobService('success', function (MockInterface $mock) {
-        $mock->shouldReceive('getAccounts')
+        $mock
+            ->shouldReceive('getAccounts')
             ->andReturn(new Collection([makeBasiqAccount()]));
 
-        $mock->shouldReceive('paginateTransactions')
+        $mock
+            ->shouldReceive('paginateTransactions')
             ->once()
             ->with(Mockery::any(), null)
             ->andReturn(LazyCollection::empty());
     });
 
-    new SyncTransactionsJob('job-1', $user)->handle(app(BasiqServiceContract::class));
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
 });
 
 test('updates last_synced_at after successful sync', function () {
@@ -239,14 +270,16 @@ test('updates last_synced_at after successful sync', function () {
     ]);
 
     fakeBasiqJobService('success', function (MockInterface $mock) {
-        $mock->shouldReceive('getAccounts')
+        $mock
+            ->shouldReceive('getAccounts')
             ->andReturn(new Collection([makeBasiqAccount()]));
     });
 
-    new SyncTransactionsJob('job-1', $user)->handle(app(BasiqServiceContract::class));
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
 
     $user->refresh();
-    expect($user->last_synced_at)->not->toBeNull()
+    expect($user->last_synced_at)->not
+        ->toBeNull()
         ->and($user->last_synced_at->isToday())->toBeTrue();
 });
 
@@ -254,19 +287,22 @@ test('transactions for unknown accounts are skipped', function () {
     $user = User::factory()->withBasiq()->create();
 
     fakeBasiqJobService('success', function (MockInterface $mock) {
-        $mock->shouldReceive('getAccounts')
+        $mock
+            ->shouldReceive('getAccounts')
             ->andReturn(new Collection([makeBasiqAccount('basiq-acc-1')]));
 
-        $mock->shouldReceive('paginateTransactions')
+        $mock
+            ->shouldReceive('paginateTransactions')
             ->andReturn(LazyCollection::make([
                 makeBasiqTransaction('txn-known', 'basiq-acc-1'),
                 makeBasiqTransaction('txn-unknown', 'basiq-acc-999'),
             ]));
     });
 
-    new SyncTransactionsJob('job-1', $user)->handle(app(BasiqServiceContract::class));
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
 
-    expect(Transaction::count())->toBe(1)
+    expect(Transaction::count())
+        ->toBe(1)
         ->and(Transaction::first()->basiq_id)->toBe('txn-known');
 });
 
@@ -274,19 +310,22 @@ test('transactions with null postDate are skipped', function () {
     $user = User::factory()->withBasiq()->create();
 
     fakeBasiqJobService('success', function (MockInterface $mock) {
-        $mock->shouldReceive('getAccounts')
+        $mock
+            ->shouldReceive('getAccounts')
             ->andReturn(new Collection([makeBasiqAccount()]));
 
-        $mock->shouldReceive('paginateTransactions')
+        $mock
+            ->shouldReceive('paginateTransactions')
             ->andReturn(LazyCollection::make([
                 makeBasiqTransaction('txn-posted', 'basiq-acc-1', ['postDate' => '2026-03-10']),
                 makeBasiqTransaction('txn-pending', 'basiq-acc-1', ['postDate' => null]),
             ]));
     });
 
-    new SyncTransactionsJob('job-1', $user)->handle(app(BasiqServiceContract::class));
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
 
-    expect(Transaction::count())->toBe(1)
+    expect(Transaction::count())
+        ->toBe(1)
         ->and(Transaction::first()->basiq_id)->toBe('txn-posted');
 });
 
@@ -294,22 +333,25 @@ test('updateOrCreate prevents duplicate records on re-run', function () {
     $user = User::factory()->withBasiq()->create();
 
     $configureMock = function (MockInterface $mock) {
-        $mock->shouldReceive('getAccounts')
+        $mock
+            ->shouldReceive('getAccounts')
             ->andReturn(new Collection([makeBasiqAccount()]));
 
-        $mock->shouldReceive('paginateTransactions')
+        $mock
+            ->shouldReceive('paginateTransactions')
             ->andReturn(LazyCollection::make([
                 makeBasiqTransaction('txn-1', 'basiq-acc-1'),
             ]));
     };
 
     fakeBasiqJobService('success', $configureMock);
-    new SyncTransactionsJob('job-1', $user)->handle(app(BasiqServiceContract::class));
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
 
     fakeBasiqJobService('success', $configureMock);
-    new SyncTransactionsJob('job-2', $user)->handle(app(BasiqServiceContract::class));
+    new SyncTransactionsJob($user, 'job-2')->handle(app(BasiqServiceContract::class));
 
-    expect(Account::count())->toBe(1)
+    expect(Account::count())
+        ->toBe(1)
         ->and(Transaction::count())->toBe(1);
 });
 
@@ -317,10 +359,12 @@ test('processes transactions across multiple DTOs', function () {
     $user = User::factory()->withBasiq()->create();
 
     fakeBasiqJobService('success', function (MockInterface $mock) {
-        $mock->shouldReceive('getAccounts')
+        $mock
+            ->shouldReceive('getAccounts')
             ->andReturn(new Collection([makeBasiqAccount()]));
 
-        $mock->shouldReceive('paginateTransactions')
+        $mock
+            ->shouldReceive('paginateTransactions')
             ->andReturn(LazyCollection::make([
                 makeBasiqTransaction('txn-1', 'basiq-acc-1', ['amount' => '-10.00']),
                 makeBasiqTransaction('txn-2', 'basiq-acc-1', ['amount' => '-20.00']),
@@ -328,7 +372,7 @@ test('processes transactions across multiple DTOs', function () {
             ]));
     });
 
-    new SyncTransactionsJob('job-1', $user)->handle(app(BasiqServiceContract::class));
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
 
     expect(Transaction::count())->toBe(3);
 });
