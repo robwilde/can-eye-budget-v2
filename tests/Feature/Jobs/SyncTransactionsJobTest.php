@@ -10,11 +10,14 @@ use App\Contracts\BasiqServiceContract;
 use App\DTOs\BasiqAccount;
 use App\DTOs\BasiqJob;
 use App\DTOs\BasiqTransaction;
+use App\Enums\AccountClass;
 use App\Jobs\SyncTransactionsJob;
 use App\Models\Account;
 use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\LazyCollection;
@@ -375,4 +378,123 @@ test('processes transactions across multiple DTOs', function () {
     new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
 
     expect(Transaction::count())->toBe(3);
+});
+
+test('end-to-end sync through real BasiqService with Http::fake', function () {
+    Cache::forget('basiq:server_token');
+
+    config([
+        'services.basiq.api_key' => 'test-api-key',
+        'services.basiq.base_url' => 'https://au-api.basiq.io',
+    ]);
+
+    $user = User::factory()->withBasiq()->create([
+        'last_synced_at' => null,
+    ]);
+
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/jobs/job-1' => Http::response([
+            'id' => 'job-1',
+            'steps' => [
+                ['title' => 'verify-credentials', 'status' => 'success'],
+                ['title' => 'retrieve-accounts', 'status' => 'success'],
+            ],
+        ]),
+        '*/users/*/accounts' => Http::response([
+            'data' => [
+                [
+                    'id' => 'acc-1',
+                    'name' => 'Everyday Account',
+                    'institution' => 'AU00000',
+                    'class' => ['type' => 'transaction'],
+                    'balance' => '1234.56',
+                    'currency' => 'AUD',
+                    'status' => 'active',
+                ],
+                [
+                    'id' => 'acc-2',
+                    'name' => 'Savings Account',
+                    'institution' => 'AU00000',
+                    'class' => ['type' => 'savings'],
+                    'balance' => '9999.00',
+                    'currency' => 'AUD',
+                    'status' => 'active',
+                ],
+            ],
+        ]),
+        '*/users/*/transactions*' => Http::response([
+            'data' => [
+                [
+                    'id' => 'txn-1',
+                    'amount' => '-42.50',
+                    'direction' => 'debit',
+                    'description' => 'WOOLWORTHS 1234',
+                    'postDate' => '2026-03-10',
+                    'transactionDate' => '2026-03-09',
+                    'account' => 'acc-1',
+                    'status' => 'posted',
+                    'enrich' => [
+                        'merchant' => ['businessName' => 'Woolworths'],
+                        'category' => ['anzsic' => ['code' => '4111']],
+                    ],
+                ],
+                [
+                    'id' => 'txn-2',
+                    'amount' => '150.00',
+                    'direction' => 'credit',
+                    'description' => 'SALARY DEPOSIT',
+                    'postDate' => '2026-03-11',
+                    'transactionDate' => '2026-03-11',
+                    'account' => 'acc-2',
+                    'status' => 'posted',
+                ],
+            ],
+            'links' => ['next' => null],
+        ]),
+    ]);
+
+    app()->forgetInstance(BasiqServiceContract::class);
+
+    $basiqService = app(BasiqServiceContract::class);
+    new SyncTransactionsJob($user, 'job-1')->handle($basiqService);
+
+    expect(Account::count())->toBe(2);
+
+    $everyday = Account::where('basiq_account_id', 'acc-1')->first();
+    expect($everyday)
+        ->name->toBe('Everyday Account')
+        ->balance->toBe(123456)
+        ->currency->toBe('AUD')
+        ->type->toBe(AccountClass::Transaction);
+
+    $savings = Account::where('basiq_account_id', 'acc-2')->first();
+    expect($savings)
+        ->name->toBe('Savings Account')
+        ->balance->toBe(999900)
+        ->type
+        ->toBe(AccountClass::Savings)
+        ->and(Transaction::count())->toBe(2);
+
+    $txn1 = Transaction::where('basiq_id', 'txn-1')->first();
+    expect($txn1)
+        ->user_id->toBe($user->id)
+        ->amount->toBe(-4250)
+        ->direction->value->toBe('debit')
+        ->description->toBe('WOOLWORTHS 1234')
+        ->post_date->format('Y-m-d')->toBe('2026-03-10')
+        ->merchant_name->toBe('Woolworths')
+        ->anzsic_code->toBe('4111');
+
+    $txn2 = Transaction::where('basiq_id', 'txn-2')->first();
+    expect($txn2)
+        ->amount->toBe(15000)
+        ->direction->value->toBe('credit')
+        ->description->toBe('SALARY DEPOSIT');
+
+    $user->refresh();
+    expect($user->last_synced_at)->not->toBeNull()
+        ->and($user->last_synced_at->isToday())->toBeTrue();
+
+    Http::assertSentCount(4);
 });
