@@ -39,6 +39,14 @@ enum AccountClass: string
         };
     }
 
+    public function isSpendable(): bool
+    {
+        return match ($this) {
+            self::Transaction, self::Savings, self::CreditCard, self::Investment, self::Foreign, self::TermDeposit => true,
+            default => false,
+        };
+    }
+
     public function icon(): string
     {
         return match ($this) {
