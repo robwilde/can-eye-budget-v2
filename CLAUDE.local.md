@@ -96,7 +96,7 @@ date: 2026-03-17
 project: Can Eye Budget v2
 tags:
   - devlog
-  - compare-build
+  - can-eye-budget-v2
 ---
 
 ---
@@ -110,6 +110,14 @@ Every session should improve the codebase, not just add to it. Actively refactor
 - **Leverage:** Use battle-tested packages over custom implementations. Do not reinvent the wheel unless the wheel is broken.
 - **Readable:** Code must be self-documenting. Comments should explain *why*, not *what*.
 - **Safety:** If a refactor carries high risk of breaking functionality, flag it for user review rather than applying it silently.
+
+---
+
+### Operational Rule
+
+After every interaction that includes a code change, you **must** create a devlog file at the vault path before finishing. This is mandatory.
+
+**Goal:** If a new developer (or a new AI session) joins tomorrow, they should be able to browse `DevLogs/CanEyeBudget/` in Obsidian and understand the full state and history of the project immediately.
 
 ---
 
