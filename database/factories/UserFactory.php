@@ -79,7 +79,6 @@ final class UserFactory extends Factory
             'pay_amount' => 300000,
             'pay_frequency' => PayFrequency::Fortnightly,
             'next_pay_date' => now()->addDays(7),
-            'committed_per_cycle' => 180000,
         ]);
     }
 }

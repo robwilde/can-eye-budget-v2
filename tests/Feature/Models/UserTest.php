@@ -85,34 +85,10 @@ test('hasPayCycleConfigured returns true when all fields set', function () {
     expect($user->hasPayCycleConfigured())->toBeTrue();
 });
 
-test('bufferUntilNextPay returns null when pay cycle not configured', function () {
-    $user = User::factory()->create();
+test('bufferUntilNextPay returns null as stub', function () {
+    $user = User::factory()->withPayCycle()->create();
 
     expect($user->bufferUntilNextPay(200000))->toBeNull();
-});
-
-test('bufferUntilNextPay returns positive buffer when above committed', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'committed_per_cycle' => 180000,
-    ]);
-
-    expect($user->bufferUntilNextPay(200000))->toBe(20000);
-});
-
-test('bufferUntilNextPay returns negative buffer when below committed', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'committed_per_cycle' => 180000,
-    ]);
-
-    expect($user->bufferUntilNextPay(100000))->toBe(-80000);
-});
-
-test('bufferUntilNextPay returns zero when exactly at committed', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'committed_per_cycle' => 200000,
-    ]);
-
-    expect($user->bufferUntilNextPay(200000))->toBe(0);
 });
 
 test('withPayCycle factory state sets all pay cycle fields', function () {
@@ -120,6 +96,5 @@ test('withPayCycle factory state sets all pay cycle fields', function () {
 
     expect($user->pay_amount)->not->toBeNull()
         ->and($user->pay_frequency)->toBe(PayFrequency::Fortnightly)
-        ->and($user->next_pay_date)->not->toBeNull()
-        ->and($user->committed_per_cycle)->not->toBeNull();
+        ->and($user->next_pay_date)->not->toBeNull();
 });

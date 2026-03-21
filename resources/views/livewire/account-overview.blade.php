@@ -15,7 +15,7 @@
             <p class="mt-1 text-5xl font-bold tracking-tight tabular-nums sm:text-6xl md:text-7xl {{ $availableToSpend >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500' }}">
                 {{ $formatMoney($availableToSpend) }}
             </p>
-            @if($hasPayCycle)
+            @if($hasPayCycle && $buffer !== null)
                 <p class="mt-2 text-lg font-semibold tabular-nums {{ $buffer > 0 ? 'text-green-600 dark:text-green-500' : ($buffer < 0 ? 'text-red-600 dark:text-red-500' : 'text-zinc-500 dark:text-zinc-400') }}">
                     @if($buffer > 0)
                         +{{ $formatMoney($buffer) }} above what you need
