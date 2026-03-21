@@ -119,3 +119,25 @@ test('closed state sets status to closed with zero balance', function () {
     expect($account->status)->toBe(AccountStatus::Closed)
         ->and($account->balance)->toBe(0);
 });
+
+test('active scope excludes closed accounts', function () {
+    $user = User::factory()->create();
+    $active = Account::factory()->for($user)->create();
+    Account::factory()->closed()->for($user)->create();
+
+    $activeAccounts = Account::query()->active()->where('user_id', $user->id)->get();
+
+    expect($activeAccounts)->toHaveCount(1)
+        ->and($activeAccounts->first()->id)->toBe($active->id);
+});
+
+test('active scope excludes inactive accounts', function () {
+    $user = User::factory()->create();
+    $active = Account::factory()->for($user)->create();
+    Account::factory()->inactive()->for($user)->create();
+
+    $activeAccounts = Account::query()->active()->where('user_id', $user->id)->get();
+
+    expect($activeAccounts)->toHaveCount(1)
+        ->and($activeAccounts->first()->id)->toBe($active->id);
+});

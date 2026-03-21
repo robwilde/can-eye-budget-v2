@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Casts\MoneyCast;
 use App\Enums\AccountClass;
 use App\Enums\AccountStatus;
+use Carbon\CarbonImmutable;
 use Database\Factories\AccountFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -14,6 +15,19 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property int $id
+ * @property int $user_id
+ * @property string|null $basiq_account_id
+ * @property string $name
+ * @property AccountClass $type
+ * @property string $institution
+ * @property string $currency
+ * @property int $balance
+ * @property AccountStatus $status
+ * @property CarbonImmutable $created_at
+ * @property CarbonImmutable $updated_at
+ */
 final class Account extends Model
 {
     /** @use HasFactory<AccountFactory> */
@@ -43,6 +57,15 @@ final class Account extends Model
     public function transactions(): HasMany
     {
         return $this->hasMany(Transaction::class);
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->where('status', AccountStatus::Active);
     }
 
     /**

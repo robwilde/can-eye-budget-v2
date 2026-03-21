@@ -26,3 +26,38 @@ test('account class resolves from backing value', function () {
     expect(AccountClass::from('credit-card'))->toBe(AccountClass::CreditCard)
         ->and(AccountClass::from('term-deposit'))->toBe(AccountClass::TermDeposit);
 });
+
+test('label returns human-readable names', function () {
+    expect(AccountClass::Transaction->label())->toBe('Transaction')
+        ->and(AccountClass::Savings->label())->toBe('Savings')
+        ->and(AccountClass::CreditCard->label())->toBe('Credit Card')
+        ->and(AccountClass::Loan->label())->toBe('Loan')
+        ->and(AccountClass::Mortgage->label())->toBe('Mortgage')
+        ->and(AccountClass::Investment->label())->toBe('Investment')
+        ->and(AccountClass::Insurance->label())->toBe('Insurance')
+        ->and(AccountClass::Foreign->label())->toBe('Foreign')
+        ->and(AccountClass::TermDeposit->label())->toBe('Term Deposit');
+});
+
+test('isAsset returns true for asset account types', function (AccountClass $type) {
+    expect($type->isAsset())->toBeTrue();
+})->with([
+    'transaction' => AccountClass::Transaction,
+    'savings' => AccountClass::Savings,
+    'investment' => AccountClass::Investment,
+    'insurance' => AccountClass::Insurance,
+    'foreign' => AccountClass::Foreign,
+    'term deposit' => AccountClass::TermDeposit,
+]);
+
+test('isAsset returns false for liability account types', function (AccountClass $type) {
+    expect($type->isAsset())->toBeFalse();
+})->with([
+    'credit card' => AccountClass::CreditCard,
+    'loan' => AccountClass::Loan,
+    'mortgage' => AccountClass::Mortgage,
+]);
+
+test('icon returns a non-empty string for all cases', function (AccountClass $type) {
+    expect($type->icon())->toBeString()->not->toBeEmpty();
+})->with(AccountClass::cases());
