@@ -181,39 +181,15 @@ test('connect bank button links to connect-bank route', function () {
         ->assertSeeHtml('href="'.route('connect-bank').'"');
 });
 
-test('shows positive buffer when pay cycle configured and above committed', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'committed_per_cycle' => 100000,
-    ]);
+test('buffer is hidden while stub returns null', function () {
+    $user = User::factory()->withPayCycle()->create();
     Account::factory()->for($user)->create(['balance' => 150000]);
 
     Livewire::actingAs($user)
         ->test(AccountOverview::class)
-        ->assertSee('above what you need')
-        ->assertSee(MoneyCast::format(50000));
-});
-
-test('shows negative buffer when pay cycle configured and below committed', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'committed_per_cycle' => 200000,
-    ]);
-    Account::factory()->for($user)->create(['balance' => 100000]);
-
-    Livewire::actingAs($user)
-        ->test(AccountOverview::class)
-        ->assertSee('below what you need')
-        ->assertSee(MoneyCast::format(-100000));
-});
-
-test('shows zero buffer state', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'committed_per_cycle' => 100000,
-    ]);
-    Account::factory()->for($user)->create(['balance' => 100000]);
-
-    Livewire::actingAs($user)
-        ->test(AccountOverview::class)
-        ->assertSee('right on target');
+        ->assertDontSee('above what you need')
+        ->assertDontSee('below what you need')
+        ->assertDontSee('right on target');
 });
 
 test('shows set up pay cycle link when not configured', function () {
@@ -225,26 +201,4 @@ test('shows set up pay cycle link when not configured', function () {
         ->assertSee('Set up pay cycle')
         ->assertDontSee('above what you need')
         ->assertDontSee('below what you need');
-});
-
-test('buffer does not show when no accounts exist', function () {
-    $user = User::factory()->withPayCycle()->create();
-
-    Livewire::actingAs($user)
-        ->test(AccountOverview::class)
-        ->assertDontSee('above what you need')
-        ->assertDontSee('below what you need');
-});
-
-test('buffer calculation excludes non-spendable accounts', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'committed_per_cycle' => 100000,
-    ]);
-    Account::factory()->for($user)->create(['balance' => 150000]);
-    Account::factory()->loan()->for($user)->create(['balance' => -500000]);
-
-    Livewire::actingAs($user)
-        ->test(AccountOverview::class)
-        ->assertSee('above what you need')
-        ->assertSee(MoneyCast::format(50000));
 });

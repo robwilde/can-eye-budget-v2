@@ -47,6 +47,138 @@ test('category filter from URL shows correct transactions', function () {
         ->assertSee('WOOLWORTHS');
 });
 
+test('search filters transactions by description', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'WOOLWORTHS SYDNEY',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'COLES MELBOURNE',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    $this->actingAs($user);
+
+    $page = visit('/transactions?search=WOOLWORTHS');
+
+    $page->assertSee('WOOLWORTHS SYDNEY')
+        ->assertDontSee('COLES MELBOURNE');
+});
+
+test('account filter shows only transactions from selected account', function () {
+    $user = User::factory()->create();
+    $accountA = Account::factory()->for($user)->create(['name' => 'Everyday']);
+    $accountB = Account::factory()->for($user)->create(['name' => 'Savings']);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $accountA->id,
+        'description' => 'WOOLWORTHS SYDNEY',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $accountB->id,
+        'description' => 'COLES MELBOURNE',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    $this->actingAs($user);
+
+    $page = visit('/transactions?account='.$accountA->id);
+
+    $page->assertSee('WOOLWORTHS SYDNEY')
+        ->assertDontSee('COLES MELBOURNE');
+});
+
+test('direction toggle switches between spending and income', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'WOOLWORTHS SYDNEY',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $account->id,
+        'description' => 'SALARY PAYMENT',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    $this->actingAs($user);
+
+    $page = visit('/transactions');
+
+    $page->assertSee('WOOLWORTHS SYDNEY')
+        ->assertDontSee('SALARY PAYMENT');
+
+    $page = visit('/transactions?direction=income');
+
+    $page->assertSee('SALARY PAYMENT')
+        ->assertDontSee('WOOLWORTHS SYDNEY');
+});
+
+test('clicking sort header changes sort order', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'EXPENSIVE ITEM',
+        'amount' => 50000,
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'CHEAP ITEM',
+        'amount' => 500,
+        'post_date' => now()->subDays(5),
+    ]);
+
+    $this->actingAs($user);
+
+    $page = visit('/transactions?sortBy=amount&sortDir=asc');
+
+    $page->assertSee('CHEAP ITEM')
+        ->assertSee('EXPENSIVE ITEM');
+});
+
+test('multiple filters work together via URL', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['name' => 'Everyday']);
+    $otherAccount = Account::factory()->for($user)->create(['name' => 'Savings']);
+    $groceries = Category::factory()->create(['name' => 'Groceries']);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $groceries->id,
+        'description' => 'WOOLWORTHS SYDNEY',
+        'post_date' => now()->subDays(3),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $otherAccount->id,
+        'category_id' => $groceries->id,
+        'description' => 'WOOLWORTHS MELBOURNE',
+        'post_date' => now()->subDays(3),
+    ]);
+
+    $this->actingAs($user);
+
+    $page = visit('/transactions?direction=spending&account='.$account->id.'&category='.$groceries->id.'&search=WOOLWORTHS');
+
+    $page->assertSee('WOOLWORTHS SYDNEY')
+        ->assertDontSee('WOOLWORTHS MELBOURNE');
+});
+
 test('period filter changes update the list', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();

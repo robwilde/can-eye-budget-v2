@@ -20,7 +20,6 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * @property int|null $pay_amount
  * @property PayFrequency|null $pay_frequency
  * @property CarbonImmutable|null $next_pay_date
- * @property int|null $committed_per_cycle
  */
 final class User extends Authenticatable
 {
@@ -41,7 +40,6 @@ final class User extends Authenticatable
         'pay_amount',
         'pay_frequency',
         'next_pay_date',
-        'committed_per_cycle',
     ];
 
     /**
@@ -90,17 +88,13 @@ final class User extends Authenticatable
     {
         return $this->pay_amount !== null
             && $this->pay_frequency !== null
-            && $this->next_pay_date !== null
-            && $this->committed_per_cycle !== null;
+            && $this->next_pay_date !== null;
     }
 
+    /** @phpstan-ignore return.unusedType */
     public function bufferUntilNextPay(int $availableToSpend): ?int
     {
-        if (! $this->hasPayCycleConfigured()) {
-            return null;
-        }
-
-        return $availableToSpend - $this->committed_per_cycle;
+        return null;
     }
 
     /**
@@ -115,7 +109,6 @@ final class User extends Authenticatable
             'pay_amount' => MoneyCast::class,
             'pay_frequency' => PayFrequency::class,
             'next_pay_date' => 'date',
-            'committed_per_cycle' => MoneyCast::class,
         ];
     }
 }

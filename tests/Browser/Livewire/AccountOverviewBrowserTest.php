@@ -7,10 +7,8 @@ declare(strict_types=1);
 use App\Models\Account;
 use App\Models\User;
 
-test('dashboard shows buffer number when pay cycle is configured', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'committed_per_cycle' => 100000,
-    ]);
+test('buffer is hidden while stub returns null', function () {
+    $user = User::factory()->withPayCycle()->create();
     Account::factory()->for($user)->create(['balance' => 150000]);
 
     $this->actingAs($user);
@@ -18,33 +16,8 @@ test('dashboard shows buffer number when pay cycle is configured', function () {
     $page = visit('/dashboard');
 
     $page->assertSee('Available to Spend')
-        ->assertSee('above what you need');
-});
-
-test('buffer text shows positive message for positive buffer', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'committed_per_cycle' => 100000,
-    ]);
-    Account::factory()->for($user)->create(['balance' => 200000]);
-
-    $this->actingAs($user);
-
-    $page = visit('/dashboard');
-
-    $page->assertSee('above what you need');
-});
-
-test('buffer text shows negative message for negative buffer', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'committed_per_cycle' => 300000,
-    ]);
-    Account::factory()->for($user)->create(['balance' => 100000]);
-
-    $this->actingAs($user);
-
-    $page = visit('/dashboard');
-
-    $page->assertSee('below what you need');
+        ->assertDontSee('above what you need')
+        ->assertDontSee('below what you need');
 });
 
 test('set up pay cycle CTA appears when not configured', function () {
