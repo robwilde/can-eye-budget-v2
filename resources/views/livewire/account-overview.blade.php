@@ -1,45 +1,41 @@
-@php use App\Enums\AccountClass; @endphp
 <div class="space-y-6">
-    @if($grouped->isEmpty())
+    @if($accounts->isEmpty())
         <div class="rounded-xl border border-neutral-200 p-8 text-center dark:border-neutral-700">
-            <flux:icon.building-library class="mx-auto size-12 text-zinc-400" />
+            <flux:icon.building-library class="mx-auto size-12 text-zinc-400"/>
             <flux:heading size="lg" class="mt-4">No linked accounts</flux:heading>
-            <flux:text class="mt-2">Connect your bank to see your accounts and track your net worth.</flux:text>
+            <flux:text class="mt-2">Connect your bank to see your accounts and what you have available.</flux:text>
             <div class="mt-6">
                 <flux:button variant="primary" icon="plus" href="{{ route('connect-bank') }}">Connect Bank</flux:button>
             </div>
         </div>
     @else
-        <div class="rounded-xl border border-neutral-200 p-6 dark:border-neutral-700">
-            <div class="grid gap-4 sm:grid-cols-3">
-                <div>
-                    <flux:text>Net Worth</flux:text>
-                    <flux:heading size="xl" class="mt-1 tabular-nums">{{ $formatMoney($netWorth) }}</flux:heading>
-                </div>
-                <div>
-                    <flux:text>Assets</flux:text>
-                    <flux:heading size="lg" class="mt-1 tabular-nums text-green-600 dark:text-green-500">{{ $formatMoney($totalAssets) }}</flux:heading>
-                </div>
-                <div>
-                    <flux:text>Liabilities</flux:text>
-                    <flux:heading size="lg" class="mt-1 tabular-nums text-red-600 dark:text-red-500">{{ $formatMoney(abs($totalLiabilities)) }}</flux:heading>
-                </div>
-            </div>
+        <div class="rounded-xl border border-neutral-200 p-6 text-center dark:border-neutral-700">
+            <flux:text>Available to Spend</flux:text>
+            <p class="mt-1 text-5xl font-bold tracking-tight tabular-nums sm:text-6xl md:text-7xl {{ $availableToSpend >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500' }}">
+                {{ $formatMoney($availableToSpend) }}
+            </p>
+            @if($lastSynced)
+                <flux:text size="sm" class="mt-2">Last synced {{ $lastSynced->diffForHumans() }}</flux:text>
+            @endif
         </div>
 
-        @foreach($grouped as $typeValue => $accounts)
-            @php $type = AccountClass::from($typeValue) @endphp
-            <div class="rounded-xl border border-neutral-200 dark:border-neutral-700">
-                <div class="flex items-center justify-between p-4">
-                    <div class="flex items-center gap-2">
-                        <flux:icon :name="$type->icon()" variant="mini" class="text-zinc-500" />
-                        <flux:heading>{{ $type->label() }}</flux:heading>
-                    </div>
-                    <flux:badge color="zinc">{{ $formatMoney($accounts->sum('balance')) }}</flux:badge>
-                </div>
+        <div x-data="{ open: false }">
+            <button
+                x-on:click="open = !open"
+                class="flex w-full items-center justify-between rounded-xl border border-neutral-200 px-4 py-3 text-left dark:border-neutral-700"
+            >
+                <flux:text class="font-medium">Account breakdown</flux:text>
+                <flux:icon.chevron-down
+                    class="size-5 text-zinc-400 transition-transform duration-200"
+                    ::class="open ? 'rotate-180' : ''"
+                />
+            </button>
 
-                <flux:separator />
-
+            <div
+                x-show="open"
+                x-collapse
+                class="mt-2 rounded-xl border border-neutral-200 dark:border-neutral-700"
+            >
                 <div class="divide-y divide-neutral-200 dark:divide-neutral-700">
                     @foreach($accounts as $account)
                         <div wire:key="account-{{ $account->id }}" class="flex items-center justify-between px-4 py-3">
@@ -48,14 +44,16 @@
                                 <flux:text size="sm">{{ $account->institution }}</flux:text>
                             </div>
                             <div class="text-right">
-                                <flux:text class="tabular-nums font-medium">{{ $formatMoney($account->balance) }}</flux:text>
-                                <flux:text size="sm">{{ $account->updated_at->diffForHumans() }}</flux:text>
+                                <flux:text class="tabular-nums font-medium">{{ $formatMoney($account->availableBalance()) }}</flux:text>
+                                @if($account->type === \App\Enums\AccountClass::CreditCard)
+                                    <flux:text size="sm" class="tabular-nums text-zinc-500">Current {{ $formatMoney($account->balance) }}</flux:text>
+                                @endif
                             </div>
                         </div>
                     @endforeach
                 </div>
             </div>
-        @endforeach
+        </div>
 
         <div class="flex justify-center">
             <flux:button variant="primary" icon="plus" href="{{ route('connect-bank') }}">Connect Bank</flux:button>

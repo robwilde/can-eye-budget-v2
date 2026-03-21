@@ -24,6 +24,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $institution
  * @property string $currency
  * @property int $balance
+ * @property int|null $credit_limit
  * @property AccountStatus $status
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
@@ -44,6 +45,7 @@ final class Account extends Model
         'institution',
         'currency',
         'balance',
+        'credit_limit',
         'status',
     ];
 
@@ -68,6 +70,15 @@ final class Account extends Model
         return $query->where('status', AccountStatus::Active);
     }
 
+    public function availableBalance(): int
+    {
+        if ($this->type === AccountClass::CreditCard) {
+            return ($this->credit_limit ?? 0) + $this->balance;
+        }
+
+        return $this->balance;
+    }
+
     /**
      * @param  Builder<self>  $query
      * @return Builder<self>
@@ -86,6 +97,7 @@ final class Account extends Model
             'type' => AccountClass::class,
             'status' => AccountStatus::class,
             'balance' => MoneyCast::class,
+            'credit_limit' => MoneyCast::class,
         ];
     }
 }

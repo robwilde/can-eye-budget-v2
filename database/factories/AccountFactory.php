@@ -46,6 +46,7 @@ final class AccountFactory extends Factory
             'name' => fake()->randomElement(['Low Rate Card', 'Platinum Card', 'Awards Card', 'Low Fee Card']),
             'type' => AccountClass::CreditCard,
             'balance' => fake()->numberBetween(-1000000, -10000),
+            'credit_limit' => fake()->randomElement([200000, 500000, 1000000, 2000000]),
         ]);
     }
 

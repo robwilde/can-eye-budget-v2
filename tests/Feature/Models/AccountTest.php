@@ -141,3 +141,27 @@ test('active scope excludes inactive accounts', function () {
     expect($activeAccounts)->toHaveCount(1)
         ->and($activeAccounts->first()->id)->toBe($active->id);
 });
+
+test('availableBalance returns balance for non-credit-card accounts', function () {
+    $account = Account::factory()->create(['balance' => 150000]);
+
+    expect($account->availableBalance())->toBe(150000);
+});
+
+test('availableBalance returns available credit for credit card accounts', function () {
+    $account = Account::factory()->creditCard()->create([
+        'balance' => -50000,
+        'credit_limit' => 500000,
+    ]);
+
+    expect($account->availableBalance())->toBe(450000);
+});
+
+test('availableBalance returns balance when credit card has no limit set', function () {
+    $account = Account::factory()->creditCard()->create([
+        'balance' => -50000,
+        'credit_limit' => null,
+    ]);
+
+    expect($account->availableBalance())->toBe(-50000);
+});

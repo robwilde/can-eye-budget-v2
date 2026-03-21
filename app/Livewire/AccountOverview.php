@@ -32,17 +32,16 @@ final class AccountOverview extends Component
             ->orderBy('type')
             ->get();
 
-        $grouped = $accounts->groupBy(fn (Account $account) => $account->type->value);
+        $availableToSpend = $accounts
+            ->filter(fn (Account $a) => $a->type->isSpendable())
+            ->sum(fn (Account $a) => $a->availableBalance());
 
-        $totalAssets = $accounts->filter(fn (Account $a) => $a->type->isAsset())->sum('balance');
-        $totalLiabilities = $accounts->filter(fn (Account $a) => ! $a->type->isAsset())->sum('balance');
-        $netWorth = $totalAssets + $totalLiabilities;
+        $lastSynced = $accounts->max('updated_at');
 
         return view('livewire.account-overview', [
-            'grouped' => $grouped,
-            'totalAssets' => $totalAssets,
-            'totalLiabilities' => $totalLiabilities,
-            'netWorth' => $netWorth,
+            'accounts' => $accounts,
+            'availableToSpend' => $availableToSpend,
+            'lastSynced' => $lastSynced,
             'formatMoney' => MoneyCast::format(...),
         ]);
     }
