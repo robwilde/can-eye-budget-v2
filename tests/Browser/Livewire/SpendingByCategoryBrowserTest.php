@@ -45,7 +45,7 @@ test('period selector changes update the chart', function () {
 
     $page->assertSee('Spending by Category')
         ->assertSee('Recent Spend')
-        ->select('[wire\\:model\\.live="period"]', '7d')
+        ->select('[data-testid="spending-by-category"] [wire\\:model\\.live="period"]', '7d')
         ->assertSee('Recent Spend');
 });
 
