@@ -58,6 +58,25 @@ test('isAsset returns false for liability account types', function (AccountClass
     'mortgage' => AccountClass::Mortgage,
 ]);
 
+test('isSpendable returns true for spendable account types', function (AccountClass $type) {
+    expect($type->isSpendable())->toBeTrue();
+})->with([
+    'transaction' => AccountClass::Transaction,
+    'savings' => AccountClass::Savings,
+    'credit card' => AccountClass::CreditCard,
+    'investment' => AccountClass::Investment,
+    'foreign' => AccountClass::Foreign,
+    'term deposit' => AccountClass::TermDeposit,
+]);
+
+test('isSpendable returns false for non-spendable account types', function (AccountClass $type) {
+    expect($type->isSpendable())->toBeFalse();
+})->with([
+    'loan' => AccountClass::Loan,
+    'mortgage' => AccountClass::Mortgage,
+    'insurance' => AccountClass::Insurance,
+]);
+
 test('icon returns a non-empty string for all cases', function (AccountClass $type) {
     expect($type->icon())->toBeString()->not->toBeEmpty();
 })->with(AccountClass::cases());

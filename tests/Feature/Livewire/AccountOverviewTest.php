@@ -18,26 +18,72 @@ test('component renders for authenticated user', function () {
         ->assertSuccessful();
 });
 
-test('accounts are grouped by type', function () {
-    $user = User::factory()->create();
-    Account::factory()->for($user)->create();
-    Account::factory()->savings()->for($user)->create();
-
-    Livewire::actingAs($user)
-        ->test(AccountOverview::class)
-        ->assertSee('Transaction')
-        ->assertSee('Savings');
-});
-
-test('net worth calculates correctly from assets and liabilities', function () {
+test('displays available to spend for spendable accounts', function () {
     $user = User::factory()->create();
     Account::factory()->for($user)->create(['balance' => 100000]);
     Account::factory()->savings()->for($user)->create(['balance' => 200000]);
-    Account::factory()->creditCard()->for($user)->create(['balance' => -50000]);
 
     Livewire::actingAs($user)
         ->test(AccountOverview::class)
-        ->assertSee(MoneyCast::format(250000));
+        ->assertSee('Available to Spend')
+        ->assertSee(MoneyCast::format(300000));
+});
+
+test('excludes loans and mortgages from available to spend', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create(['balance' => 100000]);
+    Account::factory()->loan()->for($user)->create(['balance' => -500000]);
+    Account::factory()->mortgage()->for($user)->create(['balance' => -50000000]);
+
+    Livewire::actingAs($user)
+        ->test(AccountOverview::class)
+        ->assertSeeInOrder(['Available to Spend', MoneyCast::format(100000)]);
+});
+
+test('credit card contributes available credit to available to spend', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create(['balance' => 100000]);
+    Account::factory()->creditCard()->for($user)->create([
+        'balance' => -50000,
+        'credit_limit' => 500000,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(AccountOverview::class)
+        ->assertSeeInOrder(['Available to Spend', MoneyCast::format(550000)]);
+});
+
+test('credit card shows available balance and current owed', function () {
+    $user = User::factory()->create();
+    Account::factory()->creditCard()->for($user)->create([
+        'balance' => -50000,
+        'credit_limit' => 500000,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(AccountOverview::class)
+        ->assertSee(MoneyCast::format(450000))
+        ->assertSee('Current '.MoneyCast::format(-50000));
+});
+
+test('shows available to spend as zero when no spendable accounts', function () {
+    $user = User::factory()->create();
+    Account::factory()->mortgage()->for($user)->create(['balance' => -30000000]);
+
+    Livewire::actingAs($user)
+        ->test(AccountOverview::class)
+        ->assertSee(MoneyCast::format(0));
+});
+
+test('does not display net worth assets or liabilities labels', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create(['balance' => 100000]);
+
+    Livewire::actingAs($user)
+        ->test(AccountOverview::class)
+        ->assertDontSee('Net Worth')
+        ->assertDontSee('Assets')
+        ->assertDontSee('Liabilities');
 });
 
 test('displays account name institution and formatted balance', function () {
@@ -55,15 +101,14 @@ test('displays account name institution and formatted balance', function () {
         ->assertSee(MoneyCast::format(123456));
 });
 
-test('shows last synced as relative time', function () {
+test('shows last synced timestamp from most recent account', function () {
     $user = User::factory()->create();
-    Account::factory()->for($user)->create([
-        'updated_at' => now()->subHours(2),
-    ]);
+    Account::factory()->for($user)->create(['updated_at' => now()->subHours(5)]);
+    Account::factory()->savings()->for($user)->create(['updated_at' => now()->subMinutes(30)]);
 
     Livewire::actingAs($user)
         ->test(AccountOverview::class)
-        ->assertSee('2 hours ago');
+        ->assertSee('Last synced 30 minutes ago');
 });
 
 test('shows empty state when no accounts exist', function () {
@@ -109,14 +154,23 @@ test('excludes inactive accounts', function () {
         ->assertDontSee('Inactive Account');
 });
 
-test('shows subtotals per group', function () {
+test('hero number uses large responsive text', function () {
     $user = User::factory()->create();
-    Account::factory()->for($user)->create(['balance' => 100000]);
-    Account::factory()->for($user)->create(['balance' => 200000]);
+    Account::factory()->for($user)->create(['balance' => 250000]);
 
     Livewire::actingAs($user)
         ->test(AccountOverview::class)
-        ->assertSee(MoneyCast::format(300000));
+        ->assertSeeHtml('text-5xl font-bold');
+});
+
+test('account breakdown has expand toggle', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(AccountOverview::class)
+        ->assertSee('Account breakdown')
+        ->assertSeeHtml('x-collapse');
 });
 
 test('connect bank button links to connect-bank route', function () {
