@@ -16,36 +16,36 @@ final class BudgetSeeder extends Seeder
         $user = User::where('email', 'test@example.com')->firstOrFail();
 
         $groceries = Category::where('name', 'Groceries')->whereNotNull('parent_id')->first();
-        $fuel = Category::where('name', 'Fuel')->whereNotNull('parent_id')->first();
-        $takeaway = Category::where('name', 'Takeaway')->whereNotNull('parent_id')->first();
-        $electricity = Category::where('name', 'Electricity')->whereNotNull('parent_id')->first();
+        $streaming = Category::where('name', 'Streaming')->whereNotNull('parent_id')->first();
+        $insurance = Category::where('name', 'Insurance Premiums')->whereNotNull('parent_id')->first();
+        $loanRepayments = Category::where('name', 'Loan Repayments')->whereNotNull('parent_id')->first();
 
         Budget::factory()->for($user)->create([
-            'name' => 'Monthly Groceries',
-            'limit_amount' => 80000,
+            'name' => 'Groceries',
+            'limit_amount' => 60000,
             'category_id' => $groceries?->id,
-            'start_date' => '2026-03-01',
+            'start_date' => '2026-01-01',
         ]);
 
         Budget::factory()->for($user)->create([
-            'name' => 'Fuel Budget',
+            'name' => 'Streaming & Subscriptions',
+            'limit_amount' => 10000,
+            'category_id' => $streaming?->id,
+            'start_date' => '2026-01-01',
+        ]);
+
+        Budget::factory()->for($user)->create([
+            'name' => 'Insurance',
             'limit_amount' => 30000,
-            'category_id' => $fuel?->id,
-            'start_date' => '2026-03-01',
+            'category_id' => $insurance?->id,
+            'start_date' => '2026-01-01',
         ]);
 
         Budget::factory()->for($user)->create([
-            'name' => 'Takeaway Limit',
-            'limit_amount' => 15000,
-            'category_id' => $takeaway?->id,
-            'start_date' => '2026-03-01',
-        ]);
-
-        Budget::factory()->for($user)->create([
-            'name' => 'Electricity',
-            'limit_amount' => 25000,
-            'category_id' => $electricity?->id,
-            'start_date' => '2026-03-01',
+            'name' => 'Loan Repayments',
+            'limit_amount' => 30000,
+            'category_id' => $loanRepayments?->id,
+            'start_date' => '2026-01-01',
         ]);
     }
 }
