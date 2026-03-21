@@ -26,7 +26,9 @@ final class AccountOverview extends Component
 
     public function render(): View
     {
-        $accounts = auth()->user()
+        $user = auth()->user();
+
+        $accounts = $user
             ->accounts()
             ->active()
             ->orderBy('type')
@@ -35,12 +37,14 @@ final class AccountOverview extends Component
         $availableToSpend = $accounts
             ->filter(fn (Account $a) => $a->type->isSpendable())
             ->sum(fn (Account $a) => $a->availableBalance());
-
+        $buffer = $user->bufferUntilNextPay($availableToSpend);
         $lastSynced = $accounts->max('updated_at');
 
         return view('livewire.account-overview', [
             'accounts' => $accounts,
             'availableToSpend' => $availableToSpend,
+            'buffer' => $buffer,
+            'hasPayCycle' => $user->hasPayCycleConfigured(),
             'lastSynced' => $lastSynced,
             'formatMoney' => MoneyCast::format(...),
         ]);
