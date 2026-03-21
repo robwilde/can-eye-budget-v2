@@ -1,4 +1,4 @@
-<div>
+<div data-testid="spending-by-category">
     <div class="rounded-xl border border-neutral-200 dark:border-neutral-700">
         <div class="flex items-center justify-between p-4">
             <flux:heading>Spending by Category</flux:heading>
