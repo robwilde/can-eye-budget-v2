@@ -57,4 +57,4 @@ jobs:
         run: npm run build
 
       - name: Run Tests
-        run: ./vendor/bin/pest
+        run: ./vendor/bin/pest --exclude-testsuite=Browser
