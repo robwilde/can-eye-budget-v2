@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Casts\MoneyCast;
+use App\Enums\PayFrequency;
 use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -13,7 +15,13 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Str;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 
-/** @property CarbonImmutable|null $last_synced_at */
+/**
+ * @property CarbonImmutable|null $last_synced_at
+ * @property int|null $pay_amount
+ * @property PayFrequency|null $pay_frequency
+ * @property CarbonImmutable|null $next_pay_date
+ * @property int|null $committed_per_cycle
+ */
 final class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
@@ -30,6 +38,10 @@ final class User extends Authenticatable
         'basiq_user_id',
         'last_synced_at',
         'password',
+        'pay_amount',
+        'pay_frequency',
+        'next_pay_date',
+        'committed_per_cycle',
     ];
 
     /**
@@ -74,9 +86,24 @@ final class User extends Authenticatable
         return $this->hasMany(Budget::class);
     }
 
+    public function hasPayCycleConfigured(): bool
+    {
+        return $this->pay_amount !== null
+            && $this->pay_frequency !== null
+            && $this->next_pay_date !== null
+            && $this->committed_per_cycle !== null;
+    }
+
+    public function bufferUntilNextPay(int $availableToSpend): ?int
+    {
+        if (! $this->hasPayCycleConfigured()) {
+            return null;
+        }
+
+        return $availableToSpend - $this->committed_per_cycle;
+    }
+
     /**
-     * Get the attributes that should be cast.
-     *
      * @return array<string, string>
      */
     protected function casts(): array
@@ -85,6 +112,10 @@ final class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'last_synced_at' => 'datetime',
             'password' => 'hashed',
+            'pay_amount' => MoneyCast::class,
+            'pay_frequency' => PayFrequency::class,
+            'next_pay_date' => 'date',
+            'committed_per_cycle' => MoneyCast::class,
         ];
     }
 }
