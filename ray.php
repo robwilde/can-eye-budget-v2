@@ -82,12 +82,12 @@ return [
     /*
     * When enabled, all requests made to this app will automatically be sent to Ray.
     */
-    'send_requests_to_ray' => env('SEND_REQUESTS_TO_RAY', false),
+    'send_requests_to_ray' => env('SEND_REQUESTS_TO_RAY', true),
 
     /**
      * When enabled, all Http Client requests made by this app will be automatically sent to Ray.
      */
-    'send_http_client_requests_to_ray' => env('SEND_HTTP_CLIENT_REQUESTS_TO_RAY', false),
+    'send_http_client_requests_to_ray' => env('SEND_HTTP_CLIENT_REQUESTS_TO_RAY', true),
 
     /*
     * When enabled, all views that are rendered automatically be sent to Ray.
@@ -111,7 +111,7 @@ return [
     * When using Homestead with the VirtualBox provider, you can replace localhost with '10.0.2.2'
     * When using Homestead with the Parallels provider, you can replace localhost with '10.211.55.2'
     */
-    'host' => env('RAY_HOST', 'localhost'),
+    'host' => env('RAY_HOST', 'host.docker.internal'),
 
     /*
     * The port number used to communicate with the Ray app.
@@ -122,7 +122,7 @@ return [
      * Absolute base path for your sites or projects in Homestead,
      * Vagrant, Docker, or another remote development server.
      */
-    'remote_path' => env('RAY_REMOTE_PATH', null),
+    'remote_path' => env('RAY_REMOTE_PATH', '/var/www/html'),
 
     /*
      * Absolute base path for your sites or projects on your local
