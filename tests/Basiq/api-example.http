@@ -1,0 +1,120 @@
+### Get Server Token (use this for data retrieval - accounts, transactions, etc.)
+POST https://au-api.basiq.io/token
+Authorization: Basic {{apiKey}}
+accept: application/json
+basiq-version: 3.0
+Content-Type: application/x-www-form-urlencoded
+
+scope=SERVER_ACCESS
+
+> {%
+    client.global.set("serverToken", response.body.access_token);
+    client.log("Server token captured, expires in " + response.body.expires_in + "s");
+%}
+
+### Get Client Token (use ONLY for consent UI flow - cannot retrieve individual resources)
+POST https://au-api.basiq.io/token
+Authorization: Basic {{apiKey}}
+accept: application/json
+basiq-version: 3.0
+Content-Type: application/x-www-form-urlencoded
+
+scope=CLIENT_ACCESS&userId={{gilfoyle.userId}}
+
+> {%
+    client.global.set("clientToken", response.body.access_token);
+    client.log("Client token captured for user " + "{{gilfoyle.userId}}");
+%}
+
+##########################################################################
+## Gavin Belson (test@example.com) — 4 accounts, HooliGov Bank
+##########################################################################
+
+### [gavinBelson] List all accounts
+GET https://au-api.basiq.io/users/{{gavinBelson.userId}}/accounts
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+### [gavinBelson] Retrieve Cheque Account
+GET https://au-api.basiq.io/users/{{gavinBelson.userId}}/accounts/{{gavinBelson.accounts.cheque}}
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+### [gavinBelson] Retrieve Personal Savings
+GET https://au-api.basiq.io/users/{{gavinBelson.userId}}/accounts/{{gavinBelson.accounts.savings}}
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+### [gavinBelson] Retrieve Personal Loan
+GET https://au-api.basiq.io/users/{{gavinBelson.userId}}/accounts/{{gavinBelson.accounts.loan}}
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+### [gavinBelson] Retrieve Credit Card
+GET https://au-api.basiq.io/users/{{gavinBelson.userId}}/accounts/{{gavinBelson.accounts.creditCard}}
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+### [gavinBelson] Transactions — Cheque Account
+GET https://au-api.basiq.io/users/{{gavinBelson.userId}}/transactions?filter=account.id.eq('{{gavinBelson.accounts.cheque}}')&limit=500
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+### [gavinBelson] Transactions — Personal Savings
+GET https://au-api.basiq.io/users/{{gavinBelson.userId}}/transactions?filter=account.id.eq('{{gavinBelson.accounts.savings}}')&limit=500
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+### [gavinBelson] Transactions — Personal Loan
+GET https://au-api.basiq.io/users/{{gavinBelson.userId}}/transactions?filter=account.id.eq('{{gavinBelson.accounts.loan}}')&limit=500
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+### [gavinBelson] Transactions — Credit Card
+GET https://au-api.basiq.io/users/{{gavinBelson.userId}}/transactions?filter=account.id.eq('{{gavinBelson.accounts.creditCard}}')&limit=500
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+##########################################################################
+## Gilfoyle — 3 accounts, Hooli Bank
+##########################################################################
+
+### [gilfoyle] List all accounts
+GET https://au-api.basiq.io/users/{{gilfoyle.userId}}/accounts
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+### [gilfoyle] Retrieve Hooli Awards Card (Visa)
+GET https://au-api.basiq.io/users/{{gilfoyle.userId}}/accounts/{{gilfoyle.accounts.visa}}
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+### [gilfoyle] Retrieve Hooli Access (Transaction)
+GET https://au-api.basiq.io/users/{{gilfoyle.userId}}/accounts/{{gilfoyle.accounts.access}}
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+### [gilfoyle] Retrieve Hooli Saver (Savings)
+GET https://au-api.basiq.io/users/{{gilfoyle.userId}}/accounts/{{gilfoyle.accounts.saver}}
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+### [gilfoyle] Transactions — all accounts
+GET https://au-api.basiq.io/users/{{gilfoyle.userId}}/transactions?limit=500
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+### [gilfoyle] Transactions — Visa
+GET https://au-api.basiq.io/users/{{gilfoyle.userId}}/transactions?filter=account.id.eq('{{gilfoyle.accounts.visa}}')&limit=500
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+### [gilfoyle] Transactions — Access
+GET https://au-api.basiq.io/users/{{gilfoyle.userId}}/transactions?filter=account.id.eq('{{gilfoyle.accounts.access}}')&limit=500
+accept: application/json
+authorization: Bearer {{serverToken}}
+
+### [gilfoyle] Transactions — Saver
+GET https://au-api.basiq.io/users/{{gilfoyle.userId}}/transactions?filter=account.id.eq('{{gilfoyle.accounts.saver}}')&limit=500
+accept: application/json
+authorization: Bearer {{serverToken}}
