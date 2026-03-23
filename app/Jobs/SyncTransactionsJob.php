@@ -8,13 +8,16 @@ use App\Contracts\BasiqServiceContract;
 use App\Models\Account;
 use App\Models\Transaction;
 use App\Models\User;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
-final class SyncTransactionsJob implements ShouldQueue
+final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
@@ -22,10 +25,27 @@ final class SyncTransactionsJob implements ShouldQueue
 
     public int $backoff = 5;
 
+    public int $timeout = 120;
+
+    public int $uniqueFor = 300;
+
     public function __construct(
         public readonly User $user,
         public readonly ?string $jobId = null,
     ) {}
+
+    public function uniqueId(): int
+    {
+        return $this->user->id;
+    }
+
+    /** @return array<int, object> */
+    public function middleware(): array
+    {
+        return [
+            new WithoutOverlapping("sync-user-{$this->user->id}"),
+        ];
+    }
 
     /**
      * @throws ConnectionException
@@ -50,6 +70,14 @@ final class SyncTransactionsJob implements ShouldQueue
 
         $accountMap = $this->syncAccounts($basiqService);
         $this->syncTransactions($basiqService, $accountMap);
+    }
+
+    public function failed(Throwable $exception): void
+    {
+        Log::error('SyncTransactionsJob failed', [
+            'userId' => $this->user->id,
+            'exception' => $exception,
+        ]);
     }
 
     private static function toCents(string $amount): int
