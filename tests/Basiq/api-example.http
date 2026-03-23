@@ -19,7 +19,7 @@ accept: application/json
 basiq-version: 3.0
 Content-Type: application/x-www-form-urlencoded
 
-scope=CLIENT_ACCESS&userId={{gilfoyle.userId}}
+scope=CLIENT_ACCESS&userId={{gavinBelson.userId}}
 
 > {%
     client.global.set("clientToken", response.body.access_token);
