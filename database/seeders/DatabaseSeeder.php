@@ -22,11 +22,10 @@ final class DatabaseSeeder extends Seeder
             'name' => 'Test User',
             'email' => 'test@example.com',
             'password' => Hash::make('H@rd24G$t'),
+            'basiq_user_id' => '3470f92c-54d1-4a68-a767-1d031d340d06',
         ]);
 
-        $this->call(AccountSeeder::class);
         $this->call(CategorySeeder::class);
-        $this->call(TransactionSeeder::class);
         $this->call(BudgetSeeder::class);
     }
 }
