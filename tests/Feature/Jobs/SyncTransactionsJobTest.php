@@ -380,6 +380,47 @@ test('processes transactions across multiple DTOs', function () {
     expect(Transaction::count())->toBe(3);
 });
 
+test('job implements ShouldBeUnique with user-scoped uniqueId', function () {
+    $user = User::factory()->withBasiq()->create();
+    $job = new SyncTransactionsJob($user);
+
+    expect($job)
+        ->toBeInstanceOf(Illuminate\Contracts\Queue\ShouldBeUnique::class)
+        ->and($job->uniqueId())->toBe($user->id)
+        ->and($job->uniqueFor)->toBe(300);
+});
+
+test('job has WithoutOverlapping middleware keyed on user', function () {
+    $user = User::factory()->withBasiq()->create();
+    $job = new SyncTransactionsJob($user);
+
+    $middleware = $job->middleware();
+
+    expect($middleware)->toHaveCount(1)
+        ->and($middleware[0])->toBeInstanceOf(Illuminate\Queue\Middleware\WithoutOverlapping::class);
+});
+
+test('job has appropriate timeout for API calls', function () {
+    $user = User::factory()->withBasiq()->create();
+    $job = new SyncTransactionsJob($user);
+
+    expect($job->timeout)->toBe(120);
+});
+
+test('failed method logs the exception', function () {
+    $user = User::factory()->withBasiq()->create();
+    $job = new SyncTransactionsJob($user);
+    $exception = new RuntimeException('Basiq API unreachable');
+
+    Log::shouldReceive('error')
+        ->once()
+        ->with('SyncTransactionsJob failed', Mockery::on(fn ($ctx) => $ctx['userId'] === $user->id
+            && $ctx['exception'] === $exception,
+        ));
+
+    $job->failed($exception);
+});
+
 test('end-to-end sync through real BasiqService with Http::fake', function () {
     Cache::forget('basiq:server_token');
 
