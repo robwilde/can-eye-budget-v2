@@ -31,7 +31,7 @@ final class AccountFactory extends Factory
         ];
     }
 
-    public function savings(): static
+    public function savings(): self
     {
         return $this->state(fn (array $attributes) => [
             'name' => fake()->randomElement(['NetBank Saver', 'Goal Saver', 'Bonus Saver', 'Online Savings']),
@@ -40,26 +40,33 @@ final class AccountFactory extends Factory
         ]);
     }
 
-    public function creditCard(): static
+    public function creditCard(): self
     {
-        return $this->state(fn (array $attributes) => [
-            'name' => fake()->randomElement(['Low Rate Card', 'Platinum Card', 'Awards Card', 'Low Fee Card']),
-            'type' => AccountClass::CreditCard,
-            'balance' => fake()->numberBetween(-1000000, -10000),
-            'credit_limit' => fake()->randomElement([200000, 500000, 1000000, 2000000]),
-        ]);
+        return $this->state(function (array $attributes) {
+            $balance = fake()->numberBetween(-1000000, -10000);
+            $creditLimit = fake()->randomElement([200000, 500000, 1000000, 2000000]);
+
+            return [
+                'name' => fake()->randomElement(['Low Rate Card', 'Platinum Card', 'Awards Card', 'Low Fee Card']),
+                'type' => AccountClass::CreditCard,
+                'balance' => $balance,
+                'credit_limit' => $creditLimit,
+                'available_funds' => $creditLimit + $balance,
+            ];
+        });
     }
 
-    public function loan(): static
+    public function loan(): self
     {
         return $this->state(fn (array $attributes) => [
             'name' => fake()->randomElement(['Personal Loan', 'Car Loan', 'Secured Loan']),
             'type' => AccountClass::Loan,
             'balance' => fake()->numberBetween(-5000000, -100000),
+            'available_funds' => 0,
         ]);
     }
 
-    public function mortgage(): static
+    public function mortgage(): self
     {
         return $this->state(fn (array $attributes) => [
             'name' => fake()->randomElement(['Home Loan', 'Investment Loan', 'Fixed Rate Home Loan']),
@@ -68,7 +75,7 @@ final class AccountFactory extends Factory
         ]);
     }
 
-    public function investment(): static
+    public function investment(): self
     {
         return $this->state(fn (array $attributes) => [
             'name' => fake()->randomElement(['Share Trading', 'Managed Fund', 'Term Deposit', 'Investment Portfolio']),
@@ -77,21 +84,21 @@ final class AccountFactory extends Factory
         ]);
     }
 
-    public function withBasiq(): static
+    public function withBasiq(): self
     {
         return $this->state(fn (array $attributes) => [
             'basiq_account_id' => fake()->uuid(),
         ]);
     }
 
-    public function inactive(): static
+    public function inactive(): self
     {
         return $this->state(fn (array $attributes) => [
             'status' => AccountStatus::Inactive,
         ]);
     }
 
-    public function closed(): static
+    public function closed(): self
     {
         return $this->state(fn (array $attributes) => [
             'status' => AccountStatus::Closed,

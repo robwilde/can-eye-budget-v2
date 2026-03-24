@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Casts\MoneyCast;
+use App\Enums\AccountClass;
 use App\Enums\PayFrequency;
+use App\Enums\TransactionDirection;
 use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -91,10 +93,58 @@ final class User extends Authenticatable
             && $this->next_pay_date !== null;
     }
 
-    /** @phpstan-ignore return.unusedType */
+    public function totalOwed(): int
+    {
+        return $this->accounts()
+            ->active()
+            ->whereIn('type', [AccountClass::CreditCard, AccountClass::Loan])
+            ->get()
+            ->sum(fn (Account $a) => $a->amountOwed());
+    }
+
+    public function totalAvailable(): int
+    {
+        return $this->accounts()
+            ->active()
+            ->get()
+            ->filter(fn (Account $a) => $a->type->isSpendable())
+            ->sum(fn (Account $a) => $a->availableBalance());
+    }
+
+    public function daysUntilNextPay(): ?int
+    {
+        if (! $this->hasPayCycleConfigured()) {
+            return null;
+        }
+
+        return (int) now()->startOfDay()->diffInDays($this->next_pay_date, false);
+    }
+
+    public function averageDailySpending(int $lookbackDays = 30): int
+    {
+        if ($lookbackDays <= 0) {
+            return 0;
+        }
+
+        $totalDebits = $this->transactions()
+            ->where('direction', TransactionDirection::Debit)
+            ->where('post_date', '>=', now()->subDays($lookbackDays))
+            ->sum('amount');
+
+        return abs(intdiv((int) $totalDebits, $lookbackDays));
+    }
+
     public function bufferUntilNextPay(int $availableToSpend): ?int
     {
-        return null;
+        $daysUntilPay = $this->daysUntilNextPay();
+
+        if ($daysUntilPay === null) {
+            return null;
+        }
+
+        $projectedSpend = $this->averageDailySpending() * $daysUntilPay;
+
+        return $availableToSpend - $projectedSpend;
     }
 
     /**

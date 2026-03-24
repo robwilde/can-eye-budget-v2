@@ -16,6 +16,8 @@ final class BasiqAccount extends Dto
         public readonly ?string $balance,
         public readonly string $currency,
         public readonly ?string $status = null,
+        public readonly ?string $creditLimit = null,
+        public readonly ?string $availableFunds = null,
     ) {}
 
     /**
@@ -27,6 +29,14 @@ final class BasiqAccount extends Dto
         $properties['type'] = $properties['class']['type'] ?? $properties['type'] ?? null;
         unset($properties['class']);
 
+        $properties['creditLimit'] = self::emptyToNull($properties['creditLimit'] ?? null);
+        $properties['availableFunds'] = self::emptyToNull($properties['availableFunds'] ?? null);
+
         return $properties;
+    }
+
+    private static function emptyToNull(?string $value): ?string
+    {
+        return ($value === null || $value === '') ? null : $value;
     }
 }

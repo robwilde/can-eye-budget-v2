@@ -25,12 +25,12 @@
                         x-data="{
                         chart: null,
                         init() {
-                            this.chart = new ApexCharts(this.$refs.chart, this.chartOptions(@js($this->categoryData, JSON_THROW_ON_ERROR)))
-                            this.chart.render()
+                            this.chart = new ApexCharts(this.$refs.chart, this.chartOptions(@js($this->categoryData, JSON_THROW_ON_ERROR)));
+                            this.chart.render();
 
                             Livewire.on('chart-updated', (event) => {
-                                this.chart.updateOptions(this.chartOptions(event.data))
-                            })
+                                this.chart.updateOptions(this.chartOptions(event.data));
+                            });
                         },
                         chartOptions(data) {
                             return {
@@ -39,11 +39,11 @@
                                     height: 300,
                                     events: {
                                         dataPointSelection: (event, chartContext, config) => {
-                                            const categoryId = data[config.dataPointIndex]?.category_id
-                                            const period = this.$wire?.period ?? @js($this->period, JSON_THROW_ON_ERROR)
-                                            const baseUrl = @js(route('transactions'), JSON_THROW_ON_ERROR)
-                                            const params = new URLSearchParams({ category: categoryId ?? '', period: period })
-                                            window.location.href = baseUrl + '?' + params.toString()
+                                            var categoryId = data[config.dataPointIndex]?.category_id;
+                                            var period = this.$wire?.period ?? @js($this->period, JSON_THROW_ON_ERROR);
+                                            var baseUrl = @js(route('transactions'), JSON_THROW_ON_ERROR);
+                                            var params = new URLSearchParams({ category: categoryId ?? '', period: period });
+                                            window.location.href = baseUrl + '?' + params.toString();
                                         }
                                     }
                                 },
@@ -70,8 +70,8 @@
                                                     show: true,
                                                     label: 'Total',
                                                     formatter: (w) => {
-                                                        const total = w.globals.seriesTotals.reduce((a, b) => a + b, 0)
-                                                        return '$' + (total / 100).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                                        var total = w.globals.seriesTotals.reduce((a, b) => a + b, 0);
+                                                        return '$' + (total / 100).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                                                     },
                                                     color: document.documentElement.classList.contains('dark') ? '#d4d4d8' : '#3f3f46'
                                                 },

@@ -7,17 +7,32 @@ declare(strict_types=1);
 use App\Models\Account;
 use App\Models\User;
 
-test('buffer is hidden while stub returns null', function () {
-    $user = User::factory()->withPayCycle()->create();
+test('renders three summary cards', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create(['balance' => 150000]);
+    Account::factory()->creditCard()->for($user)->create(['balance' => -50000, 'credit_limit' => 500000]);
+
+    $this->actingAs($user);
+
+    $page = visit('/dashboard');
+
+    $page->assertSee('Owed')
+        ->assertSee('Available')
+        ->assertSee('Needed');
+});
+
+test('buffer shows positive amount when available exceeds projected spend', function () {
+    $user = User::factory()->withPayCycle()->create([
+        'next_pay_date' => now()->addDays(7),
+    ]);
     Account::factory()->for($user)->create(['balance' => 150000]);
 
     $this->actingAs($user);
 
     $page = visit('/dashboard');
 
-    $page->assertSee('Available to Spend')
-        ->assertDontSee('above what you need')
-        ->assertDontSee('below what you need');
+    $page->assertSee('Available')
+        ->assertSee('above what you need');
 });
 
 test('set up pay cycle CTA appears when not configured', function () {

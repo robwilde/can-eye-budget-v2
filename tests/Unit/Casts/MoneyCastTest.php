@@ -17,11 +17,11 @@ test('get returns integer from string database value', function () {
     expect($cast->get($model, 'amount', '4599', []))->toBe(4599);
 });
 
-test('get returns 0 for null value', function () {
+test('get preserves null for nullable columns', function () {
     $cast = new MoneyCast;
     $model = new class extends Model {};
 
-    expect($cast->get($model, 'amount', null, []))->toBe(0);
+    expect($cast->get($model, 'amount', null, []))->toBeNull();
 });
 
 test('set stores integer from int input', function () {
