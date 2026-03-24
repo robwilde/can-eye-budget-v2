@@ -56,5 +56,39 @@ test('from handles all optional fields as null', function () {
         ->type->toBeNull()
         ->balance->toBeNull()
         ->currency->toBe('USD')
-        ->status->toBeNull();
+        ->status->toBeNull()
+        ->creditLimit->toBeNull()
+        ->availableFunds->toBeNull();
+});
+
+test('from maps creditLimit and availableFunds', function () {
+    $dto = BasiqAccount::from([
+        'id' => 'acc-4',
+        'name' => 'Credit Card',
+        'institution' => 'AU00000',
+        'class' => ['type' => 'credit-card'],
+        'balance' => '-3503.41',
+        'currency' => 'AUD',
+        'creditLimit' => '70581.58',
+        'availableFunds' => '-3503.41',
+        'status' => 'available',
+    ]);
+
+    expect($dto)
+        ->creditLimit->toBe('70581.58')
+        ->availableFunds->toBe('-3503.41');
+});
+
+test('from normalizes empty string creditLimit and availableFunds to null', function () {
+    $dto = BasiqAccount::from([
+        'id' => 'acc-5',
+        'name' => 'Cheque Account',
+        'currency' => 'AUD',
+        'creditLimit' => '',
+        'availableFunds' => '',
+    ]);
+
+    expect($dto)
+        ->creditLimit->toBeNull()
+        ->availableFunds->toBeNull();
 });

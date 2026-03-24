@@ -85,8 +85,142 @@ test('hasPayCycleConfigured returns true when all fields set', function () {
     expect($user->hasPayCycleConfigured())->toBeTrue();
 });
 
-test('bufferUntilNextPay returns null as stub', function () {
-    $user = User::factory()->withPayCycle()->create();
+test('totalOwed sums abs balance for credit card and loan accounts', function () {
+    $user = User::factory()->create();
+    Account::factory()->creditCard()->for($user)->create(['balance' => -50000]);
+    Account::factory()->loan()->for($user)->create(['balance' => -300000]);
+    Account::factory()->for($user)->create(['balance' => 100000]);
+    Account::factory()->savings()->for($user)->create(['balance' => 200000]);
+
+    expect($user->totalOwed())->toBe(350000);
+});
+
+test('totalOwed returns zero when no debt accounts exist', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create(['balance' => 100000]);
+
+    expect($user->totalOwed())->toBe(0);
+});
+
+test('totalOwed excludes inactive and closed accounts', function () {
+    $user = User::factory()->create();
+    Account::factory()->creditCard()->for($user)->create(['balance' => -50000]);
+    Account::factory()->creditCard()->inactive()->for($user)->create(['balance' => -80000]);
+    Account::factory()->loan()->closed()->for($user)->create(['balance' => 0]);
+
+    expect($user->totalOwed())->toBe(50000);
+});
+
+test('totalAvailable sums available balance for spendable accounts', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create(['balance' => 100000]);
+    Account::factory()->savings()->for($user)->create(['balance' => 200000]);
+    Account::factory()->creditCard()->for($user)->create([
+        'balance' => -50000,
+        'credit_limit' => 500000,
+    ]);
+
+    expect($user->totalAvailable())->toBe(750000);
+});
+
+test('totalAvailable excludes loans and mortgages', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create(['balance' => 100000]);
+    Account::factory()->loan()->for($user)->create(['balance' => -500000]);
+    Account::factory()->mortgage()->for($user)->create(['balance' => -50000000]);
+
+    expect($user->totalAvailable())->toBe(100000);
+});
+
+test('totalAvailable returns zero when no spendable accounts exist', function () {
+    $user = User::factory()->create();
+    Account::factory()->mortgage()->for($user)->create(['balance' => -30000000]);
+
+    expect($user->totalAvailable())->toBe(0);
+});
+
+test('daysUntilNextPay returns correct days when pay cycle configured', function () {
+    $user = User::factory()->withPayCycle()->create([
+        'next_pay_date' => now()->addDays(5),
+    ]);
+
+    expect($user->daysUntilNextPay())->toBe(5);
+});
+
+test('daysUntilNextPay returns null when no pay cycle', function () {
+    $user = User::factory()->create();
+
+    expect($user->daysUntilNextPay())->toBeNull();
+});
+
+test('daysUntilNextPay returns zero on pay day', function () {
+    $user = User::factory()->withPayCycle()->create([
+        'next_pay_date' => now()->startOfDay(),
+    ]);
+
+    expect($user->daysUntilNextPay())->toBe(0);
+});
+
+test('averageDailySpending calculates from debit transactions', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->debit()->for($user)->for($account)->create([
+        'amount' => 10000,
+        'post_date' => now()->subDays(15),
+    ]);
+    Transaction::factory()->debit()->for($user)->for($account)->create([
+        'amount' => 20000,
+        'post_date' => now()->subDays(5),
+    ]);
+
+    expect($user->averageDailySpending(30))->toBe(1000);
+});
+
+test('averageDailySpending excludes credit transactions', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->debit()->for($user)->for($account)->create([
+        'amount' => 30000,
+        'post_date' => now()->subDays(10),
+    ]);
+    Transaction::factory()->credit()->for($user)->for($account)->create([
+        'amount' => 50000,
+        'post_date' => now()->subDays(5),
+    ]);
+
+    expect($user->averageDailySpending(30))->toBe(1000);
+});
+
+test('averageDailySpending returns zero when no debit transactions', function () {
+    $user = User::factory()->create();
+
+    expect($user->averageDailySpending(30))->toBe(0);
+});
+
+test('bufferUntilNextPay returns difference between available and projected spend', function () {
+    $user = User::factory()->withPayCycle()->create([
+        'next_pay_date' => now()->addDays(7),
+    ]);
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->debit()->for($user)->for($account)->create([
+        'amount' => 30000,
+        'post_date' => now()->subDays(10),
+    ]);
+
+    $available = 200000;
+    $buffer = $user->bufferUntilNextPay($available);
+
+    $dailySpend = $user->averageDailySpending();
+    $expected = $available - ($dailySpend * 7);
+
+    expect($buffer)->toBe($expected);
+});
+
+test('bufferUntilNextPay returns null when no pay cycle configured', function () {
+    $user = User::factory()->create();
 
     expect($user->bufferUntilNextPay(200000))->toBeNull();
 });

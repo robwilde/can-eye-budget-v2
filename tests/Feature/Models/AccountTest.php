@@ -177,3 +177,27 @@ test('availableBalance returns balance when credit card has no limit set', funct
 
     expect($account->availableBalance())->toBe(-50000);
 });
+
+test('amountOwed returns abs balance for credit card', function () {
+    $account = Account::factory()->creditCard()->create(['balance' => -50000]);
+
+    expect($account->amountOwed())->toBe(50000);
+});
+
+test('amountOwed returns abs balance for loan', function () {
+    $account = Account::factory()->loan()->create(['balance' => -300000]);
+
+    expect($account->amountOwed())->toBe(300000);
+});
+
+test('amountOwed returns zero for transaction account', function () {
+    $account = Account::factory()->create(['balance' => 150000]);
+
+    expect($account->amountOwed())->toBe(0);
+});
+
+test('amountOwed returns zero for savings account', function () {
+    $account = Account::factory()->savings()->create(['balance' => 200000]);
+
+    expect($account->amountOwed())->toBe(0);
+});

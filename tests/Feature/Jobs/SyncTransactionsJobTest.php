@@ -155,6 +155,55 @@ test('successful job syncs accounts via updateOrCreate', function () {
         ->currency->toBe('AUD');
 });
 
+test('syncs credit_limit and available_funds from basiq', function () {
+    $user = User::factory()->withBasiq()->create();
+
+    fakeBasiqJobService('success', function (MockInterface $mock) {
+        $mock
+            ->shouldReceive('getAccounts')
+            ->once()
+            ->andReturn(new Collection([
+                makeBasiqAccount('basiq-cc-1', [
+                    'name' => 'Credit Card',
+                    'class' => ['type' => 'credit-card'],
+                    'balance' => '-3503.41',
+                    'creditLimit' => '70581.58',
+                    'availableFunds' => '67078.17',
+                ]),
+            ]));
+    });
+
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
+
+    $account = Account::where('basiq_account_id', 'basiq-cc-1')->first();
+    expect($account)
+        ->credit_limit->toBe(7058158)
+        ->available_funds->toBe(6707817);
+});
+
+test('syncs zero credit_limit and available_funds when basiq returns empty strings', function () {
+    $user = User::factory()->withBasiq()->create();
+
+    fakeBasiqJobService('success', function (MockInterface $mock) {
+        $mock
+            ->shouldReceive('getAccounts')
+            ->once()
+            ->andReturn(new Collection([
+                makeBasiqAccount('basiq-txn-1', [
+                    'creditLimit' => '',
+                    'availableFunds' => '',
+                ]),
+            ]));
+    });
+
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
+
+    $account = Account::where('basiq_account_id', 'basiq-txn-1')->first();
+    expect($account)
+        ->credit_limit->toBe(0)
+        ->available_funds->toBe(0);
+});
+
 test('successful job syncs transactions with correct field mapping', function () {
     $user = User::factory()->withBasiq()->create();
     $enrich = [
