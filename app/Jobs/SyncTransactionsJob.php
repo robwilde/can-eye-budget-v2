@@ -85,6 +85,11 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
         return (int) bcmul($amount, '100', 0);
     }
 
+    private static function toCentsOrNull(?string $amount): ?int
+    {
+        return $amount !== null ? self::toCents($amount) : null;
+    }
+
     /**
      * @return Collection<string, int>
      *
@@ -104,6 +109,8 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
                     'institution' => $dto->institution,
                     'currency' => $dto->currency,
                     'balance' => self::toCents($dto->balance ?? '0'),
+                    'credit_limit' => self::toCentsOrNull($dto->creditLimit),
+                    'available_funds' => self::toCentsOrNull($dto->availableFunds),
                     'status' => $dto->status ?? 'active',
                 ],
             );
