@@ -5,21 +5,22 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Casts\MoneyCast;
-use App\Enums\TransactionDirection;
 use App\Models\Transaction;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonPeriod;
 use Carbon\Constants\UnitValue;
 use Illuminate\Database\Connection;
+use Illuminate\Support\Collection;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
+use stdClass;
 
 final class SpendingOverTime extends Component
 {
     public string $period = '30d';
 
-    /** @return array<int, array{date: string, total: int}> */
+    /** @return array<int, array{date: string, total: int, accounts: array<int, array{name: string, total: int}>}> */
     #[Computed(persist: true)]
     public function timeSeriesData(): array
     {
@@ -31,56 +32,36 @@ final class SpendingOverTime extends Component
         $isSqlite = $connection->getDriverName() === 'sqlite';
 
         $groupExpression = match ($aggregation) {
-            'day' => 'DATE(post_date)',
+            'day' => 'DATE(transactions.post_date)',
             'week' => $isSqlite
-                ? "DATE(post_date, '-' || ((CAST(strftime('%w', post_date) AS INTEGER) + 6) % 7) || ' days')"
-                : 'DATE(DATE_SUB(post_date, INTERVAL WEEKDAY(post_date) DAY))',
+                ? "DATE(transactions.post_date, '-' || ((CAST(strftime('%w', transactions.post_date) AS INTEGER) + 6) % 7) || ' days')"
+                : 'DATE(DATE_SUB(transactions.post_date, INTERVAL WEEKDAY(transactions.post_date) DAY))',
             'month' => $isSqlite
-                ? "strftime('%Y-%m-01', post_date)"
-                : "DATE_FORMAT(post_date, '%Y-%m-01')",
+                ? "strftime('%Y-%m-01', transactions.post_date)"
+                : "DATE_FORMAT(transactions.post_date, '%Y-%m-01')",
         };
 
+        $netExpression = 'SUM(transactions.amount)';
+
+        /** @var Collection<int, stdClass> $rows */
         $rows = Transaction::query()
-            ->where('user_id', auth()->id())
-            ->where('direction', TransactionDirection::Debit)
-            ->where('post_date', '>=', $start)
-            ->selectRaw("{$groupExpression} as period_date, SUM(amount) as total")
-            ->groupBy('period_date')
+            ->join('accounts', 'transactions.account_id', '=', 'accounts.id')
+            ->where('transactions.user_id', auth()->id())
+            ->whereColumn('accounts.user_id', 'transactions.user_id')
+            ->where('transactions.post_date', '>=', $start)
+            ->selectRaw("{$groupExpression} as period_date, transactions.account_id, accounts.name as account_name, {$netExpression} as total")
+            ->groupBy('period_date', 'transactions.account_id', 'accounts.name')
             ->orderBy('period_date')
-            ->pluck('total', 'period_date');
+            ->get();
 
         if ($rows->isEmpty()) {
             return [];
         }
 
-        $interval = match ($aggregation) {
-            'day' => '1 day',
-            'week' => '1 week',
-            'month' => '1 month',
-        };
+        /** @var Collection<string, Collection<int, stdClass>> $grouped */
+        $grouped = $rows->groupBy('period_date');
 
-        $periodDates = CarbonPeriod::create($start->startOfDay(), $interval, now()->startOfDay());
-
-        $series = [];
-
-        foreach ($periodDates as $date) {
-            $key = match ($aggregation) {
-                'day' => $date->format('Y-m-d'),
-                'week' => $date->startOfWeek(UnitValue::MONDAY)->format('Y-m-d'),
-                'month' => $date->format('Y-m-01'),
-            };
-
-            if (isset($series[$key])) {
-                continue;
-            }
-
-            $series[$key] = [
-                'date' => $key,
-                'total' => (int) ($rows[$key] ?? 0),
-            ];
-        }
-
-        return array_values($series);
+        return $this->fillPeriods($aggregation, $start, $grouped);
     }
 
     public function updatedPeriod(): void
@@ -107,6 +88,55 @@ final class SpendingOverTime extends Component
             'formatMoney' => MoneyCast::format(...),
             'aggregation' => $this->aggregationLevel(),
         ]);
+    }
+
+    /**
+     * @param  'day'|'week'|'month'  $aggregation
+     * @param  Collection<string, Collection<int, stdClass>>  $grouped
+     * @return array<int, array{date: string, total: int, accounts: array<int, array{name: string, total: int}>}>
+     */
+    private function fillPeriods(string $aggregation, CarbonImmutable $start, Collection $grouped): array
+    {
+        $interval = match ($aggregation) {
+            'day' => '1 day',
+            'week' => '1 week',
+            default => '1 month',
+        };
+
+        $periodDates = CarbonPeriod::create($start->startOfDay(), $interval, now()->startOfDay());
+
+        $series = [];
+
+        foreach ($periodDates as $date) {
+            $key = match ($aggregation) {
+                'day' => $date->format('Y-m-d'),
+                'week' => $date->startOfWeek(UnitValue::MONDAY)->format('Y-m-d'),
+                default => $date->format('Y-m-01'),
+            };
+
+            if (isset($series[$key])) {
+                continue;
+            }
+
+            /** @var Collection<int, stdClass> $periodRows */
+            $periodRows = $grouped->get($key, collect());
+
+            $accounts = [];
+            foreach ($periodRows as $row) {
+                $accounts[] = [
+                    'name' => (string) $row->account_name,
+                    'total' => (int) $row->total,
+                ];
+            }
+
+            $series[$key] = [
+                'date' => $key,
+                'total' => (int) $periodRows->sum('total'),
+                'accounts' => $accounts,
+            ];
+        }
+
+        return array_values($series);
     }
 
     private function periodStart(): CarbonImmutable
