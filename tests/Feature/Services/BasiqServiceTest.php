@@ -300,7 +300,7 @@ test('paginateTransactions returns transactions from single page', function () {
 test('paginateTransactions follows pagination links across multiple pages', function () {
     Http::fake([
         '*/token' => Http::response(['access_token' => 'tok']),
-        '*/users/usr-1/transactions' => Http::sequence()
+        '*/users/usr-1/transactions*' => Http::sequence()
             ->push([
                 'data' => [['id' => 'txn-1', 'amount' => '10.00', 'direction' => 'debit']],
                 'links' => ['next' => 'https://au-api.basiq.io/users/usr-1/transactions?cursor=abc'],
@@ -355,7 +355,7 @@ test('paginateTransactions sends no filter param when null', function () {
 test('paginateTransactions stops when data is empty even if next link exists', function () {
     Http::fake([
         '*/token' => Http::response(['access_token' => 'tok']),
-        '*/users/usr-1/transactions' => Http::sequence()
+        '*/users/usr-1/transactions*' => Http::sequence()
             ->push([
                 'data' => [['id' => 'txn-1', 'amount' => '10.00', 'direction' => 'debit']],
                 'links' => ['next' => 'https://au-api.basiq.io/users/usr-1/transactions?next=cursor'],
