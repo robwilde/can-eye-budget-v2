@@ -263,7 +263,7 @@ test('card numbers use bold tracking-tight text', function () {
 
     Livewire::actingAs($user)
         ->test(AccountOverview::class)
-        ->assertSeeHtml('text-3xl font-bold');
+        ->assertSeeHtml('text-4xl font-bold');
 });
 
 test('account breakdown has expand toggle', function () {

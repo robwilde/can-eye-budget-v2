@@ -181,7 +181,7 @@ test('syncs credit_limit and available_funds from basiq', function () {
         ->available_funds->toBe(6707817);
 });
 
-test('syncs zero credit_limit and available_funds when basiq returns empty strings', function () {
+test('syncs null credit_limit and available_funds when basiq returns empty strings', function () {
     $user = User::factory()->withBasiq()->create();
 
     fakeBasiqJobService('success', function (MockInterface $mock) {
@@ -200,8 +200,8 @@ test('syncs zero credit_limit and available_funds when basiq returns empty strin
 
     $account = Account::where('basiq_account_id', 'basiq-txn-1')->first();
     expect($account)
-        ->credit_limit->toBe(0)
-        ->available_funds->toBe(0);
+        ->credit_limit->toBeNull()
+        ->available_funds->toBeNull();
 });
 
 test('successful job syncs transactions with correct field mapping', function () {
