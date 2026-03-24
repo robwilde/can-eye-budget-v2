@@ -142,6 +142,18 @@ test('active scope excludes inactive accounts', function () {
         ->and($activeAccounts->first()->id)->toBe($active->id);
 });
 
+test('active scope includes available accounts', function () {
+    $user = User::factory()->create();
+    $active = Account::factory()->for($user)->create();
+    $available = Account::factory()->for($user)->create(['status' => AccountStatus::Available]);
+    Account::factory()->closed()->for($user)->create();
+
+    $activeAccounts = Account::query()->active()->where('user_id', $user->id)->get();
+
+    expect($activeAccounts)->toHaveCount(2)
+        ->and($activeAccounts->pluck('id')->all())->toEqualCanonicalizing([$active->id, $available->id]);
+});
+
 test('availableBalance returns balance for non-credit-card accounts', function () {
     $account = Account::factory()->create(['balance' => 150000]);
 

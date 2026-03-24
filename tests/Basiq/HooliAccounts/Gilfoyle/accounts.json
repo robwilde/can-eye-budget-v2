@@ -1,0 +1,439 @@
+{
+  "type": "list",
+  "data": [
+    {
+      "type": "account",
+      "id": "5a56e00f-c1bb-4887-a7df-eabc45557d77",
+      "accountNo": "000001919644170",
+      "name": "Hooli Awards Card",
+      "displayName": "",
+      "currency": "AUD",
+      "balance": "-24229.33",
+      "availableFunds": "-24229.33",
+      "lastUpdated": "2026-03-22T13:00:00Z",
+      "institution": "AU00000",
+      "creditLimit": "0.00",
+      "class": {
+        "type": "credit-card",
+        "product": "Hooli Visa"
+      },
+      "transactionIntervals": [
+        {
+          "from": "2025-03-01",
+          "to": "2026-03-23"
+        }
+      ],
+      "accountHolder": "Gilfoyle",
+      "accountOwnership": "UNKNOWN",
+      "bsb": "",
+      "unmaskedAccNum": "",
+      "maskedNumber": "",
+      "creationDate": "",
+      "depositRate": "",
+      "lendingRate": "",
+      "bundleName": "",
+      "specificAccountUType": "",
+      "purses": null,
+      "amortisedLimit": "",
+      "isOwned": true,
+      "connection": "dfed5aba-5c9b-4ce6-bbf4-a9a1260c396b",
+      "status": "available",
+      "meta": {
+        "fees": [
+          {
+            "name": "Late Payment Administration Fee",
+            "feeType": "EVENT",
+            "amount": "25.00",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          },
+          {
+            "name": "Paper Statement Fee",
+            "feeType": "PERIODIC",
+            "amount": "1.25",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          },
+          {
+            "name": "Notice of Demand Fee",
+            "feeType": "EVENT",
+            "amount": "50.00",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          },
+          {
+            "name": "Annual Fee",
+            "feeType": "PERIODIC",
+            "amount": "59.00",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          },
+          {
+            "name": "Customer Trace Fee",
+            "feeType": "EVENT",
+            "amount": "10.00",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          },
+          {
+            "name": "Credit Card Replacement Fee",
+            "feeType": "EVENT",
+            "amount": "25.00",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          }
+        ],
+        "depositRates": null,
+        "lendingRates": [
+          {
+            "lendingRateType": "PURCHASE",
+            "rate": "0.2024",
+            "applicationFrequency": "P1M",
+            "comparisonRate": "",
+            "calculationFrequency": "",
+            "interestPaymentDue": "",
+            "repaymentType": "",
+            "loanPurpose": "",
+            "tiers": null
+          },
+          {
+            "lendingRateType": "CASH_ADVANCE",
+            "rate": "0.2124",
+            "applicationFrequency": "P1M",
+            "comparisonRate": "",
+            "calculationFrequency": "",
+            "interestPaymentDue": "",
+            "repaymentType": "",
+            "loanPurpose": "",
+            "tiers": null
+          }
+        ],
+        "termDeposits": null,
+        "addresses": null,
+        "loan": null,
+        "creditCard": {
+          "minPaymentAmount": "117.00",
+          "paymentDueAmount": "5847.00",
+          "paymentCurrency": "",
+          "paymentDueDate": "2023-12-12"
+        },
+        "features": null
+      },
+      "links": {
+        "self": "/users/f8cb2aba-c931-4c54-bd64-2c427975f37c/accounts/5a56e00f-c1bb-4887-a7df-eabc45557d77",
+        "transactions": "/users/f8cb2aba-c931-4c54-bd64-2c427975f37c/transactions?filter=account.id.eq('5a56e00f-c1bb-4887-a7df-eabc45557d77')",
+        "connection": null,
+        "institution": "/institutions/AU00000",
+        "statements": []
+      }
+    },
+    {
+      "type": "account",
+      "id": "9d4c5cc9-4182-4e3d-9601-a660765638f8",
+      "accountNo": "000001919644171",
+      "name": "Hooli Access",
+      "displayName": "",
+      "currency": "AUD",
+      "balance": "-444.47",
+      "availableFunds": "-444.47",
+      "lastUpdated": "2026-03-22T13:00:00Z",
+      "institution": "AU00000",
+      "creditLimit": "",
+      "class": {
+        "type": "transaction",
+        "product": "Hooli Transaction"
+      },
+      "transactionIntervals": [
+        {
+          "from": "2025-03-14",
+          "to": "2026-03-23"
+        }
+      ],
+      "accountHolder": "Gilfoyle",
+      "accountOwnership": "UNKNOWN",
+      "bsb": "",
+      "unmaskedAccNum": "",
+      "maskedNumber": "",
+      "creationDate": "",
+      "depositRate": "",
+      "lendingRate": "",
+      "bundleName": "",
+      "specificAccountUType": "",
+      "purses": null,
+      "amortisedLimit": "",
+      "isOwned": true,
+      "connection": "dfed5aba-5c9b-4ce6-bbf4-a9a1260c396b",
+      "status": "available",
+      "meta": {
+        "fees": [
+          {
+            "name": "Unpaid cheque or debit fee",
+            "feeType": "EVENT",
+            "amount": "5.00",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          },
+          {
+            "name": "Unpaid scheduled payment fee",
+            "feeType": "EVENT",
+            "amount": "5.00",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          },
+          {
+            "name": "International purchase fee",
+            "feeType": "TRANSACTION",
+            "amount": "3.00",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          },
+          {
+            "name": "Overdraw Fee",
+            "feeType": "EVENT",
+            "amount": "15.00",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          },
+          {
+            "name": "Account fee",
+            "feeType": "PERIODIC",
+            "amount": "4.00",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          },
+          {
+            "name": "Access fee - Overseas ATMs",
+            "feeType": "WITHDRAWAL",
+            "amount": "2.00",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          },
+          {
+            "name": "Access fee - Overseas cash withdrawals",
+            "feeType": "WITHDRAWAL",
+            "amount": "5.00",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          },
+          {
+            "name": "Staff assisted withdrawals",
+            "feeType": "WITHDRAWAL",
+            "amount": "3.00",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          },
+          {
+            "name": "Cheque negotiated fee",
+            "feeType": "TRANSACTION",
+            "amount": "3.00",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          }
+        ],
+        "depositRates": null,
+        "lendingRates": null,
+        "termDeposits": null,
+        "addresses": null,
+        "loan": null,
+        "creditCard": null,
+        "features": null
+      },
+      "links": {
+        "self": "/users/f8cb2aba-c931-4c54-bd64-2c427975f37c/accounts/9d4c5cc9-4182-4e3d-9601-a660765638f8",
+        "transactions": "/users/f8cb2aba-c931-4c54-bd64-2c427975f37c/transactions?filter=account.id.eq('9d4c5cc9-4182-4e3d-9601-a660765638f8')",
+        "connection": null,
+        "institution": "/institutions/AU00000",
+        "statements": []
+      }
+    },
+    {
+      "type": "account",
+      "id": "b1ccea8f-df14-4e08-8937-d7f47a50de58",
+      "accountNo": "000001919644172",
+      "name": "Hooli Saver",
+      "displayName": "",
+      "currency": "AUD",
+      "balance": "-6180.00",
+      "availableFunds": "-6180.00",
+      "lastUpdated": "2026-03-22T13:00:00Z",
+      "institution": "AU00000",
+      "creditLimit": "",
+      "class": {
+        "type": "savings",
+        "product": "Hooli Saver"
+      },
+      "transactionIntervals": [
+        {
+          "from": "2025-03-27",
+          "to": "2026-03-23"
+        }
+      ],
+      "accountHolder": "Gilfoyle",
+      "accountOwnership": "UNKNOWN",
+      "bsb": "",
+      "unmaskedAccNum": "",
+      "maskedNumber": "",
+      "creationDate": "",
+      "depositRate": "",
+      "lendingRate": "",
+      "bundleName": "",
+      "specificAccountUType": "",
+      "purses": null,
+      "amortisedLimit": "",
+      "isOwned": true,
+      "connection": "dfed5aba-5c9b-4ce6-bbf4-a9a1260c396b",
+      "status": "available",
+      "meta": {
+        "fees": [
+          {
+            "name": "Paper Statement Fee",
+            "feeType": "EVENT",
+            "amount": "1.50",
+            "balanceRate": "",
+            "transactionRate": "",
+            "accruedRate": "",
+            "accrualFrequency": "",
+            "currency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "discounts": null
+          }
+        ],
+        "depositRates": [
+          {
+            "depositRateType": "VARIABLE",
+            "rate": "0.0385",
+            "applicationFrequency": "P1M",
+            "calculationFrequency": "",
+            "additionalValue": "",
+            "additionalInfo": "",
+            "additionalInfoUri": "",
+            "tiers": null
+          }
+        ],
+        "lendingRates": null,
+        "termDeposits": null,
+        "addresses": null,
+        "loan": null,
+        "creditCard": null,
+        "features": null
+      },
+      "links": {
+        "self": "/users/f8cb2aba-c931-4c54-bd64-2c427975f37c/accounts/b1ccea8f-df14-4e08-8937-d7f47a50de58",
+        "transactions": "/users/f8cb2aba-c931-4c54-bd64-2c427975f37c/transactions?filter=account.id.eq('b1ccea8f-df14-4e08-8937-d7f47a50de58')",
+        "connection": null,
+        "institution": "/institutions/AU00000",
+        "statements": []
+      }
+    }
+  ],
+  "links": {
+    "self": "https://au-api.basiq.io/users/f8cb2aba-c931-4c54-bd64-2c427975f37c/accounts"
+  }
+}

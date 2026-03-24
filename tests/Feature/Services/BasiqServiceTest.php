@@ -352,6 +352,27 @@ test('paginateTransactions sends no filter param when null', function () {
         && ! str_contains($r->url(), 'filter='));
 });
 
+test('paginateTransactions stops when data is empty even if next link exists', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users/usr-1/transactions' => Http::sequence()
+            ->push([
+                'data' => [['id' => 'txn-1', 'amount' => '10.00', 'direction' => 'debit']],
+                'links' => ['next' => 'https://au-api.basiq.io/users/usr-1/transactions?next=cursor'],
+            ])
+            ->push([
+                'data' => [],
+                'links' => ['next' => 'https://au-api.basiq.io/users/usr-1/transactions?next=cursor2'],
+            ]),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $transactions = $service->paginateTransactions('usr-1')->all();
+
+    expect($transactions)->toHaveCount(1);
+    Http::assertSentCount(3);
+});
+
 test('getJob returns BasiqJob with derived status', function () {
     Http::fake([
         '*/token' => Http::response(['access_token' => 'tok']),

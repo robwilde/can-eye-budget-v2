@@ -67,7 +67,7 @@ final class Account extends Model
      */
     public function scopeActive(Builder $query): Builder
     {
-        return $query->where('status', AccountStatus::Active);
+        return $query->whereIn('status', [AccountStatus::Active, AccountStatus::Available]);
     }
 
     public function availableBalance(): int
