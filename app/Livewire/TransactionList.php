@@ -21,8 +21,10 @@ final class TransactionList extends Component
 
     private const array SORTABLE_COLUMNS = ['post_date', 'amount', 'description'];
 
+    private const array VALID_DIRECTIONS = ['all', 'incoming', 'outgoing'];
+
     #[Url]
-    public string $direction = 'spending';
+    public string $direction = 'all';
 
     #[Url]
     public ?int $account = null;
@@ -42,6 +44,13 @@ final class TransactionList extends Component
     #[Url]
     public string $sortDir = 'desc';
 
+    public function mount(): void
+    {
+        if (! in_array($this->direction, self::VALID_DIRECTIONS, true)) {
+            $this->direction = 'all';
+        }
+    }
+
     public function sort(string $column): void
     {
         if (! in_array($column, self::SORTABLE_COLUMNS, true)) {
@@ -60,6 +69,10 @@ final class TransactionList extends Component
 
     public function updatedDirection(): void
     {
+        if (! in_array($this->direction, self::VALID_DIRECTIONS, true)) {
+            $this->direction = 'all';
+        }
+
         $this->resetPage();
     }
 
@@ -85,13 +98,15 @@ final class TransactionList extends Component
 
     public function render(): View
     {
-        $directionEnum = $this->direction === 'income'
-            ? TransactionDirection::Credit
-            : TransactionDirection::Debit;
+        $directionEnum = match ($this->direction) {
+            'incoming' => TransactionDirection::Credit,
+            'outgoing' => TransactionDirection::Debit,
+            default => null,
+        };
 
         $transactions = Transaction::query()
             ->where('user_id', auth()->id())
-            ->where('direction', $directionEnum)
+            ->when($directionEnum, fn ($q, $dir) => $q->where('direction', $dir))
             ->when($this->account, fn ($q, $id) => $q->where('account_id', $id))
             ->when($this->category, fn ($q, $id) => $q->where('category_id', $id))
             ->when($this->search, fn ($q, $term) => $q->where(function ($q) use ($term) {
@@ -100,7 +115,7 @@ final class TransactionList extends Component
                     ->orWhere('merchant_name', 'like', "%{$term}%");
             }))
             ->where('post_date', '>=', $this->periodStart())
-            ->with('category')
+            ->withRelations()
             ->orderBy(
                 in_array($this->sortBy, self::SORTABLE_COLUMNS, true) ? $this->sortBy : 'post_date',
                 in_array($this->sortDir, ['asc', 'desc'], true) ? $this->sortDir : 'desc',

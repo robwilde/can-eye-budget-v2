@@ -256,7 +256,7 @@ test('search with no matches shows empty state', function () {
         ->assertSee('No transactions found');
 });
 
-test('direction filter shows only debits when spending', function () {
+test('direction filter shows only debits when outgoing', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -273,12 +273,12 @@ test('direction filter shows only debits when spending', function () {
     ]);
 
     Livewire::actingAs($user)
-        ->test(TransactionList::class, ['direction' => 'spending'])
+        ->test(TransactionList::class, ['direction' => 'outgoing'])
         ->assertSee('WOOLWORTHS SYDNEY')
         ->assertDontSee('SALARY PAYMENT');
 });
 
-test('direction filter shows only credits when income', function () {
+test('direction filter shows only credits when incoming', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -295,7 +295,7 @@ test('direction filter shows only credits when income', function () {
     ]);
 
     Livewire::actingAs($user)
-        ->test(TransactionList::class, ['direction' => 'income'])
+        ->test(TransactionList::class, ['direction' => 'incoming'])
         ->assertSee('SALARY PAYMENT')
         ->assertDontSee('WOOLWORTHS SYDNEY');
 });
@@ -435,7 +435,7 @@ test('all filters work together', function () {
 
     Livewire::actingAs($user)
         ->test(TransactionList::class, [
-            'direction' => 'spending',
+            'direction' => 'outgoing',
             'account' => $accountA->id,
             'category' => $groceries->id,
             'search' => 'WOOLWORTHS',
@@ -453,7 +453,7 @@ test('filter state persists via url query string', function () {
 
     Livewire::actingAs($user)
         ->test(TransactionList::class, [
-            'direction' => 'income',
+            'direction' => 'incoming',
             'account' => $account->id,
             'category' => $category->id,
             'period' => '7d',
@@ -461,7 +461,7 @@ test('filter state persists via url query string', function () {
             'sortBy' => 'amount',
             'sortDir' => 'asc',
         ])
-        ->assertSet('direction', 'income')
+        ->assertSet('direction', 'incoming')
         ->assertSet('account', $account->id)
         ->assertSet('category', $category->id)
         ->assertSet('period', '7d')
@@ -482,6 +482,141 @@ test('loading indicator markup is present', function () {
     Livewire::actingAs($user)
         ->test(TransactionList::class)
         ->assertSee('wire:loading', escape: false);
+});
+
+test('default direction is all', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSet('direction', 'all');
+});
+
+test('direction all shows both debits and credits', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'WOOLWORTHS SYDNEY',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $account->id,
+        'description' => 'SALARY PAYMENT',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSet('direction', 'all')
+        ->assertSee('WOOLWORTHS SYDNEY')
+        ->assertSee('SALARY PAYMENT');
+});
+
+test('account column visible when viewing all accounts', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['name' => 'Everyday']);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'WOOLWORTHS',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSee('Account')
+        ->assertSee('Everyday');
+});
+
+test('account column hidden when filtering single account', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['name' => 'Everyday']);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'WOOLWORTHS',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['account' => $account->id])
+        ->assertDontSee('Account');
+});
+
+test('invalid direction value normalizes to all', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'DEBIT TXN',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $account->id,
+        'description' => 'CREDIT TXN',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['direction' => 'garbage'])
+        ->assertSet('direction', 'all')
+        ->assertSee('DEBIT TXN')
+        ->assertSee('CREDIT TXN');
+});
+
+test('legacy direction values normalize to all', function (string $legacy) {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['direction' => $legacy])
+        ->assertSet('direction', 'all');
+})->with(['spending', 'income']);
+
+test('amounts show color coding when direction is all', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'WOOLWORTHS SYDNEY',
+        'amount' => 4599,
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $account->id,
+        'description' => 'SALARY PAYMENT',
+        'amount' => 500000,
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSet('direction', 'all')
+        ->assertSeeHtml('text-red-600')
+        ->assertSeeHtml('text-green-600');
+});
+
+test('amounts do not show color coding when direction is filtered', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'WOOLWORTHS SYDNEY',
+        'amount' => 4599,
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['direction' => 'outgoing'])
+        ->assertDontSeeHtml('text-red-600')
+        ->assertDontSeeHtml('text-green-600');
 });
 
 test('route requires authentication', function () {

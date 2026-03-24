@@ -96,7 +96,7 @@ test('account filter shows only transactions from selected account', function ()
         ->assertDontSee('COLES MELBOURNE');
 });
 
-test('direction toggle switches between spending and income', function () {
+test('direction toggle switches between all outgoing and incoming', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -117,9 +117,14 @@ test('direction toggle switches between spending and income', function () {
     $page = visit('/transactions');
 
     $page->assertSee('WOOLWORTHS SYDNEY')
+        ->assertSee('SALARY PAYMENT');
+
+    $page = visit('/transactions?direction=outgoing');
+
+    $page->assertSee('WOOLWORTHS SYDNEY')
         ->assertDontSee('SALARY PAYMENT');
 
-    $page = visit('/transactions?direction=income');
+    $page = visit('/transactions?direction=incoming');
 
     $page->assertSee('SALARY PAYMENT')
         ->assertDontSee('WOOLWORTHS SYDNEY');
@@ -173,7 +178,7 @@ test('multiple filters work together via URL', function () {
 
     $this->actingAs($user);
 
-    $page = visit('/transactions?direction=spending&account='.$account->id.'&category='.$groceries->id.'&search=WOOLWORTHS');
+    $page = visit('/transactions?direction=outgoing&account='.$account->id.'&category='.$groceries->id.'&search=WOOLWORTHS');
 
     $page->assertSee('WOOLWORTHS SYDNEY')
         ->assertDontSee('WOOLWORTHS MELBOURNE');
