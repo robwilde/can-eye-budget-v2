@@ -23,7 +23,7 @@ scope=CLIENT_ACCESS&userId={{gavinBelson.userId}}
 
 > {%
     client.global.set("clientToken", response.body.access_token);
-    client.log("Client token captured for user " + "{{gilfoyle.userId}}");
+    client.log("Client token captured for user " + "{{gavinBelson.userId}}");
 %}
 
 ##########################################################################
