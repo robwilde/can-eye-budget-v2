@@ -83,13 +83,13 @@ final readonly class BasiqService implements BasiqServiceContract
     {
         return LazyCollection::make(function () use ($basiqUserId, $filter) {
             $url = "/users/$basiqUserId/transactions";
-            $query = $filter !== null ? ['filter' => implode(',', $filter)] : [];
+            $query = $filter !== null ? ['filter' => implode(',', $filter)] : null;
             $fetched = 0;
             $total = null;
 
             do {
                 $response = $this->api()->get($url, $query)->json();
-                $query = [];
+                $query = null;
                 $data = $response['data'] ?? [];
 
                 $total ??= $response['size'] ?? PHP_INT_MAX;
