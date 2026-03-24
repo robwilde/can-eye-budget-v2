@@ -7,7 +7,7 @@ namespace App\Casts;
 use Illuminate\Contracts\Database\Eloquent\CastsAttributes;
 use Illuminate\Database\Eloquent\Model;
 
-/** @implements CastsAttributes<int, int> */
+/** @implements CastsAttributes<int|null, int|null> */
 final class MoneyCast implements CastsAttributes
 {
     public static function format(int $cents): string
@@ -21,13 +21,13 @@ final class MoneyCast implements CastsAttributes
         return $isNegative ? "-$formatted" : $formatted;
     }
 
-    public function get(Model $model, string $key, mixed $value, array $attributes): int
+    public function get(Model $model, string $key, mixed $value, array $attributes): ?int
     {
-        return (int) $value;
+        return $value === null ? null : (int) $value;
     }
 
-    public function set(Model $model, string $key, mixed $value, array $attributes): int
+    public function set(Model $model, string $key, mixed $value, array $attributes): ?int
     {
-        return (int) $value;
+        return $value === null ? null : (int) $value;
     }
 }
