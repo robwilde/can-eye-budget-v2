@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Casts\MoneyCast;
 use App\Enums\AccountClass;
+use App\Enums\AccountGroup;
 use App\Enums\AccountStatus;
 use Carbon\CarbonImmutable;
 use Database\Factories\AccountFactory;
@@ -26,6 +27,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int $balance
  * @property int|null $credit_limit
  * @property int|null $available_funds
+ * @property string|null $description
+ * @property AccountGroup $group
  * @property AccountStatus $status
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
@@ -48,6 +51,8 @@ final class Account extends Model
         'balance',
         'credit_limit',
         'available_funds',
+        'description',
+        'group',
         'status',
     ];
 
@@ -70,6 +75,15 @@ final class Account extends Model
     public function scopeActive(Builder $query): Builder
     {
         return $query->whereIn('status', [AccountStatus::Active, AccountStatus::Available]);
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeVisible(Builder $query): Builder
+    {
+        return $query->where('group', '!=', AccountGroup::Hidden);
     }
 
     public function availableBalance(): int
@@ -106,6 +120,7 @@ final class Account extends Model
     {
         return [
             'type' => AccountClass::class,
+            'group' => AccountGroup::class,
             'status' => AccountStatus::class,
             'balance' => MoneyCast::class,
             'credit_limit' => MoneyCast::class,

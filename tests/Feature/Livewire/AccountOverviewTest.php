@@ -292,3 +292,15 @@ test('uses three-column grid on medium screens', function () {
         ->test(AccountOverview::class)
         ->assertSeeHtml('md:grid-cols-3');
 });
+
+test('hidden group accounts are excluded from totals', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create(['name' => 'Visible', 'balance' => 100000]);
+    Account::factory()->for($user)->hidden()->create(['name' => 'Hidden', 'balance' => 999999]);
+
+    Livewire::actingAs($user)
+        ->test(AccountOverview::class)
+        ->assertSee('Visible')
+        ->assertDontSee('Hidden')
+        ->assertSeeInOrder(['Available', MoneyCast::format(100000)]);
+});

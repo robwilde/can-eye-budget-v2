@@ -35,6 +35,7 @@ final class AccountOverview extends Component
         $accounts = $user
             ->accounts()
             ->active()
+            ->visible()
             ->orderBy('type')
             ->get();
 
