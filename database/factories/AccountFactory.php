@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Database\Factories;
 
 use App\Enums\AccountClass;
+use App\Enums\AccountGroup;
 use App\Enums\AccountStatus;
 use App\Models\Account;
 use App\Models\User;
@@ -27,6 +28,7 @@ final class AccountFactory extends Factory
             'institution' => fake()->randomElement(['Commonwealth Bank', 'Westpac', 'ANZ', 'NAB', 'Macquarie Bank', 'ING', 'Bendigo Bank', 'Suncorp']),
             'currency' => 'AUD',
             'balance' => fake()->numberBetween(10000, 500000),
+            'group' => AccountGroup::DayToDay,
             'status' => AccountStatus::Active,
         ];
     }
@@ -103,6 +105,20 @@ final class AccountFactory extends Factory
         return $this->state(fn (array $attributes) => [
             'status' => AccountStatus::Closed,
             'balance' => 0,
+        ]);
+    }
+
+    public function longTermSavings(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'group' => AccountGroup::LongTermSavings,
+        ]);
+    }
+
+    public function hidden(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'group' => AccountGroup::Hidden,
         ]);
     }
 }
