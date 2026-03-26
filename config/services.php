@@ -21,6 +21,7 @@ return [
         'base_url' => env('BASIQ_BASE_URL', 'https://au-api.basiq.io'),
         'consent_url' => env('BASIQ_CONSENT_URL', 'https://consent.basiq.io'),
         'webhook_secret' => env('BASIQ_WEBHOOK_SECRET'),
+        'seed_user_id' => env('BASIQ_SEED_USER_ID'),
     ],
 
     'postmark' => [
