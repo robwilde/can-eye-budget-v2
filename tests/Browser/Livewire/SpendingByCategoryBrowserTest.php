@@ -26,7 +26,7 @@ test('spending chart renders donut with category data on dashboard', function ()
 
     $page->assertSee('Spending by Category')
         ->assertSee('Groceries');
-});
+})->skip('SpendingByCategory removed from dashboard in #78');
 
 test('period selector changes update the chart', function () {
     $user = User::factory()->create();
@@ -47,7 +47,7 @@ test('period selector changes update the chart', function () {
         ->assertSee('Recent Spend')
         ->select('[data-testid="spending-by-category"] [wire\\:model\\.live="period"]', '7d')
         ->assertSee('Recent Spend');
-});
+})->skip('SpendingByCategory removed from dashboard in #78');
 
 test('clicking category navigates to transaction list', function () {
     $user = User::factory()->create();
@@ -69,7 +69,7 @@ test('clicking category navigates to transaction list', function () {
         ->click('Groceries')
         ->assertPathBeginsWith('/transactions')
         ->assertQueryStringHas('category');
-});
+})->skip('SpendingByCategory removed from dashboard in #78');
 
 test('empty state displays when no transactions', function () {
     $user = User::factory()->create();
@@ -80,4 +80,4 @@ test('empty state displays when no transactions', function () {
 
     $page->assertSee('Spending by Category')
         ->assertSee('No spending data');
-});
+})->skip('SpendingByCategory removed from dashboard in #78');
