@@ -588,3 +588,70 @@ test('end-to-end sync through real BasiqService with Http::fake', function () {
 
     Http::assertSentCount(4);
 });
+
+test('404 from Basiq API clears basiq_user_id and fails permanently', function () {
+    Cache::forget('basiq:server_token');
+
+    config([
+        'services.basiq.api_key' => 'test-api-key',
+        'services.basiq.base_url' => 'https://au-api.basiq.io',
+    ]);
+
+    $user = User::factory()->withBasiq()->create();
+
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/jobs/job-1' => Http::response([
+            'id' => 'job-1',
+            'steps' => [['title' => 'verify-credentials', 'status' => 'success']],
+        ]),
+        '*/users/*/accounts' => Http::response([
+            'type' => 'list',
+            'data' => [['type' => 'error', 'code' => 'resource-not-found']],
+        ], 404),
+    ]);
+
+    app()->forgetInstance(BasiqServiceContract::class);
+
+    Log::shouldReceive('error')
+        ->once()
+        ->with('Basiq user not found (404). Clearing stale basiq_user_id.', Mockery::type('array'));
+
+    $job = new SyncTransactionsJob($user, 'job-1');
+    $job->handle(app(BasiqServiceContract::class));
+
+    $user->refresh();
+    expect($user->basiq_user_id)->toBeNull()
+        ->and(Account::count())->toBe(0)
+        ->and(Transaction::count())->toBe(0);
+});
+
+test('non-404 RequestException is re-thrown for retry', function () {
+    Cache::forget('basiq:server_token');
+
+    config([
+        'services.basiq.api_key' => 'test-api-key',
+        'services.basiq.base_url' => 'https://au-api.basiq.io',
+    ]);
+
+    $user = User::factory()->withBasiq()->create();
+
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/jobs/job-1' => Http::response([
+            'id' => 'job-1',
+            'steps' => [['title' => 'verify-credentials', 'status' => 'success']],
+        ]),
+        '*/users/*/accounts' => Http::response(['error' => 'internal'], 500),
+    ]);
+
+    app()->forgetInstance(BasiqServiceContract::class);
+
+    $job = new SyncTransactionsJob($user, 'job-1');
+
+    expect(fn () => $job->handle(app(BasiqServiceContract::class)))
+        ->toThrow(Illuminate\Http\Client\RequestException::class);
+
+    $user->refresh();
+    expect($user->basiq_user_id)->not->toBeNull();
+});

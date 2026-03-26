@@ -60,20 +60,52 @@ function fakeBasiqApi(): void
     ]);
 }
 
-test('fails when test user does not exist', function () {
+test('fails when no basiq user ID provided and no env var', function () {
+    config(['services.basiq.seed_user_id' => null]);
+    User::factory()->create(['email' => 'test@example.com']);
+
     $this->artisan('app:seed-from-basiq')
         ->assertFailed();
 });
 
-test('sets basiq_user_id on test user', function () {
+test('fails when test user does not exist', function () {
+    $this->artisan('app:seed-from-basiq', ['basiq_user_id' => 'test-uuid'])
+        ->assertFailed();
+});
+
+test('sets basiq_user_id from argument on test user', function () {
     Queue::fake();
+    $user = User::factory()->create(['email' => 'test@example.com']);
+
+    $this->artisan('app:seed-from-basiq', ['basiq_user_id' => 'arg-uuid-123'])
+        ->assertSuccessful();
+
+    $user->refresh();
+    expect($user->basiq_user_id)->toBe('arg-uuid-123');
+});
+
+test('reads basiq_user_id from env when no argument provided', function () {
+    Queue::fake();
+    config(['services.basiq.seed_user_id' => 'env-uuid-456']);
     $user = User::factory()->create(['email' => 'test@example.com']);
 
     $this->artisan('app:seed-from-basiq')
         ->assertSuccessful();
 
     $user->refresh();
-    expect($user->basiq_user_id)->toBe('3470f92c-54d1-4a68-a767-1d031d340d06');
+    expect($user->basiq_user_id)->toBe('env-uuid-456');
+});
+
+test('argument takes precedence over env var', function () {
+    Queue::fake();
+    config(['services.basiq.seed_user_id' => 'env-uuid-456']);
+    $user = User::factory()->create(['email' => 'test@example.com']);
+
+    $this->artisan('app:seed-from-basiq', ['basiq_user_id' => 'arg-uuid-123'])
+        ->assertSuccessful();
+
+    $user->refresh();
+    expect($user->basiq_user_id)->toBe('arg-uuid-123');
 });
 
 test('clears last_synced_at for full sync', function () {
@@ -83,7 +115,7 @@ test('clears last_synced_at for full sync', function () {
         'last_synced_at' => now(),
     ]);
 
-    $this->artisan('app:seed-from-basiq')
+    $this->artisan('app:seed-from-basiq', ['basiq_user_id' => 'test-uuid'])
         ->assertSuccessful();
 
     $user->refresh();
@@ -94,7 +126,7 @@ test('dispatches SyncTransactionsJob to queue by default', function () {
     Queue::fake();
     User::factory()->create(['email' => 'test@example.com']);
 
-    $this->artisan('app:seed-from-basiq')
+    $this->artisan('app:seed-from-basiq', ['basiq_user_id' => 'test-uuid'])
         ->assertSuccessful();
 
     Queue::assertPushed(SyncTransactionsJob::class);
@@ -104,7 +136,7 @@ test('runs synchronously with --sync flag', function () {
     fakeBasiqApi();
     User::factory()->create(['email' => 'test@example.com']);
 
-    $this->artisan('app:seed-from-basiq', ['--sync' => true])
+    $this->artisan('app:seed-from-basiq', ['basiq_user_id' => 'test-uuid', '--sync' => true])
         ->assertSuccessful();
 
     expect(Account::count())->toBe(2)
@@ -115,12 +147,12 @@ test('is idempotent on re-run', function () {
     fakeBasiqApi();
     $user = User::factory()->create(['email' => 'test@example.com']);
 
-    $this->artisan('app:seed-from-basiq', ['--sync' => true])
+    $this->artisan('app:seed-from-basiq', ['basiq_user_id' => 'test-uuid', '--sync' => true])
         ->assertSuccessful();
 
     $user->update(['last_synced_at' => null]);
 
-    $this->artisan('app:seed-from-basiq', ['--sync' => true])
+    $this->artisan('app:seed-from-basiq', ['basiq_user_id' => 'test-uuid', '--sync' => true])
         ->assertSuccessful();
 
     expect(Account::count())->toBe(2)

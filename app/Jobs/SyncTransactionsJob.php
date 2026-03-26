@@ -12,6 +12,7 @@ use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -48,28 +49,27 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * @throws ConnectionException
+     * @throws ConnectionException|RequestException
      */
     public function handle(BasiqServiceContract $basiqService): void
     {
-        if ($this->jobId !== null) {
-            $job = $basiqService->getJob($this->jobId);
+        try {
+            $this->process($basiqService);
+        } catch (RequestException $e) {
+            if ($e->response->status() === 404) {
+                Log::error('Basiq user not found (404). Clearing stale basiq_user_id.', [
+                    'userId' => $this->user->id,
+                    'basiqUserId' => $this->user->basiq_user_id,
+                ]);
 
-            if ($job->status === 'pending') {
-                $this->release($this->backoff);
+                $this->user->update(['basiq_user_id' => null]);
+                $this->fail($e);
 
                 return;
             }
 
-            if ($job->status === 'failed') {
-                Log::warning('Basiq job failed', ['jobId' => $this->jobId, 'userId' => $this->user->id]);
-
-                return;
-            }
+            throw $e;
         }
-
-        $accountMap = $this->syncAccounts($basiqService);
-        $this->syncTransactions($basiqService, $accountMap);
     }
 
     public function failed(Throwable $exception): void
@@ -91,9 +91,34 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
     }
 
     /**
+     * @throws ConnectionException|RequestException
+     */
+    private function process(BasiqServiceContract $basiqService): void
+    {
+        if ($this->jobId !== null) {
+            $job = $basiqService->getJob($this->jobId);
+
+            if ($job->status === 'pending') {
+                $this->release($this->backoff);
+
+                return;
+            }
+
+            if ($job->status === 'failed') {
+                Log::warning('Basiq job failed', ['jobId' => $this->jobId, 'userId' => $this->user->id]);
+
+                return;
+            }
+        }
+
+        $accountMap = $this->syncAccounts($basiqService);
+        $this->syncTransactions($basiqService, $accountMap);
+    }
+
+    /**
      * @return Collection<string, int>
      *
-     * @throws ConnectionException
+     * @throws ConnectionException|RequestException
      */
     private function syncAccounts(BasiqServiceContract $basiqService): Collection
     {
@@ -124,7 +149,12 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
             ->pluck('id', 'basiq_account_id');
     }
 
-    /** @param  Collection<string, int>  $accountMap */
+    /**
+     * @param  Collection<string, int>  $accountMap
+     *
+     * @throws ConnectionException
+     * @throws RequestException
+     */
     private function syncTransactions(BasiqServiceContract $basiqService, Collection $accountMap): void
     {
         $filter = null;

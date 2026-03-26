@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Contracts;
 
+use App\DTOs\BasiqAccount;
 use App\DTOs\BasiqJob;
+use App\DTOs\BasiqTransaction;
 use App\DTOs\BasiqUser;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
@@ -30,19 +32,24 @@ interface BasiqServiceContract
     public function createUser(string $email, ?string $mobile = null): BasiqUser;
 
     /**
-     * @return Collection<int, \App\DTOs\BasiqAccount>
+     * @return Collection<int, BasiqAccount>
      *
+     * @throws RequestException
      * @throws ConnectionException
      */
     public function getAccounts(string $basiqUserId): Collection;
 
     /**
      * @param  array<int, string>|null  $filter
-     * @return LazyCollection<int, \App\DTOs\BasiqTransaction>
+     * @return LazyCollection<int, BasiqTransaction>
+     *
+     * @throws RequestException
+     * @throws ConnectionException
      */
     public function paginateTransactions(string $basiqUserId, ?array $filter = null): LazyCollection;
 
     /**
+     * @throws RequestException
      * @throws ConnectionException
      */
     public function getJob(string $jobId): BasiqJob;
