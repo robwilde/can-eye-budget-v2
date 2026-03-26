@@ -86,6 +86,12 @@ final class User extends Authenticatable
         return $this->hasMany(Budget::class);
     }
 
+    /** @return HasMany<PlannedTransaction, $this> */
+    public function plannedTransactions(): HasMany
+    {
+        return $this->hasMany(PlannedTransaction::class);
+    }
+
     public function hasPayCycleConfigured(): bool
     {
         return $this->pay_amount !== null

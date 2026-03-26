@@ -87,6 +87,12 @@ final class Transaction extends Model
         return $this->belongsTo(Category::class);
     }
 
+    /** @return BelongsTo<PlannedTransaction, $this> */
+    public function plannedTransaction(): BelongsTo
+    {
+        return $this->belongsTo(PlannedTransaction::class);
+    }
+
     /** @return BelongsTo<self, $this> */
     public function transferPair(): BelongsTo
     {
