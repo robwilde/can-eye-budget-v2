@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Casts\MoneyCast;
 use App\Enums\TransactionDirection;
+use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use Carbon\CarbonImmutable;
 use Database\Factories\TransactionFactory;
@@ -31,6 +32,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $merchant_name
  * @property string|null $anzsic_code
  * @property array<string, mixed>|null $enrich_data
+ * @property TransactionSource $source
+ * @property int|null $transfer_pair_id
+ * @property int|null $planned_transaction_id
+ * @property string|null $notes
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
  */
@@ -58,6 +63,10 @@ final class Transaction extends Model
         'merchant_name',
         'anzsic_code',
         'enrich_data',
+        'source',
+        'transfer_pair_id',
+        'planned_transaction_id',
+        'notes',
     ];
 
     /** @return BelongsTo<User, $this> */
@@ -78,6 +87,12 @@ final class Transaction extends Model
         return $this->belongsTo(Category::class);
     }
 
+    /** @return BelongsTo<self, $this> */
+    public function transferPair(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'transfer_pair_id');
+    }
+
     /**
      * @param  Builder<self>  $query
      * @return Builder<self>
@@ -93,6 +108,7 @@ final class Transaction extends Model
     protected function casts(): array
     {
         return [
+            'source' => TransactionSource::class,
             'direction' => TransactionDirection::class,
             'status' => TransactionStatus::class,
             'amount' => MoneyCast::class,
