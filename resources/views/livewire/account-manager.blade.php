@@ -170,4 +170,10 @@
             </div>
         </div>
     </flux:modal>
+
+    <flux:modal.trigger name="category-editor">
+        <flux:button variant="ghost" icon="tag" class="w-full">
+            {{ __('Manage Categories') }}
+        </flux:button>
+    </flux:modal.trigger>
 </div>

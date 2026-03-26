@@ -122,3 +122,48 @@ test('withColor state sets color', function () {
 
     expect($category->color)->toBe('#DC2626');
 });
+
+test('is_hidden defaults to false', function () {
+    $category = Category::factory()->create();
+
+    expect($category->is_hidden)->toBeFalse();
+});
+
+test('hidden factory state sets is_hidden to true', function () {
+    $category = Category::factory()->hidden()->create();
+
+    expect($category->is_hidden)->toBeTrue();
+});
+
+test('scopeVisible excludes hidden categories', function () {
+    Category::factory()->create(['name' => 'Visible']);
+    Category::factory()->hidden()->create(['name' => 'Hidden']);
+
+    $visible = Category::visible()->get();
+
+    expect($visible)->toHaveCount(1)
+        ->and($visible->first()->name)->toBe('Visible');
+});
+
+test('fullPath returns name for top-level category', function () {
+    $category = Category::factory()->create(['name' => 'Office']);
+
+    expect($category->fullPath())->toBe('Office');
+});
+
+test('fullPath returns parent / child for nested category', function () {
+    $parent = Category::factory()->create(['name' => 'Office']);
+    $child = Category::factory()->withParent($parent)->create(['name' => 'Software']);
+
+    expect($child->fullPath())->toBe('Office / Software');
+});
+
+test('fullPath returns three levels for deeply nested category', function () {
+    $grandparent = Category::factory()->create(['name' => 'Office']);
+    $parent = Category::factory()->withParent($grandparent)->create(['name' => 'Training']);
+    $child = Category::factory()->withParent($parent)->create(['name' => 'Subscription']);
+
+    $child->load('parent.parent');
+
+    expect($child->fullPath())->toBe('Office / Training / Subscription');
+});

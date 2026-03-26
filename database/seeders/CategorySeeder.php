@@ -11,106 +11,119 @@ final class CategorySeeder extends Seeder
 {
     public function run(): void
     {
-        $divisions = [
-            [
-                'name' => 'Retail Trade',
-                'anzsic_division' => 'G',
-                'icon' => 'shopping-cart',
-                'color' => '#4F46E5',
-                'children' => ['Groceries', 'Supermarkets', 'Clothing', 'Electronics', 'Home & Garden', 'Specialty Retail'],
+        $categories = [
+            'Office' => [
+                'Online Service' => ['Apple'],
+                'Software',
+                'AI Apps',
+                'Newsletter',
+                'Training' => ['Subscription', 'Course'],
+                'Hardware' => ['Rentals'],
+                'Mobile App',
+                '3D Printing',
+                'Laptop',
+                'Tools',
+                'IoT',
             ],
-            [
-                'name' => 'Accommodation & Food Services',
-                'anzsic_division' => 'H',
-                'icon' => 'utensils',
-                'color' => '#DC2626',
-                'children' => ['Restaurants', 'Takeaway', 'Coffee & Cafes', 'Bars & Pubs', 'Accommodation'],
+            'Personal' => [
+                'Health',
+                'Subscription',
+                'Finance' => ['Bank Fees'],
+                'Hunter',
+                'Pet',
+                'Kitchen',
+                'Clothes',
+                'Gifts',
+                'Grooming',
+                'Beddings',
+                'Bathroom',
+                'Holiday',
+                'Plants',
+                'Fines',
+                'Charity',
             ],
-            [
-                'name' => 'Financial & Insurance Services',
-                'anzsic_division' => 'K',
-                'icon' => 'landmark',
-                'color' => '#059669',
-                'children' => ['Bank Fees', 'Insurance Premiums', 'Loan Repayments', 'Investment Fees', 'Interest Charges'],
+            'Entertainment' => [
+                'Streaming',
+                'Patreon',
+                'Adult',
+                'Twitch',
+                'Gaming',
+                'Apps',
+                'Alcohol',
+                'Event',
+                'VR',
             ],
-            [
-                'name' => 'Transport, Postal & Warehousing',
-                'anzsic_division' => 'I',
-                'icon' => 'car',
-                'color' => '#D97706',
-                'children' => ['Fuel', 'Public Transport', 'Parking', 'Rideshare', 'Tolls', 'Vehicle Maintenance'],
+            'Food' => [
+                'Groceries',
+                'Restaurant',
+                'Quick Foods',
             ],
-            [
-                'name' => 'Health Care & Social Assistance',
-                'anzsic_division' => 'Q',
-                'icon' => 'heart-pulse',
-                'color' => '#DB2777',
-                'children' => ['Doctor', 'Dental', 'Pharmacy', 'Optical', 'Allied Health', 'Hospital'],
+            'Bills' => [
+                'Rent',
+                'Cleaning',
+                'Mobile',
+                'Internet',
+                'Electricity',
+                'Hotwater',
+                'Food',
             ],
-            [
-                'name' => 'Education & Training',
-                'anzsic_division' => 'P',
-                'icon' => 'graduation-cap',
-                'color' => '#7C3AED',
-                'children' => ['Tuition', 'Books & Supplies', 'Courses', 'Childcare'],
+            'Income' => [
+                'Salary',
+                'Client',
+                'Medicare',
             ],
-            [
-                'name' => 'Arts & Recreation Services',
-                'anzsic_division' => 'R',
-                'icon' => 'ticket',
-                'color' => '#0891B2',
-                'children' => ['Streaming', 'Cinema', 'Events & Concerts', 'Fitness & Gym', 'Sports'],
+            'Transfer' => [
+                'Optimus to Spaceship',
+                'Optimus to CC',
+                'Optimus to uBank',
+                'FairGo Finance',
+                'uBank to uSavings',
+                'Optimus to Latitude',
+                'uBank to Optimus',
+                'Optimus to Cash',
+                'uSavings to uBank',
             ],
-            [
-                'name' => 'Electricity, Gas, Water & Waste',
-                'anzsic_division' => 'D',
-                'icon' => 'zap',
-                'color' => '#CA8A04',
-                'children' => ['Electricity', 'Gas', 'Water', 'Internet', 'Phone'],
+            'Loan' => [
+                'Motorcycle',
+                'Latitude' => ['Interest', 'Fees'],
+                'Shane',
             ],
-            [
-                'name' => 'Rental, Hiring & Real Estate',
-                'anzsic_division' => 'L',
-                'icon' => 'home',
-                'color' => '#2563EB',
-                'children' => ['Rent', 'Mortgage', 'Property Insurance', 'Strata & Body Corp'],
-            ],
-            [
-                'name' => 'Personal & Other Services',
-                'anzsic_division' => 'S',
-                'icon' => 'user',
-                'color' => '#6366F1',
-                'children' => ['Beauty & Hair', 'Subscriptions', 'Pet Care', 'Laundry & Dry Cleaning'],
-            ],
-            [
-                'name' => 'Income',
-                'anzsic_division' => null,
-                'icon' => 'wallet',
-                'color' => '#16A34A',
-                'children' => ['Salary', 'Freelance', 'Interest', 'Government Benefits', 'Refunds'],
-            ],
-            [
-                'name' => 'Transfers',
-                'anzsic_division' => null,
-                'icon' => 'arrow-left-right',
-                'color' => '#64748B',
-                'children' => [],
+            'Transport' => [
+                'Motorcycle' => ['Fuel'],
+                'Uber',
+                'Scooter',
+                'Tolls',
+                'Parking',
+                'Translink',
             ],
         ];
 
-        foreach ($divisions as $division) {
-            $parent = Category::create([
-                'name' => $division['name'],
-                'anzsic_division' => $division['anzsic_division'],
-                'icon' => $division['icon'],
-                'color' => $division['color'],
-            ]);
+        foreach ($categories as $parentName => $children) {
+            $parent = Category::create(['name' => $parentName]);
+            $this->seedChildren($parent, $children);
+        }
+    }
 
-            foreach ($division['children'] as $childName) {
-                Category::create([
-                    'name' => $childName,
+    /** @param array<int|string, string|list<string>> $children */
+    private function seedChildren(Category $parent, array $children): void
+    {
+        foreach ($children as $key => $value) {
+            if (is_string($key)) {
+                $child = Category::create([
+                    'name' => $key,
                     'parent_id' => $parent->id,
-                    'anzsic_division' => $division['anzsic_division'],
+                ]);
+
+                foreach ($value as $grandchildName) {
+                    Category::create([
+                        'name' => $grandchildName,
+                        'parent_id' => $child->id,
+                    ]);
+                }
+            } else {
+                Category::create([
+                    'name' => $value,
+                    'parent_id' => $parent->id,
                 ]);
             }
         }

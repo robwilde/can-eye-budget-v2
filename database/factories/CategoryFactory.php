@@ -19,6 +19,7 @@ final class CategoryFactory extends Factory
     {
         return [
             'name' => fake()->randomElement(['Groceries', 'Transport', 'Utilities', 'Entertainment', 'Dining', 'Healthcare', 'Shopping', 'Education']),
+            'is_hidden' => false,
         ];
     }
 
@@ -78,6 +79,13 @@ final class CategoryFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'color' => $color,
+        ]);
+    }
+
+    public function hidden(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'is_hidden' => true,
         ]);
     }
 }
