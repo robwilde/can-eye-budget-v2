@@ -134,10 +134,18 @@ final class CategoryEditor extends Component
 
     public function render(): View
     {
+        $search = $this->search;
+
         $categories = Category::query()
             ->with(['parent.parent'])
             ->withCount(['transactions' => fn ($q) => $q->where('user_id', auth()->id())])
             ->when(! $this->showHidden, fn ($q) => $q->visible())
+            ->when($search !== '', fn ($q) => $q->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhereHas('parent', fn ($pq) => $pq->where('name', 'like', "%{$search}%"))
+                    ->orWhereHas('parent.parent', fn ($pq) => $pq->where('name', 'like', "%{$search}%"));
+            }))
+            ->orderByDesc('transactions_count')
             ->get()
             ->map(fn (Category $category) => [
                 'id' => $category->id,
@@ -147,17 +155,6 @@ final class CategoryEditor extends Component
                 'is_hidden' => $category->is_hidden,
                 'parent_id' => $category->parent_id,
             ]);
-
-        if ($this->search !== '') {
-            $categories = $categories->filter(
-                fn (array $item) => str_contains(
-                    mb_strtolower($item['full_path']),
-                    mb_strtolower($this->search),
-                ),
-            );
-        }
-
-        $categories = $categories->sortByDesc('transactions_count')->values();
 
         $transactions = $this->selectedCategoryId
             ? Transaction::query()
