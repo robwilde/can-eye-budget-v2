@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Database\Factories;
 
 use App\Enums\TransactionDirection;
+use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Models\Account;
 use App\Models\Category;
@@ -37,6 +38,7 @@ final class TransactionFactory extends Factory
             ]),
             'post_date' => fake()->dateTimeBetween('-3 months', 'now'),
             'status' => TransactionStatus::Posted,
+            'source' => TransactionSource::Manual,
         ];
     }
 
@@ -65,6 +67,7 @@ final class TransactionFactory extends Factory
     public function fromBasiq(): self
     {
         return $this->state(fn (array $attributes) => [
+            'source' => TransactionSource::Basiq,
             'basiq_id' => fake()->uuid(),
             'basiq_account_id' => fake()->uuid(),
             'merchant_name' => fake()->randomElement(['Woolworths', 'Coles', 'Aldi', 'Kmart', 'Bunnings', 'JB Hi-Fi']),
@@ -80,6 +83,27 @@ final class TransactionFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'status' => TransactionStatus::Pending,
+        ]);
+    }
+
+    public function manual(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'source' => TransactionSource::Manual,
+        ]);
+    }
+
+    public function transfer(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'transfer_pair_id' => Transaction::factory(),
+        ]);
+    }
+
+    public function withNotes(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'notes' => fake()->sentence(),
         ]);
     }
 }
