@@ -12,15 +12,22 @@ use Illuminate\Console\Command;
 
 final class SeedFromBasiqCommand extends Command
 {
-    private const string BASIQ_USER_ID = '3470f92c-54d1-4a68-a767-1d031d340d06';
-
     protected $signature = 'app:seed-from-basiq
+        {basiq_user_id? : The Basiq user ID to link (defaults to BASIQ_SEED_USER_ID env var)}
         {--sync : Run synchronously instead of dispatching to queue}';
 
     protected $description = 'Seed the database with real Basiq sandbox data for the test user';
 
     public function handle(): int
     {
+        $basiqUserId = $this->argument('basiq_user_id') ?? config('services.basiq.seed_user_id');
+
+        if (empty($basiqUserId)) {
+            $this->components->error('No Basiq user ID provided. Pass it as an argument or set BASIQ_SEED_USER_ID in your .env file.');
+
+            return self::FAILURE;
+        }
+
         $user = User::query()->where('email', 'test@example.com')->first();
 
         if (! $user) {
@@ -30,11 +37,11 @@ final class SeedFromBasiqCommand extends Command
         }
 
         $user->update([
-            'basiq_user_id' => self::BASIQ_USER_ID,
+            'basiq_user_id' => $basiqUserId,
             'last_synced_at' => null,
         ]);
 
-        $this->components->info('Linked test@example.com to Basiq user: '.self::BASIQ_USER_ID);
+        $this->components->info("Linked test@example.com to Basiq user: {$basiqUserId}");
 
         if ($this->option('sync')) {
             $this->components->info('Running sync synchronously...');
