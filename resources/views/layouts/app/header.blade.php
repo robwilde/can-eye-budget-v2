@@ -19,6 +19,9 @@
                 <flux:navbar.item icon="arrows-right-left" :href="route('transactions')" :current="request()->routeIs('transactions')" wire:navigate>
                     {{ __('Transactions') }}
                 </flux:navbar.item>
+                <flux:navbar.item icon="calendar-days" :href="route('calendar')" :current="request()->routeIs('calendar')" wire:navigate>
+                    {{ __('Calendar') }}
+                </flux:navbar.item>
                 <flux:navbar.item icon="building-library" :href="route('connect-bank')" :current="request()->routeIs('connect-bank')" wire:navigate>
                     {{ __('Connect Bank') }}
                 </flux:navbar.item>
@@ -52,6 +55,9 @@
                     </flux:sidebar.item>
                     <flux:sidebar.item icon="arrows-right-left" :href="route('transactions')" :current="request()->routeIs('transactions')" wire:navigate>
                         {{ __('Transactions') }}
+                    </flux:sidebar.item>
+                    <flux:sidebar.item icon="calendar-days" :href="route('calendar')" :current="request()->routeIs('calendar')" wire:navigate>
+                        {{ __('Calendar') }}
                     </flux:sidebar.item>
                     <flux:sidebar.item icon="building-library" :href="route('connect-bank')" :current="request()->routeIs('connect-bank')" wire:navigate>
                         {{ __('Connect Bank') }}
