@@ -265,6 +265,34 @@ test('calendar weeks always have 7 days', function () {
     }
 });
 
+test('calendar refreshes after transaction-saved event', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $component = Livewire::actingAs($user)
+        ->test(CalendarView::class);
+
+    $dataBefore = $component->get('calendarData');
+    $allBefore = collect($dataBefore['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions']);
+
+    expect($allBefore)->toHaveCount(0);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -2500,
+        'post_date' => now()->startOfMonth()->addDays(1),
+    ]);
+
+    $component->dispatch('transaction-saved');
+
+    $dataAfter = $component->get('calendarData');
+    $allAfter = collect($dataAfter['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions']);
+
+    expect($allAfter)->toHaveCount(1);
+});
+
 test('today is marked in current month', function () {
     $user = User::factory()->create();
 
