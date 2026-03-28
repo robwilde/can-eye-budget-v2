@@ -11,6 +11,7 @@ use Carbon\Constants\UnitValue;
 use Illuminate\Support\Collection;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 final class CalendarView extends Component
@@ -37,6 +38,12 @@ final class CalendarView extends Component
     public function goToToday(): void
     {
         $this->currentMonth = CarbonImmutable::now()->format('Y-m');
+        unset($this->calendarData); // @phpstan-ignore property.notFound
+    }
+
+    #[On('transaction-saved')]
+    public function refreshCalendar(): void
+    {
         unset($this->calendarData); // @phpstan-ignore property.notFound
     }
 
