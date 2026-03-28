@@ -47,7 +47,7 @@ final class CalendarView extends Component
         unset($this->calendarData); // @phpstan-ignore property.notFound
     }
 
-    /** @return array{monthLabel: string, weeks: list<list<array{date: int, fullDate: string, isCurrentMonth: bool, isToday: bool, transactions: list<array{category: string, amount: int, direction: string}>}>>, isCurrentMonth: bool} */
+    /** @return array{monthLabel: string, weeks: list<list<array{date: int, fullDate: string, isCurrentMonth: bool, isToday: bool, transactions: list<array{id: int, category: string, amount: int, direction: string, source: string}>}>>, isCurrentMonth: bool} */
     #[Computed(persist: true)]
     public function calendarData(): array
     {
@@ -82,9 +82,11 @@ final class CalendarView extends Component
                     'isCurrentMonth' => $current->month === $monthStart->month && $current->year === $monthStart->year,
                     'isToday' => $current->isSameDay($today),
                     'transactions' => $dayTransactions->map(fn (Transaction $t) => [
+                        'id' => $t->id,
                         'category' => $t->category?->name ?? $t->description, // @phpstan-ignore nullsafe.neverNull
                         'amount' => $t->amount,
                         'direction' => $t->direction->value,
+                        'source' => $t->source->value,
                     ])->values()->all(),
                 ];
 
@@ -103,13 +105,13 @@ final class CalendarView extends Component
     public function placeholder(): string
     {
         return <<<'HTML'
-        <div>
-            <div class="space-y-4">
-                <div class="animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800 h-10 w-48"></div>
-                <div class="animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800 h-96"></div>
+            <div>
+                <div class="space-y-4">
+                    <div class="animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800 h-10 w-48"></div>
+                    <div class="animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800 h-96"></div>
+                </div>
             </div>
-        </div>
-        HTML;
+            HTML;
     }
 
     public function render(): View

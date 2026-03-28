@@ -293,6 +293,50 @@ test('calendar refreshes after transaction-saved event', function () {
     expect($allAfter)->toHaveCount(1);
 });
 
+test('transaction data includes id and source fields', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $transaction = Transaction::factory()->for($user)->manual()->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -3000,
+        'post_date' => now()->startOfMonth()->addDays(2),
+    ]);
+
+    $component = Livewire::actingAs($user)
+        ->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $txn = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->first();
+
+    expect($txn)
+        ->toHaveKey('id', $transaction->id)
+        ->toHaveKey('source', 'manual');
+});
+
+test('transaction data includes source for basiq transactions', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->fromBasiq()->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -5000,
+        'post_date' => now()->startOfMonth()->addDays(4),
+    ]);
+
+    $component = Livewire::actingAs($user)
+        ->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $txn = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->first();
+
+    expect($txn['source'])->toBe('basiq');
+});
+
 test('today is marked in current month', function () {
     $user = User::factory()->create();
 
