@@ -4,9 +4,11 @@
 
 declare(strict_types=1);
 
+use App\Enums\TransactionDirection;
 use App\Livewire\CalendarView;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use Livewire\Livewire;
@@ -344,13 +346,13 @@ test('transaction data includes isTransfer flag for transfer transactions', func
 
     $debit = Transaction::factory()->for($user)->create([
         'account_id' => $fromAccount->id,
-        'direction' => App\Enums\TransactionDirection::Debit,
+        'direction' => TransactionDirection::Debit,
         'post_date' => now()->startOfMonth()->addDays(3),
     ]);
 
     $credit = Transaction::factory()->for($user)->create([
         'account_id' => $toAccount->id,
-        'direction' => App\Enums\TransactionDirection::Credit,
+        'direction' => TransactionDirection::Credit,
         'post_date' => now()->startOfMonth()->addDays(3),
         'transfer_pair_id' => $debit->id,
     ]);
@@ -401,4 +403,232 @@ test('today is marked in current month', function () {
     expect($todayCell)->not->toBeNull()
         ->and($todayCell['date'])->toBe((int) now()->format('j'))
         ->and($todayCell['isCurrentMonth'])->toBeTrue();
+});
+
+// ── Planned Transactions ─────────────────────────────────────────
+
+test('planned transaction occurrences appear on correct dates', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Rent']);
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'category_id' => $category->id,
+        'amount' => 150000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => now()->startOfMonth()->addDays(14),
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $allTxns = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions']);
+
+    $plannedTxns = $allTxns->where('type', 'planned');
+
+    expect($plannedTxns)->toHaveCount(1)
+        ->and($plannedTxns->first()['category'])->toBe('Rent')
+        ->and($plannedTxns->first()['amount'])->toBe(150000)
+        ->and($plannedTxns->first()['direction'])->toBe('debit')
+        ->and($plannedTxns->first()['id'])->toBeNull()
+        ->and($plannedTxns->first()['planned_transaction_id'])->toBe($planned->id);
+});
+
+test('weekly planned transaction shows on multiple weeks', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->weekly()->create([
+        'start_date' => now()->startOfMonth(),
+        'amount' => 5000,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $planned = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->where('type', 'planned');
+
+    expect($planned->count())->toBeGreaterThanOrEqual(4);
+});
+
+test('monthly planned transaction shows once in current month days', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'start_date' => now()->startOfMonth()->addDays(9),
+        'amount' => 10000,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $planned = collect($data['weeks'])->flatten(1)
+        ->filter(fn (array $day) => $day['isCurrentMonth'])
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->where('type', 'planned');
+
+    expect($planned)->toHaveCount(1);
+});
+
+test('planned entries have type planned and actual entries have type actual', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = now()->startOfMonth()->addDays(4);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -3000,
+        'post_date' => $date,
+    ]);
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'start_date' => $date,
+        'amount' => 5000,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $day = collect($data['weeks'])->flatten(1)
+        ->firstWhere('fullDate', $date->format('Y-m-d'));
+
+    $actual = collect($day['transactions'])->where('type', 'actual');
+    $planned = collect($day['transactions'])->where('type', 'planned');
+
+    expect($actual)->toHaveCount(1)
+        ->and($planned)->toHaveCount(1);
+});
+
+test('planned transaction respects until_date', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->weekly()->create([
+        'start_date' => now()->startOfMonth(),
+        'until_date' => now()->startOfMonth()->addDays(7),
+        'amount' => 2000,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $planned = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->where('type', 'planned');
+
+    expect($planned->count())->toBeLessThanOrEqual(2);
+});
+
+test('inactive planned transactions are not shown', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->inactive()->create([
+        'start_date' => now()->startOfMonth()->addDays(4),
+        'amount' => 5000,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $planned = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->where('type', 'planned');
+
+    expect($planned)->toBeEmpty();
+});
+
+test('actual and planned transactions on the same day both appear', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = now()->startOfMonth()->addDays(9);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -3000,
+        'post_date' => $date,
+    ]);
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'start_date' => $date,
+        'amount' => 7000,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $day = collect($data['weeks'])->flatten(1)
+        ->firstWhere('fullDate', $date->format('Y-m-d'));
+
+    expect($day['transactions'])->toHaveCount(2);
+
+    $types = collect($day['transactions'])->pluck('type')->sort()->values()->all();
+    expect($types)->toBe(['actual', 'planned']);
+});
+
+test('planned transactions starting after grid end are excluded', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'start_date' => now()->startOfMonth()->addMonths(2),
+        'amount' => 9999,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $planned = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->where('type', 'planned');
+
+    expect($planned)->toBeEmpty();
+});
+
+test('planned transactions with until_date before grid start are excluded', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->weekly()->create([
+        'start_date' => now()->subMonths(6),
+        'until_date' => now()->subMonths(3),
+        'amount' => 5000,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $planned = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->where('type', 'planned');
+
+    expect($planned)->toBeEmpty();
+});
+
+test('only current user planned transactions are shown', function () {
+    $user = User::factory()->create();
+    $otherUser = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $otherAccount = Account::factory()->for($otherUser)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'start_date' => now()->startOfMonth()->addDays(4),
+    ]);
+
+    PlannedTransaction::factory()->for($otherUser)->for($otherAccount)->noRepeat()->create([
+        'start_date' => now()->startOfMonth()->addDays(4),
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $planned = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->where('type', 'planned');
+
+    expect($planned)->toHaveCount(1);
 });

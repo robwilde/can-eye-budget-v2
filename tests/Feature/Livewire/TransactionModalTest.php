@@ -959,6 +959,71 @@ test('plan mode dispatches transaction-saved event', function () {
         ->assertDispatched('transaction-saved');
 });
 
+test('editing planned transaction enforces plan validation even when mode is tampered', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'start_date' => '2026-03-15',
+        'amount' => 5000,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->set('mode', 'enter')
+        ->set('transactionType', 'transfer')
+        ->set('frequency', 'invalid-frequency')
+        ->call('save')
+        ->assertHasErrors(['transactionType', 'frequency']);
+});
+
+test('editing planned transaction updates correctly', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'start_date' => '2026-03-15',
+        'amount' => 5000,
+        'description' => 'gym',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->set('descriptionInput', '75 updated gym')
+        ->set('categoryId', $category->id)
+        ->set('frequency', RecurrenceFrequency::EveryWeek->value)
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors()
+        ->assertDispatched('transaction-saved');
+
+    $planned->refresh();
+    expect($planned)
+        ->amount->toBe(7500)
+        ->description->toBe('updated gym')
+        ->frequency->toBe(RecurrenceFrequency::EveryWeek)
+        ->category_id->toBe($category->id);
+});
+
+test('deleting planned transaction removes it', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->call('deletePlannedTransaction')
+        ->assertSet('showModal', false)
+        ->assertDispatched('transaction-saved');
+
+    expect(PlannedTransaction::query()->find($planned->id))->toBeNull();
+});
+
 test('plan mode resets form after save', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
