@@ -4,7 +4,13 @@
         <form wire:submit="save" class="space-y-6">
             <div class="flex items-center justify-between">
                 <flux:heading size="lg">
-                    @if($editingTransactionId)
+                    @if($editingPlannedTransactionId)
+                        @if($transactionType === 'expense')
+                            {{ __('Edit Planned Expense') }}
+                        @else
+                            {{ __('Edit Planned Income') }}
+                        @endif
+                    @elseif($editingTransactionId)
                         @if($transactionType === 'transfer')
                             {{ __('Edit Transfer') }}
                         @elseif($transactionType === 'expense')
@@ -42,7 +48,7 @@
                         wire:click="$set('transactionType', 'expense')"
                         type="button"
                         class="flex-1"
-                        :disabled="$isBasiqTransaction"
+                        :disabled="$isBasiqTransaction || $editingPlannedTransactionId"
                 >
                     {{ __('Expense') }}
                 </flux:button>
@@ -51,7 +57,7 @@
                         wire:click="$set('transactionType', 'income')"
                         type="button"
                         class="flex-1"
-                        :disabled="$isBasiqTransaction"
+                        :disabled="$isBasiqTransaction || $editingPlannedTransactionId"
                 >
                     {{ __('Income') }}
                 </flux:button>
@@ -60,13 +66,13 @@
                         wire:click="$set('transactionType', 'transfer'); $set('mode', 'enter')"
                         type="button"
                         class="flex-1"
-                        :disabled="$isBasiqTransaction"
+                        :disabled="$isBasiqTransaction || $editingPlannedTransactionId"
                 >
                     {{ __('Transfer') }}
                 </flux:button>
             </div>
 
-            @if(!$editingTransactionId && $transactionType !== 'transfer')
+            @if(!$editingTransactionId && !$editingPlannedTransactionId && $transactionType !== 'transfer')
                 <div class="flex items-center justify-center gap-4">
                     <flux:text size="sm" class="text-zinc-500">{{ __('Enter vs Plan') }}</flux:text>
                     <div class="flex gap-1">
@@ -205,7 +211,16 @@
             />
 
             <div class="flex">
-                @if($editingTransactionId && !$isBasiqTransaction)
+                @if($editingPlannedTransactionId)
+                    <flux:button
+                            variant="danger"
+                            wire:click="deletePlannedTransaction"
+                            wire:confirm="{{ __('Are you sure you want to delete this planned transaction?') }}"
+                            type="button"
+                    >
+                        {{ __('Delete') }}
+                    </flux:button>
+                @elseif($editingTransactionId && !$isBasiqTransaction)
                     <flux:button
                             variant="danger"
                             wire:click="deleteTransaction"
@@ -217,7 +232,13 @@
                 @endif
                 <flux:spacer/>
                 <flux:button type="submit" variant="primary">
-                    @if($editingTransactionId)
+                    @if($editingPlannedTransactionId)
+                        @if($transactionType === 'expense')
+                            {{ __('Update planned expense') }}
+                        @else
+                            {{ __('Update planned income') }}
+                        @endif
+                    @elseif($editingTransactionId)
                         @if($transactionType === 'transfer')
                             {{ __('Update transfer') }}
                         @elseif($transactionType === 'expense')

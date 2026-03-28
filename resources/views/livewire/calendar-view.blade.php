@@ -42,25 +42,44 @@
                                 <div class="max-h-24 space-y-0.5 overflow-y-auto">
                                     @foreach($day['transactions'] as $txn)
                                         @php
+                                            $isPlanned = ($txn['type'] ?? 'actual') === 'planned';
                                             $bgColor = match(true) {
+                                                $isPlanned && $txn['direction'] === 'debit' => 'border border-dashed border-red-300 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20',
+                                                $isPlanned => 'border border-dashed border-green-300 bg-green-50/50 dark:border-green-800 dark:bg-green-950/20',
                                                 ($txn['isTransfer'] ?? false) => 'bg-blue-50 dark:bg-blue-950/30',
                                                 $txn['direction'] === 'debit' => 'bg-red-50 dark:bg-red-950/30',
                                                 default => 'bg-green-50 dark:bg-green-950/30',
                                             };
                                             $amountColor = match(true) {
+                                                $isPlanned && $txn['direction'] === 'debit' => 'text-red-400 dark:text-red-600',
+                                                $isPlanned => 'text-green-400 dark:text-green-600',
                                                 ($txn['isTransfer'] ?? false) => 'text-blue-600 dark:text-blue-400',
                                                 $txn['direction'] === 'debit' => 'text-red-600 dark:text-red-400',
                                                 default => 'text-green-600 dark:text-green-400',
                                             };
                                         @endphp
-                                        <button
-                                            type="button"
-                                            wire:click.stop="$dispatch('edit-transaction', { id: {{ $txn['id'] }} })"
-                                            class="flex w-full cursor-pointer items-center justify-between gap-1 rounded px-1 py-0.5 text-xs hover:ring-1 hover:ring-indigo-300 dark:hover:ring-indigo-600 {{ $bgColor }}"
-                                        >
-                                            <span class="truncate {{ !$day['isCurrentMonth'] ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-600 dark:text-zinc-400' }}">{{ $txn['category'] }}</span>
-                                            <span class="shrink-0 tabular-nums font-medium {{ $amountColor }}">{{ $formatMoney($txn['amount']) }}</span>
-                                        </button>
+                                        @if($isPlanned)
+                                            <button
+                                                type="button"
+                                                wire:click.stop="$dispatch('edit-planned-transaction', { id: {{ $txn['planned_transaction_id'] }} })"
+                                                class="flex w-full cursor-pointer items-center justify-between gap-1 rounded px-1 py-0.5 text-xs hover:ring-1 hover:ring-indigo-300 dark:hover:ring-indigo-600 {{ $bgColor }}"
+                                            >
+                                                <span class="flex items-center gap-0.5 truncate {{ !$day['isCurrentMonth'] ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-500 dark:text-zinc-500' }}">
+                                                    <flux:icon.clock variant="mini" class="size-3 shrink-0"/>
+                                                    {{ $txn['category'] }}
+                                                </span>
+                                                <span class="shrink-0 tabular-nums font-medium {{ $amountColor }}">{{ $formatMoney($txn['amount']) }}</span>
+                                            </button>
+                                        @else
+                                            <button
+                                                type="button"
+                                                wire:click.stop="$dispatch('edit-transaction', { id: {{ $txn['id'] }} })"
+                                                class="flex w-full cursor-pointer items-center justify-between gap-1 rounded px-1 py-0.5 text-xs hover:ring-1 hover:ring-indigo-300 dark:hover:ring-indigo-600 {{ $bgColor }}"
+                                            >
+                                                <span class="truncate {{ !$day['isCurrentMonth'] ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-600 dark:text-zinc-400' }}">{{ $txn['category'] }}</span>
+                                                <span class="shrink-0 tabular-nums font-medium {{ $amountColor }}">{{ $formatMoney($txn['amount']) }}</span>
+                                            </button>
+                                        @endif
                                     @endforeach
                                 </div>
                             @endif
@@ -97,20 +116,37 @@
                             <div class="space-y-1">
                                 @foreach($day['transactions'] as $txn)
                                     @php
+                                        $isPlanned = ($txn['type'] ?? 'actual') === 'planned';
                                         $amountColor = match(true) {
+                                            $isPlanned && $txn['direction'] === 'debit' => 'text-red-400 dark:text-red-600',
+                                            $isPlanned => 'text-green-400 dark:text-green-600',
                                             ($txn['isTransfer'] ?? false) => 'text-blue-600 dark:text-blue-400',
                                             $txn['direction'] === 'debit' => 'text-red-600 dark:text-red-400',
                                             default => 'text-green-600 dark:text-green-400',
                                         };
                                     @endphp
-                                    <button
-                                        type="button"
-                                        wire:click.stop="$dispatch('edit-transaction', { id: {{ $txn['id'] }} })"
-                                        class="flex w-full cursor-pointer items-center justify-between rounded-md px-2 py-1 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                                    >
-                                        <span class="truncate text-zinc-600 dark:text-zinc-400">{{ $txn['category'] }}</span>
-                                        <span class="shrink-0 tabular-nums font-medium {{ $amountColor }}">{{ $formatMoney($txn['amount']) }}</span>
-                                    </button>
+                                    @if($isPlanned)
+                                        <button
+                                            type="button"
+                                            wire:click.stop="$dispatch('edit-planned-transaction', { id: {{ $txn['planned_transaction_id'] }} })"
+                                            class="flex w-full cursor-pointer items-center justify-between rounded-md border border-dashed {{ $txn['direction'] === 'debit' ? 'border-red-300 dark:border-red-800' : 'border-green-300 dark:border-green-800' }} px-2 py-1 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                        >
+                                            <span class="flex items-center gap-1 truncate text-zinc-500 dark:text-zinc-500">
+                                                <flux:icon.clock variant="mini" class="size-3.5 shrink-0"/>
+                                                {{ $txn['category'] }}
+                                            </span>
+                                            <span class="shrink-0 tabular-nums font-medium {{ $amountColor }}">{{ $formatMoney($txn['amount']) }}</span>
+                                        </button>
+                                    @else
+                                        <button
+                                            type="button"
+                                            wire:click.stop="$dispatch('edit-transaction', { id: {{ $txn['id'] }} })"
+                                            class="flex w-full cursor-pointer items-center justify-between rounded-md px-2 py-1 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                        >
+                                            <span class="truncate text-zinc-600 dark:text-zinc-400">{{ $txn['category'] }}</span>
+                                            <span class="shrink-0 tabular-nums font-medium {{ $amountColor }}">{{ $formatMoney($txn['amount']) }}</span>
+                                        </button>
+                                    @endif
                                 @endforeach
                             </div>
                         </div>
