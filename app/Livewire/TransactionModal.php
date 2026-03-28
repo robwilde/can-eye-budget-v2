@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Casts\MoneyCast;
+use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Models\Category;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Support\AmountParser;
 use Illuminate\Support\Facades\DB;
@@ -41,6 +43,14 @@ final class TransactionModal extends Component
     public string $cleanDescription = '';
 
     public ?int $transferToAccountId = null;
+
+    public string $mode = 'enter';
+
+    public string $frequency = 'every-month';
+
+    public string $untilType = 'always';
+
+    public ?string $untilDate = null;
 
     #[On('open-transaction-modal')]
     public function openForAdd(string $date): void
@@ -120,7 +130,9 @@ final class TransactionModal extends Component
     {
         $this->validate($this->formRules());
 
-        if ($this->editingTransactionId) {
+        if ($this->mode === 'plan') {
+            $saved = $this->createPlannedTransaction();
+        } elseif ($this->editingTransactionId) {
             $saved = $this->isTransfer()
                 ? $this->updateTransfer()
                 : $this->updateTransaction();
@@ -267,6 +279,34 @@ final class TransactionModal extends Component
         return true;
     }
 
+    private function createPlannedTransaction(): bool
+    {
+        $parsed = AmountParser::parse($this->descriptionInput);
+
+        if ($parsed->amount <= 0) {
+            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
+
+            return false;
+        }
+
+        PlannedTransaction::query()->create([
+            'user_id' => auth()->id(),
+            'account_id' => $this->accountId,
+            'category_id' => $this->categoryId,
+            'amount' => $parsed->amount,
+            'direction' => $this->transactionType === 'expense'
+                ? TransactionDirection::Debit
+                : TransactionDirection::Credit,
+            'description' => $parsed->description,
+            'start_date' => $this->date,
+            'frequency' => RecurrenceFrequency::from($this->frequency),
+            'until_date' => $this->untilType === 'until-date' ? $this->untilDate : null,
+            'is_active' => true,
+        ]);
+
+        return true;
+    }
+
     private function updateTransaction(): bool
     {
         $transaction = Transaction::query()
@@ -383,13 +423,18 @@ final class TransactionModal extends Component
         $this->notes = '';
         $this->cleanDescription = '';
         $this->transferToAccountId = null;
+        $this->mode = 'enter';
+        $this->frequency = 'every-month';
+        $this->untilType = 'always';
+        $this->untilDate = null;
         $this->resetValidation();
     }
 
     /** @return array<string, mixed> */
     private function formRules(): array
     {
-        return [
+        $rules = [
+            'mode' => ['required', Rule::in(['enter', 'plan'])],
             'transactionType' => ['required', Rule::in(['expense', 'income', 'transfer'])],
             'descriptionInput' => ['required', 'string', 'max:255'],
             'accountId' => [
@@ -411,5 +456,16 @@ final class TransactionModal extends Component
                 ]
                 : ['nullable'],
         ];
+
+        if ($this->mode === 'plan') {
+            $rules['transactionType'] = ['required', Rule::in(['expense', 'income'])];
+            $rules['frequency'] = ['required', Rule::in(array_column(RecurrenceFrequency::cases(), 'value'))];
+            $rules['untilType'] = ['required', Rule::in(['always', 'until-date'])];
+            $rules['untilDate'] = $this->untilType === 'until-date'
+                ? ['required', 'date_format:Y-m-d', 'after_or_equal:date']
+                : ['nullable'];
+        }
+
+        return $rules;
     }
 }
