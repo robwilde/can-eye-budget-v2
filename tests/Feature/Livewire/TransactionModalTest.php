@@ -278,3 +278,198 @@ test('rejects hidden category via crafted request', function () {
         ->call('save')
         ->assertHasErrors(['categoryId']);
 });
+
+test('opens for edit with pre-filled data from manual transaction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $transaction = Transaction::factory()->for($user)->for($account)->create([
+        'amount' => 4250,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'coffee and cake',
+        'post_date' => '2026-03-15',
+        'category_id' => $category->id,
+        'source' => TransactionSource::Manual,
+        'notes' => 'Meeting with client',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->assertSet('showModal', true)
+        ->assertSet('editingTransactionId', $transaction->id)
+        ->assertSet('isBasiqTransaction', false)
+        ->assertSet('transactionType', 'expense')
+        ->assertSet('descriptionInput', '42.50 coffee and cake')
+        ->assertSet('accountId', $account->id)
+        ->assertSet('categoryId', $category->id)
+        ->assertSet('date', '2026-03-15')
+        ->assertSet('notes', 'Meeting with client');
+});
+
+test('cannot edit another user transaction', function () {
+    $user = User::factory()->create();
+    $otherUser = User::factory()->create();
+    $otherTransaction = Transaction::factory()->for($otherUser)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $otherTransaction->id)
+        ->assertSet('showModal', false)
+        ->assertSet('editingTransactionId', null);
+});
+
+test('basiq transaction sets read-only flag', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->assertSet('isBasiqTransaction', true)
+        ->assertSet('editingTransactionId', $transaction->id);
+});
+
+test('basiq transaction allows updating category and notes', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create([
+        'category_id' => null,
+        'notes' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('categoryId', $category->id)
+        ->set('notes', 'Groceries for the week')
+        ->set('cleanDescription', 'Woolworths groceries')
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertDispatched('transaction-saved');
+
+    $transaction->refresh();
+    expect($transaction)
+        ->category_id->toBe($category->id)
+        ->notes->toBe('Groceries for the week')
+        ->clean_description->toBe('Woolworths groceries');
+});
+
+test('manual transaction allows updating all fields', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $newAccount = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 4250,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'coffee',
+        'post_date' => '2026-03-15',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('descriptionInput', '99.99 fancy dinner')
+        ->set('transactionType', 'income')
+        ->set('accountId', $newAccount->id)
+        ->set('categoryId', $category->id)
+        ->set('date', '2026-03-20')
+        ->set('notes', 'Anniversary dinner')
+        ->call('save')
+        ->assertSet('showModal', false);
+
+    $transaction->refresh();
+    expect($transaction)
+        ->amount->toBe(9999)
+        ->direction->toBe(TransactionDirection::Credit)
+        ->description->toBe('fancy dinner')
+        ->account_id->toBe($newAccount->id)
+        ->category_id->toBe($category->id)
+        ->post_date->format('Y-m-d')->toBe('2026-03-20')
+        ->notes->toBe('Anniversary dinner');
+});
+
+test('updates existing transaction instead of creating new', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 1000,
+        'description' => 'original',
+    ]);
+
+    $originalCount = Transaction::query()->where('user_id', $user->id)->count();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('descriptionInput', '20.00 updated')
+        ->call('save');
+
+    expect(Transaction::query()->where('user_id', $user->id)->count())
+        ->toBe($originalCount)
+        ->and($transaction->fresh()->description)->toBe('updated');
+});
+
+test('dispatches transaction-saved event on update', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 1000,
+        'description' => 'test',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('descriptionInput', '10.00 test')
+        ->call('save')
+        ->assertDispatched('transaction-saved');
+});
+
+test('basiq transaction does not modify amount or account on save', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create([
+        'amount' => 5000,
+        'post_date' => '2026-03-10',
+    ]);
+
+    $originalAmount = $transaction->amount;
+    $originalDate = $transaction->post_date->format('Y-m-d');
+    $originalAccountId = $transaction->account_id;
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('notes', 'Updated note')
+        ->call('save');
+
+    $transaction->refresh();
+    expect($transaction)
+        ->amount->toBe($originalAmount)
+        ->post_date->format('Y-m-d')->toBe($originalDate)
+        ->account_id->toBe($originalAccountId)
+        ->notes->toBe('Updated note');
+});
+
+test('resets form after edit save including edit-specific properties', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 1000,
+        'description' => 'test',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('descriptionInput', '10.00 test')
+        ->call('save')
+        ->assertSet('editingTransactionId', null)
+        ->assertSet('isBasiqTransaction', false)
+        ->assertSet('notes', '')
+        ->assertSet('cleanDescription', '');
+});
