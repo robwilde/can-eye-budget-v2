@@ -11,10 +11,12 @@ use App\Enums\TransactionStatus;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Support\AmountParser;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Livewire\Attributes\On;
 use Livewire\Component;
+use Throwable;
 
 final class TransactionModal extends Component
 {
@@ -38,6 +40,8 @@ final class TransactionModal extends Component
 
     public string $cleanDescription = '';
 
+    public ?int $transferToAccountId = null;
+
     #[On('open-transaction-modal')]
     public function openForAdd(string $date): void
     {
@@ -57,14 +61,42 @@ final class TransactionModal extends Component
             return;
         }
 
+        if ($transaction->transfer_pair_id && $transaction->direction === TransactionDirection::Credit) {
+            $debitSide = Transaction::query()
+                ->where('user_id', auth()->id())
+                ->find($transaction->transfer_pair_id);
+
+            if ($debitSide) {
+                $transaction = $debitSide;
+            }
+        }
+
         $this->resetForm();
 
         $this->editingTransactionId = $transaction->id;
         $this->isBasiqTransaction = $transaction->source === TransactionSource::Basiq;
 
-        $this->transactionType = $transaction->direction === TransactionDirection::Debit
-            ? 'expense'
-            : 'income';
+        if ($transaction->transfer_pair_id) {
+            $this->transactionType = 'transfer';
+
+            $pair = Transaction::query()
+                ->where('user_id', auth()->id())
+                ->find($transaction->transfer_pair_id);
+
+            if ($pair) {
+                $debitSide = $transaction->direction === TransactionDirection::Debit ? $transaction : $pair;
+                $creditSide = $transaction->direction === TransactionDirection::Credit ? $transaction : $pair;
+
+                $this->accountId = $debitSide->account_id;
+                $this->transferToAccountId = $creditSide->account_id;
+            }
+        } else {
+            $this->transactionType = $transaction->direction === TransactionDirection::Debit
+                ? 'expense'
+                : 'income';
+
+            $this->accountId = $transaction->account_id;
+        }
 
         $dollars = number_format($transaction->amount / 100, 2, '.', '');
         $description = $transaction->description ?? '';
@@ -74,7 +106,6 @@ final class TransactionModal extends Component
             $this->cleanDescription = $transaction->clean_description ?? '';
         }
 
-        $this->accountId = $transaction->account_id;
         $this->categoryId = $transaction->category_id;
         $this->date = $transaction->post_date->format('Y-m-d');
         $this->notes = $transaction->notes ?? '';
@@ -82,19 +113,59 @@ final class TransactionModal extends Component
         $this->showModal = true;
     }
 
+    /**
+     * @throws Throwable
+     */
     public function save(): void
     {
         $this->validate($this->formRules());
 
         if ($this->editingTransactionId) {
-            $saved = $this->updateTransaction();
+            $saved = $this->isTransfer()
+                ? $this->updateTransfer()
+                : $this->updateTransaction();
         } else {
-            $saved = $this->createTransaction();
+            $saved = $this->transactionType === 'transfer'
+                ? $this->createTransfer()
+                : $this->createTransaction();
         }
 
         if (! $saved) {
             return;
         }
+
+        $this->showModal = false;
+        $this->resetForm();
+        $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * @throws Throwable
+     */
+    public function deleteTransaction(): void
+    {
+        $transaction = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->find($this->editingTransactionId);
+
+        if (! $transaction) {
+            return;
+        }
+
+        if ($transaction->source === TransactionSource::Basiq) {
+            return;
+        }
+
+        DB::transaction(static function () use ($transaction): void {
+            if ($transaction->transfer_pair_id) {
+                Transaction::query()
+                    ->where('id', $transaction->transfer_pair_id)
+                    ->where('user_id', auth()->id())
+                    ->delete();
+            }
+
+            $transaction->delete();
+        });
 
         $this->showModal = false;
         $this->resetForm();
@@ -154,6 +225,48 @@ final class TransactionModal extends Component
         return true;
     }
 
+    /**
+     * @throws Throwable
+     */
+    private function createTransfer(): bool
+    {
+        $parsed = AmountParser::parse($this->descriptionInput);
+
+        if ($parsed->amount <= 0) {
+            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
+
+            return false;
+        }
+
+        DB::transaction(function () use ($parsed): void {
+            $shared = [
+                'user_id' => auth()->id(),
+                'category_id' => $this->categoryId,
+                'amount' => $parsed->amount,
+                'description' => $parsed->description,
+                'post_date' => $this->date,
+                'status' => TransactionStatus::Posted,
+                'source' => TransactionSource::Manual,
+                'notes' => $this->notes !== '' ? $this->notes : null,
+            ];
+
+            $debit = Transaction::query()->create($shared + [
+                'account_id' => $this->accountId,
+                'direction' => TransactionDirection::Debit,
+            ]);
+
+            $credit = Transaction::query()->create($shared + [
+                'account_id' => $this->transferToAccountId,
+                'direction' => TransactionDirection::Credit,
+            ]);
+
+            $debit->update(['transfer_pair_id' => $credit->id]);
+            $credit->update(['transfer_pair_id' => $debit->id]);
+        });
+
+        return true;
+    }
+
     private function updateTransaction(): bool
     {
         $transaction = Transaction::query()
@@ -197,6 +310,67 @@ final class TransactionModal extends Component
         return true;
     }
 
+    /**
+     * @throws Throwable
+     */
+    private function updateTransfer(): bool
+    {
+        $transaction = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->find($this->editingTransactionId);
+
+        if (! $transaction || ! $transaction->transfer_pair_id) {
+            return false;
+        }
+
+        $pair = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->find($transaction->transfer_pair_id);
+
+        if (! $pair) {
+            return false;
+        }
+
+        $parsed = AmountParser::parse($this->descriptionInput);
+
+        if ($parsed->amount <= 0) {
+            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
+
+            return false;
+        }
+
+        DB::transaction(function () use ($transaction, $pair, $parsed): void {
+            $shared = [
+                'category_id' => $this->categoryId,
+                'amount' => $parsed->amount,
+                'description' => $parsed->description,
+                'post_date' => $this->date,
+                'notes' => $this->notes !== '' ? $this->notes : null,
+            ];
+
+            $debitSide = $transaction->direction === TransactionDirection::Debit ? $transaction : $pair;
+            $creditSide = $transaction->direction === TransactionDirection::Credit ? $transaction : $pair;
+
+            $debitSide->update($shared + ['account_id' => $this->accountId]);
+            $creditSide->update($shared + ['account_id' => $this->transferToAccountId]);
+        });
+
+        return true;
+    }
+
+    private function isTransfer(): bool
+    {
+        if (! $this->editingTransactionId) {
+            return $this->transactionType === 'transfer';
+        }
+
+        return Transaction::query()
+            ->where('id', $this->editingTransactionId)
+            ->where('user_id', auth()->id())
+            ->whereNotNull('transfer_pair_id')
+            ->exists();
+    }
+
     private function resetForm(): void
     {
         $this->editingTransactionId = null;
@@ -208,6 +382,7 @@ final class TransactionModal extends Component
         $this->date = '';
         $this->notes = '';
         $this->cleanDescription = '';
+        $this->transferToAccountId = null;
         $this->resetValidation();
     }
 
@@ -215,7 +390,7 @@ final class TransactionModal extends Component
     private function formRules(): array
     {
         return [
-            'transactionType' => ['required', Rule::in(['expense', 'income'])],
+            'transactionType' => ['required', Rule::in(['expense', 'income', 'transfer'])],
             'descriptionInput' => ['required', 'string', 'max:255'],
             'accountId' => [
                 'required',
@@ -228,6 +403,13 @@ final class TransactionModal extends Component
             'date' => ['required', 'date_format:Y-m-d'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'cleanDescription' => ['nullable', 'string', 'max:255'],
+            'transferToAccountId' => $this->isTransfer()
+                ? [
+                    'required',
+                    Rule::exists('accounts', 'id')->where('user_id', auth()->id()),
+                    Rule::notIn([$this->accountId]),
+                ]
+                : ['nullable'],
         ];
     }
 }

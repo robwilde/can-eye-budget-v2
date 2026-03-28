@@ -47,7 +47,7 @@ final class CalendarView extends Component
         unset($this->calendarData); // @phpstan-ignore property.notFound
     }
 
-    /** @return array{monthLabel: string, weeks: list<list<array{date: int, fullDate: string, isCurrentMonth: bool, isToday: bool, transactions: list<array{id: int, category: string, amount: int, direction: string, source: string}>}>>, isCurrentMonth: bool} */
+    /** @return array{monthLabel: string, weeks: list<list<array{date: int, fullDate: string, isCurrentMonth: bool, isToday: bool, transactions: list<array{id: int, category: string, amount: int, direction: string, source: string, isTransfer: bool}>}>>, isCurrentMonth: bool} */
     #[Computed(persist: true)]
     public function calendarData(): array
     {
@@ -87,6 +87,7 @@ final class CalendarView extends Component
                         'amount' => $t->amount,
                         'direction' => $t->direction->value,
                         'source' => $t->source->value,
+                        'isTransfer' => $t->transfer_pair_id !== null,
                     ])->values()->all(),
                 ];
 
