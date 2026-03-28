@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Casts\MoneyCast;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use Carbon\CarbonImmutable;
 use Carbon\Constants\UnitValue;
@@ -47,7 +48,7 @@ final class CalendarView extends Component
         unset($this->calendarData); // @phpstan-ignore property.notFound
     }
 
-    /** @return array{monthLabel: string, weeks: list<list<array{date: int, fullDate: string, isCurrentMonth: bool, isToday: bool, transactions: list<array{id: int, category: string, amount: int, direction: string, source: string, isTransfer: bool}>}>>, isCurrentMonth: bool} */
+    /** @return array{monthLabel: string, weeks: list<list<array{date: int, fullDate: string, isCurrentMonth: bool, isToday: bool, transactions: list<array{id: int|null, category: string, amount: int, direction: string, type: string, source: string, isTransfer: bool, planned_transaction_id: int|null}>}>>, isCurrentMonth: bool} */
     #[Computed(persist: true)]
     public function calendarData(): array
     {
@@ -67,6 +68,35 @@ final class CalendarView extends Component
             ->get()
             ->groupBy(fn (Transaction $t) => $t->post_date->format('Y-m-d'));
 
+        /** @var Collection<string, list<array{id: null, category: string, amount: int, direction: string, type: string, source: string, isTransfer: false, planned_transaction_id: int}>> $plannedByDate */
+        $plannedByDate = collect();
+
+        $plannedTransactions = PlannedTransaction::query()
+            ->where('user_id', auth()->id())
+            ->where('is_active', true)
+            ->where('start_date', '<=', $gridEnd)
+            ->where(fn ($q) => $q->whereNull('until_date')->orWhere('until_date', '>=', $gridStart))
+            ->with('category:id,name')
+            ->get();
+
+        foreach ($plannedTransactions as $planned) {
+            foreach ($planned->occurrencesBetween($gridStart, $gridEnd) as $date) {
+                $dateKey = $date->format('Y-m-d');
+                $existing = $plannedByDate->get($dateKey, []);
+                $existing[] = [
+                    'id' => null,
+                    'category' => $planned->category?->name ?? $planned->description, // @phpstan-ignore nullsafe.neverNull
+                    'amount' => $planned->amount,
+                    'direction' => $planned->direction->value,
+                    'type' => 'planned',
+                    'source' => 'planned',
+                    'isTransfer' => false,
+                    'planned_transaction_id' => $planned->id,
+                ];
+                $plannedByDate->put($dateKey, $existing);
+            }
+        }
+
         $weeks = [];
         $current = $gridStart;
 
@@ -76,19 +106,23 @@ final class CalendarView extends Component
                 $dateKey = $current->format('Y-m-d');
                 $dayTransactions = $transactionsByDate->get($dateKey, collect());
 
+                $actualTxns = $dayTransactions->map(fn (Transaction $t) => [
+                    'id' => $t->id,
+                    'category' => $t->category?->name ?? $t->description, // @phpstan-ignore nullsafe.neverNull
+                    'amount' => $t->amount,
+                    'direction' => $t->direction->value,
+                    'type' => 'actual',
+                    'source' => $t->source->value,
+                    'isTransfer' => $t->transfer_pair_id !== null,
+                    'planned_transaction_id' => null,
+                ])->values()->all();
+
                 $week[] = [
                     'date' => $current->day,
                     'fullDate' => $dateKey,
                     'isCurrentMonth' => $current->month === $monthStart->month && $current->year === $monthStart->year,
                     'isToday' => $current->isSameDay($today),
-                    'transactions' => $dayTransactions->map(fn (Transaction $t) => [
-                        'id' => $t->id,
-                        'category' => $t->category?->name ?? $t->description, // @phpstan-ignore nullsafe.neverNull
-                        'amount' => $t->amount,
-                        'direction' => $t->direction->value,
-                        'source' => $t->source->value,
-                        'isTransfer' => $t->transfer_pair_id !== null,
-                    ])->values()->all(),
+                    'transactions' => array_merge($actualTxns, $plannedByDate->get($dateKey, [])),
                 ];
 
                 $current = $current->addDay();

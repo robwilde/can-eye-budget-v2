@@ -46,6 +46,8 @@ final class TransactionModal extends Component
 
     public string $mode = 'enter';
 
+    public ?int $editingPlannedTransactionId = null;
+
     public string $frequency = 'every-month';
 
     public string $untilType = 'always';
@@ -123,14 +125,56 @@ final class TransactionModal extends Component
         $this->showModal = true;
     }
 
+    #[On('edit-planned-transaction')]
+    public function openForEditPlanned(int $id): void
+    {
+        $planned = PlannedTransaction::query()
+            ->where('user_id', auth()->id())
+            ->find($id);
+
+        if (! $planned) {
+            return;
+        }
+
+        $this->resetForm();
+
+        $this->editingPlannedTransactionId = $planned->id;
+        $this->mode = 'plan';
+        $this->transactionType = $planned->direction === TransactionDirection::Debit
+            ? 'expense'
+            : 'income';
+
+        $dollars = number_format($planned->amount / 100, 2, '.', '');
+        $description = $planned->description ?? '';
+        $this->descriptionInput = $description !== '' ? "{$dollars} {$description}" : $dollars;
+
+        $this->accountId = $planned->account_id;
+        $this->categoryId = $planned->category_id;
+        $this->date = $planned->start_date->format('Y-m-d');
+        $this->frequency = $planned->frequency->value;
+
+        if ($planned->until_date !== null) {
+            $this->untilType = 'until-date';
+            $this->untilDate = $planned->until_date->format('Y-m-d');
+        }
+
+        $this->showModal = true;
+    }
+
     /**
      * @throws Throwable
      */
     public function save(): void
     {
+        if ($this->editingPlannedTransactionId) {
+            $this->mode = 'plan';
+        }
+
         $this->validate($this->formRules());
 
-        if ($this->mode === 'plan') {
+        if ($this->editingPlannedTransactionId) {
+            $saved = $this->updatePlannedTransaction();
+        } elseif ($this->mode === 'plan') {
             $saved = $this->createPlannedTransaction();
         } elseif ($this->editingTransactionId) {
             $saved = $this->isTransfer()
@@ -207,6 +251,23 @@ final class TransactionModal extends Component
                 ? AmountParser::parse($this->descriptionInput)->amount
                 : 0,
         ]);
+    }
+
+    public function deletePlannedTransaction(): void
+    {
+        $planned = PlannedTransaction::query()
+            ->where('user_id', auth()->id())
+            ->find($this->editingPlannedTransactionId);
+
+        if (! $planned) {
+            return;
+        }
+
+        $planned->delete();
+
+        $this->showModal = false;
+        $this->resetForm();
+        $this->dispatch('transaction-saved');
     }
 
     private function createTransaction(): bool
@@ -302,6 +363,40 @@ final class TransactionModal extends Component
             'frequency' => RecurrenceFrequency::from($this->frequency),
             'until_date' => $this->untilType === 'until-date' ? $this->untilDate : null,
             'is_active' => true,
+        ]);
+
+        return true;
+    }
+
+    private function updatePlannedTransaction(): bool
+    {
+        $planned = PlannedTransaction::query()
+            ->where('user_id', auth()->id())
+            ->find($this->editingPlannedTransactionId);
+
+        if (! $planned) {
+            return false;
+        }
+
+        $parsed = AmountParser::parse($this->descriptionInput);
+
+        if ($parsed->amount <= 0) {
+            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
+
+            return false;
+        }
+
+        $planned->update([
+            'account_id' => $this->accountId,
+            'category_id' => $this->categoryId,
+            'amount' => $parsed->amount,
+            'direction' => $this->transactionType === 'expense'
+                ? TransactionDirection::Debit
+                : TransactionDirection::Credit,
+            'description' => $parsed->description,
+            'start_date' => $this->date,
+            'frequency' => RecurrenceFrequency::from($this->frequency),
+            'until_date' => $this->untilType === 'until-date' ? $this->untilDate : null,
         ]);
 
         return true;
@@ -414,6 +509,7 @@ final class TransactionModal extends Component
     private function resetForm(): void
     {
         $this->editingTransactionId = null;
+        $this->editingPlannedTransactionId = null;
         $this->isBasiqTransaction = false;
         $this->transactionType = 'expense';
         $this->descriptionInput = '';
