@@ -28,7 +28,8 @@
                     @foreach($week as $day)
                         <div
                                 wire:key="day-{{ $day['fullDate'] }}"
-                                class="min-h-28 border-r border-neutral-200 p-1.5 last:border-r-0 dark:border-neutral-700 {{ !$day['isCurrentMonth'] ? 'bg-zinc-50 dark:bg-zinc-900/50' : '' }}"
+                                wire:click="$dispatch('open-transaction-modal', { date: '{{ $day['fullDate'] }}' })"
+                                class="min-h-28 cursor-pointer border-r border-neutral-200 p-1.5 last:border-r-0 hover:bg-zinc-50 dark:border-neutral-700 dark:hover:bg-zinc-800 {{ !$day['isCurrentMonth'] ? 'bg-zinc-50 dark:bg-zinc-900/50' : '' }}"
                         >
                             <div class="mb-1 text-right text-xs font-medium {{ $day['isToday'] ? 'flex items-center justify-end' : '' }} {{ !$day['isCurrentMonth'] ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-700 dark:text-zinc-300' }}">
                                 @if($day['isToday'])
