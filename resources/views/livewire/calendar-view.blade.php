@@ -41,10 +41,14 @@
                             @if(count($day['transactions']) > 0)
                                 <div class="max-h-24 space-y-0.5 overflow-y-auto">
                                     @foreach($day['transactions'] as $txn)
-                                        <div class="flex items-center justify-between gap-1 rounded px-1 py-0.5 text-xs {{ $txn['direction'] === 'debit' ? 'bg-red-50 dark:bg-red-950/30' : 'bg-green-50 dark:bg-green-950/30' }}">
+                                        <button
+                                            type="button"
+                                            wire:click.stop="$dispatch('edit-transaction', { id: {{ $txn['id'] }} })"
+                                            class="flex w-full cursor-pointer items-center justify-between gap-1 rounded px-1 py-0.5 text-xs hover:ring-1 hover:ring-indigo-300 dark:hover:ring-indigo-600 {{ $txn['direction'] === 'debit' ? 'bg-red-50 dark:bg-red-950/30' : 'bg-green-50 dark:bg-green-950/30' }}"
+                                        >
                                             <span class="truncate {{ !$day['isCurrentMonth'] ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-600 dark:text-zinc-400' }}">{{ $txn['category'] }}</span>
                                             <span class="shrink-0 tabular-nums font-medium {{ $txn['direction'] === 'debit' ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400' }}">{{ $formatMoney($txn['amount']) }}</span>
-                                        </div>
+                                        </button>
                                     @endforeach
                                 </div>
                             @endif
@@ -70,16 +74,24 @@
             @else
                 <div class="divide-y divide-neutral-200 dark:divide-neutral-700">
                     @foreach($daysWithTransactions as $day)
-                        <div wire:key="mobile-{{ $day['fullDate'] }}" class="px-4 py-3">
+                        <div
+                            wire:key="mobile-{{ $day['fullDate'] }}"
+                            wire:click="$dispatch('open-transaction-modal', { date: '{{ $day['fullDate'] }}' })"
+                            class="cursor-pointer px-4 py-3"
+                        >
                             <div class="mb-2 text-sm font-medium {{ $day['isToday'] ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-700 dark:text-zinc-300' }}">
                                 {{ CarbonImmutable::parse($day['fullDate'])->format('D j M') }}
                             </div>
                             <div class="space-y-1">
                                 @foreach($day['transactions'] as $txn)
-                                    <div class="flex items-center justify-between text-sm">
+                                    <button
+                                        type="button"
+                                        wire:click.stop="$dispatch('edit-transaction', { id: {{ $txn['id'] }} })"
+                                        class="flex w-full cursor-pointer items-center justify-between rounded-md px-2 py-1 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                    >
                                         <span class="truncate text-zinc-600 dark:text-zinc-400">{{ $txn['category'] }}</span>
                                         <span class="shrink-0 tabular-nums font-medium {{ $txn['direction'] === 'debit' ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400' }}">{{ $formatMoney($txn['amount']) }}</span>
-                                    </div>
+                                    </button>
                                 @endforeach
                             </div>
                         </div>
