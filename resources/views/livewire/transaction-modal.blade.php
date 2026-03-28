@@ -1,4 +1,4 @@
-@php use Carbon\CarbonImmutable; @endphp
+@php use App\Enums\RecurrenceFrequency;use Carbon\CarbonImmutable; @endphp
 <div>
     <flux:modal wire:model="showModal" class="md:w-lg">
         <form wire:submit="save" class="space-y-6">
@@ -38,47 +38,73 @@
 
             <div class="flex gap-2">
                 <flux:button
-                    variant="{{ $transactionType === 'expense' ? 'primary' : 'ghost' }}"
-                    wire:click="$set('transactionType', 'expense')"
-                    type="button"
-                    class="flex-1"
-                    :disabled="$isBasiqTransaction"
+                        variant="{{ $transactionType === 'expense' ? 'primary' : 'ghost' }}"
+                        wire:click="$set('transactionType', 'expense')"
+                        type="button"
+                        class="flex-1"
+                        :disabled="$isBasiqTransaction"
                 >
                     {{ __('Expense') }}
                 </flux:button>
                 <flux:button
-                    variant="{{ $transactionType === 'income' ? 'primary' : 'ghost' }}"
-                    wire:click="$set('transactionType', 'income')"
-                    type="button"
-                    class="flex-1"
-                    :disabled="$isBasiqTransaction"
+                        variant="{{ $transactionType === 'income' ? 'primary' : 'ghost' }}"
+                        wire:click="$set('transactionType', 'income')"
+                        type="button"
+                        class="flex-1"
+                        :disabled="$isBasiqTransaction"
                 >
                     {{ __('Income') }}
                 </flux:button>
                 <flux:button
-                    variant="{{ $transactionType === 'transfer' ? 'primary' : 'ghost' }}"
-                    wire:click="$set('transactionType', 'transfer')"
-                    type="button"
-                    class="flex-1"
-                    :disabled="$isBasiqTransaction"
+                        variant="{{ $transactionType === 'transfer' ? 'primary' : 'ghost' }}"
+                        wire:click="$set('transactionType', 'transfer'); $set('mode', 'enter')"
+                        type="button"
+                        class="flex-1"
+                        :disabled="$isBasiqTransaction"
                 >
                     {{ __('Transfer') }}
                 </flux:button>
             </div>
 
+            @if(!$editingTransactionId && $transactionType !== 'transfer')
+                <div class="flex items-center justify-center gap-4">
+                    <flux:text size="sm" class="text-zinc-500">{{ __('Enter vs Plan') }}</flux:text>
+                    <div class="flex gap-1">
+                        <flux:button
+                                variant="{{ $mode === 'enter' ? 'filled' : 'ghost' }}"
+                                size="sm"
+                                wire:click="$set('mode', 'enter')"
+                                type="button"
+                                icon="check"
+                        >
+                            {{ __('Enter') }}
+                        </flux:button>
+                        <flux:button
+                                variant="{{ $mode === 'plan' ? 'filled' : 'ghost' }}"
+                                size="sm"
+                                wire:click="$set('mode', 'plan')"
+                                type="button"
+                                icon="pencil"
+                        >
+                            {{ __('Plan') }}
+                        </flux:button>
+                    </div>
+                </div>
+            @endif
+
             <flux:input
-                wire:model.blur="descriptionInput"
-                :label="__('Amount with description')"
-                placeholder="4*15 zoo tickets (tip is ignored)"
-                required
-                :disabled="$isBasiqTransaction"
+                    wire:model.blur="descriptionInput"
+                    :label="$mode === 'plan' ? __('Planned amount with description') : __('Amount with description')"
+                    placeholder="4*15 zoo tickets (tip is ignored)"
+                    required
+                    :disabled="$isBasiqTransaction"
             />
 
             @if($isBasiqTransaction)
                 <flux:input
-                    wire:model.blur="cleanDescription"
-                    :label="__('Clean description')"
-                    :placeholder="__('Your description for this transaction')"
+                        wire:model.blur="cleanDescription"
+                        :label="__('Clean description')"
+                        :placeholder="__('Your description for this transaction')"
                 />
             @endif
 
@@ -90,10 +116,10 @@
             </div>
 
             <flux:select
-                wire:model="accountId"
-                :label="$transactionType === 'transfer' ? __('From account') : __('Account')"
-                required
-                :disabled="$isBasiqTransaction"
+                    wire:model="accountId"
+                    :label="$transactionType === 'transfer' ? __('From account') : __('Account')"
+                    required
+                    :disabled="$isBasiqTransaction"
             >
                 <flux:select.option value="">{{ __('Select account') }}</flux:select.option>
                 @foreach($accounts as $account)
@@ -124,27 +150,67 @@
             </flux:select>
 
             <flux:input
-                wire:model="date"
-                :label="__('Date')"
-                type="date"
-                required
-                :disabled="$isBasiqTransaction"
+                    wire:model="date"
+                    :label="__('Date')"
+                    type="date"
+                    required
+                    :disabled="$isBasiqTransaction"
             />
 
+            @if($mode === 'plan')
+                <flux:select wire:model="frequency" :label="__('Frequency')" required>
+                    @foreach(RecurrenceFrequency::cases() as $freq)
+                        <flux:select.option value="{{ $freq->value }}">
+                            {{ $freq->label() }}
+                        </flux:select.option>
+                    @endforeach
+                </flux:select>
+
+                <div class="space-y-3">
+                    <div class="flex gap-1">
+                        <flux:button
+                                variant="{{ $untilType === 'always' ? 'filled' : 'ghost' }}"
+                                size="sm"
+                                wire:click="$set('untilType', 'always')"
+                                type="button"
+                        >
+                            {{ __('Always') }}
+                        </flux:button>
+                        <flux:button
+                                variant="{{ $untilType === 'until-date' ? 'filled' : 'ghost' }}"
+                                size="sm"
+                                wire:click="$set('untilType', 'until-date')"
+                                type="button"
+                        >
+                            {{ __('Until date') }}
+                        </flux:button>
+                    </div>
+
+                    @if($untilType === 'until-date')
+                        <flux:input
+                                wire:model="untilDate"
+                                :label="__('Until date')"
+                                type="date"
+                                required
+                        />
+                    @endif
+                </div>
+            @endif
+
             <flux:textarea
-                wire:model="notes"
-                :label="__('Notes')"
-                :placeholder="__('Optional notes')"
-                rows="2"
+                    wire:model="notes"
+                    :label="__('Notes')"
+                    :placeholder="__('Optional notes')"
+                    rows="2"
             />
 
             <div class="flex">
                 @if($editingTransactionId && !$isBasiqTransaction)
                     <flux:button
-                        variant="danger"
-                        wire:click="deleteTransaction"
-                        wire:confirm="{{ __('Are you sure you want to delete this transaction?') }}"
-                        type="button"
+                            variant="danger"
+                            wire:click="deleteTransaction"
+                            wire:confirm="{{ __('Are you sure you want to delete this transaction?') }}"
+                            type="button"
                     >
                         {{ __('Delete') }}
                     </flux:button>
@@ -158,6 +224,12 @@
                             {{ __('Update expense') }}
                         @else
                             {{ __('Update income') }}
+                        @endif
+                    @elseif($mode === 'plan')
+                        @if($transactionType === 'expense')
+                            {{ __('Plan expense') }}
+                        @else
+                            {{ __('Plan income') }}
                         @endif
                     @else
                         @if($transactionType === 'transfer')
