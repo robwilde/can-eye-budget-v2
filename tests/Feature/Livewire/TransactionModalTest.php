@@ -5,12 +5,14 @@
 declare(strict_types=1);
 
 use App\Enums\AccountStatus;
+use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Livewire\TransactionModal;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use Livewire\Livewire;
@@ -726,4 +728,254 @@ test('clicking credit side of transfer opens debit side for editing', function (
         ->assertSet('transactionType', 'transfer')
         ->assertSet('accountId', $fromAccount->id)
         ->assertSet('transferToAccountId', $toAccount->id);
+});
+
+// ── Plan Mode ────────────────────────────────────────────────────
+
+test('plan mode toggle defaults to enter mode', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->assertSet('mode', 'enter');
+});
+
+test('plan mode shows frequency and until fields', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('mode', 'plan')
+        ->assertSee(__('Frequency'))
+        ->assertSee(__('Always'));
+});
+
+test('enter mode hides plan fields', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->assertSet('mode', 'enter')
+        ->assertDontSee(__('Frequency'));
+});
+
+test('plan mode saves to planned_transactions table', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $transactionCountBefore = Transaction::query()->where('user_id', $user->id)->count();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '50 monthly gym')
+        ->set('accountId', $account->id)
+        ->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    expect(PlannedTransaction::query()->where('user_id', $user->id)->count())->toBe(1)
+        ->and(Transaction::query()->where('user_id', $user->id)->count())->toBe($transactionCountBefore);
+});
+
+test('plan mode stores correct direction for expense', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '100 rent')
+        ->set('accountId', $account->id)
+        ->call('save');
+
+    expect(PlannedTransaction::query()->where('user_id', $user->id)->first())
+        ->direction->toBe(TransactionDirection::Debit);
+});
+
+test('plan mode stores correct direction for income', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('mode', 'plan')
+        ->set('transactionType', 'income')
+        ->set('descriptionInput', '3000 salary')
+        ->set('accountId', $account->id)
+        ->call('save');
+
+    expect(PlannedTransaction::query()->where('user_id', $user->id)->first())
+        ->direction->toBe(TransactionDirection::Credit);
+});
+
+test('plan mode stores frequency correctly', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '20 streaming')
+        ->set('accountId', $account->id)
+        ->set('frequency', RecurrenceFrequency::EveryWeek->value)
+        ->call('save');
+
+    expect(PlannedTransaction::query()->where('user_id', $user->id)->first())
+        ->frequency->toBe(RecurrenceFrequency::EveryWeek);
+});
+
+test('plan mode always sets until_date to null', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '50 gym')
+        ->set('accountId', $account->id)
+        ->set('untilType', 'always')
+        ->call('save');
+
+    expect(PlannedTransaction::query()->where('user_id', $user->id)->first())
+        ->until_date->toBeNull();
+});
+
+test('plan mode until-date sets date correctly', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '50 gym')
+        ->set('accountId', $account->id)
+        ->set('untilType', 'until-date')
+        ->set('untilDate', '2026-09-15')
+        ->call('save');
+
+    expect(PlannedTransaction::query()->where('user_id', $user->id)->first())
+        ->until_date->format('Y-m-d')->toBe('2026-09-15');
+});
+
+test('plan mode validates frequency is valid enum', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '50 gym')
+        ->set('accountId', $account->id)
+        ->set('frequency', 'invalid-frequency')
+        ->call('save')
+        ->assertHasErrors(['frequency']);
+});
+
+test('plan mode validates until_date required when until-date type selected', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '50 gym')
+        ->set('accountId', $account->id)
+        ->set('untilType', 'until-date')
+        ->set('untilDate', null)
+        ->call('save')
+        ->assertHasErrors(['untilDate']);
+});
+
+test('plan mode rejects transfer transaction type via validation', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('mode', 'plan')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '500 transfer')
+        ->set('accountId', $account->id)
+        ->call('save')
+        ->assertHasErrors(['transactionType']);
+
+    expect(PlannedTransaction::query()->where('user_id', $user->id)->count())->toBe(0);
+});
+
+test('plan toggle hidden for transfers', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->assertDontSee(__('Enter vs Plan'));
+});
+
+test('plan toggle hidden when editing', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->manual()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->assertDontSee(__('Enter vs Plan'));
+});
+
+test('plan mode dispatches transaction-saved event', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '50 gym')
+        ->set('accountId', $account->id)
+        ->call('save')
+        ->assertDispatched('transaction-saved');
+});
+
+test('plan mode resets form after save', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '50 gym')
+        ->set('accountId', $account->id)
+        ->set('frequency', RecurrenceFrequency::EveryWeek->value)
+        ->set('untilType', 'until-date')
+        ->set('untilDate', '2026-09-15')
+        ->call('save')
+        ->assertSet('mode', 'enter')
+        ->assertSet('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->assertSet('untilType', 'always')
+        ->assertSet('untilDate', null);
 });
