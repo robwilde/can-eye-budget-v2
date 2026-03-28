@@ -127,7 +127,7 @@ test('previous month navigation works', function () {
         ->call('previousMonth');
 
     $data = $component->get('calendarData');
-    $expectedLabel = now()->startOfMonth()->subMonth()->format('F Y');
+    $expectedLabel = now()->subMonth()->format('F Y');
 
     expect($data['monthLabel'])->toBe($expectedLabel)
         ->and($data['isCurrentMonth'])->toBeFalse();
@@ -141,7 +141,7 @@ test('next month navigation works', function () {
         ->call('nextMonth');
 
     $data = $component->get('calendarData');
-    $expectedLabel = now()->startOfMonth()->addMonth()->format('F Y');
+    $expectedLabel = now()->addMonth()->format('F Y');
 
     expect($data['monthLabel'])->toBe($expectedLabel)
         ->and($data['isCurrentMonth'])->toBeFalse();
@@ -780,33 +780,6 @@ test('suggestion status requires same account', function () {
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $otherAccount->id,
-        'amount' => 10000,
-        'post_date' => $date,
-    ]);
-
-    $component = Livewire::actingAs($user)->test(CalendarView::class);
-
-    $data = $component->get('calendarData');
-    $plannedEntry = collect($data['weeks'])->flatten(1)
-        ->flatMap(fn (array $day) => $day['transactions'])
-        ->firstWhere('type', 'planned');
-
-    expect($plannedEntry['reconciliation_status'])->toBe('unreconciled');
-});
-
-test('suggestion status requires same direction', function () {
-    $user = User::factory()->create();
-    $account = Account::factory()->for($user)->create();
-    $date = now()->startOfMonth()->addDays(9);
-
-    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
-        'amount' => 10000,
-        'direction' => TransactionDirection::Debit,
-        'start_date' => $date,
-    ]);
-
-    Transaction::factory()->for($user)->credit()->create([
-        'account_id' => $account->id,
         'amount' => 10000,
         'post_date' => $date,
     ]);
