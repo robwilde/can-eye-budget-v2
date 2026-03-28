@@ -41,13 +41,25 @@
                             @if(count($day['transactions']) > 0)
                                 <div class="max-h-24 space-y-0.5 overflow-y-auto">
                                     @foreach($day['transactions'] as $txn)
+                                        @php
+                                            $bgColor = match(true) {
+                                                ($txn['isTransfer'] ?? false) => 'bg-blue-50 dark:bg-blue-950/30',
+                                                $txn['direction'] === 'debit' => 'bg-red-50 dark:bg-red-950/30',
+                                                default => 'bg-green-50 dark:bg-green-950/30',
+                                            };
+                                            $amountColor = match(true) {
+                                                ($txn['isTransfer'] ?? false) => 'text-blue-600 dark:text-blue-400',
+                                                $txn['direction'] === 'debit' => 'text-red-600 dark:text-red-400',
+                                                default => 'text-green-600 dark:text-green-400',
+                                            };
+                                        @endphp
                                         <button
                                             type="button"
                                             wire:click.stop="$dispatch('edit-transaction', { id: {{ $txn['id'] }} })"
-                                            class="flex w-full cursor-pointer items-center justify-between gap-1 rounded px-1 py-0.5 text-xs hover:ring-1 hover:ring-indigo-300 dark:hover:ring-indigo-600 {{ $txn['direction'] === 'debit' ? 'bg-red-50 dark:bg-red-950/30' : 'bg-green-50 dark:bg-green-950/30' }}"
+                                            class="flex w-full cursor-pointer items-center justify-between gap-1 rounded px-1 py-0.5 text-xs hover:ring-1 hover:ring-indigo-300 dark:hover:ring-indigo-600 {{ $bgColor }}"
                                         >
                                             <span class="truncate {{ !$day['isCurrentMonth'] ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-600 dark:text-zinc-400' }}">{{ $txn['category'] }}</span>
-                                            <span class="shrink-0 tabular-nums font-medium {{ $txn['direction'] === 'debit' ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400' }}">{{ $formatMoney($txn['amount']) }}</span>
+                                            <span class="shrink-0 tabular-nums font-medium {{ $amountColor }}">{{ $formatMoney($txn['amount']) }}</span>
                                         </button>
                                     @endforeach
                                 </div>
@@ -84,13 +96,20 @@
                             </div>
                             <div class="space-y-1">
                                 @foreach($day['transactions'] as $txn)
+                                    @php
+                                        $amountColor = match(true) {
+                                            ($txn['isTransfer'] ?? false) => 'text-blue-600 dark:text-blue-400',
+                                            $txn['direction'] === 'debit' => 'text-red-600 dark:text-red-400',
+                                            default => 'text-green-600 dark:text-green-400',
+                                        };
+                                    @endphp
                                     <button
                                         type="button"
                                         wire:click.stop="$dispatch('edit-transaction', { id: {{ $txn['id'] }} })"
                                         class="flex w-full cursor-pointer items-center justify-between rounded-md px-2 py-1 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
                                     >
                                         <span class="truncate text-zinc-600 dark:text-zinc-400">{{ $txn['category'] }}</span>
-                                        <span class="shrink-0 tabular-nums font-medium {{ $txn['direction'] === 'debit' ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400' }}">{{ $formatMoney($txn['amount']) }}</span>
+                                        <span class="shrink-0 tabular-nums font-medium {{ $amountColor }}">{{ $formatMoney($txn['amount']) }}</span>
                                     </button>
                                 @endforeach
                             </div>

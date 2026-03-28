@@ -5,9 +5,21 @@
             <div class="flex items-center justify-between">
                 <flux:heading size="lg">
                     @if($editingTransactionId)
-                        {{ $transactionType === 'expense' ? __('Edit Expense') : __('Edit Income') }}
+                        @if($transactionType === 'transfer')
+                            {{ __('Edit Transfer') }}
+                        @elseif($transactionType === 'expense')
+                            {{ __('Edit Expense') }}
+                        @else
+                            {{ __('Edit Income') }}
+                        @endif
                     @else
-                        {{ $transactionType === 'expense' ? __('Add Expense') : __('Add Income') }}
+                        @if($transactionType === 'transfer')
+                            {{ __('Add Transfer') }}
+                        @elseif($transactionType === 'expense')
+                            {{ __('Add Expense') }}
+                        @else
+                            {{ __('Add Income') }}
+                        @endif
                     @endif
                 </flux:heading>
                 <div class="flex items-center gap-2">
@@ -43,6 +55,15 @@
                 >
                     {{ __('Income') }}
                 </flux:button>
+                <flux:button
+                    variant="{{ $transactionType === 'transfer' ? 'primary' : 'ghost' }}"
+                    wire:click="$set('transactionType', 'transfer')"
+                    type="button"
+                    class="flex-1"
+                    :disabled="$isBasiqTransaction"
+                >
+                    {{ __('Transfer') }}
+                </flux:button>
             </div>
 
             <flux:input
@@ -68,7 +89,12 @@
                 </div>
             </div>
 
-            <flux:select wire:model="accountId" :label="__('Account')" required :disabled="$isBasiqTransaction">
+            <flux:select
+                wire:model="accountId"
+                :label="$transactionType === 'transfer' ? __('From account') : __('Account')"
+                required
+                :disabled="$isBasiqTransaction"
+            >
                 <flux:select.option value="">{{ __('Select account') }}</flux:select.option>
                 @foreach($accounts as $account)
                     <flux:select.option value="{{ $account->id }}">
@@ -76,6 +102,17 @@
                     </flux:select.option>
                 @endforeach
             </flux:select>
+
+            @if($transactionType === 'transfer')
+                <flux:select wire:model="transferToAccountId" :label="__('To account')" required>
+                    <flux:select.option value="">{{ __('Select account') }}</flux:select.option>
+                    @foreach($accounts as $account)
+                        <flux:select.option value="{{ $account->id }}">
+                            {{ $account->name }} ({{ $formatMoney($account->balance) }})
+                        </flux:select.option>
+                    @endforeach
+                </flux:select>
+            @endif
 
             <flux:select wire:model="categoryId" :label="__('Category')">
                 <flux:select.option value="">{{ __('No category') }}</flux:select.option>
@@ -102,12 +139,34 @@
             />
 
             <div class="flex">
+                @if($editingTransactionId && !$isBasiqTransaction)
+                    <flux:button
+                        variant="danger"
+                        wire:click="deleteTransaction"
+                        wire:confirm="{{ __('Are you sure you want to delete this transaction?') }}"
+                        type="button"
+                    >
+                        {{ __('Delete') }}
+                    </flux:button>
+                @endif
                 <flux:spacer/>
                 <flux:button type="submit" variant="primary">
                     @if($editingTransactionId)
-                        {{ $transactionType === 'expense' ? __('Update expense') : __('Update income') }}
+                        @if($transactionType === 'transfer')
+                            {{ __('Update transfer') }}
+                        @elseif($transactionType === 'expense')
+                            {{ __('Update expense') }}
+                        @else
+                            {{ __('Update income') }}
+                        @endif
                     @else
-                        {{ $transactionType === 'expense' ? __('Enter expense') : __('Enter income') }}
+                        @if($transactionType === 'transfer')
+                            {{ __('Enter transfer') }}
+                        @elseif($transactionType === 'expense')
+                            {{ __('Enter expense') }}
+                        @else
+                            {{ __('Enter income') }}
+                        @endif
                     @endif
                 </flux:button>
             </div>

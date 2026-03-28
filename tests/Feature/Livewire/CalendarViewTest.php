@@ -337,6 +337,57 @@ test('transaction data includes source for basiq transactions', function () {
     expect($txn['source'])->toBe('basiq');
 });
 
+test('transaction data includes isTransfer flag for transfer transactions', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $debit = Transaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'direction' => App\Enums\TransactionDirection::Debit,
+        'post_date' => now()->startOfMonth()->addDays(3),
+    ]);
+
+    $credit = Transaction::factory()->for($user)->create([
+        'account_id' => $toAccount->id,
+        'direction' => App\Enums\TransactionDirection::Credit,
+        'post_date' => now()->startOfMonth()->addDays(3),
+        'transfer_pair_id' => $debit->id,
+    ]);
+
+    $debit->update(['transfer_pair_id' => $credit->id]);
+
+    $component = Livewire::actingAs($user)
+        ->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $txns = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions']);
+
+    $transferTxn = $txns->firstWhere('id', $debit->id);
+    expect($transferTxn['isTransfer'])->toBeTrue();
+});
+
+test('non-transfer transaction has isTransfer false', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->manual()->create([
+        'account_id' => $account->id,
+        'post_date' => now()->startOfMonth()->addDays(3),
+    ]);
+
+    $component = Livewire::actingAs($user)
+        ->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $txn = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->first();
+
+    expect($txn['isTransfer'])->toBeFalse();
+});
+
 test('today is marked in current month', function () {
     $user = User::factory()->create();
 

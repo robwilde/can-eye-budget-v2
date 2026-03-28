@@ -229,7 +229,7 @@ test('rejects invalid transaction type', function () {
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
-        ->set('transactionType', 'transfer')
+        ->set('transactionType', 'refund')
         ->set('descriptionInput', '10 lunch')
         ->set('accountId', $account->id)
         ->call('save')
@@ -472,4 +472,258 @@ test('resets form after edit save including edit-specific properties', function 
         ->assertSet('isBasiqTransaction', false)
         ->assertSet('notes', '')
         ->assertSet('cleanDescription', '');
+});
+
+test('transfer creates two linked transactions', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create(['name' => 'Checking']);
+    $toAccount = Account::factory()->for($user)->create(['name' => 'Savings']);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '500 monthly savings')
+        ->set('accountId', $fromAccount->id)
+        ->set('transferToAccountId', $toAccount->id)
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertDispatched('transaction-saved');
+
+    $transactions = Transaction::query()->where('user_id', $user->id)->get();
+    expect($transactions)->toHaveCount(2);
+
+    $debit = $transactions->firstWhere('direction', TransactionDirection::Debit);
+    $credit = $transactions->firstWhere('direction', TransactionDirection::Credit);
+
+    expect($debit)
+        ->account_id->toBe($fromAccount->id)
+        ->amount->toBe(50000)
+        ->description->toBe('monthly savings')
+        ->transfer_pair_id
+        ->toBe($credit->id)
+        ->and($credit)
+        ->account_id->toBe($toAccount->id)
+        ->amount->toBe(50000)
+        ->description->toBe('monthly savings')
+        ->transfer_pair_id->toBe($debit->id);
+});
+
+test('transfer debit and credit have correct directions', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '100 transfer')
+        ->set('accountId', $fromAccount->id)
+        ->set('transferToAccountId', $toAccount->id)
+        ->call('save');
+
+    $debit = Transaction::query()
+        ->where('user_id', $user->id)
+        ->where('account_id', $fromAccount->id)
+        ->first();
+
+    $credit = Transaction::query()
+        ->where('user_id', $user->id)
+        ->where('account_id', $toAccount->id)
+        ->first();
+
+    expect($debit->direction)
+        ->toBe(TransactionDirection::Debit)
+        ->and($credit->direction)->toBe(TransactionDirection::Credit);
+});
+
+test('cannot transfer to same account', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '100 self transfer')
+        ->set('accountId', $account->id)
+        ->set('transferToAccountId', $account->id)
+        ->call('save')
+        ->assertHasErrors(['transferToAccountId']);
+
+    expect(Transaction::query()->where('user_id', $user->id)->count())->toBe(0);
+});
+
+test('edit transfer opens with pre-filled data for both sides', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $debit = Transaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'savings transfer',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+    ]);
+
+    $credit = Transaction::factory()->for($user)->create([
+        'account_id' => $toAccount->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Credit,
+        'description' => 'savings transfer',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+        'transfer_pair_id' => $debit->id,
+    ]);
+
+    $debit->update(['transfer_pair_id' => $credit->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->assertSet('showModal', true)
+        ->assertSet('transactionType', 'transfer')
+        ->assertSet('accountId', $fromAccount->id)
+        ->assertSet('transferToAccountId', $toAccount->id)
+        ->assertSet('descriptionInput', '100.00 savings transfer');
+});
+
+test('edit transfer updates both sides', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $debit = Transaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'original',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+    ]);
+
+    $credit = Transaction::factory()->for($user)->create([
+        'account_id' => $toAccount->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Credit,
+        'description' => 'original',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+        'transfer_pair_id' => $debit->id,
+    ]);
+
+    $debit->update(['transfer_pair_id' => $credit->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->set('descriptionInput', '200 updated transfer')
+        ->call('save')
+        ->assertSet('showModal', false);
+
+    $debit->refresh();
+    $credit->refresh();
+
+    expect($debit)
+        ->amount->toBe(20000)
+        ->description
+        ->toBe('updated transfer')
+        ->and($credit)
+        ->amount->toBe(20000)
+        ->description->toBe('updated transfer');
+});
+
+test('delete transfer removes both sides', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $debit = Transaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Debit,
+        'source' => TransactionSource::Manual,
+    ]);
+
+    $credit = Transaction::factory()->for($user)->create([
+        'account_id' => $toAccount->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Credit,
+        'source' => TransactionSource::Manual,
+        'transfer_pair_id' => $debit->id,
+    ]);
+
+    $debit->update(['transfer_pair_id' => $credit->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->call('deleteTransaction')
+        ->assertSet('showModal', false)
+        ->assertDispatched('transaction-saved');
+
+    expect(Transaction::query()->where('user_id', $user->id)->count())->toBe(0);
+});
+
+test('delete non-transfer removes single transaction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->manual()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->call('deleteTransaction')
+        ->assertSet('showModal', false);
+
+    expect(Transaction::query()->where('id', $transaction->id)->exists())->toBeFalse();
+});
+
+test('cannot delete basiq transaction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->call('deleteTransaction');
+
+    expect(Transaction::query()->where('id', $transaction->id)->exists())->toBeTrue();
+});
+
+test('clicking credit side of transfer opens debit side for editing', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $debit = Transaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'transfer test',
+        'source' => TransactionSource::Manual,
+    ]);
+
+    $credit = Transaction::factory()->for($user)->create([
+        'account_id' => $toAccount->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Credit,
+        'description' => 'transfer test',
+        'source' => TransactionSource::Manual,
+        'transfer_pair_id' => $debit->id,
+    ]);
+
+    $debit->update(['transfer_pair_id' => $credit->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $credit->id)
+        ->assertSet('editingTransactionId', $debit->id)
+        ->assertSet('transactionType', 'transfer')
+        ->assertSet('accountId', $fromAccount->id)
+        ->assertSet('transferToAccountId', $toAccount->id);
 });
