@@ -906,21 +906,30 @@ test('plan mode validates until_date required when until-date type selected', fu
         ->assertHasErrors(['untilDate']);
 });
 
-test('plan mode rejects transfer transaction type via validation', function () {
+test('plan mode allows transfer transaction type', function () {
     $user = User::factory()->create();
-    $account = Account::factory()->for($user)->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('mode', 'plan')
         ->set('transactionType', 'transfer')
-        ->set('descriptionInput', '500 transfer')
-        ->set('accountId', $account->id)
+        ->set('descriptionInput', '500 monthly savings')
+        ->set('accountId', $fromAccount->id)
+        ->set('transferToAccountId', $toAccount->id)
         ->call('save')
-        ->assertHasErrors(['transactionType']);
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
 
-    expect(PlannedTransaction::query()->where('user_id', $user->id)->count())->toBe(0);
+    $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
+    expect($planned)
+        ->direction->toBe(TransactionDirection::Debit)
+        ->amount->toBe(50000)
+        ->account_id->toBe($fromAccount->id)
+        ->transfer_to_account_id->toBe($toAccount->id)
+        ->description->toBe('monthly savings');
 });
 
 test('plan toggle hidden for transfers', function () {
@@ -972,7 +981,7 @@ test('editing planned transaction enforces plan validation even when mode is tam
         ->test(TransactionModal::class)
         ->dispatch('edit-planned-transaction', id: $planned->id)
         ->set('mode', 'enter')
-        ->set('transactionType', 'transfer')
+        ->set('transactionType', 'invalid-type')
         ->set('frequency', 'invalid-frequency')
         ->call('save')
         ->assertHasErrors(['transactionType', 'frequency']);
@@ -1043,4 +1052,96 @@ test('plan mode resets form after save', function () {
         ->assertSet('frequency', RecurrenceFrequency::EveryMonth->value)
         ->assertSet('untilType', 'always')
         ->assertSet('untilDate', null);
+});
+
+// ── Planned Transfers (#125) ────────────────────────────────────
+
+test('planned transfer requires transfer_to_account_id', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('mode', 'plan')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '500 savings')
+        ->set('accountId', $account->id)
+        ->set('transferToAccountId', null)
+        ->call('save')
+        ->assertHasErrors(['transferToAccountId']);
+});
+
+test('planned transfer cannot use same account for both sides', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('mode', 'plan')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '500 savings')
+        ->set('accountId', $account->id)
+        ->set('transferToAccountId', $account->id)
+        ->call('save')
+        ->assertHasErrors(['transferToAccountId']);
+});
+
+test('editing planned transfer opens with pre-filled transfer data', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'transfer_to_account_id' => $toAccount->id,
+        'amount' => 50000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'monthly savings',
+        'start_date' => '2026-04-01',
+        'frequency' => RecurrenceFrequency::EveryMonth,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->assertSet('showModal', true)
+        ->assertSet('mode', 'plan')
+        ->assertSet('transactionType', 'transfer')
+        ->assertSet('accountId', $fromAccount->id)
+        ->assertSet('transferToAccountId', $toAccount->id)
+        ->assertSet('descriptionInput', '500.00 monthly savings');
+});
+
+test('updating planned transfer saves both account ids', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+    $newToAccount = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'transfer_to_account_id' => $toAccount->id,
+        'amount' => 50000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'savings',
+        'start_date' => '2026-04-01',
+        'frequency' => RecurrenceFrequency::EveryMonth,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->set('transferToAccountId', $newToAccount->id)
+        ->set('descriptionInput', '750 updated savings')
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    $planned->refresh();
+    expect($planned)
+        ->transfer_to_account_id->toBe($newToAccount->id)
+        ->amount->toBe(75000)
+        ->description->toBe('updated savings');
 });
