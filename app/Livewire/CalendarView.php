@@ -110,7 +110,7 @@ final class CalendarView extends Component
                     'direction' => $planned->direction->value,
                     'type' => 'planned',
                     'source' => 'planned',
-                    'isTransfer' => false,
+                    'isTransfer' => $planned->transfer_to_account_id !== null,
                     'planned_transaction_id' => $planned->id,
                     'reconciliation_status' => $reconciliationResult['status'],
                     'linked_transaction_id' => $reconciliationResult['linked_transaction_id'],

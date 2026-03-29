@@ -140,9 +140,15 @@ final class TransactionModal extends Component
 
         $this->editingPlannedTransactionId = $planned->id;
         $this->mode = 'plan';
-        $this->transactionType = $planned->direction === TransactionDirection::Debit
-            ? 'expense'
-            : 'income';
+
+        if ($planned->transfer_to_account_id !== null) {
+            $this->transactionType = 'transfer';
+            $this->transferToAccountId = $planned->transfer_to_account_id;
+        } else {
+            $this->transactionType = $planned->direction === TransactionDirection::Debit
+                ? 'expense'
+                : 'income';
+        }
 
         $dollars = number_format($planned->amount / 100, 2, '.', '');
         $description = $planned->description ?? '';
@@ -350,14 +356,20 @@ final class TransactionModal extends Component
             return false;
         }
 
+        $direction = match ($this->transactionType) {
+            'income' => TransactionDirection::Credit,
+            default => TransactionDirection::Debit,
+        };
+
         PlannedTransaction::query()->create([
             'user_id' => auth()->id(),
             'account_id' => $this->accountId,
+            'transfer_to_account_id' => $this->transactionType === 'transfer'
+                ? $this->transferToAccountId
+                : null,
             'category_id' => $this->categoryId,
             'amount' => $parsed->amount,
-            'direction' => $this->transactionType === 'expense'
-                ? TransactionDirection::Debit
-                : TransactionDirection::Credit,
+            'direction' => $direction,
             'description' => $parsed->description,
             'start_date' => $this->date,
             'frequency' => RecurrenceFrequency::from($this->frequency),
@@ -386,13 +398,19 @@ final class TransactionModal extends Component
             return false;
         }
 
+        $direction = match ($this->transactionType) {
+            'income' => TransactionDirection::Credit,
+            default => TransactionDirection::Debit,
+        };
+
         $planned->update([
             'account_id' => $this->accountId,
+            'transfer_to_account_id' => $this->transactionType === 'transfer'
+                ? $this->transferToAccountId
+                : null,
             'category_id' => $this->categoryId,
             'amount' => $parsed->amount,
-            'direction' => $this->transactionType === 'expense'
-                ? TransactionDirection::Debit
-                : TransactionDirection::Credit,
+            'direction' => $direction,
             'description' => $parsed->description,
             'start_date' => $this->date,
             'frequency' => RecurrenceFrequency::from($this->frequency),
@@ -554,7 +572,7 @@ final class TransactionModal extends Component
         ];
 
         if ($this->mode === 'plan') {
-            $rules['transactionType'] = ['required', Rule::in(['expense', 'income'])];
+            $rules['transactionType'] = ['required', Rule::in(['expense', 'income', 'transfer'])];
             $rules['frequency'] = ['required', Rule::in(array_column(RecurrenceFrequency::cases(), 'value'))];
             $rules['untilType'] = ['required', Rule::in(['always', 'until-date'])];
             $rules['untilDate'] = $this->untilType === 'until-date'
