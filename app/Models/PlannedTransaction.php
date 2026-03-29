@@ -19,6 +19,7 @@ use Illuminate\Support\Collection;
  * @property int $id
  * @property int $user_id
  * @property int $account_id
+ * @property int|null $transfer_to_account_id
  * @property int|null $category_id
  * @property int $amount
  * @property TransactionDirection $direction
@@ -42,6 +43,7 @@ final class PlannedTransaction extends Model
     protected $fillable = [
         'user_id',
         'account_id',
+        'transfer_to_account_id',
         'category_id',
         'amount',
         'direction',
@@ -63,6 +65,12 @@ final class PlannedTransaction extends Model
     public function account(): BelongsTo
     {
         return $this->belongsTo(Account::class);
+    }
+
+    /** @return BelongsTo<Account, $this> */
+    public function transferToAccount(): BelongsTo
+    {
+        return $this->belongsTo(Account::class, 'transfer_to_account_id');
     }
 
     /** @return BelongsTo<Category, $this> */
