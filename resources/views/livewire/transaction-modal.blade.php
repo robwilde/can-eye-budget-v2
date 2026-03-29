@@ -3,31 +3,42 @@
     <flux:modal wire:model="showModal" class="md:w-lg">
         <form wire:submit="save" class="space-y-6">
             <div class="flex items-center justify-between">
-                <flux:heading size="lg">
-                    @if($editingPlannedTransactionId)
-                        @if($transactionType === 'expense')
-                            {{ __('Edit Planned Expense') }}
-                        @else
-                            {{ __('Edit Planned Income') }}
-                        @endif
-                    @elseif($editingTransactionId)
+                @if($isBasiqTransaction || $editingTransactionId || $editingPlannedTransactionId)
+                    <flux:heading size="lg">
                         @if($transactionType === 'transfer')
-                            {{ __('Edit Transfer') }}
-                        @elseif($transactionType === 'expense')
-                            {{ __('Edit Expense') }}
+                            {{ __('Between Accounts') }}
+                        @elseif($transactionType === 'income')
+                            {{ __('Income') }}
                         @else
-                            {{ __('Edit Income') }}
+                            {{ __('Expense') }}
                         @endif
-                    @else
-                        @if($transactionType === 'transfer')
-                            {{ __('Add Transfer') }}
-                        @elseif($transactionType === 'expense')
-                            {{ __('Add Expense') }}
-                        @else
-                            {{ __('Add Income') }}
-                        @endif
-                    @endif
-                </flux:heading>
+                    </flux:heading>
+                @else
+                    <flux:dropdown>
+                        <flux:button variant="ghost" class="text-lg! font-semibold!" icon:trailing="chevron-down">
+                            @if($transactionType === 'transfer')
+                                {{ __('Between Accounts') }}
+                            @elseif($transactionType === 'income')
+                                {{ __('Income') }}
+                            @else
+                                {{ __('Expense') }}
+                            @endif
+                        </flux:button>
+
+                        <flux:menu>
+                            <flux:menu.item wire:click="$set('transactionType', 'expense')">
+                                {{ __('expense') }}
+                            </flux:menu.item>
+                            <flux:menu.item wire:click="$set('transactionType', 'income')">
+                                {{ __('income') }}
+                            </flux:menu.item>
+                            <flux:menu.item wire:click="$set('transactionType', 'transfer')">
+                                {{ __('transfer between accounts') }}
+                            </flux:menu.item>
+                        </flux:menu>
+                    </flux:dropdown>
+                @endif
+
                 <div class="flex items-center gap-2">
                     @if($isBasiqTransaction)
                         <flux:badge color="blue" size="sm" icon="cloud-arrow-down">
@@ -40,36 +51,6 @@
                         </flux:badge>
                     @endif
                 </div>
-            </div>
-
-            <div class="flex gap-2">
-                <flux:button
-                        variant="{{ $transactionType === 'expense' ? 'primary' : 'ghost' }}"
-                        wire:click="$set('transactionType', 'expense')"
-                        type="button"
-                        class="flex-1"
-                        :disabled="$isBasiqTransaction || $editingPlannedTransactionId"
-                >
-                    {{ __('Expense') }}
-                </flux:button>
-                <flux:button
-                        variant="{{ $transactionType === 'income' ? 'primary' : 'ghost' }}"
-                        wire:click="$set('transactionType', 'income')"
-                        type="button"
-                        class="flex-1"
-                        :disabled="$isBasiqTransaction || $editingPlannedTransactionId"
-                >
-                    {{ __('Income') }}
-                </flux:button>
-                <flux:button
-                        variant="{{ $transactionType === 'transfer' ? 'primary' : 'ghost' }}"
-                        wire:click="$set('transactionType', 'transfer'); $set('mode', 'enter')"
-                        type="button"
-                        class="flex-1"
-                        :disabled="$isBasiqTransaction || $editingPlannedTransactionId"
-                >
-                    {{ __('Transfer') }}
-                </flux:button>
             </div>
 
             @if(!$editingTransactionId && !$editingPlannedTransactionId && $transactionType !== 'transfer')
