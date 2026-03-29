@@ -1114,6 +1114,32 @@ test('editing planned transfer opens with pre-filled transfer data', function ()
         ->assertSet('descriptionInput', '500.00 monthly savings');
 });
 
+// ── Type Selector UI (#118) ────────────────────────────────────
+
+test('dropdown type selector shown when adding new transaction', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->assertSeeHtml("\$set('transactionType', 'expense')")
+        ->assertSeeHtml("\$set('transactionType', 'income')")
+        ->assertSeeHtml("\$set('transactionType', 'transfer')");
+});
+
+test('static heading shown when editing transaction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->manual()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->assertDontSeeHtml("\$set('transactionType', 'expense')")
+        ->assertDontSeeHtml("\$set('transactionType', 'income')")
+        ->assertDontSeeHtml("\$set('transactionType', 'transfer')");
+});
+
 test('updating planned transfer saves both account ids', function () {
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
