@@ -127,7 +127,7 @@ test('previous month navigation works', function () {
         ->call('previousMonth');
 
     $data = $component->get('calendarData');
-    $expectedLabel = now()->subMonth()->format('F Y');
+    $expectedLabel = now()->startOfMonth()->subMonth()->format('F Y');
 
     expect($data['monthLabel'])->toBe($expectedLabel)
         ->and($data['isCurrentMonth'])->toBeFalse();
@@ -141,7 +141,7 @@ test('next month navigation works', function () {
         ->call('nextMonth');
 
     $data = $component->get('calendarData');
-    $expectedLabel = now()->addMonth()->format('F Y');
+    $expectedLabel = now()->startOfMonth()->addMonth()->format('F Y');
 
     expect($data['monthLabel'])->toBe($expectedLabel)
         ->and($data['isCurrentMonth'])->toBeFalse();
@@ -631,4 +631,236 @@ test('only current user planned transactions are shown', function () {
         ->where('type', 'planned');
 
     expect($planned)->toHaveCount(1);
+});
+
+// ── Reconciliation Status ────────────────────────────────────────
+
+test('planned entry has reconciled status when linked transaction exists near occurrence date', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = now()->startOfMonth()->addDays(9);
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'amount' => 15000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => 15000,
+        'post_date' => $date,
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $plannedEntry = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->firstWhere('type', 'planned');
+
+    expect($plannedEntry['reconciliation_status'])->toBe('reconciled')
+        ->and($plannedEntry['linked_transaction_id'])->not->toBeNull();
+});
+
+test('planned entry has unreconciled status when no matching transactions exist', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'amount' => 15000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => now()->startOfMonth()->addDays(9),
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $plannedEntry = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->firstWhere('type', 'planned');
+
+    expect($plannedEntry['reconciliation_status'])->toBe('unreconciled')
+        ->and($plannedEntry['linked_transaction_id'])->toBeNull();
+});
+
+test('planned entry has suggested status when unlinked match exists', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = now()->startOfMonth()->addDays(9);
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'amount' => 15000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => 15000,
+        'post_date' => $date,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $plannedEntry = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->firstWhere('type', 'planned');
+
+    expect($plannedEntry['reconciliation_status'])->toBe('suggested');
+});
+
+test('suggestion status respects amount tolerance', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = now()->startOfMonth()->addDays(9);
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'amount' => 10000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => 12000,
+        'post_date' => $date,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $plannedEntry = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->firstWhere('type', 'planned');
+
+    expect($plannedEntry['reconciliation_status'])->toBe('unreconciled');
+});
+
+test('suggestion status respects date tolerance', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = now()->startOfMonth()->addDays(9);
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'amount' => 10000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => 10000,
+        'post_date' => $date->addDays(5),
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $plannedEntry = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->firstWhere('type', 'planned');
+
+    expect($plannedEntry['reconciliation_status'])->toBe('unreconciled');
+});
+
+test('suggestion status requires same account', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $otherAccount = Account::factory()->for($user)->create();
+    $date = now()->startOfMonth()->addDays(9);
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'amount' => 10000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $otherAccount->id,
+        'amount' => 10000,
+        'post_date' => $date,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $plannedEntry = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->firstWhere('type', 'planned');
+
+    expect($plannedEntry['reconciliation_status'])->toBe('unreconciled');
+});
+
+test('suggestion status requires same direction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = now()->startOfMonth()->addDays(9);
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'amount' => 10000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $account->id,
+        'amount' => 10000,
+        'post_date' => $date,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $plannedEntry = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->firstWhere('type', 'planned');
+
+    expect($plannedEntry['reconciliation_status'])->toBe('unreconciled');
+});
+
+test('planned entry includes occurrence_date field', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = now()->startOfMonth()->addDays(9);
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'start_date' => $date,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $plannedEntry = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->firstWhere('type', 'planned');
+
+    expect($plannedEntry['occurrence_date'])->toBe($date->format('Y-m-d'));
+});
+
+test('actual transaction includes planned_transaction_id when linked', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = now()->startOfMonth()->addDays(9);
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'start_date' => $date,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'post_date' => $date,
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $data = $component->get('calendarData');
+    $actualEntry = collect($data['weeks'])->flatten(1)
+        ->flatMap(fn (array $day) => $day['transactions'])
+        ->firstWhere('type', 'actual');
+
+    expect($actualEntry['planned_transaction_id'])->toBe($planned->id);
 });

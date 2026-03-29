@@ -7,6 +7,7 @@ namespace App\Livewire;
 use App\Casts\MoneyCast;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
+use App\Services\ReconciliationMatcher;
 use Carbon\CarbonImmutable;
 use Carbon\Constants\UnitValue;
 use Illuminate\Support\Collection;
@@ -48,7 +49,7 @@ final class CalendarView extends Component
         unset($this->calendarData); // @phpstan-ignore property.notFound
     }
 
-    /** @return array{monthLabel: string, weeks: list<list<array{date: int, fullDate: string, isCurrentMonth: bool, isToday: bool, transactions: list<array{id: int|null, category: string, amount: int, direction: string, type: string, source: string, isTransfer: bool, planned_transaction_id: int|null}>}>>, isCurrentMonth: bool} */
+    /** @return array{monthLabel: string, weeks: list<list<array{date: int, fullDate: string, isCurrentMonth: bool, isToday: bool, transactions: list<array{id: int|null, category: string, amount: int, direction: string, type: string, source: string, isTransfer: bool, planned_transaction_id: int|null, reconciliation_status: string|null, linked_transaction_id: int|null, occurrence_date: string|null}>}>>, isCurrentMonth: bool} */
     #[Computed(persist: true)]
     public function calendarData(): array
     {
@@ -59,16 +60,27 @@ final class CalendarView extends Component
         $gridStart = $monthStart->startOfWeek(UnitValue::MONDAY);
         $gridEnd = $monthEnd->endOfWeek(UnitValue::SUNDAY);
 
-        /** @var Collection<string, Collection<int, Transaction>> $transactionsByDate */
-        $transactionsByDate = Transaction::query()
+        $allTransactions = Transaction::query()
             ->where('user_id', auth()->id())
             ->whereBetween('post_date', [$gridStart, $gridEnd])
             ->with('category:id,name')
             ->orderBy('post_date')
-            ->get()
+            ->get();
+
+        /** @var Collection<string, Collection<int, Transaction>> $transactionsByDate */
+        $transactionsByDate = $allTransactions
             ->groupBy(fn (Transaction $t) => $t->post_date->format('Y-m-d'));
 
-        /** @var Collection<string, list<array{id: null, category: string, amount: int, direction: string, type: string, source: string, isTransfer: false, planned_transaction_id: int}>> $plannedByDate */
+        /** @var Collection<int, Collection<int, Transaction>> $linkedByPlannedId */
+        $linkedByPlannedId = $allTransactions
+            ->filter(fn (Transaction $t) => $t->planned_transaction_id !== null)
+            ->groupBy('planned_transaction_id');
+
+        /** @var Collection<int, Collection<int, Transaction>> $unlinkedByAccount */
+        $unlinkedByAccount = $allTransactions
+            ->filter(fn (Transaction $t) => $t->planned_transaction_id === null)
+            ->groupBy('account_id');
+
         $plannedByDate = collect();
 
         $plannedTransactions = PlannedTransaction::query()
@@ -83,6 +95,14 @@ final class CalendarView extends Component
             foreach ($planned->occurrencesBetween($gridStart, $gridEnd) as $date) {
                 $dateKey = $date->format('Y-m-d');
                 $existing = $plannedByDate->get($dateKey, []);
+
+                $reconciliationResult = $this->resolveReconciliationStatus(
+                    $planned,
+                    $date,
+                    $linkedByPlannedId,
+                    $unlinkedByAccount,
+                );
+
                 $existing[] = [
                     'id' => null,
                     'category' => $planned->category?->name ?? $planned->description, // @phpstan-ignore nullsafe.neverNull
@@ -92,6 +112,9 @@ final class CalendarView extends Component
                     'source' => 'planned',
                     'isTransfer' => false,
                     'planned_transaction_id' => $planned->id,
+                    'reconciliation_status' => $reconciliationResult['status'],
+                    'linked_transaction_id' => $reconciliationResult['linked_transaction_id'],
+                    'occurrence_date' => $dateKey,
                 ];
                 $plannedByDate->put($dateKey, $existing);
             }
@@ -114,7 +137,10 @@ final class CalendarView extends Component
                     'type' => 'actual',
                     'source' => $t->source->value,
                     'isTransfer' => $t->transfer_pair_id !== null,
-                    'planned_transaction_id' => null,
+                    'planned_transaction_id' => $t->planned_transaction_id,
+                    'reconciliation_status' => null,
+                    'linked_transaction_id' => null,
+                    'occurrence_date' => null,
                 ])->values()->all();
 
                 $week[] = [
@@ -122,7 +148,7 @@ final class CalendarView extends Component
                     'fullDate' => $dateKey,
                     'isCurrentMonth' => $current->month === $monthStart->month && $current->year === $monthStart->year,
                     'isToday' => $current->isSameDay($today),
-                    'transactions' => array_merge($actualTxns, $plannedByDate->get($dateKey, [])),
+                    'transactions' => array_merge($actualTxns, (array) $plannedByDate->get($dateKey, [])),
                 ];
 
                 $current = $current->addDay();
@@ -156,9 +182,45 @@ final class CalendarView extends Component
         ]);
     }
 
+    /**
+     * @param  Collection<int, Collection<int, Transaction>>  $linkedByPlannedId
+     * @param  Collection<int, Collection<int, Transaction>>  $unlinkedByAccount
+     * @return array{status: string, linked_transaction_id: int|null}
+     */
+    private function resolveReconciliationStatus(
+        PlannedTransaction $planned,
+        CarbonImmutable $occurrenceDate,
+        Collection $linkedByPlannedId,
+        Collection $unlinkedByAccount,
+    ): array {
+        $linked = $linkedByPlannedId->get($planned->id, collect())
+            ->first(fn (Transaction $t) => abs($t->post_date->diffInDays($occurrenceDate)) <= ReconciliationMatcher::DATE_TOLERANCE_DAYS);
+
+        if ($linked) {
+            return ['status' => 'reconciled', 'linked_transaction_id' => $linked->id];
+        }
+
+        $hasSuggestion = $unlinkedByAccount->get($planned->account_id, collect())
+            ->contains(function (Transaction $t) use ($planned, $occurrenceDate) {
+                if ($t->direction !== $planned->direction) {
+                    return false;
+                }
+
+                if (abs($t->post_date->diffInDays($occurrenceDate)) > ReconciliationMatcher::DATE_TOLERANCE_DAYS) {
+                    return false;
+                }
+
+                $amountDiff = abs(abs($t->amount) - abs($planned->amount));
+
+                return $amountDiff <= abs($planned->amount) * ReconciliationMatcher::AMOUNT_TOLERANCE;
+            });
+
+        return ['status' => $hasSuggestion ? 'suggested' : 'unreconciled', 'linked_transaction_id' => null];
+    }
+
     private function monthStart(): CarbonImmutable
     {
-        $date = CarbonImmutable::createFromFormat('Y-m', $this->currentMonth);
+        $date = CarbonImmutable::createFromFormat('Y-m-d', $this->currentMonth.'-01');
 
         if (! $date instanceof CarbonImmutable) {
             $date = CarbonImmutable::now();

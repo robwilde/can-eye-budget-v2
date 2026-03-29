@@ -43,7 +43,14 @@
                                     @foreach($day['transactions'] as $txn)
                                         @php
                                             $isPlanned = ($txn['type'] ?? 'actual') === 'planned';
+                                            $reconStatus = $txn['reconciliation_status'] ?? null;
+                                            $isReconciled = $reconStatus === 'reconciled';
+                                            $isSuggested = $reconStatus === 'suggested';
+
                                             $bgColor = match(true) {
+                                                $isReconciled && $txn['direction'] === 'debit' => 'bg-red-50 dark:bg-red-950/30',
+                                                $isReconciled => 'bg-green-50 dark:bg-green-950/30',
+                                                $isSuggested => 'border border-dashed border-amber-400 bg-amber-50/50 dark:border-amber-600 dark:bg-amber-950/20',
                                                 $isPlanned && $txn['direction'] === 'debit' => 'border border-dashed border-red-300 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20',
                                                 $isPlanned => 'border border-dashed border-green-300 bg-green-50/50 dark:border-green-800 dark:bg-green-950/20',
                                                 ($txn['isTransfer'] ?? false) => 'bg-blue-50 dark:bg-blue-950/30',
@@ -51,6 +58,9 @@
                                                 default => 'bg-green-50 dark:bg-green-950/30',
                                             };
                                             $amountColor = match(true) {
+                                                $isReconciled && $txn['direction'] === 'debit' => 'text-red-600 dark:text-red-400',
+                                                $isReconciled => 'text-green-600 dark:text-green-400',
+                                                $isSuggested => 'text-amber-600 dark:text-amber-400',
                                                 $isPlanned && $txn['direction'] === 'debit' => 'text-red-400 dark:text-red-600',
                                                 $isPlanned => 'text-green-400 dark:text-green-600',
                                                 ($txn['isTransfer'] ?? false) => 'text-blue-600 dark:text-blue-400',
@@ -61,11 +71,27 @@
                                         @if($isPlanned)
                                             <button
                                                 type="button"
-                                                wire:click.stop="$dispatch('edit-planned-transaction', { id: {{ $txn['planned_transaction_id'] }} })"
+                                                wire:click.stop="$dispatch('open-reconciliation-modal', { plannedId: {{ $txn['planned_transaction_id'] }}, occurrenceDate: '{{ $txn['occurrence_date'] }}' })"
                                                 class="flex w-full cursor-pointer items-center justify-between gap-1 rounded px-1 py-0.5 text-xs hover:ring-1 hover:ring-indigo-300 dark:hover:ring-indigo-600 {{ $bgColor }}"
                                             >
-                                                <span class="flex items-center gap-0.5 truncate {{ !$day['isCurrentMonth'] ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-500 dark:text-zinc-500' }}">
-                                                    <flux:icon.clock variant="mini" class="size-3 shrink-0"/>
+                                                @php
+                                                    $plannedTextColor = match(true) {
+                                                        !$day['isCurrentMonth'] => 'text-zinc-400 dark:text-zinc-600',
+                                                        $isReconciled => 'text-zinc-600 dark:text-zinc-400',
+                                                        default => 'text-zinc-500 dark:text-zinc-500',
+                                                    };
+                                                @endphp
+                                                <span class="flex items-center gap-0.5 truncate {{ $plannedTextColor }}">
+                                                    @if($isReconciled)
+                                                        <flux:icon.check-circle variant="mini" class="size-3 shrink-0 text-green-500"/>
+                                                    @elseif($isSuggested)
+                                                        <span class="relative">
+                                                            <flux:icon.clock variant="mini" class="size-3 shrink-0"/>
+                                                            <span class="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-amber-400"></span>
+                                                        </span>
+                                                    @else
+                                                        <flux:icon.clock variant="mini" class="size-3 shrink-0"/>
+                                                    @endif
                                                     {{ $txn['category'] }}
                                                 </span>
                                                 <span class="shrink-0 tabular-nums font-medium {{ $amountColor }}">{{ $formatMoney($txn['amount']) }}</span>
@@ -117,22 +143,45 @@
                                 @foreach($day['transactions'] as $txn)
                                     @php
                                         $isPlanned = ($txn['type'] ?? 'actual') === 'planned';
+                                        $reconStatus = $txn['reconciliation_status'] ?? null;
+                                        $isReconciled = $reconStatus === 'reconciled';
+                                        $isSuggested = $reconStatus === 'suggested';
+
                                         $amountColor = match(true) {
+                                            $isReconciled && $txn['direction'] === 'debit' => 'text-red-600 dark:text-red-400',
+                                            $isReconciled => 'text-green-600 dark:text-green-400',
+                                            $isSuggested => 'text-amber-600 dark:text-amber-400',
                                             $isPlanned && $txn['direction'] === 'debit' => 'text-red-400 dark:text-red-600',
                                             $isPlanned => 'text-green-400 dark:text-green-600',
                                             ($txn['isTransfer'] ?? false) => 'text-blue-600 dark:text-blue-400',
                                             $txn['direction'] === 'debit' => 'text-red-600 dark:text-red-400',
                                             default => 'text-green-600 dark:text-green-400',
                                         };
+
+                                        $mobileBorder = match(true) {
+                                            $isReconciled => 'border border-solid ' . ($txn['direction'] === 'debit' ? 'border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20' : 'border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/20'),
+                                            $isSuggested => 'border border-dashed border-amber-400 bg-amber-50/50 dark:border-amber-600 dark:bg-amber-950/20',
+                                            $isPlanned => 'border border-dashed ' . ($txn['direction'] === 'debit' ? 'border-red-300 dark:border-red-800' : 'border-green-300 dark:border-green-800'),
+                                            default => '',
+                                        };
                                     @endphp
                                     @if($isPlanned)
                                         <button
                                             type="button"
-                                            wire:click.stop="$dispatch('edit-planned-transaction', { id: {{ $txn['planned_transaction_id'] }} })"
-                                            class="flex w-full cursor-pointer items-center justify-between rounded-md border border-dashed {{ $txn['direction'] === 'debit' ? 'border-red-300 dark:border-red-800' : 'border-green-300 dark:border-green-800' }} px-2 py-1 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                            wire:click.stop="$dispatch('open-reconciliation-modal', { plannedId: {{ $txn['planned_transaction_id'] }}, occurrenceDate: '{{ $txn['occurrence_date'] }}' })"
+                                            class="flex w-full cursor-pointer items-center justify-between rounded-md px-2 py-1 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 {{ $mobileBorder }}"
                                         >
-                                            <span class="flex items-center gap-1 truncate text-zinc-500 dark:text-zinc-500">
-                                                <flux:icon.clock variant="mini" class="size-3.5 shrink-0"/>
+                                            <span class="flex items-center gap-1 truncate {{ $isReconciled ? 'text-zinc-600 dark:text-zinc-400' : 'text-zinc-500 dark:text-zinc-500' }}">
+                                                @if($isReconciled)
+                                                    <flux:icon.check-circle variant="mini" class="size-3.5 shrink-0 text-green-500"/>
+                                                @elseif($isSuggested)
+                                                    <span class="relative">
+                                                        <flux:icon.clock variant="mini" class="size-3.5 shrink-0"/>
+                                                        <span class="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-amber-400"></span>
+                                                    </span>
+                                                @else
+                                                    <flux:icon.clock variant="mini" class="size-3.5 shrink-0"/>
+                                                @endif
                                                 {{ $txn['category'] }}
                                             </span>
                                             <span class="shrink-0 tabular-nums font-medium {{ $amountColor }}">{{ $formatMoney($txn['amount']) }}</span>
