@@ -73,4 +73,14 @@ final class PlannedTransactionFactory extends Factory
             'is_active' => false,
         ]);
     }
+
+    public function transfer(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'transfer_to_account_id' => Account::factory()->for(
+                User::find($attributes['user_id'])
+            ),
+            'direction' => TransactionDirection::Debit,
+        ]);
+    }
 }
