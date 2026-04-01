@@ -13,6 +13,7 @@ use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Support\AmountParser;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
@@ -59,6 +60,7 @@ final class TransactionModal extends Component
     {
         $this->resetForm();
         $this->date = $date;
+        $this->mode = CarbonImmutable::parse($date)->isFuture() ? 'plan' : 'enter';
         $this->showModal = true;
     }
 

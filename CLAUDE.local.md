@@ -58,6 +58,16 @@ This is non-negotiable. There are zero exceptions to this rule.
 
 ---
 
+## GitHub Account
+
+The repo belongs to `robwilde`. Before running `gh` commands, ensure the correct account is active:
+
+```bash
+gh auth switch --user robwilde
+```
+
+---
+
 ## GitHub Project Board
 
 Track project tasks and roadmap at: https://github.com/users/robwilde/projects/2
