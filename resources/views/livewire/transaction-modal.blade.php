@@ -5,61 +5,84 @@
     $typeColor = match($transactionType) {
         'expense' => 'text-red-600 dark:text-red-400',
         'income' => 'text-green-600 dark:text-green-400',
-        'transfer' => 'text-blue-600 dark:text-blue-400',
+        'transfer' => 'text-amber-600 dark:text-amber-400',
+        default => '',
+    };
+
+    $headerBg = match($transactionType) {
+        'expense' => 'bg-red-50 dark:bg-red-950/30',
+        'income' => 'bg-green-50 dark:bg-green-950/30',
+        'transfer' => 'bg-amber-50 dark:bg-amber-950/30',
+        default => '',
+    };
+
+    $borderColor = match($transactionType) {
+        'expense' => 'border-l-4 border-l-red-500',
+        'income' => 'border-l-4 border-l-green-500',
+        'transfer' => 'border-l-4 border-l-amber-500',
+        default => '',
+    };
+
+    $buttonClasses = match($transactionType) {
+        'expense' => 'bg-red-600! hover:bg-red-700! text-white!',
+        'income' => 'bg-green-600! hover:bg-green-700! text-white!',
+        'transfer' => 'bg-amber-600! hover:bg-amber-700! text-white!',
         default => '',
     };
 @endphp
 <div>
-    <flux:modal wire:model="showModal" class="md:w-lg">
+    <flux:modal wire:model="showModal" class="md:w-lg {{ $borderColor }}">
         <form wire:submit="save" class="space-y-6">
-            <div class="flex items-center justify-between">
-                @if($isBasiqTransaction || $editingTransactionId || $editingPlannedTransactionId)
-                    <flux:heading size="lg" class="{{ $typeColor }}">
-                        @if($transactionType === 'transfer')
-                            {{ __('Between Accounts') }}
-                        @elseif($transactionType === 'income')
-                            {{ __('Income') }}
-                        @else
-                            {{ __('Expense') }}
-                        @endif
-                    </flux:heading>
-                @else
-                    <flux:dropdown>
-                        <flux:button variant="ghost" class="text-lg! font-semibold! {{ $typeColor }}" icon:trailing="chevron-down" type="button">
+            <div class="-mx-6 -mt-6 mb-6 rounded-t-xl px-6 py-4 {{ $headerBg }}">
+                <div class="flex items-center justify-between">
+                    @if($isBasiqTransaction || $editingTransactionId || $editingPlannedTransactionId)
+                        <flux:heading size="lg" class="{{ $typeColor }}">
                             @if($transactionType === 'transfer')
-                                {{ __('transfer between accounts') }}
+                                {{ __('Between Accounts') }}
                             @elseif($transactionType === 'income')
-                                {{ __('income') }}
+                                {{ __('Income') }}
                             @else
-                                {{ __('expense') }}
+                                {{ __('Expense') }}
                             @endif
-                        </flux:button>
+                        </flux:heading>
+                    @else
+                        <flux:dropdown>
+                            <flux:button variant="ghost" class="text-lg! font-semibold! {{ $typeColor }}" icon:trailing="chevron-down" type="button">
+                                @if($transactionType === 'transfer')
+                                    {{ __('transfer between accounts') }}
+                                @elseif($transactionType === 'income')
+                                    {{ __('income') }}
+                                @else
+                                    {{ __('expense') }}
+                                @endif
+                            </flux:button>
 
-                        <flux:menu>
-                            <flux:menu.item wire:click="$set('transactionType', 'expense')" class="text-red-600 dark:text-red-400">
-                                {{ __('expense') }}
-                            </flux:menu.item>
-                            <flux:menu.item wire:click="$set('transactionType', 'income')" class="text-green-600 dark:text-green-400">
-                                {{ __('income') }}
-                            </flux:menu.item>
-                            <flux:menu.item wire:click="$set('transactionType', 'transfer')" class="text-blue-600 dark:text-blue-400">
-                                {{ __('transfer between accounts') }}
-                            </flux:menu.item>
-                        </flux:menu>
-                    </flux:dropdown>
-                @endif
+                            <flux:menu>
+                                <flux:menu.item wire:click="$set('transactionType', 'expense')" class="text-red-600 dark:text-red-400">
+                                    {{ __('expense') }}
+                                </flux:menu.item>
+                                <flux:menu.item wire:click="$set('transactionType', 'income')" class="text-green-600 dark:text-green-400">
+                                    {{ __('income') }}
+                                </flux:menu.item>
+                                <flux:menu.item wire:click="$set('transactionType', 'transfer')" class="text-amber-600 dark:text-amber-400">
+                                    {{ __('transfer between accounts') }}
+                                </flux:menu.item>
+                            </flux:menu>
+                        </flux:dropdown>
+                    @endif
 
-                <div class="flex items-center gap-2">
-                    @if($isBasiqTransaction)
-                        <flux:badge color="blue" size="sm" icon="cloud-arrow-down">
-                            {{ __('Synced from bank') }}
-                        </flux:badge>
-                    @endif
-                    @if($date)
-                        <flux:badge color="zinc">
-                            {{ CarbonImmutable::parse($date)->format('D j M Y') }}
-                        </flux:badge>
-                    @endif
+                    <div class="flex items-center gap-2">
+                        @if($isBasiqTransaction)
+                            <flux:badge color="blue" size="sm" icon="cloud-arrow-down">
+                                {{ __('Synced from bank') }}
+                            </flux:badge>
+                        @endif
+                        @if($date)
+                            <flux:badge color="zinc">
+                                {{ CarbonImmutable::parse($date)->format('D j M Y') }}
+                            </flux:badge>
+                        @endif
+                    </div>
                 </div>
             </div>
 
@@ -222,7 +245,7 @@
                     </flux:button>
                 @endif
                 <flux:spacer/>
-                <flux:button type="submit" variant="primary">
+                <flux:button type="submit" variant="primary" class="{{ $buttonClasses }}">
                     @if($editingPlannedTransactionId)
                         @if($transactionType === 'transfer')
                             {{ __('Update planned transfer') }}

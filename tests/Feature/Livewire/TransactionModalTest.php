@@ -780,7 +780,8 @@ test('plan mode saves to planned_transactions table', function () {
         ->assertSet('showModal', false)
         ->assertHasNoErrors();
 
-    expect(PlannedTransaction::query()->where('user_id', $user->id)->count())->toBe(1)
+    expect(PlannedTransaction::query()->where('user_id', $user->id)->count())
+        ->toBe(1)
         ->and(Transaction::query()->where('user_id', $user->id)->count())->toBe($transactionCountBefore);
 });
 
@@ -1170,4 +1171,79 @@ test('updating planned transfer saves both account ids', function () {
         ->transfer_to_account_id->toBe($newToAccount->id)
         ->amount->toBe(75000)
         ->description->toBe('updated savings');
+});
+
+// ── Header Colors (#119) ──────────────────────────────────────
+
+test('expense header renders red background', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'expense')
+        ->assertSeeHtml('bg-red-50')
+        ->assertSeeHtml('border-l-red-500')
+        ->assertSeeHtml('bg-red-600!');
+});
+
+test('income header renders green background', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'income')
+        ->assertSeeHtml('bg-green-50')
+        ->assertSeeHtml('border-l-green-500')
+        ->assertSeeHtml('bg-green-600!');
+});
+
+test('transfer header renders amber background', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->assertSeeHtml('bg-amber-50')
+        ->assertSeeHtml('border-l-amber-500')
+        ->assertSeeHtml('bg-amber-600!');
+});
+
+test('transfer uses amber not blue', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->assertSeeHtml('text-amber-600')
+        ->assertDontSeeHtml('text-blue-600');
+});
+
+test('submit button has type-specific classes', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'expense')
+        ->assertSeeHtml('bg-red-600!')
+        ->assertSeeHtml('hover:bg-red-700!')
+        ->assertSeeHtml('text-white!');
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'income')
+        ->assertSeeHtml('bg-green-600!')
+        ->assertSeeHtml('hover:bg-green-700!');
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->assertSeeHtml('bg-amber-600!')
+        ->assertSeeHtml('hover:bg-amber-700!');
 });
