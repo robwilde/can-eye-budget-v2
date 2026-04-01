@@ -86,7 +86,7 @@
                 </div>
             </div>
 
-            @if(!$editingTransactionId && !$editingPlannedTransactionId && $transactionType !== 'transfer')
+            @if(!$editingTransactionId && !$editingPlannedTransactionId)
                 <div class="flex items-center justify-center gap-4">
                     <flux:text size="sm" class="text-zinc-500">{{ __('Enter vs Plan') }}</flux:text>
                     <div class="flex gap-1">
