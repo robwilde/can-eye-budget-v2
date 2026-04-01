@@ -933,14 +933,52 @@ test('plan mode allows transfer transaction type', function () {
         ->description->toBe('monthly savings');
 });
 
-test('plan toggle hidden for transfers', function () {
+test('plan toggle visible for transfers', function () {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('transactionType', 'transfer')
-        ->assertDontSee(__('Enter vs Plan'));
+        ->assertSee(__('Enter vs Plan'));
+});
+
+test('auto-selects enter mode for today date', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: today()->format('Y-m-d'))
+        ->assertSet('mode', 'enter');
+});
+
+test('auto-selects enter mode for past date', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: today()->subDay()->format('Y-m-d'))
+        ->assertSet('mode', 'enter');
+});
+
+test('auto-selects plan mode for future date', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: today()->addDay()->format('Y-m-d'))
+        ->assertSet('mode', 'plan');
+});
+
+test('user can manually override auto-selected mode', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: today()->addDay()->format('Y-m-d'))
+        ->assertSet('mode', 'plan')
+        ->set('mode', 'enter')
+        ->assertSet('mode', 'enter');
 });
 
 test('plan toggle hidden when editing', function () {
