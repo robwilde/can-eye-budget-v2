@@ -112,13 +112,26 @@
                 </div>
             @endif
 
-            <flux:input
+            @if($transactionType === 'transfer')
+                <flux:input
+                    wire:key="description-transfer"
                     wire:model.blur="descriptionInput"
-                    :label="$mode === 'plan' ? __('Planned amount with description') : __('Amount with description')"
-                    placeholder="4*15 zoo tickets (tip is ignored)"
+                    :label="$mode === 'plan' ? __('Planned amount with description') : __('Actual amount with description')"
+                    placeholder="100 savings transfer"
                     required
                     :disabled="$isBasiqTransaction"
-            />
+                />
+            @else
+                <flux:textarea
+                    wire:key="description-non-transfer"
+                    wire:model.blur="descriptionInput"
+                    :label="$mode === 'plan' ? __('Planned amount with description') : __('Actual amount with description')"
+                    placeholder="4*15 zoo tickets&#10;(100 in parentheses is ignored)"
+                    rows="2"
+                    required
+                    :disabled="$isBasiqTransaction"
+                />
+            @endif
 
             @if($isBasiqTransaction)
                 <flux:input
