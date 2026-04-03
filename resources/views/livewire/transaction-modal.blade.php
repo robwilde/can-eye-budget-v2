@@ -182,13 +182,15 @@
                 @endforeach
             </flux:select>
 
-            <flux:input
-                    wire:model="date"
-                    :label="__('Date')"
-                    type="date"
-                    required
-                    :disabled="$isBasiqTransaction"
-            />
+            @if($mode === 'plan')
+                <flux:input
+                        wire:model="date"
+                        :label="__('Date')"
+                        type="date"
+                        required
+                        :disabled="$isBasiqTransaction"
+                />
+            @endif
 
             @if($mode === 'plan')
                 <flux:select wire:model="frequency" :label="__('Frequency')" required>
