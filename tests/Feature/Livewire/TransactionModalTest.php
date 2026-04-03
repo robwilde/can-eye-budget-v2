@@ -207,7 +207,9 @@ test('resets form after save', function () {
         ->assertSet('descriptionInput', '')
         ->assertSet('accountId', null)
         ->assertSet('categoryId', null)
-        ->assertSet('transactionType', 'expense');
+        ->assertSet('transactionType', 'expense')
+        ->assertSet('transferAmount', '')
+        ->assertSet('transferDescription', '');
 });
 
 test('cannot save to another user account', function () {
@@ -485,7 +487,8 @@ test('transfer creates two linked transactions', function () {
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('transactionType', 'transfer')
-        ->set('descriptionInput', '500 monthly savings')
+        ->set('transferAmount', '500')
+        ->set('transferDescription', 'monthly savings')
         ->set('accountId', $fromAccount->id)
         ->set('transferToAccountId', $toAccount->id)
         ->call('save')
@@ -520,7 +523,8 @@ test('transfer debit and credit have correct directions', function () {
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('transactionType', 'transfer')
-        ->set('descriptionInput', '100 transfer')
+        ->set('transferAmount', '100')
+        ->set('transferDescription', 'transfer')
         ->set('accountId', $fromAccount->id)
         ->set('transferToAccountId', $toAccount->id)
         ->call('save');
@@ -548,7 +552,8 @@ test('cannot transfer to same account', function () {
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('transactionType', 'transfer')
-        ->set('descriptionInput', '100 self transfer')
+        ->set('transferAmount', '100')
+        ->set('transferDescription', 'self transfer')
         ->set('accountId', $account->id)
         ->set('transferToAccountId', $account->id)
         ->call('save')
@@ -590,7 +595,8 @@ test('edit transfer opens with pre-filled data for both sides', function () {
         ->assertSet('transactionType', 'transfer')
         ->assertSet('accountId', $fromAccount->id)
         ->assertSet('transferToAccountId', $toAccount->id)
-        ->assertSet('descriptionInput', '100.00 savings transfer');
+        ->assertSet('transferAmount', '100.00')
+        ->assertSet('transferDescription', 'savings transfer');
 });
 
 test('edit transfer updates both sides', function () {
@@ -622,7 +628,8 @@ test('edit transfer updates both sides', function () {
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('edit-transaction', id: $debit->id)
-        ->set('descriptionInput', '200 updated transfer')
+        ->set('transferAmount', '200')
+        ->set('transferDescription', 'updated transfer')
         ->call('save')
         ->assertSet('showModal', false);
 
@@ -937,7 +944,8 @@ test('plan mode allows transfer transaction type', function () {
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('mode', 'plan')
         ->set('transactionType', 'transfer')
-        ->set('descriptionInput', '500 monthly savings')
+        ->set('transferAmount', '500')
+        ->set('transferDescription', 'monthly savings')
         ->set('accountId', $fromAccount->id)
         ->set('transferToAccountId', $toAccount->id)
         ->call('save')
@@ -1124,7 +1132,8 @@ test('planned transfer requires transfer_to_account_id', function () {
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('mode', 'plan')
         ->set('transactionType', 'transfer')
-        ->set('descriptionInput', '500 savings')
+        ->set('transferAmount', '500')
+        ->set('transferDescription', 'savings')
         ->set('accountId', $account->id)
         ->set('transferToAccountId', null)
         ->call('save')
@@ -1140,7 +1149,8 @@ test('planned transfer cannot use same account for both sides', function () {
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('mode', 'plan')
         ->set('transactionType', 'transfer')
-        ->set('descriptionInput', '500 savings')
+        ->set('transferAmount', '500')
+        ->set('transferDescription', 'savings')
         ->set('accountId', $account->id)
         ->set('transferToAccountId', $account->id)
         ->call('save')
@@ -1170,7 +1180,8 @@ test('editing planned transfer opens with pre-filled transfer data', function ()
         ->assertSet('transactionType', 'transfer')
         ->assertSet('accountId', $fromAccount->id)
         ->assertSet('transferToAccountId', $toAccount->id)
-        ->assertSet('descriptionInput', '500.00 monthly savings');
+        ->assertSet('transferAmount', '500.00')
+        ->assertSet('transferDescription', 'monthly savings');
 });
 
 // ── Type Selector UI (#118) ────────────────────────────────────
@@ -1219,7 +1230,8 @@ test('updating planned transfer saves both account ids', function () {
         ->test(TransactionModal::class)
         ->dispatch('edit-planned-transaction', id: $planned->id)
         ->set('transferToAccountId', $newToAccount->id)
-        ->set('descriptionInput', '750 updated savings')
+        ->set('transferAmount', '750')
+        ->set('transferDescription', 'updated savings')
         ->call('save')
         ->assertHasNoErrors()
         ->assertSet('showModal', false);
@@ -1360,12 +1372,12 @@ test('switching from transfer to expense hides notes field', function () {
         ->set('transactionType', 'transfer')
         ->assertSee(__('Transfer description'))
         ->set('transactionType', 'expense')
-        ->assertSet('notes', '')
+        ->assertSet('transferDescription', '')
         ->assertDontSee(__('Notes'))
         ->assertDontSee(__('Transfer description'));
 });
 
-test('switching from transfer clears notes before save', function () {
+test('switching from transfer clears transfer fields before save', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create();
@@ -1374,9 +1386,11 @@ test('switching from transfer clears notes before save', function () {
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('transactionType', 'transfer')
-        ->set('notes', 'Transfer memo that should be cleared')
+        ->set('transferDescription', 'Transfer memo that should be cleared')
+        ->set('transferAmount', '100')
         ->set('transactionType', 'expense')
-        ->assertSet('notes', '')
+        ->assertSet('transferDescription', '')
+        ->assertSet('transferAmount', '')
         ->set('descriptionInput', '50 Groceries')
         ->set('accountId', $account->id)
         ->set('categoryId', $category->id)
@@ -1387,4 +1401,112 @@ test('switching from transfer clears notes before save', function () {
     expect($transaction)
         ->not->toBeNull()
         ->notes->toBeNull();
+});
+
+// ── Transfer Form Redesign (#124) ─────────────────────────────
+
+test('transfer amount validation rejects zero', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->set('transferAmount', '0')
+        ->set('accountId', $fromAccount->id)
+        ->set('transferToAccountId', $toAccount->id)
+        ->call('save')
+        ->assertHasErrors(['transferAmount']);
+
+    expect(Transaction::query()->where('user_id', $user->id)->count())->toBe(0);
+});
+
+test('transfer amount validation rejects non-numeric', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->set('transferAmount', 'abc')
+        ->set('accountId', $fromAccount->id)
+        ->set('transferToAccountId', $toAccount->id)
+        ->call('save')
+        ->assertHasErrors(['transferAmount']);
+});
+
+test('transfer description maps to transaction description not notes', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->set('transferAmount', '250')
+        ->set('transferDescription', 'rent contribution')
+        ->set('accountId', $fromAccount->id)
+        ->set('transferToAccountId', $toAccount->id)
+        ->call('save');
+
+    $debit = Transaction::query()
+        ->where('user_id', $user->id)
+        ->where('direction', TransactionDirection::Debit)
+        ->first();
+
+    expect($debit)
+        ->description->toBe('rent contribution')
+        ->notes->toBeNull();
+});
+
+test('switching to transfer clears descriptionInput', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('descriptionInput', '50 groceries')
+        ->set('transactionType', 'transfer')
+        ->assertSet('descriptionInput', '');
+});
+
+test('swap accounts swaps from and to', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->set('accountId', $fromAccount->id)
+        ->set('transferToAccountId', $toAccount->id)
+        ->call('swapAccounts')
+        ->assertSet('accountId', $toAccount->id)
+        ->assertSet('transferToAccountId', $fromAccount->id);
+});
+
+test('transfer form hides parsed amount box', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->assertDontSee(__('Parsed amount'));
+});
+
+test('non-transfer form shows parsed amount box', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'expense')
+        ->assertSee(__('Parsed amount'));
 });
