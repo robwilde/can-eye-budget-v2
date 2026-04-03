@@ -45,6 +45,10 @@ final class TransactionModal extends Component
 
     public ?int $transferToAccountId = null;
 
+    public string $transferAmount = '';
+
+    public string $transferDescription = '';
+
     public string $mode = 'enter';
 
     public ?int $editingPlannedTransactionId = null;
@@ -104,17 +108,20 @@ final class TransactionModal extends Component
                 $this->accountId = $debitSide->account_id;
                 $this->transferToAccountId = $creditSide->account_id;
             }
+
+            $this->transferAmount = number_format($transaction->amount / 100, 2, '.', '');
+            $this->transferDescription = $transaction->description ?? '';
         } else {
             $this->transactionType = $transaction->direction === TransactionDirection::Debit
                 ? 'expense'
                 : 'income';
 
             $this->accountId = $transaction->account_id;
-        }
 
-        $dollars = number_format($transaction->amount / 100, 2, '.', '');
-        $description = $transaction->description ?? '';
-        $this->descriptionInput = $description !== '' ? "{$dollars} {$description}" : $dollars;
+            $dollars = number_format($transaction->amount / 100, 2, '.', '');
+            $description = $transaction->description ?? '';
+            $this->descriptionInput = $description !== '' ? "{$dollars} {$description}" : $dollars;
+        }
 
         if ($this->isBasiqTransaction) {
             $this->cleanDescription = $transaction->clean_description ?? '';
@@ -146,15 +153,17 @@ final class TransactionModal extends Component
         if ($planned->transfer_to_account_id !== null) {
             $this->transactionType = 'transfer';
             $this->transferToAccountId = $planned->transfer_to_account_id;
+            $this->transferAmount = number_format($planned->amount / 100, 2, '.', '');
+            $this->transferDescription = $planned->description ?? '';
         } else {
             $this->transactionType = $planned->direction === TransactionDirection::Debit
                 ? 'expense'
                 : 'income';
-        }
 
-        $dollars = number_format($planned->amount / 100, 2, '.', '');
-        $description = $planned->description ?? '';
-        $this->descriptionInput = $description !== '' ? "{$dollars} {$description}" : $dollars;
+            $dollars = number_format($planned->amount / 100, 2, '.', '');
+            $description = $planned->description ?? '';
+            $this->descriptionInput = $description !== '' ? "{$dollars} {$description}" : $dollars;
+        }
 
         $this->accountId = $planned->account_id;
         $this->categoryId = $planned->category_id;
@@ -205,9 +214,21 @@ final class TransactionModal extends Component
 
     public function updatedTransactionType(): void
     {
-        if ($this->transactionType !== 'transfer' && ! $this->isBasiqTransaction) {
-            $this->notes = '';
+        if ($this->transactionType === 'transfer') {
+            $this->descriptionInput = '';
+        } else {
+            $this->transferAmount = '';
+            $this->transferDescription = '';
+
+            if (! $this->isBasiqTransaction) {
+                $this->notes = '';
+            }
         }
+    }
+
+    public function swapAccounts(): void
+    {
+        [$this->accountId, $this->transferToAccountId] = [$this->transferToAccountId, $this->accountId];
     }
 
     /**
@@ -287,11 +308,9 @@ final class TransactionModal extends Component
 
     private function createTransaction(): bool
     {
-        $parsed = AmountParser::parse($this->descriptionInput);
+        $resolved = $this->resolveAmountAndDescription();
 
-        if ($parsed->amount <= 0) {
-            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
-
+        if ($resolved === false) {
             return false;
         }
 
@@ -299,11 +318,11 @@ final class TransactionModal extends Component
             'user_id' => auth()->id(),
             'account_id' => $this->accountId,
             'category_id' => $this->categoryId,
-            'amount' => $parsed->amount,
+            'amount' => $resolved['amount'],
             'direction' => $this->transactionType === 'expense'
                 ? TransactionDirection::Debit
                 : TransactionDirection::Credit,
-            'description' => $parsed->description,
+            'description' => $resolved['description'],
             'post_date' => $this->date,
             'status' => TransactionStatus::Posted,
             'source' => TransactionSource::Manual,
@@ -318,24 +337,21 @@ final class TransactionModal extends Component
      */
     private function createTransfer(): bool
     {
-        $parsed = AmountParser::parse($this->descriptionInput);
+        $resolved = $this->resolveAmountAndDescription();
 
-        if ($parsed->amount <= 0) {
-            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
-
+        if ($resolved === false) {
             return false;
         }
 
-        DB::transaction(function () use ($parsed): void {
+        DB::transaction(function () use ($resolved): void {
             $shared = [
                 'user_id' => auth()->id(),
                 'category_id' => $this->categoryId,
-                'amount' => $parsed->amount,
-                'description' => $parsed->description,
+                'amount' => $resolved['amount'],
+                'description' => $resolved['description'],
                 'post_date' => $this->date,
                 'status' => TransactionStatus::Posted,
                 'source' => TransactionSource::Manual,
-                'notes' => $this->notes !== '' ? $this->notes : null,
             ];
 
             $debit = Transaction::query()->create($shared + [
@@ -357,11 +373,9 @@ final class TransactionModal extends Component
 
     private function createPlannedTransaction(): bool
     {
-        $parsed = AmountParser::parse($this->descriptionInput);
+        $resolved = $this->resolveAmountAndDescription();
 
-        if ($parsed->amount <= 0) {
-            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
-
+        if ($resolved === false) {
             return false;
         }
 
@@ -377,9 +391,9 @@ final class TransactionModal extends Component
                 ? $this->transferToAccountId
                 : null,
             'category_id' => $this->categoryId,
-            'amount' => $parsed->amount,
+            'amount' => $resolved['amount'],
             'direction' => $direction,
-            'description' => $parsed->description,
+            'description' => $resolved['description'],
             'start_date' => $this->date,
             'frequency' => RecurrenceFrequency::from($this->frequency),
             'until_date' => $this->untilType === 'until-date' ? $this->untilDate : null,
@@ -399,11 +413,9 @@ final class TransactionModal extends Component
             return false;
         }
 
-        $parsed = AmountParser::parse($this->descriptionInput);
+        $resolved = $this->resolveAmountAndDescription();
 
-        if ($parsed->amount <= 0) {
-            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
-
+        if ($resolved === false) {
             return false;
         }
 
@@ -418,9 +430,9 @@ final class TransactionModal extends Component
                 ? $this->transferToAccountId
                 : null,
             'category_id' => $this->categoryId,
-            'amount' => $parsed->amount,
+            'amount' => $resolved['amount'],
             'direction' => $direction,
-            'description' => $parsed->description,
+            'description' => $resolved['description'],
             'start_date' => $this->date,
             'frequency' => RecurrenceFrequency::from($this->frequency),
             'until_date' => $this->untilType === 'until-date' ? $this->untilDate : null,
@@ -449,22 +461,20 @@ final class TransactionModal extends Component
             return true;
         }
 
-        $parsed = AmountParser::parse($this->descriptionInput);
+        $resolved = $this->resolveAmountAndDescription();
 
-        if ($parsed->amount <= 0) {
-            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
-
+        if ($resolved === false) {
             return false;
         }
 
         $transaction->update([
             'account_id' => $this->accountId,
             'category_id' => $this->categoryId,
-            'amount' => $parsed->amount,
+            'amount' => $resolved['amount'],
             'direction' => $this->transactionType === 'expense'
                 ? TransactionDirection::Debit
                 : TransactionDirection::Credit,
-            'description' => $parsed->description,
+            'description' => $resolved['description'],
             'post_date' => $this->date,
             'notes' => $this->notes !== '' ? $this->notes : null,
         ]);
@@ -493,21 +503,18 @@ final class TransactionModal extends Component
             return false;
         }
 
-        $parsed = AmountParser::parse($this->descriptionInput);
+        $resolved = $this->resolveAmountAndDescription();
 
-        if ($parsed->amount <= 0) {
-            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
-
+        if ($resolved === false) {
             return false;
         }
 
-        DB::transaction(function () use ($transaction, $pair, $parsed): void {
+        DB::transaction(function () use ($transaction, $pair, $resolved): void {
             $shared = [
                 'category_id' => $this->categoryId,
-                'amount' => $parsed->amount,
-                'description' => $parsed->description,
+                'amount' => $resolved['amount'],
+                'description' => $resolved['description'],
                 'post_date' => $this->date,
-                'notes' => $this->notes !== '' ? $this->notes : null,
             ];
 
             $debitSide = $transaction->direction === TransactionDirection::Debit ? $transaction : $pair;
@@ -518,6 +525,30 @@ final class TransactionModal extends Component
         });
 
         return true;
+    }
+
+    /** @return array{amount: int, description: ?string}|false */
+    private function resolveAmountAndDescription(): array|false
+    {
+        if ($this->transactionType === 'transfer') {
+            $amount = (int) round((float) $this->transferAmount * 100);
+            $transferDescription = mb_trim($this->transferDescription);
+            $description = $transferDescription !== '' ? $transferDescription : null;
+            $errorKey = 'transferAmount';
+        } else {
+            $parsed = AmountParser::parse($this->descriptionInput);
+            $amount = $parsed->amount;
+            $description = $parsed->description;
+            $errorKey = 'descriptionInput';
+        }
+
+        if ($amount <= 0) {
+            $this->addError($errorKey, __('The amount must be greater than zero.'));
+
+            return false;
+        }
+
+        return ['amount' => $amount, 'description' => $description];
     }
 
     private function isTransfer(): bool
@@ -546,6 +577,8 @@ final class TransactionModal extends Component
         $this->notes = '';
         $this->cleanDescription = '';
         $this->transferToAccountId = null;
+        $this->transferAmount = '';
+        $this->transferDescription = '';
         $this->mode = 'enter';
         $this->frequency = 'every-month';
         $this->untilType = 'always';
@@ -556,10 +589,20 @@ final class TransactionModal extends Component
     /** @return array<string, mixed> */
     private function formRules(): array
     {
+        $isTransfer = $this->isTransfer();
+
         $rules = [
             'mode' => ['required', Rule::in(['enter', 'plan'])],
             'transactionType' => ['required', Rule::in(['expense', 'income', 'transfer'])],
-            'descriptionInput' => ['required', 'string', 'max:255'],
+            'descriptionInput' => $isTransfer
+                ? ['nullable', 'string', 'max:255']
+                : ['required', 'string', 'max:255'],
+            'transferAmount' => $isTransfer
+                ? ['required', 'numeric', 'min:0.01']
+                : ['nullable'],
+            'transferDescription' => $isTransfer
+                ? ['nullable', 'string', 'max:255']
+                : ['nullable'],
             'accountId' => [
                 'required',
                 Rule::exists('accounts', 'id')->where('user_id', auth()->id()),
@@ -571,7 +614,7 @@ final class TransactionModal extends Component
             'date' => ['required', 'date_format:Y-m-d'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'cleanDescription' => ['nullable', 'string', 'max:255'],
-            'transferToAccountId' => $this->isTransfer()
+            'transferToAccountId' => $isTransfer
                 ? [
                     'required',
                     Rule::exists('accounts', 'id')->where('user_id', auth()->id()),
