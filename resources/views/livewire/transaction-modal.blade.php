@@ -35,7 +35,7 @@
         <form wire:submit="save" class="space-y-6">
             <div class="-mx-6 -mt-6 mb-6 rounded-t-xl px-6 py-4 {{ $headerBg }}">
                 <div class="flex items-center justify-between">
-                    @if($isBasiqTransaction || $editingTransactionId || $editingPlannedTransactionId)
+                    @if($isBasiqTransaction)
                         <flux:heading size="lg" class="{{ $typeColor }}">
                             @if($transactionType === 'transfer')
                                 {{ __('Between Accounts') }}
@@ -58,15 +58,19 @@
                             </flux:button>
 
                             <flux:menu>
-                                <flux:menu.item wire:click="$set('transactionType', 'expense')" class="text-red-600 dark:text-red-400">
-                                    {{ __('expense') }}
-                                </flux:menu.item>
-                                <flux:menu.item wire:click="$set('transactionType', 'income')" class="text-green-600 dark:text-green-400">
-                                    {{ __('income') }}
-                                </flux:menu.item>
-                                <flux:menu.item wire:click="$set('transactionType', 'transfer')" class="text-amber-600 dark:text-amber-400">
-                                    {{ __('transfer between accounts') }}
-                                </flux:menu.item>
+                                @if(!$originalWasTransfer || (!$editingTransactionId && !$editingPlannedTransactionId))
+                                    <flux:menu.item wire:click="$set('transactionType', 'expense')" class="text-red-600 dark:text-red-400">
+                                        {{ __('expense') }}
+                                    </flux:menu.item>
+                                    <flux:menu.item wire:click="$set('transactionType', 'income')" class="text-green-600 dark:text-green-400">
+                                        {{ __('income') }}
+                                    </flux:menu.item>
+                                @endif
+                                @if($originalWasTransfer || (!$editingTransactionId && !$editingPlannedTransactionId))
+                                    <flux:menu.item wire:click="$set('transactionType', 'transfer')" class="text-amber-600 dark:text-amber-400">
+                                        {{ __('transfer between accounts') }}
+                                    </flux:menu.item>
+                                @endif
                             </flux:menu>
                         </flux:dropdown>
                     @endif
@@ -78,9 +82,17 @@
                             </flux:badge>
                         @endif
                         @if($date)
-                            <flux:badge color="zinc">
-                                {{ CarbonImmutable::parse($date)->format('D j M Y') }}
-                            </flux:badge>
+                            @if($isBasiqTransaction)
+                                <flux:badge color="zinc">
+                                    {{ CarbonImmutable::parse($date)->format('D j M Y') }}
+                                </flux:badge>
+                            @else
+                                <flux:input
+                                    type="date"
+                                    wire:model.live="date"
+                                    class="py-1! text-sm!"
+                                />
+                            @endif
                         @endif
                     </div>
                 </div>
@@ -113,60 +125,15 @@
             @endif
 
             @if($transactionType === 'transfer')
-                {{-- Transfer layout: From account + inline amount --}}
-                <div class="flex items-end gap-3">
-                    <div class="flex-1">
-                        <flux:select
-                                wire:model="accountId"
-                                :label="__('From account')"
-                                required
-                        >
-                            <flux:select.option value="">{{ __('Select account') }}</flux:select.option>
-                            @foreach($accounts as $account)
-                                <flux:select.option value="{{ $account->id }}">
-                                    {{ $account->name }} ({{ $formatMoney($account->balance) }})
-                                </flux:select.option>
-                            @endforeach
-                        </flux:select>
-                    </div>
-                    <div class="flex items-end gap-1.5">
-                        <flux:input
-                                wire:model.blur="transferAmount"
-                                type="number"
-                                step="0.01"
-                                min="0.01"
-                                placeholder="0"
-                                class="w-24 tabular-nums"
-                                aria-label="{{ __('Transfer amount') }}"
-                                required
-                        />
-                        <flux:text class="pb-2 text-zinc-500">{{ __('AUD') }}</flux:text>
-                    </div>
-                </div>
-
-                {{-- To account with swap button --}}
-                <div class="flex items-end gap-3">
-                    <div class="flex-1">
-                        <flux:select wire:model="transferToAccountId" :label="__('To account')" required>
-                            <flux:select.option value="">{{ __('Select account') }}</flux:select.option>
-                            @foreach($accounts as $account)
-                                <flux:select.option value="{{ $account->id }}">
-                                    {{ $account->name }} ({{ $formatMoney($account->balance) }})
-                                </flux:select.option>
-                            @endforeach
-                        </flux:select>
-                    </div>
-                    <flux:button
-                            variant="ghost"
-                            size="sm"
-                            wire:click="swapAccounts"
-                            type="button"
-                            icon="arrows-right-left"
-                            class="mb-0.5"
-                    />
-                </div>
+                <flux:input
+                    wire:key="description-transfer"
+                    wire:model.blur="descriptionInput"
+                    :label="$mode === 'plan' ? __('Planned amount with description') : __('Actual amount with description')"
+                    placeholder="100 savings transfer"
+                    required
+                    :disabled="$isBasiqTransaction"
+                />
             @else
-                {{-- Non-transfer layout: textarea + parsed amount + account --}}
                 <flux:textarea
                     wire:key="description-non-transfer"
                     wire:model.blur="descriptionInput"
@@ -176,28 +143,39 @@
                     required
                     :disabled="$isBasiqTransaction"
                 />
+            @endif
 
-                @if($isBasiqTransaction)
-                    <flux:input
-                            wire:model.blur="cleanDescription"
-                            :label="__('Clean description')"
-                            :placeholder="__('Your description for this transaction')"
-                    />
-                @endif
+            @if($isBasiqTransaction)
+                <flux:input
+                        wire:model.blur="cleanDescription"
+                        :label="__('Clean description')"
+                        :placeholder="__('Your description for this transaction')"
+                />
+            @endif
 
-                <div class="rounded-lg bg-zinc-50 px-4 py-3 dark:bg-zinc-800">
-                    <flux:text size="sm" class="text-zinc-500">{{ __('Parsed amount') }}</flux:text>
-                    <div class="mt-1 text-lg font-semibold tabular-nums">
-                        {{ $formatMoney($parsedAmount) }} — {{ __('Australian Dollar') }}
-                    </div>
+            <div class="rounded-lg bg-zinc-50 px-4 py-3 dark:bg-zinc-800">
+                <flux:text size="sm" class="text-zinc-500">{{ __('Parsed amount') }}</flux:text>
+                <div class="mt-1 text-lg font-semibold tabular-nums">
+                    {{ $formatMoney($parsedAmount) }}
                 </div>
+            </div>
 
-                <flux:select
-                        wire:model="accountId"
-                        :label="__('Account')"
-                        required
-                        :disabled="$isBasiqTransaction"
-                >
+            <flux:select
+                    wire:model="accountId"
+                    :label="$transactionType === 'transfer' ? __('From account') : __('Account')"
+                    required
+                    :disabled="$isBasiqTransaction"
+            >
+                <flux:select.option value="">{{ __('Select account') }}</flux:select.option>
+                @foreach($accounts as $account)
+                    <flux:select.option value="{{ $account->id }}">
+                        {{ $account->name }} ({{ $formatMoney($account->balance) }})
+                    </flux:select.option>
+                @endforeach
+            </flux:select>
+
+            @if($transactionType === 'transfer')
+                <flux:select wire:model="transferToAccountId" :label="__('To account')" required>
                     <flux:select.option value="">{{ __('Select account') }}</flux:select.option>
                     @foreach($accounts as $account)
                         <flux:select.option value="{{ $account->id }}">
@@ -266,17 +244,10 @@
                 </div>
             @endif
 
-            @if($transactionType === 'transfer')
-                <flux:textarea
-                        wire:model="transferDescription"
-                        :label="__('Transfer description')"
-                        :placeholder="__('Optional description')"
-                        rows="2"
-                />
-            @elseif($isBasiqTransaction)
+            @if($transactionType === 'transfer' || $isBasiqTransaction)
                 <flux:textarea
                         wire:model="notes"
-                        :label="__('Notes')"
+                        :label="$transactionType === 'transfer' ? __('Transfer description') : __('Notes')"
                         :placeholder="__('Optional notes')"
                         rows="2"
                 />
