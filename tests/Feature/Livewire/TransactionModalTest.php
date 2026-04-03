@@ -1305,3 +1305,86 @@ test('submit button has type-specific classes', function () {
         ->assertSeeHtml('bg-amber-600!')
         ->assertSeeHtml('hover:bg-amber-700!');
 });
+
+test('expense type hides notes field', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->assertSet('transactionType', 'expense')
+        ->assertDontSee(__('Notes'))
+        ->assertDontSee(__('Transfer description'));
+});
+
+test('income type hides notes field', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'income')
+        ->assertDontSee(__('Notes'))
+        ->assertDontSee(__('Transfer description'));
+});
+
+test('transfer type shows notes field with transfer description label', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->assertSee(__('Transfer description'))
+        ->assertDontSee(__('Notes'));
+});
+
+test('basiq transaction shows notes field with notes label', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->assertSet('isBasiqTransaction', true)
+        ->assertSee(__('Notes'));
+});
+
+test('switching from transfer to expense hides notes field', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->assertSee(__('Transfer description'))
+        ->set('transactionType', 'expense')
+        ->assertSet('notes', '')
+        ->assertDontSee(__('Notes'))
+        ->assertDontSee(__('Transfer description'));
+});
+
+test('switching from transfer clears notes before save', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->set('notes', 'Transfer memo that should be cleared')
+        ->set('transactionType', 'expense')
+        ->assertSet('notes', '')
+        ->set('descriptionInput', '50 Groceries')
+        ->set('accountId', $account->id)
+        ->set('categoryId', $category->id)
+        ->call('save');
+
+    $transaction = Transaction::query()->where('user_id', $user->id)->first();
+
+    expect($transaction)
+        ->not->toBeNull()
+        ->notes->toBeNull();
+});

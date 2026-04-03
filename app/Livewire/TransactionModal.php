@@ -203,6 +203,13 @@ final class TransactionModal extends Component
         $this->dispatch('transaction-saved');
     }
 
+    public function updatedTransactionType(): void
+    {
+        if ($this->transactionType !== 'transfer' && ! $this->isBasiqTransaction) {
+            $this->notes = '';
+        }
+    }
+
     /**
      * @throws Throwable
      */
