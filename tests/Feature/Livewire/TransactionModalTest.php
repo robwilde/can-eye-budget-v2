@@ -762,6 +762,26 @@ test('enter mode hides plan fields', function () {
         ->assertDontSee(__('Frequency'));
 });
 
+test('enter mode hides date input field', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->assertSet('mode', 'enter')
+        ->assertDontSee(__('Date'));
+});
+
+test('plan mode shows date input field', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('mode', 'plan')
+        ->assertSee(__('Date'));
+});
+
 test('plan mode saves to planned_transactions table', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
