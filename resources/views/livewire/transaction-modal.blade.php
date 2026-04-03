@@ -232,12 +232,14 @@
                 </div>
             @endif
 
-            <flux:textarea
-                    wire:model="notes"
-                    :label="__('Notes')"
-                    :placeholder="__('Optional notes')"
-                    rows="2"
-            />
+            @if($transactionType === 'transfer' || $isBasiqTransaction)
+                <flux:textarea
+                        wire:model="notes"
+                        :label="$transactionType === 'transfer' ? __('Transfer description') : __('Notes')"
+                        :placeholder="__('Optional notes')"
+                        rows="2"
+                />
+            @endif
 
             <div class="flex">
                 @if($editingPlannedTransactionId)
