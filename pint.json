@@ -23,6 +23,7 @@
     "modernize_types_casting": true,
     "new_with_parentheses": false,
     "no_superfluous_elseif": true,
+    "no_superfluous_phpdoc_tags": false,
     "no_useless_else": true,
     "no_multiple_statements_per_line": true,
     "ordered_class_elements": {
