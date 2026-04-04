@@ -27,6 +27,7 @@ final readonly class ReconciliationMatcher
 
         return Transaction::query()
             ->where('user_id', $planned->user_id)
+            ->current()
             ->where('account_id', $planned->account_id)
             ->where('direction', $planned->direction)
             ->whereNull('planned_transaction_id')
@@ -48,6 +49,7 @@ final readonly class ReconciliationMatcher
 
         return Transaction::query()
             ->where('user_id', $planned->user_id)
+            ->current()
             ->where('planned_transaction_id', $planned->id)
             ->whereBetween('post_date', [$dateFrom, $dateTo])
             ->with('account:id,name')
