@@ -58,19 +58,15 @@
                             </flux:button>
 
                             <flux:menu>
-                                @if(!$originalWasTransfer || (!$editingTransactionId && !$editingPlannedTransactionId))
-                                    <flux:menu.item wire:click="$set('transactionType', 'expense')" class="text-red-600 dark:text-red-400">
-                                        {{ __('expense') }}
-                                    </flux:menu.item>
-                                    <flux:menu.item wire:click="$set('transactionType', 'income')" class="text-green-600 dark:text-green-400">
-                                        {{ __('income') }}
-                                    </flux:menu.item>
-                                @endif
-                                @if($originalWasTransfer || (!$editingTransactionId && !$editingPlannedTransactionId))
-                                    <flux:menu.item wire:click="$set('transactionType', 'transfer')" class="text-amber-600 dark:text-amber-400">
-                                        {{ __('transfer between accounts') }}
-                                    </flux:menu.item>
-                                @endif
+                                <flux:menu.item wire:click="$set('transactionType', 'expense')" class="text-red-600 dark:text-red-400">
+                                    {{ __('expense') }}
+                                </flux:menu.item>
+                                <flux:menu.item wire:click="$set('transactionType', 'income')" class="text-green-600 dark:text-green-400">
+                                    {{ __('income') }}
+                                </flux:menu.item>
+                                <flux:menu.item wire:click="$set('transactionType', 'transfer')" class="text-amber-600 dark:text-amber-400">
+                                    {{ __('transfer between accounts') }}
+                                </flux:menu.item>
                             </flux:menu>
                         </flux:dropdown>
                     @endif
