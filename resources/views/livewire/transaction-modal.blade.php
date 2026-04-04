@@ -94,7 +94,7 @@
                 </div>
             </div>
 
-            @if(!$editingTransactionId && !$editingPlannedTransactionId)
+            @if(!$isBasiqTransaction)
                 <div class="flex items-center justify-center gap-4">
                     <flux:text size="sm" class="text-zinc-500">{{ __('Enter vs Plan') }}</flux:text>
                     <div class="flex gap-1">
@@ -271,7 +271,23 @@
                 @endif
                 <flux:spacer/>
                 <flux:button type="submit" variant="primary" class="{{ $buttonClasses }}">
-                    @if($editingPlannedTransactionId)
+                    @if($editingTransactionId && $mode === 'plan')
+                        @if($transactionType === 'transfer')
+                            {{ __('Convert to planned transfer') }}
+                        @elseif($transactionType === 'expense')
+                            {{ __('Convert to planned expense') }}
+                        @else
+                            {{ __('Convert to planned income') }}
+                        @endif
+                    @elseif($editingPlannedTransactionId && $mode === 'enter')
+                        @if($transactionType === 'transfer')
+                            {{ __('Convert to entered transfer') }}
+                        @elseif($transactionType === 'expense')
+                            {{ __('Convert to entered expense') }}
+                        @else
+                            {{ __('Convert to entered income') }}
+                        @endif
+                    @elseif($editingPlannedTransactionId)
                         @if($transactionType === 'transfer')
                             {{ __('Update planned transfer') }}
                         @elseif($transactionType === 'expense')
