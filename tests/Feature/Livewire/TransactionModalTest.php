@@ -1256,7 +1256,7 @@ test('static heading shown when editing basiq transaction', function () {
         ->assertDontSeeHtml("\$set('transactionType', 'transfer')");
 });
 
-test('editing manual expense shows expense and income options but not transfer', function () {
+test('editing manual expense shows all type options including transfer', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
@@ -1268,10 +1268,10 @@ test('editing manual expense shows expense and income options but not transfer',
         ->dispatch('edit-transaction', id: $transaction->id)
         ->assertSeeHtml("\$set('transactionType', 'expense')")
         ->assertSeeHtml("\$set('transactionType', 'income')")
-        ->assertDontSeeHtml("\$set('transactionType', 'transfer')");
+        ->assertSeeHtml("\$set('transactionType', 'transfer')");
 });
 
-test('editing transfer shows only transfer option', function () {
+test('editing transfer shows all type options including expense and income', function () {
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
     $toAccount = Account::factory()->for($user)->create();
@@ -1296,8 +1296,8 @@ test('editing transfer shows only transfer option', function () {
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('edit-transaction', id: $debit->id)
-        ->assertDontSeeHtml("\$set('transactionType', 'expense')")
-        ->assertDontSeeHtml("\$set('transactionType', 'income')")
+        ->assertSeeHtml("\$set('transactionType', 'expense')")
+        ->assertSeeHtml("\$set('transactionType', 'income')")
         ->assertSeeHtml("\$set('transactionType', 'transfer')");
 });
 
@@ -1613,7 +1613,7 @@ test('originalWasTransfer resets after save', function () {
         ->assertSet('originalWasTransfer', false);
 });
 
-test('editing planned expense shows expense and income options but not transfer', function () {
+test('editing planned expense shows all type options including transfer', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
@@ -1627,10 +1627,10 @@ test('editing planned expense shows expense and income options but not transfer'
         ->dispatch('edit-planned-transaction', id: $planned->id)
         ->assertSeeHtml("\$set('transactionType', 'expense')")
         ->assertSeeHtml("\$set('transactionType', 'income')")
-        ->assertDontSeeHtml("\$set('transactionType', 'transfer')");
+        ->assertSeeHtml("\$set('transactionType', 'transfer')");
 });
 
-test('editing planned transfer shows only transfer option', function () {
+test('editing planned transfer shows all type options including expense and income', function () {
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
     $toAccount = Account::factory()->for($user)->create();
@@ -1647,8 +1647,8 @@ test('editing planned transfer shows only transfer option', function () {
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('edit-planned-transaction', id: $planned->id)
-        ->assertDontSeeHtml("\$set('transactionType', 'expense')")
-        ->assertDontSeeHtml("\$set('transactionType', 'income')")
+        ->assertSeeHtml("\$set('transactionType', 'expense')")
+        ->assertSeeHtml("\$set('transactionType', 'income')")
         ->assertSeeHtml("\$set('transactionType', 'transfer')");
 });
 
@@ -1778,4 +1778,456 @@ test('openForEdit resolves superseded parent to latest child', function () {
         ->test(TransactionModal::class)
         ->dispatch('edit-transaction', id: $parent->id)
         ->assertSet('editingTransactionId', $child->id);
+});
+
+// ── Transfer Conversion (#135) ──────────────────────────────────
+
+test('converting expense to transfer creates child and new credit side', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $expense = Transaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'original expense',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $expense->id)
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '50.00 transfer to savings')
+        ->set('transferToAccountId', $toAccount->id)
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    $expense->refresh();
+    expect($expense->direction)->toBe(TransactionDirection::Debit)
+        ->and($expense->description)->toBe('original expense');
+
+    $debitChild = Transaction::query()
+        ->where('parent_transaction_id', $expense->id)
+        ->first();
+
+    expect($debitChild)
+        ->not->toBeNull()
+        ->direction->toBe(TransactionDirection::Debit)
+        ->account_id->toBe($fromAccount->id)
+        ->amount->toBe(5000)
+        ->transfer_pair_id->not->toBeNull();
+
+    $creditSide = Transaction::query()->find($debitChild->transfer_pair_id);
+
+    expect($creditSide)
+        ->not->toBeNull()
+        ->direction->toBe(TransactionDirection::Credit)
+        ->account_id->toBe($toAccount->id)
+        ->amount->toBe(5000)
+        ->transfer_pair_id->toBe($debitChild->id)
+        ->parent_transaction_id->toBeNull();
+
+    $currentIds = Transaction::query()
+        ->where('user_id', $user->id)
+        ->current()
+        ->pluck('id');
+
+    expect($currentIds)
+        ->toContain($debitChild->id)
+        ->toContain($creditSide->id)
+        ->not->toContain($expense->id);
+});
+
+test('converting income to transfer creates child as debit side and new credit side', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $income = Transaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Credit,
+        'description' => 'original income',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $income->id)
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '100.00 move to savings')
+        ->set('transferToAccountId', $toAccount->id)
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    $debitChild = Transaction::query()
+        ->where('parent_transaction_id', $income->id)
+        ->first();
+
+    expect($debitChild)
+        ->not->toBeNull()
+        ->direction->toBe(TransactionDirection::Debit);
+
+    $creditSide = Transaction::query()->find($debitChild->transfer_pair_id);
+
+    expect($creditSide)
+        ->not->toBeNull()
+        ->direction->toBe(TransactionDirection::Credit)
+        ->account_id->toBe($toAccount->id);
+});
+
+test('converting transfer to expense creates child without pair and soft-deletes credit side', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $debit = Transaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'transfer out',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+    ]);
+
+    $credit = Transaction::factory()->for($user)->create([
+        'account_id' => $toAccount->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Credit,
+        'description' => 'transfer out',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+        'transfer_pair_id' => $debit->id,
+    ]);
+
+    $debit->update(['transfer_pair_id' => $credit->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '50.00 now just an expense')
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    $child = Transaction::query()
+        ->where('parent_transaction_id', $debit->id)
+        ->first();
+
+    expect($child)
+        ->not->toBeNull()
+        ->direction->toBe(TransactionDirection::Debit)
+        ->transfer_pair_id->toBeNull()
+        ->amount->toBe(5000)
+        ->and(Transaction::query()->find($credit->id))->toBeNull()
+        ->and(Transaction::withTrashed()->find($credit->id))->not->toBeNull();
+
+    $currentIds = Transaction::query()
+        ->where('user_id', $user->id)
+        ->current()
+        ->pluck('id');
+
+    expect($currentIds)
+        ->toContain($child->id)
+        ->not->toContain($debit->id)
+        ->not->toContain($credit->id);
+});
+
+test('converting transfer to income creates child with credit direction and soft-deletes credit side', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $debit = Transaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 8000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'transfer',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+    ]);
+
+    $credit = Transaction::factory()->for($user)->create([
+        'account_id' => $toAccount->id,
+        'amount' => 8000,
+        'direction' => TransactionDirection::Credit,
+        'description' => 'transfer',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+        'transfer_pair_id' => $debit->id,
+    ]);
+
+    $debit->update(['transfer_pair_id' => $credit->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->set('transactionType', 'income')
+        ->set('descriptionInput', '80.00 actually income')
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    $child = Transaction::query()
+        ->where('parent_transaction_id', $debit->id)
+        ->first();
+
+    expect($child)
+        ->not->toBeNull()
+        ->direction->toBe(TransactionDirection::Credit)
+        ->transfer_pair_id
+        ->toBeNull()
+        ->and(Transaction::query()->find($credit->id))->toBeNull();
+});
+
+test('converting expense to transfer requires transfer_to_account_id', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $expense = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $expense->id)
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '50.00 transfer')
+        ->set('transferToAccountId', null)
+        ->call('save')
+        ->assertHasErrors(['transferToAccountId']);
+});
+
+test('converting expense to transfer rejects same account for both sides', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $expense = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $expense->id)
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '50.00 transfer')
+        ->set('transferToAccountId', $account->id)
+        ->call('save')
+        ->assertHasErrors(['transferToAccountId']);
+});
+
+test('re-editing converted transaction works correctly', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $expense = Transaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'original',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $expense->id)
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '50.00 transfer')
+        ->set('transferToAccountId', $toAccount->id)
+        ->call('save');
+
+    $debitChild = Transaction::query()
+        ->where('parent_transaction_id', $expense->id)
+        ->first();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debitChild->id)
+        ->assertSet('transactionType', 'transfer')
+        ->assertSet('originalWasTransfer', true)
+        ->set('descriptionInput', '75.00 updated transfer')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $grandchild = Transaction::query()
+        ->where('parent_transaction_id', $debitChild->id)
+        ->first();
+
+    expect($grandchild)
+        ->not->toBeNull()
+        ->amount->toBe(7500)
+        ->transfer_pair_id->not->toBeNull();
+});
+
+test('deleting converted transfer deletes both sides', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $expense = Transaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'original',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $expense->id)
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '50.00 transfer')
+        ->set('transferToAccountId', $toAccount->id)
+        ->call('save');
+
+    $debitChild = Transaction::query()
+        ->where('parent_transaction_id', $expense->id)
+        ->first();
+
+    $creditSide = Transaction::query()->find($debitChild->transfer_pair_id);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debitChild->id)
+        ->call('deleteTransaction');
+
+    expect(Transaction::query()->find($debitChild->id))->toBeNull()
+        ->and(Transaction::query()->find($creditSide->id))->toBeNull()
+        ->and(Transaction::withTrashed()->find($debitChild->id))->not->toBeNull()
+        ->and(Transaction::withTrashed()->find($creditSide->id))->not->toBeNull();
+});
+
+test('planned expense can be converted to planned transfer', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'expense',
+        'start_date' => '2026-04-01',
+        'frequency' => RecurrenceFrequency::EveryMonth,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '50.00 transfer')
+        ->set('transferToAccountId', $toAccount->id)
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    $planned->refresh();
+    expect($planned->transfer_to_account_id)->toBe($toAccount->id);
+});
+
+test('planned transfer can be converted to planned expense', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'transfer_to_account_id' => $toAccount->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'transfer',
+        'start_date' => '2026-04-01',
+        'frequency' => RecurrenceFrequency::EveryMonth,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '50.00 expense')
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    $planned->refresh();
+    expect($planned->transfer_to_account_id)->toBeNull()
+        ->and($planned->direction)->toBe(TransactionDirection::Debit);
+});
+
+test('basiq transaction cannot be converted to transfer via tampered transactionType', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $transaction = Transaction::factory()->for($user)->for($fromAccount)->fromBasiq()->create([
+        'amount' => 3000,
+        'direction' => TransactionDirection::Debit,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('transactionType', 'transfer')
+        ->set('transferToAccountId', $toAccount->id)
+        ->set('categoryId', $category->id)
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertDispatched('transaction-saved');
+
+    expect(Transaction::query()->where('transfer_pair_id', '!=', null)->count())->toBe(0);
+
+    $child = Transaction::query()
+        ->where('parent_transaction_id', $transaction->id)
+        ->first();
+
+    expect($child)
+        ->not->toBeNull()
+        ->category_id->toBe($category->id)
+        ->transfer_pair_id->toBeNull();
+});
+
+test('basiq transaction cannot be converted to income via tampered transactionType', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create([
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('transactionType', 'income')
+        ->set('categoryId', $category->id)
+        ->set('notes', 'Tampered direction')
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertDispatched('transaction-saved');
+
+    $transaction->refresh();
+    expect($transaction->direction)->toBe(TransactionDirection::Debit);
+
+    $child = Transaction::query()
+        ->where('parent_transaction_id', $transaction->id)
+        ->first();
+
+    expect($child)
+        ->not->toBeNull()
+        ->category_id->toBe($category->id)
+        ->notes->toBe('Tampered direction')
+        ->direction->toBe(TransactionDirection::Debit)
+        ->amount->toBe(5000);
 });
