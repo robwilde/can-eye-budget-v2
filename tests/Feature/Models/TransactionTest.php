@@ -215,11 +215,20 @@ test('transfer pair relationship returns a transaction', function () {
         ->and($transaction->transferPair->id)->toBe($pair->id);
 });
 
-test('deleting transfer pair nullifies transfer_pair_id', function () {
+test('soft-deleting transfer pair preserves transfer_pair_id', function () {
     $pair = Transaction::factory()->create();
     $transaction = Transaction::factory()->create(['transfer_pair_id' => $pair->id]);
 
     $pair->delete();
+
+    expect($transaction->fresh()->transfer_pair_id)->toBe($pair->id);
+});
+
+test('force-deleting transfer pair nullifies transfer_pair_id', function () {
+    $pair = Transaction::factory()->create();
+    $transaction = Transaction::factory()->create(['transfer_pair_id' => $pair->id]);
+
+    $pair->forceDelete();
 
     expect($transaction->fresh()->transfer_pair_id)->toBeNull();
 });
@@ -241,6 +250,222 @@ test('withNotes factory state populates notes', function () {
 
     expect($transaction->notes)->not->toBeNull()
         ->and($transaction->notes)->toBeString();
+});
+
+// ── Parent-Child Architecture (#134) ─────────────────────────────
+
+test('parent relationship returns parent transaction', function () {
+    $parent = Transaction::factory()->create();
+    $child = Transaction::factory()->create(['parent_transaction_id' => $parent->id]);
+
+    expect($child->parent)->toBeInstanceOf(Transaction::class)
+        ->and($child->parent->id)->toBe($parent->id);
+});
+
+test('children relationship returns child transactions', function () {
+    $parent = Transaction::factory()->create();
+    Transaction::factory()->count(2)->create(['parent_transaction_id' => $parent->id]);
+
+    expect($parent->children)->toHaveCount(2)
+        ->each(fn (Pest\Expectation $child) => $child->toBeInstanceOf(Transaction::class));
+});
+
+test('createChild copies all fields and sets parent_transaction_id', function () {
+    $parent = Transaction::factory()->withCategory()->withNotes()->create([
+        'amount' => 5000,
+        'description' => 'original coffee',
+        'post_date' => '2026-03-15',
+    ]);
+
+    $child = $parent->createChild();
+
+    expect($child->parent_transaction_id)->toBe($parent->id)
+        ->and($child->user_id)->toBe($parent->user_id)
+        ->and($child->account_id)->toBe($parent->account_id)
+        ->and($child->category_id)->toBe($parent->category_id)
+        ->and($child->amount)->toBe($parent->amount)
+        ->and($child->direction)->toBe($parent->direction)
+        ->and($child->description)->toBe($parent->description)
+        ->and($child->post_date->format('Y-m-d'))->toBe('2026-03-15')
+        ->and($child->notes)->toBe($parent->notes)
+        ->and($child->id)->not->toBe($parent->id);
+});
+
+test('createChild applies overrides on top of copied fields', function () {
+    $parent = Transaction::factory()->create([
+        'amount' => 5000,
+        'description' => 'original',
+    ]);
+
+    $child = $parent->createChild([
+        'amount' => 9999,
+        'description' => 'updated',
+    ]);
+
+    expect($child->amount)->toBe(9999)
+        ->and($child->description)->toBe('updated')
+        ->and($child->account_id)->toBe($parent->account_id);
+});
+
+test('scopeCurrent excludes transactions with live children', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $parent = Transaction::factory()->for($user)->for($account)->create();
+    Transaction::factory()->for($user)->for($account)->create([
+        'parent_transaction_id' => $parent->id,
+    ]);
+
+    $current = Transaction::query()
+        ->where('user_id', $user->id)
+        ->current()
+        ->pluck('id');
+
+    expect($current)->not->toContain($parent->id);
+});
+
+test('scopeCurrent includes transactions with no children', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $standalone = Transaction::factory()->for($user)->for($account)->create();
+
+    $current = Transaction::query()
+        ->where('user_id', $user->id)
+        ->current()
+        ->pluck('id');
+
+    expect($current)->toContain($standalone->id);
+});
+
+test('scopeCurrent includes parent whose child is soft-deleted', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $parent = Transaction::factory()->for($user)->for($account)->create();
+    $child = Transaction::factory()->for($user)->for($account)->create([
+        'parent_transaction_id' => $parent->id,
+    ]);
+
+    $child->delete();
+
+    $current = Transaction::query()
+        ->where('user_id', $user->id)
+        ->current()
+        ->pluck('id');
+
+    expect($current)->toContain($parent->id);
+});
+
+test('soft delete sets deleted_at and excludes from default queries', function () {
+    $transaction = Transaction::factory()->create();
+
+    $transaction->delete();
+
+    expect(Transaction::query()->find($transaction->id))->toBeNull()
+        ->and(Transaction::withTrashed()->find($transaction->id))->not->toBeNull()
+        ->and(Transaction::withTrashed()->find($transaction->id)->deleted_at)->not->toBeNull();
+});
+
+test('findCurrentVersion returns child when parent has one', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $parent = Transaction::factory()->for($user)->for($account)->create();
+    $child = Transaction::factory()->for($user)->for($account)->create([
+        'parent_transaction_id' => $parent->id,
+    ]);
+
+    $found = Transaction::findCurrentVersion($parent->id, $user->id);
+
+    expect($found->id)->toBe($child->id);
+});
+
+test('findCurrentVersion returns self when no children', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $standalone = Transaction::factory()->for($user)->for($account)->create();
+
+    $found = Transaction::findCurrentVersion($standalone->id, $user->id);
+
+    expect($found->id)->toBe($standalone->id);
+});
+
+test('findCurrentVersion walks full chain from original ancestor', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $grandparent = Transaction::factory()->for($user)->for($account)->create();
+    $parent = Transaction::factory()->for($user)->for($account)->create([
+        'parent_transaction_id' => $grandparent->id,
+    ]);
+    $child = $parent->createChild(['description' => 'grandchild']);
+
+    $found = Transaction::findCurrentVersion($grandparent->id, $user->id);
+
+    expect($found->id)->toBe($child->id);
+});
+
+test('createChild does not copy basiq_id from parent', function () {
+    $parent = Transaction::factory()->fromBasiq()->create();
+
+    $child = $parent->createChild();
+
+    expect($child->basiq_id)->toBeNull()
+        ->and($parent->basiq_id)->not->toBeNull();
+});
+
+test('findCurrentVersion walks chain from middle node', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $grandparent = Transaction::factory()->for($user)->for($account)->create();
+    $parent = Transaction::factory()->for($user)->for($account)->create([
+        'parent_transaction_id' => $grandparent->id,
+    ]);
+    $child = $parent->createChild(['description' => 'grandchild']);
+
+    $found = Transaction::findCurrentVersion($parent->id, $user->id);
+
+    expect($found->id)->toBe($child->id);
+});
+
+test('withParent factory state sets parent_transaction_id', function () {
+    $transaction = Transaction::factory()->withParent()->create();
+
+    expect($transaction->parent_transaction_id)->not->toBeNull()
+        ->and($transaction->parent)->toBeInstanceOf(Transaction::class);
+});
+
+test('softDeleted factory state sets deleted_at', function () {
+    $transaction = Transaction::factory()->softDeleted()->create();
+
+    expect(Transaction::query()->find($transaction->id))->toBeNull()
+        ->and(Transaction::withTrashed()->find($transaction->id)->deleted_at)->not->toBeNull();
+});
+
+test('deleting parent with nullOnDelete sets child parent_transaction_id to null', function () {
+    $parent = Transaction::factory()->create();
+    $child = Transaction::factory()->create(['parent_transaction_id' => $parent->id]);
+
+    $parent->forceDelete();
+
+    expect($child->fresh()->parent_transaction_id)->toBeNull();
+});
+
+test('createChild preserves planned_transaction_id from parent', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $planned = App\Models\PlannedTransaction::factory()->for($user)->for($account)->create();
+
+    $parent = Transaction::factory()->for($user)->for($account)->create([
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $child = $parent->createChild();
+
+    expect($child->planned_transaction_id)->toBe($planned->id);
 });
 
 test('backfill sets source to basiq for transactions with basiq_id', function () {

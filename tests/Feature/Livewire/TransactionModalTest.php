@@ -333,7 +333,7 @@ test('basiq transaction sets read-only flag', function () {
         ->assertSet('editingTransactionId', $transaction->id);
 });
 
-test('basiq transaction allows updating category and notes', function () {
+test('basiq transaction allows updating category and notes via child', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
@@ -353,13 +353,24 @@ test('basiq transaction allows updating category and notes', function () {
         ->assertDispatched('transaction-saved');
 
     $transaction->refresh();
-    expect($transaction)
+    expect($transaction->category_id)->toBeNull()
+        ->and($transaction->notes)->toBeNull();
+
+    $child = Transaction::query()
+        ->where('parent_transaction_id', $transaction->id)
+        ->first();
+
+    expect($child)
+        ->not->toBeNull()
         ->category_id->toBe($category->id)
         ->notes->toBe('Groceries for the week')
-        ->clean_description->toBe('Woolworths groceries');
+        ->clean_description->toBe('Woolworths groceries')
+        ->basiq_id->toBeNull()
+        ->amount->toBe($transaction->amount)
+        ->account_id->toBe($transaction->account_id);
 });
 
-test('manual transaction allows updating all fields', function () {
+test('manual transaction creates child with updated fields', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $newAccount = Account::factory()->for($user)->create();
@@ -385,6 +396,15 @@ test('manual transaction allows updating all fields', function () {
 
     $transaction->refresh();
     expect($transaction)
+        ->amount->toBe(4250)
+        ->description->toBe('coffee');
+
+    $child = Transaction::query()
+        ->where('parent_transaction_id', $transaction->id)
+        ->first();
+
+    expect($child)
+        ->not->toBeNull()
         ->amount->toBe(9999)
         ->direction->toBe(TransactionDirection::Credit)
         ->description->toBe('fancy dinner')
@@ -394,7 +414,7 @@ test('manual transaction allows updating all fields', function () {
         ->notes->toBe('Anniversary dinner');
 });
 
-test('updates existing transaction instead of creating new', function () {
+test('editing creates child record instead of mutating original', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
@@ -411,8 +431,17 @@ test('updates existing transaction instead of creating new', function () {
         ->call('save');
 
     expect(Transaction::query()->where('user_id', $user->id)->count())
-        ->toBe($originalCount)
-        ->and($transaction->fresh()->description)->toBe('updated');
+        ->toBe($originalCount + 1)
+        ->and($transaction->fresh()->description)->toBe('original');
+
+    $child = Transaction::query()
+        ->where('parent_transaction_id', $transaction->id)
+        ->first();
+
+    expect($child)
+        ->not->toBeNull()
+        ->description->toBe('updated')
+        ->amount->toBe(2000);
 });
 
 test('dispatches transaction-saved event on update', function () {
@@ -431,7 +460,7 @@ test('dispatches transaction-saved event on update', function () {
         ->assertDispatched('transaction-saved');
 });
 
-test('basiq transaction does not modify amount or account on save', function () {
+test('basiq transaction parent remains immutable on save', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create([
@@ -454,7 +483,17 @@ test('basiq transaction does not modify amount or account on save', function () 
         ->amount->toBe($originalAmount)
         ->post_date->format('Y-m-d')->toBe($originalDate)
         ->account_id->toBe($originalAccountId)
-        ->notes->toBe('Updated note');
+        ->notes->toBeNull();
+
+    $child = Transaction::query()
+        ->where('parent_transaction_id', $transaction->id)
+        ->first();
+
+    expect($child)
+        ->not->toBeNull()
+        ->notes->toBe('Updated note')
+        ->amount->toBe($originalAmount)
+        ->account_id->toBe($originalAccountId);
 });
 
 test('resets form after edit save including edit-specific properties', function () {
@@ -593,7 +632,7 @@ test('edit transfer opens with pre-filled data for both sides', function () {
         ->assertSet('descriptionInput', '100.00 savings transfer');
 });
 
-test('edit transfer updates both sides', function () {
+test('edit transfer creates child pairs cross-linked to each other', function () {
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
     $toAccount = Account::factory()->for($user)->create();
@@ -628,17 +667,33 @@ test('edit transfer updates both sides', function () {
 
     $debit->refresh();
     $credit->refresh();
+    expect($debit->amount)->toBe(10000)
+        ->and($debit->description)->toBe('original')
+        ->and($credit->amount)->toBe(10000)
+        ->and($credit->description)->toBe('original');
 
-    expect($debit)
+    $debitChild = Transaction::query()
+        ->where('parent_transaction_id', $debit->id)
+        ->first();
+    $creditChild = Transaction::query()
+        ->where('parent_transaction_id', $credit->id)
+        ->first();
+
+    expect($debitChild)
+        ->not->toBeNull()
         ->amount->toBe(20000)
-        ->description
-        ->toBe('updated transfer')
-        ->and($credit)
+        ->description->toBe('updated transfer')
+        ->direction->toBe(TransactionDirection::Debit)
+        ->transfer_pair_id->toBe($creditChild->id)
+        ->and($creditChild)
+        ->not->toBeNull()
         ->amount->toBe(20000)
-        ->description->toBe('updated transfer');
+        ->description->toBe('updated transfer')
+        ->direction->toBe(TransactionDirection::Credit)
+        ->transfer_pair_id->toBe($debitChild->id);
 });
 
-test('delete transfer removes both sides', function () {
+test('delete transfer soft-deletes both sides', function () {
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
     $toAccount = Account::factory()->for($user)->create();
@@ -667,10 +722,11 @@ test('delete transfer removes both sides', function () {
         ->assertSet('showModal', false)
         ->assertDispatched('transaction-saved');
 
-    expect(Transaction::query()->where('user_id', $user->id)->count())->toBe(0);
+    expect(Transaction::query()->where('user_id', $user->id)->count())->toBe(0)
+        ->and(Transaction::withTrashed()->where('user_id', $user->id)->count())->toBe(2);
 });
 
-test('delete non-transfer removes single transaction', function () {
+test('delete non-transfer soft-deletes single transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $transaction = Transaction::factory()->for($user)->for($account)->manual()->create();
@@ -681,7 +737,8 @@ test('delete non-transfer removes single transaction', function () {
         ->call('deleteTransaction')
         ->assertSet('showModal', false);
 
-    expect(Transaction::query()->where('id', $transaction->id)->exists())->toBeFalse();
+    expect(Transaction::query()->where('id', $transaction->id)->exists())->toBeFalse()
+        ->and(Transaction::withTrashed()->where('id', $transaction->id)->exists())->toBeTrue();
 });
 
 test('cannot delete basiq transaction', function () {
@@ -1244,7 +1301,7 @@ test('editing transfer shows only transfer option', function () {
         ->assertSeeHtml("\$set('transactionType', 'transfer')");
 });
 
-test('switching expense to income during edit saves correct direction', function () {
+test('switching expense to income during edit creates child with correct direction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
@@ -1264,7 +1321,14 @@ test('switching expense to income during edit saves correct direction', function
         ->assertHasNoErrors();
 
     $transaction->refresh();
-    expect($transaction)
+    expect($transaction->direction)->toBe(TransactionDirection::Debit);
+
+    $child = Transaction::query()
+        ->where('parent_transaction_id', $transaction->id)
+        ->first();
+
+    expect($child)
+        ->not->toBeNull()
         ->direction->toBe(TransactionDirection::Credit);
 });
 
@@ -1507,8 +1571,16 @@ test('header date is editable for manual transaction', function () {
         ->assertHasNoErrors()
         ->assertSet('showModal', false);
 
+    $child = Transaction::query()
+        ->where('parent_transaction_id', $transaction->id)
+        ->first();
+
+    expect($child)
+        ->not->toBeNull()
+        ->post_date->format('Y-m-d')->toBe('2026-03-20');
+
     $transaction->refresh();
-    expect($transaction->post_date->format('Y-m-d'))->toBe('2026-03-20');
+    expect($transaction->post_date->format('Y-m-d'))->toBe('2026-03-15');
 });
 
 test('header date is read-only badge for basiq transaction', function () {
@@ -1578,4 +1650,132 @@ test('editing planned transfer shows only transfer option', function () {
         ->assertDontSeeHtml("\$set('transactionType', 'expense')")
         ->assertDontSeeHtml("\$set('transactionType', 'income')")
         ->assertSeeHtml("\$set('transactionType', 'transfer')");
+});
+
+// ── Parent-Child Architecture (#134) ─────────────────────────────
+
+test('editing an already-edited transaction creates grandchild', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $original = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 1000,
+        'description' => 'original',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $original->id)
+        ->set('descriptionInput', '20.00 first edit')
+        ->call('save');
+
+    $child = Transaction::query()
+        ->where('parent_transaction_id', $original->id)
+        ->first();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $child->id)
+        ->set('descriptionInput', '30.00 second edit')
+        ->call('save');
+
+    $grandchild = Transaction::query()
+        ->where('parent_transaction_id', $child->id)
+        ->first();
+
+    expect($grandchild)
+        ->not->toBeNull()
+        ->description->toBe('second edit')
+        ->amount->toBe(3000);
+
+    $currentIds = Transaction::query()
+        ->where('user_id', $user->id)
+        ->current()
+        ->pluck('id');
+
+    expect($currentIds)->toContain($grandchild->id)
+        ->not->toContain($original->id)
+        ->not->toContain($child->id);
+});
+
+test('deleting a child resurfaces the parent as current', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $parent = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 1000,
+        'description' => 'original',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $parent->id)
+        ->set('descriptionInput', '20.00 edited')
+        ->call('save');
+
+    $child = Transaction::query()
+        ->where('parent_transaction_id', $parent->id)
+        ->first();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $child->id)
+        ->call('deleteTransaction');
+
+    $currentIds = Transaction::query()
+        ->where('user_id', $user->id)
+        ->current()
+        ->pluck('id');
+
+    expect($currentIds)->toContain($parent->id);
+});
+
+test('cannot delete basiq original but can delete basiq child', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $basiqOriginal = Transaction::factory()->for($user)->for($account)->fromBasiq()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $basiqOriginal->id)
+        ->set('categoryId', $category->id)
+        ->call('save');
+
+    $child = Transaction::query()
+        ->where('parent_transaction_id', $basiqOriginal->id)
+        ->first();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $basiqOriginal->id)
+        ->call('deleteTransaction');
+
+    expect(Transaction::query()->find($basiqOriginal->id))->not->toBeNull();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $child->id)
+        ->call('deleteTransaction');
+
+    expect(Transaction::query()->find($child->id))->toBeNull()
+        ->and(Transaction::withTrashed()->find($child->id))->not->toBeNull();
+});
+
+test('openForEdit resolves superseded parent to latest child', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $parent = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 1000,
+        'description' => 'original',
+    ]);
+
+    $child = $parent->createChild(['description' => 'edited']);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $parent->id)
+        ->assertSet('editingTransactionId', $child->id);
 });
