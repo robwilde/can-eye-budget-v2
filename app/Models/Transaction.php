@@ -14,6 +14,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
  * @property int $id
@@ -35,14 +37,18 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property TransactionSource $source
  * @property int|null $transfer_pair_id
  * @property int|null $planned_transaction_id
+ * @property int|null $parent_transaction_id
  * @property string|null $notes
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
+ * @property CarbonImmutable|null $deleted_at
  */
 final class Transaction extends Model
 {
     /** @use HasFactory<TransactionFactory> */
     use HasFactory;
+
+    use SoftDeletes;
 
     /**
      * @var list<string>
@@ -66,8 +72,34 @@ final class Transaction extends Model
         'source',
         'transfer_pair_id',
         'planned_transaction_id',
+        'parent_transaction_id',
         'notes',
     ];
+
+    public static function findCurrentVersion(int $id, int $userId): ?self
+    {
+        $current = self::query()
+            ->where('user_id', $userId)
+            ->find($id);
+
+        if (! $current) {
+            return null;
+        }
+
+        while (true) {
+            $child = self::query()
+                ->where('user_id', $userId)
+                ->where('parent_transaction_id', $current->id)
+                ->latest('id')
+                ->first();
+
+            if (! $child) {
+                return $current;
+            }
+
+            $current = $child;
+        }
+    }
 
     /** @return BelongsTo<User, $this> */
     public function user(): BelongsTo
@@ -97,6 +129,43 @@ final class Transaction extends Model
     public function transferPair(): BelongsTo
     {
         return $this->belongsTo(self::class, 'transfer_pair_id');
+    }
+
+    /** @return BelongsTo<self, $this> */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_transaction_id');
+    }
+
+    /** @return HasMany<self, $this> */
+    public function children(): HasMany
+    {
+        return $this->hasMany(self::class, 'parent_transaction_id');
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeCurrent(Builder $query): Builder
+    {
+        return $query->whereDoesntHave('children', fn (Builder $q) => $q->whereNull('deleted_at'));
+    }
+
+    /**
+     * @param  array<string, mixed>  $overrides
+     */
+    public function createChild(array $overrides = []): self
+    {
+        $excluded = ['id', 'created_at', 'updated_at', 'deleted_at', 'parent_transaction_id', 'basiq_id'];
+
+        $attributes = collect($this->getAttributes())
+            ->except($excluded)
+            ->toArray();
+
+        $attributes['parent_transaction_id'] = $this->id;
+
+        return self::query()->create(array_merge($attributes, $overrides));
     }
 
     /**
