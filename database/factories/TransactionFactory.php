@@ -106,4 +106,18 @@ final class TransactionFactory extends Factory
             'notes' => fake()->sentence(),
         ]);
     }
+
+    public function withParent(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'parent_transaction_id' => Transaction::factory(),
+        ]);
+    }
+
+    public function softDeleted(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'deleted_at' => now(),
+        ]);
+    }
 }

@@ -109,6 +109,7 @@ final class CategoryEditor extends Component
         $this->deletingCategoryName = $category->fullPath();
         $this->deletingTransactionCount = $category->transactions()
             ->where('user_id', auth()->id())
+            ->current()
             ->count();
         $this->showDeleteConfirm = true;
     }
@@ -138,7 +139,7 @@ final class CategoryEditor extends Component
 
         $categories = Category::query()
             ->with(['parent.parent'])
-            ->withCount(['transactions' => fn ($q) => $q->where('user_id', auth()->id())])
+            ->withCount(['transactions' => fn ($q) => $q->where('user_id', auth()->id())->current()])
             ->when(! $this->showHidden, fn ($q) => $q->visible())
             ->when($search !== '', fn ($q) => $q->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
@@ -160,6 +161,7 @@ final class CategoryEditor extends Component
             ? Transaction::query()
                 ->where('category_id', $this->selectedCategoryId)
                 ->where('user_id', auth()->id())
+                ->current()
                 ->with('account:id,name')
                 ->orderByDesc('post_date')
                 ->limit(50)

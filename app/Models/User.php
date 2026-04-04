@@ -133,6 +133,7 @@ final class User extends Authenticatable
         }
 
         $totalDebits = $this->transactions()
+            ->current()
             ->where('direction', TransactionDirection::Debit)
             ->where('post_date', '>=', now()->subDays($lookbackDays))
             ->sum('amount');

@@ -73,7 +73,7 @@ final class Budget extends Model
 
     public function remaining(): int
     {
-        return $this->limit_amount - $this->transactions()->where('user_id', $this->user_id)->sum('amount');
+        return $this->limit_amount - $this->transactions()->where('user_id', $this->user_id)->current()->sum('amount');
     }
 
     /**

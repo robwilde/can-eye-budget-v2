@@ -62,6 +62,7 @@ final class CalendarView extends Component
 
         $allTransactions = Transaction::query()
             ->where('user_id', auth()->id())
+            ->current()
             ->whereBetween('post_date', [$gridStart, $gridEnd])
             ->with('category:id,name')
             ->orderBy('post_date')
