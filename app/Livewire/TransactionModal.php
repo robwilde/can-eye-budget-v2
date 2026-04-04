@@ -13,10 +13,12 @@ use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Support\AmountParser;
+use App\Support\AmountParseResult;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Component;
 use Throwable;
@@ -27,6 +29,7 @@ final class TransactionModal extends Component
 
     public ?int $editingTransactionId = null;
 
+    #[Locked]
     public bool $isBasiqTransaction = false;
 
     public string $transactionType = 'expense';
@@ -55,6 +58,7 @@ final class TransactionModal extends Component
 
     public ?string $untilDate = null;
 
+    #[Locked]
     public bool $originalWasTransfer = false;
 
     #[On('open-transaction-modal')]
@@ -182,21 +186,7 @@ final class TransactionModal extends Component
 
         $this->validate($this->formRules());
 
-        if ($this->editingPlannedTransactionId) {
-            $saved = $this->updatePlannedTransaction();
-        } elseif ($this->mode === 'plan') {
-            $saved = $this->createPlannedTransaction();
-        } elseif ($this->editingTransactionId) {
-            $saved = $this->isTransfer()
-                ? $this->updateTransfer()
-                : $this->updateTransaction();
-        } else {
-            $saved = $this->transactionType === 'transfer'
-                ? $this->createTransfer()
-                : $this->createTransaction();
-        }
-
-        if (! $saved) {
+        if (! $this->resolveSave()) {
             return;
         }
 
@@ -285,6 +275,39 @@ final class TransactionModal extends Component
         $this->showModal = false;
         $this->resetForm();
         $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * @throws Throwable
+     */
+    private function resolveSave(): bool
+    {
+        if ($this->editingPlannedTransactionId) {
+            return $this->updatePlannedTransaction();
+        }
+
+        if ($this->mode === 'plan') {
+            return $this->createPlannedTransaction();
+        }
+
+        if (! $this->editingTransactionId) {
+            return $this->transactionType === 'transfer'
+                ? $this->createTransfer()
+                : $this->createTransaction();
+        }
+
+        if ($this->isBasiqTransaction) {
+            return $this->updateTransaction();
+        }
+
+        $nowIsTransfer = $this->transactionType === 'transfer';
+
+        return match (true) {
+            ! $this->originalWasTransfer && ! $nowIsTransfer => $this->updateTransaction(),
+            $this->originalWasTransfer && $nowIsTransfer => $this->updateTransfer(),
+            ! $this->originalWasTransfer && $nowIsTransfer => $this->convertToTransfer(),
+            default => $this->convertFromTransfer(),
+        };
     }
 
     private function createTransaction(): bool
@@ -433,13 +456,13 @@ final class TransactionModal extends Component
 
     private function updateTransaction(): bool
     {
-        $transaction = Transaction::query()
-            ->where('user_id', auth()->id())
-            ->find($this->editingTransactionId);
+        $resolved = $this->resolveTransactionWithParsedAmount();
 
-        if (! $transaction) {
+        if ($resolved === false) {
             return false;
         }
+
+        [$transaction, $parsed] = $resolved;
 
         if ($transaction->source === TransactionSource::Basiq) {
             $transaction->createChild([
@@ -449,14 +472,6 @@ final class TransactionModal extends Component
             ]);
 
             return true;
-        }
-
-        $parsed = AmountParser::parse($this->descriptionInput);
-
-        if ($parsed->amount <= 0) {
-            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
-
-            return false;
         }
 
         $transaction->createChild([
@@ -478,6 +493,135 @@ final class TransactionModal extends Component
      * @throws Throwable
      */
     private function updateTransfer(): bool
+    {
+        $resolved = $this->resolveTransferPairWithParsedAmount();
+
+        if ($resolved === false) {
+            return false;
+        }
+
+        [$debitSide, $creditSide, $parsed] = $resolved;
+
+        DB::transaction(function () use ($debitSide, $creditSide, $parsed): void {
+            $shared = [
+                'category_id' => $this->categoryId,
+                'amount' => $parsed->amount,
+                'description' => $parsed->description,
+                'post_date' => $this->date,
+                'notes' => $this->notes !== '' ? $this->notes : null,
+            ];
+
+            $debitChild = $debitSide->createChild($shared + ['account_id' => $this->accountId]);
+            $creditChild = $creditSide->createChild($shared + ['account_id' => $this->transferToAccountId]);
+
+            $debitChild->update(['transfer_pair_id' => $creditChild->id]);
+            $creditChild->update(['transfer_pair_id' => $debitChild->id]);
+        });
+
+        return true;
+    }
+
+    /**
+     * @throws Throwable
+     */
+    private function convertToTransfer(): bool
+    {
+        $resolved = $this->resolveTransactionWithParsedAmount();
+
+        if ($resolved === false) {
+            return false;
+        }
+
+        [$transaction, $parsed] = $resolved;
+
+        DB::transaction(function () use ($transaction, $parsed): void {
+            $shared = [
+                'amount' => $parsed->amount,
+                'description' => $parsed->description,
+                'post_date' => $this->date,
+                'category_id' => $this->categoryId,
+                'notes' => $this->notes !== '' ? $this->notes : null,
+            ];
+
+            $debitChild = $transaction->createChild($shared + [
+                'account_id' => $this->accountId,
+                'direction' => TransactionDirection::Debit,
+            ]);
+
+            $credit = Transaction::query()->create($shared + [
+                'user_id' => auth()->id(),
+                'account_id' => $this->transferToAccountId,
+                'direction' => TransactionDirection::Credit,
+                'source' => TransactionSource::Manual,
+                'status' => TransactionStatus::Posted,
+            ]);
+
+            $debitChild->update(['transfer_pair_id' => $credit->id]);
+            $credit->update(['transfer_pair_id' => $debitChild->id]);
+        });
+
+        return true;
+    }
+
+    /**
+     * @throws Throwable
+     */
+    private function convertFromTransfer(): bool
+    {
+        $resolved = $this->resolveTransferPairWithParsedAmount();
+
+        if ($resolved === false) {
+            return false;
+        }
+
+        [$debitSide, $creditSide, $parsed] = $resolved;
+
+        $direction = $this->transactionType === 'expense'
+            ? TransactionDirection::Debit
+            : TransactionDirection::Credit;
+
+        DB::transaction(function () use ($debitSide, $creditSide, $parsed, $direction): void {
+            $debitSide->createChild([
+                'account_id' => $this->accountId,
+                'direction' => $direction,
+                'amount' => $parsed->amount,
+                'description' => $parsed->description,
+                'post_date' => $this->date,
+                'category_id' => $this->categoryId,
+                'notes' => $this->notes !== '' ? $this->notes : null,
+                'transfer_pair_id' => null,
+            ]);
+
+            $creditSide->delete();
+        });
+
+        return true;
+    }
+
+    /** @return array{Transaction, AmountParseResult}|false */
+    private function resolveTransactionWithParsedAmount(): array|false
+    {
+        $transaction = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->find($this->editingTransactionId);
+
+        if (! $transaction) {
+            return false;
+        }
+
+        $parsed = AmountParser::parse($this->descriptionInput);
+
+        if ($parsed->amount <= 0) {
+            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
+
+            return false;
+        }
+
+        return [$transaction, $parsed];
+    }
+
+    /** @return array{Transaction, Transaction, AmountParseResult}|false */
+    private function resolveTransferPairWithParsedAmount(): array|false
     {
         $transaction = Transaction::query()
             ->where('user_id', auth()->id())
@@ -503,39 +647,15 @@ final class TransactionModal extends Component
             return false;
         }
 
-        DB::transaction(function () use ($transaction, $pair, $parsed): void {
-            $shared = [
-                'category_id' => $this->categoryId,
-                'amount' => $parsed->amount,
-                'description' => $parsed->description,
-                'post_date' => $this->date,
-                'notes' => $this->notes !== '' ? $this->notes : null,
-            ];
+        $debitSide = $transaction->direction === TransactionDirection::Debit ? $transaction : $pair;
+        $creditSide = $transaction->direction === TransactionDirection::Credit ? $transaction : $pair;
 
-            $debitSide = $transaction->direction === TransactionDirection::Debit ? $transaction : $pair;
-            $creditSide = $transaction->direction === TransactionDirection::Credit ? $transaction : $pair;
-
-            $debitChild = $debitSide->createChild($shared + ['account_id' => $this->accountId]);
-            $creditChild = $creditSide->createChild($shared + ['account_id' => $this->transferToAccountId]);
-
-            $debitChild->update(['transfer_pair_id' => $creditChild->id]);
-            $creditChild->update(['transfer_pair_id' => $debitChild->id]);
-        });
-
-        return true;
+        return [$debitSide, $creditSide, $parsed];
     }
 
     private function isTransfer(): bool
     {
-        if (! $this->editingTransactionId) {
-            return $this->transactionType === 'transfer';
-        }
-
-        return Transaction::query()
-            ->where('id', $this->editingTransactionId)
-            ->where('user_id', auth()->id())
-            ->whereNotNull('transfer_pair_id')
-            ->exists();
+        return $this->transactionType === 'transfer';
     }
 
     private function resetForm(): void
