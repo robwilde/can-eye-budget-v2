@@ -69,9 +69,7 @@ final class TransactionModal extends Component
     #[On('edit-transaction')]
     public function openForEdit(int $id): void
     {
-        $transaction = Transaction::query()
-            ->where('user_id', auth()->id())
-            ->find($id);
+        $transaction = Transaction::findCurrentVersion($id, auth()->id());
 
         if (! $transaction) {
             return;
@@ -227,7 +225,7 @@ final class TransactionModal extends Component
             return;
         }
 
-        if ($transaction->source === TransactionSource::Basiq) {
+        if ($transaction->source === TransactionSource::Basiq && $transaction->parent_transaction_id === null) {
             return;
         }
 
@@ -444,7 +442,7 @@ final class TransactionModal extends Component
         }
 
         if ($transaction->source === TransactionSource::Basiq) {
-            $transaction->update([
+            $transaction->createChild([
                 'category_id' => $this->categoryId,
                 'notes' => $this->notes !== '' ? $this->notes : null,
                 'clean_description' => $this->cleanDescription !== '' ? $this->cleanDescription : null,
@@ -461,7 +459,7 @@ final class TransactionModal extends Component
             return false;
         }
 
-        $transaction->update([
+        $transaction->createChild([
             'account_id' => $this->accountId,
             'category_id' => $this->categoryId,
             'amount' => $parsed->amount,
@@ -517,8 +515,11 @@ final class TransactionModal extends Component
             $debitSide = $transaction->direction === TransactionDirection::Debit ? $transaction : $pair;
             $creditSide = $transaction->direction === TransactionDirection::Credit ? $transaction : $pair;
 
-            $debitSide->update($shared + ['account_id' => $this->accountId]);
-            $creditSide->update($shared + ['account_id' => $this->transferToAccountId]);
+            $debitChild = $debitSide->createChild($shared + ['account_id' => $this->accountId]);
+            $creditChild = $creditSide->createChild($shared + ['account_id' => $this->transferToAccountId]);
+
+            $debitChild->update(['transfer_pair_id' => $creditChild->id]);
+            $creditChild->update(['transfer_pair_id' => $debitChild->id]);
         });
 
         return true;

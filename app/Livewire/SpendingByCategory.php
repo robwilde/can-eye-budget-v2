@@ -28,6 +28,7 @@ final class SpendingByCategory extends Component
     {
         $rows = Transaction::query()
             ->where('user_id', auth()->id())
+            ->current()
             ->where('direction', TransactionDirection::Debit)
             ->where('post_date', '>=', $this->periodStart())
             ->selectRaw('category_id, SUM(amount) as total')

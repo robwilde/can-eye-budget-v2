@@ -106,6 +106,7 @@ final class TransactionList extends Component
 
         $transactions = Transaction::query()
             ->where('user_id', auth()->id())
+            ->current()
             ->when($directionEnum, fn ($q, $dir) => $q->where('direction', $dir))
             ->when($this->account, fn ($q, $id) => $q->where('account_id', $id))
             ->when($this->category, fn ($q, $id) => $q->where('category_id', $id))

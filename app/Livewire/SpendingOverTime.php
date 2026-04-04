@@ -47,6 +47,7 @@ final class SpendingOverTime extends Component
         $rows = Transaction::query()
             ->join('accounts', 'transactions.account_id', '=', 'accounts.id')
             ->where('transactions.user_id', auth()->id())
+            ->current()
             ->whereColumn('accounts.user_id', 'transactions.user_id')
             ->where('transactions.post_date', '>=', $start)
             ->selectRaw("{$groupExpression} as period_date, transactions.account_id, accounts.name as account_name, {$netExpression} as total")
@@ -92,6 +93,7 @@ final class SpendingOverTime extends Component
 
     /**
      * @param  'day'|'week'|'month'  $aggregation
+     * @param  CarbonImmutable  $start
      * @param  Collection<string, Collection<int, stdClass>>  $grouped
      * @return array<int, array{date: string, total: int, accounts: array<int, array{name: string, total: int}>}>
      */
