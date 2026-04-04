@@ -180,10 +180,6 @@ final class TransactionModal extends Component
      */
     public function save(): void
     {
-        if ($this->editingPlannedTransactionId) {
-            $this->mode = 'plan';
-        }
-
         $this->validate($this->formRules());
 
         if (! $this->resolveSave()) {
@@ -282,32 +278,40 @@ final class TransactionModal extends Component
      */
     private function resolveSave(): bool
     {
+        if ($this->editingTransactionId && $this->mode === 'plan' && ! $this->isBasiqTransaction) {
+            return $this->convertEnteredToPlanned();
+        }
+
+        if ($this->editingPlannedTransactionId && $this->mode === 'enter') {
+            return $this->convertPlannedToEntered();
+        }
+
         if ($this->editingPlannedTransactionId) {
             return $this->updatePlannedTransaction();
+        }
+
+        if ($this->editingTransactionId) {
+            if ($this->isBasiqTransaction) {
+                return $this->updateTransaction();
+            }
+
+            $nowIsTransfer = $this->transactionType === 'transfer';
+
+            return match (true) {
+                ! $this->originalWasTransfer && ! $nowIsTransfer => $this->updateTransaction(),
+                $this->originalWasTransfer && $nowIsTransfer => $this->updateTransfer(),
+                ! $this->originalWasTransfer && $nowIsTransfer => $this->convertToTransfer(),
+                default => $this->convertFromTransfer(),
+            };
         }
 
         if ($this->mode === 'plan') {
             return $this->createPlannedTransaction();
         }
 
-        if (! $this->editingTransactionId) {
-            return $this->transactionType === 'transfer'
-                ? $this->createTransfer()
-                : $this->createTransaction();
-        }
-
-        if ($this->isBasiqTransaction) {
-            return $this->updateTransaction();
-        }
-
-        $nowIsTransfer = $this->transactionType === 'transfer';
-
-        return match (true) {
-            ! $this->originalWasTransfer && ! $nowIsTransfer => $this->updateTransaction(),
-            $this->originalWasTransfer && $nowIsTransfer => $this->updateTransfer(),
-            ! $this->originalWasTransfer && $nowIsTransfer => $this->convertToTransfer(),
-            default => $this->convertFromTransfer(),
-        };
+        return $this->transactionType === 'transfer'
+            ? $this->createTransfer()
+            : $this->createTransaction();
     }
 
     private function createTransaction(): bool
@@ -598,6 +602,124 @@ final class TransactionModal extends Component
         return true;
     }
 
+    /**
+     * @throws Throwable
+     */
+    private function convertEnteredToPlanned(): bool
+    {
+        $transaction = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->find($this->editingTransactionId);
+
+        if (! $transaction) {
+            return false;
+        }
+
+        $parsed = AmountParser::parse($this->descriptionInput);
+
+        if ($parsed->amount <= 0) {
+            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
+
+            return false;
+        }
+
+        $direction = match ($this->transactionType) {
+            'income' => TransactionDirection::Credit,
+            default => TransactionDirection::Debit,
+        };
+
+        DB::transaction(function () use ($transaction, $parsed, $direction): void {
+            PlannedTransaction::query()->create([
+                'user_id' => auth()->id(),
+                'account_id' => $this->accountId,
+                'transfer_to_account_id' => $this->transactionType === 'transfer'
+                    ? $this->transferToAccountId
+                    : null,
+                'category_id' => $this->categoryId,
+                'amount' => $parsed->amount,
+                'direction' => $direction,
+                'description' => $parsed->description,
+                'start_date' => $this->date,
+                'frequency' => RecurrenceFrequency::from($this->frequency),
+                'until_date' => $this->untilType === 'until-date' ? $this->untilDate : null,
+                'is_active' => true,
+            ]);
+
+            $this->softDeleteWithAncestors($transaction);
+        });
+
+        return true;
+    }
+
+    /**
+     * @throws Throwable
+     */
+    private function convertPlannedToEntered(): bool
+    {
+        $planned = PlannedTransaction::query()
+            ->where('user_id', auth()->id())
+            ->find($this->editingPlannedTransactionId);
+
+        if (! $planned) {
+            return false;
+        }
+
+        $parsed = AmountParser::parse($this->descriptionInput);
+
+        if ($parsed->amount <= 0) {
+            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
+
+            return false;
+        }
+
+        DB::transaction(function () use ($planned, $parsed): void {
+            if ($this->transactionType === 'transfer') {
+                $shared = [
+                    'user_id' => auth()->id(),
+                    'category_id' => $this->categoryId,
+                    'amount' => $parsed->amount,
+                    'description' => $parsed->description,
+                    'post_date' => $this->date,
+                    'status' => TransactionStatus::Posted,
+                    'source' => TransactionSource::Manual,
+                    'notes' => $this->notes !== '' ? $this->notes : null,
+                ];
+
+                $debit = Transaction::query()->create($shared + [
+                    'account_id' => $this->accountId,
+                    'direction' => TransactionDirection::Debit,
+                ]);
+
+                $credit = Transaction::query()->create($shared + [
+                    'account_id' => $this->transferToAccountId,
+                    'direction' => TransactionDirection::Credit,
+                ]);
+
+                $debit->update(['transfer_pair_id' => $credit->id]);
+                $credit->update(['transfer_pair_id' => $debit->id]);
+            } else {
+                Transaction::query()->create([
+                    'user_id' => auth()->id(),
+                    'account_id' => $this->accountId,
+                    'category_id' => $this->categoryId,
+                    'amount' => $parsed->amount,
+                    'direction' => $this->transactionType === 'expense'
+                        ? TransactionDirection::Debit
+                        : TransactionDirection::Credit,
+                    'description' => $parsed->description,
+                    'post_date' => $this->date,
+                    'status' => TransactionStatus::Posted,
+                    'source' => TransactionSource::Manual,
+                    'notes' => $this->notes !== '' ? $this->notes : null,
+                ]);
+            }
+
+            $planned->delete();
+        });
+
+        return true;
+    }
+
     /** @return array{Transaction, AmountParseResult}|false */
     private function resolveTransactionWithParsedAmount(): array|false
     {
@@ -656,6 +778,29 @@ final class TransactionModal extends Component
     private function isTransfer(): bool
     {
         return $this->transactionType === 'transfer';
+    }
+
+    private function softDeleteWithAncestors(Transaction $transaction): void
+    {
+        $current = $transaction;
+
+        while ($current) {
+            if ($current->transfer_pair_id) {
+                Transaction::query()
+                    ->where('id', $current->transfer_pair_id)
+                    ->where('user_id', auth()->id())
+                    ->delete();
+            }
+
+            $parentId = $current->parent_transaction_id;
+            $current->delete();
+
+            $current = $parentId
+                ? Transaction::withTrashed()
+                    ->where('user_id', auth()->id())
+                    ->find($parentId)
+                : null;
+        }
     }
 
     private function resetForm(): void
