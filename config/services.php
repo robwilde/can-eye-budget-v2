@@ -16,6 +16,11 @@ return [
     |
     */
 
+    'github' => [
+        'token' => env('GITHUB_TOKEN'),
+        'feedback_repo' => env('GITHUB_FEEDBACK_REPO', 'robwilde/can-eye-budget-v2'),
+    ],
+
     'basiq' => [
         'api_key' => env('BASIQ_API_KEY'),
         'base_url' => env('BASIQ_BASE_URL', 'https://au-api.basiq.io'),
