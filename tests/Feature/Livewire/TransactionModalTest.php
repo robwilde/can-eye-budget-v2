@@ -1058,10 +1058,35 @@ test('user can manually override auto-selected mode', function () {
         ->assertSet('mode', 'enter');
 });
 
-test('plan toggle hidden when editing', function () {
+test('plan toggle visible when editing manual transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $transaction = Transaction::factory()->for($user)->for($account)->manual()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->assertSee(__('Enter vs Plan'));
+});
+
+test('plan toggle visible when editing planned transaction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'start_date' => '2026-04-01',
+        'amount' => 5000,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->assertSee(__('Enter vs Plan'));
+});
+
+test('plan toggle hidden when editing basiq transaction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
@@ -1084,7 +1109,7 @@ test('plan mode dispatches transaction-saved event', function () {
         ->assertDispatched('transaction-saved');
 });
 
-test('editing planned transaction enforces plan validation even when mode is tampered', function () {
+test('editing planned transaction with mode enter still validates transactionType', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -1098,9 +1123,8 @@ test('editing planned transaction enforces plan validation even when mode is tam
         ->dispatch('edit-planned-transaction', id: $planned->id)
         ->set('mode', 'enter')
         ->set('transactionType', 'invalid-type')
-        ->set('frequency', 'invalid-frequency')
         ->call('save')
-        ->assertHasErrors(['transactionType', 'frequency']);
+        ->assertHasErrors(['transactionType']);
 });
 
 test('editing planned transaction updates correctly', function () {
@@ -2230,4 +2254,702 @@ test('basiq transaction cannot be converted to income via tampered transactionTy
         ->notes->toBe('Tampered direction')
         ->direction->toBe(TransactionDirection::Debit)
         ->amount->toBe(5000);
+});
+
+// ── Enter/Plan Mode Conversion (#136) ─────────────────────────────
+
+test('converting entered expense to planned expense soft-deletes transaction and creates planned', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'gym membership',
+        'post_date' => '2026-03-15',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '50.00 gym membership')
+        ->set('accountId', $account->id)
+        ->set('categoryId', $category->id)
+        ->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors()
+        ->assertDispatched('transaction-saved');
+
+    expect(Transaction::query()->find($transaction->id))->toBeNull()
+        ->and(Transaction::withTrashed()->find($transaction->id))->not->toBeNull();
+
+    $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
+
+    expect($planned)
+        ->not->toBeNull()
+        ->account_id->toBe($account->id)
+        ->category_id->toBe($category->id)
+        ->amount->toBe(5000)
+        ->direction->toBe(TransactionDirection::Debit)
+        ->description->toBe('gym membership')
+        ->frequency->toBe(RecurrenceFrequency::EveryMonth)
+        ->is_active->toBeTrue();
+});
+
+test('converting entered income to planned income preserves credit direction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $income = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 200000,
+        'direction' => TransactionDirection::Credit,
+        'description' => 'salary',
+        'post_date' => '2026-03-15',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $income->id)
+        ->set('mode', 'plan')
+        ->set('transactionType', 'income')
+        ->set('descriptionInput', '2000.00 salary')
+        ->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
+
+    expect($planned)
+        ->not->toBeNull()
+        ->direction->toBe(TransactionDirection::Credit)
+        ->amount->toBe(200000);
+});
+
+test('converting entered transfer to planned transfer soft-deletes both sides', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $debit = Transaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'to savings',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+    ]);
+
+    $credit = Transaction::factory()->for($user)->create([
+        'account_id' => $toAccount->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Credit,
+        'description' => 'to savings',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+        'transfer_pair_id' => $debit->id,
+    ]);
+
+    $debit->update(['transfer_pair_id' => $credit->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->set('mode', 'plan')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '100.00 to savings')
+        ->set('transferToAccountId', $toAccount->id)
+        ->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    expect(Transaction::query()->find($debit->id))->toBeNull()
+        ->and(Transaction::query()->find($credit->id))->toBeNull()
+        ->and(Transaction::withTrashed()->find($debit->id))->not->toBeNull()
+        ->and(Transaction::withTrashed()->find($credit->id))->not->toBeNull();
+
+    $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
+
+    expect($planned)
+        ->not->toBeNull()
+        ->account_id->toBe($fromAccount->id)
+        ->transfer_to_account_id->toBe($toAccount->id)
+        ->amount->toBe(10000);
+});
+
+test('converting planned expense to entered expense hard-deletes planned and creates transaction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $planned = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'category_id' => $category->id,
+        'amount' => 7500,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'gym',
+        'start_date' => '2026-04-01',
+        'frequency' => RecurrenceFrequency::EveryMonth,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->set('mode', 'enter')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '75.00 gym')
+        ->set('accountId', $account->id)
+        ->set('categoryId', $category->id)
+        ->set('date', '2026-04-01')
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors()
+        ->assertDispatched('transaction-saved');
+
+    expect(PlannedTransaction::query()->find($planned->id))->toBeNull();
+
+    $transaction = Transaction::query()->where('user_id', $user->id)->first();
+
+    expect($transaction)
+        ->not->toBeNull()
+        ->account_id->toBe($account->id)
+        ->category_id->toBe($category->id)
+        ->amount->toBe(7500)
+        ->direction->toBe(TransactionDirection::Debit)
+        ->description->toBe('gym')
+        ->source->toBe(TransactionSource::Manual)
+        ->status->toBe(TransactionStatus::Posted);
+});
+
+test('converting planned income to entered income preserves credit direction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'amount' => 300000,
+        'direction' => TransactionDirection::Credit,
+        'description' => 'salary',
+        'start_date' => '2026-04-01',
+        'frequency' => RecurrenceFrequency::EveryMonth,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->set('mode', 'enter')
+        ->set('transactionType', 'income')
+        ->set('descriptionInput', '3000.00 salary')
+        ->set('date', '2026-04-01')
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    $transaction = Transaction::query()->where('user_id', $user->id)->first();
+
+    expect($transaction)
+        ->not->toBeNull()
+        ->direction->toBe(TransactionDirection::Credit)
+        ->amount->toBe(300000);
+});
+
+test('converting planned transfer to entered transfer creates paired transactions', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'transfer_to_account_id' => $toAccount->id,
+        'amount' => 50000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'savings transfer',
+        'start_date' => '2026-04-01',
+        'frequency' => RecurrenceFrequency::EveryMonth,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->set('mode', 'enter')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '500.00 savings transfer')
+        ->set('transferToAccountId', $toAccount->id)
+        ->set('date', '2026-04-01')
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    expect(PlannedTransaction::query()->find($planned->id))->toBeNull();
+
+    $debit = Transaction::query()
+        ->where('user_id', $user->id)
+        ->where('direction', TransactionDirection::Debit)
+        ->first();
+
+    $credit = Transaction::query()
+        ->where('user_id', $user->id)
+        ->where('direction', TransactionDirection::Credit)
+        ->first();
+
+    expect($debit)
+        ->not->toBeNull()
+        ->account_id->toBe($fromAccount->id)
+        ->amount->toBe(50000)
+        ->transfer_pair_id->toBe($credit->id)
+        ->source->toBe(TransactionSource::Manual)
+        ->status->toBe(TransactionStatus::Posted);
+
+    expect($credit)
+        ->not->toBeNull()
+        ->account_id->toBe($toAccount->id)
+        ->amount->toBe(50000)
+        ->transfer_pair_id->toBe($debit->id);
+});
+
+test('converting entered expense to planned transfer with mode and type change', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $expense = Transaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'was expense',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $expense->id)
+        ->set('mode', 'plan')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '50.00 now planned transfer')
+        ->set('transferToAccountId', $toAccount->id)
+        ->set('frequency', RecurrenceFrequency::EveryWeek->value)
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    expect(Transaction::query()->find($expense->id))->toBeNull();
+
+    $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
+
+    expect($planned)
+        ->not->toBeNull()
+        ->transfer_to_account_id->toBe($toAccount->id)
+        ->frequency->toBe(RecurrenceFrequency::EveryWeek)
+        ->direction->toBe(TransactionDirection::Debit);
+});
+
+test('converting entered transfer to planned expense with mode and type change', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $debit = Transaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 8000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'transfer',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+    ]);
+
+    $credit = Transaction::factory()->for($user)->create([
+        'account_id' => $toAccount->id,
+        'amount' => 8000,
+        'direction' => TransactionDirection::Credit,
+        'description' => 'transfer',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+        'transfer_pair_id' => $debit->id,
+    ]);
+
+    $debit->update(['transfer_pair_id' => $credit->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '80.00 now planned expense')
+        ->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    expect(Transaction::query()->find($debit->id))->toBeNull()
+        ->and(Transaction::query()->find($credit->id))->toBeNull();
+
+    $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
+
+    expect($planned)
+        ->not->toBeNull()
+        ->transfer_to_account_id->toBeNull()
+        ->direction->toBe(TransactionDirection::Debit);
+});
+
+test('converting planned expense to entered transfer with mode and type change', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'was planned expense',
+        'start_date' => '2026-04-01',
+        'frequency' => RecurrenceFrequency::EveryMonth,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->set('mode', 'enter')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '50.00 now entered transfer')
+        ->set('transferToAccountId', $toAccount->id)
+        ->set('date', '2026-04-01')
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    expect(PlannedTransaction::query()->find($planned->id))->toBeNull();
+
+    $debit = Transaction::query()
+        ->where('user_id', $user->id)
+        ->where('direction', TransactionDirection::Debit)
+        ->first();
+
+    expect($debit)
+        ->not->toBeNull()
+        ->transfer_pair_id->not->toBeNull()
+        ->account_id->toBe($fromAccount->id);
+
+    $credit = Transaction::query()->find($debit->transfer_pair_id);
+
+    expect($credit)
+        ->not->toBeNull()
+        ->account_id->toBe($toAccount->id);
+});
+
+test('converting planned transfer to entered expense with mode and type change', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'transfer_to_account_id' => $toAccount->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'was planned transfer',
+        'start_date' => '2026-04-01',
+        'frequency' => RecurrenceFrequency::EveryMonth,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->set('mode', 'enter')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '50.00 now entered expense')
+        ->set('date', '2026-04-01')
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    expect(PlannedTransaction::query()->find($planned->id))->toBeNull();
+
+    $transaction = Transaction::query()->where('user_id', $user->id)->first();
+
+    expect($transaction)
+        ->not->toBeNull()
+        ->direction->toBe(TransactionDirection::Debit)
+        ->transfer_pair_id->toBeNull();
+});
+
+test('converting edited transaction to planned soft-deletes entire ancestor chain', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $parent = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'original expense',
+        'post_date' => '2026-03-15',
+    ]);
+
+    $child = $parent->createChild(['description' => 'edited expense']);
+    $parent->delete();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $child->id)
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '50.00 planned expense')
+        ->set('accountId', $account->id)
+        ->set('categoryId', $category->id)
+        ->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    expect(Transaction::withTrashed()->find($child->id)->deleted_at)->not->toBeNull()
+        ->and(Transaction::withTrashed()->find($parent->id)->deleted_at)->not->toBeNull()
+        ->and(Transaction::query()->current()->where('user_id', $user->id)->count())->toBe(0);
+
+    expect(PlannedTransaction::query()->where('user_id', $user->id)->first())->not->toBeNull();
+});
+
+test('converting edited transfer to planned soft-deletes entire ancestor chain including pairs', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $debitParent = Transaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'transfer',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+    ]);
+
+    $creditParent = Transaction::factory()->for($user)->create([
+        'account_id' => $toAccount->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Credit,
+        'description' => 'transfer',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+        'transfer_pair_id' => $debitParent->id,
+    ]);
+    $debitParent->update(['transfer_pair_id' => $creditParent->id]);
+
+    $debitChild = $debitParent->createChild(['description' => 'edited transfer']);
+    $creditChild = $creditParent->createChild([
+        'description' => 'edited transfer',
+        'transfer_pair_id' => $debitChild->id,
+    ]);
+    $debitChild->update(['transfer_pair_id' => $creditChild->id]);
+    $debitParent->delete();
+    $creditParent->delete();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debitChild->id)
+        ->set('mode', 'plan')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '100.00 planned transfer')
+        ->set('accountId', $fromAccount->id)
+        ->set('transferToAccountId', $toAccount->id)
+        ->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    expect(Transaction::query()->where('user_id', $user->id)->count())->toBe(0);
+
+    $allTrashed = Transaction::withTrashed()->where('user_id', $user->id)->get();
+
+    expect($allTrashed)->toHaveCount(4)
+        ->each(fn ($t) => $t->deleted_at->not->toBeNull());
+
+    expect(PlannedTransaction::query()->where('user_id', $user->id)->first())->not->toBeNull();
+});
+
+test('converting planned transfer to entered preserves notes', function () {
+    $user = User::factory()->create();
+    $fromAccount = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $fromAccount->id,
+        'transfer_to_account_id' => $toAccount->id,
+        'amount' => 50000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'savings transfer',
+        'start_date' => '2026-04-01',
+        'frequency' => RecurrenceFrequency::EveryMonth,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->set('mode', 'enter')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '500.00 savings transfer')
+        ->set('transferToAccountId', $toAccount->id)
+        ->set('date', '2026-04-01')
+        ->set('notes', 'monthly savings note')
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertHasNoErrors();
+
+    $debit = Transaction::query()
+        ->where('user_id', $user->id)
+        ->where('direction', TransactionDirection::Debit)
+        ->first();
+
+    $credit = Transaction::query()
+        ->where('user_id', $user->id)
+        ->where('direction', TransactionDirection::Credit)
+        ->first();
+
+    expect($debit->notes)->toBe('monthly savings note')
+        ->and($credit->notes)->toBe('monthly savings note');
+});
+
+test('basiq transaction cannot convert to plan mode', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create([
+        'amount' => 3000,
+        'direction' => TransactionDirection::Debit,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('mode', 'plan')
+        ->set('categoryId', $category->id)
+        ->call('save')
+        ->assertSet('showModal', false)
+        ->assertDispatched('transaction-saved');
+
+    expect(PlannedTransaction::query()->where('user_id', $user->id)->count())->toBe(0);
+
+    $child = Transaction::query()
+        ->where('parent_transaction_id', $transaction->id)
+        ->first();
+
+    expect($child)->not->toBeNull()
+        ->category_id->toBe($category->id);
+});
+
+test('converting to plan requires frequency', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('mode', 'plan')
+        ->set('frequency', 'invalid-frequency')
+        ->call('save')
+        ->assertHasErrors(['frequency']);
+});
+
+test('converting to plan with until-date validates until date', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'post_date' => '2026-03-15',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('mode', 'plan')
+        ->set('untilType', 'until-date')
+        ->set('untilDate', null)
+        ->call('save')
+        ->assertHasErrors(['untilDate']);
+});
+
+test('converting to entered transfer requires transfer_to_account_id', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => '2026-04-01',
+        'frequency' => RecurrenceFrequency::EveryMonth,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->set('mode', 'enter')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '50.00 transfer')
+        ->set('transferToAccountId', null)
+        ->call('save')
+        ->assertHasErrors(['transferToAccountId']);
+});
+
+test('converting to entered transfer rejects same account', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => '2026-04-01',
+        'frequency' => RecurrenceFrequency::EveryMonth,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->set('mode', 'enter')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '50.00 transfer')
+        ->set('transferToAccountId', $account->id)
+        ->call('save')
+        ->assertHasErrors(['transferToAccountId']);
+});
+
+test('submit button shows convert text when switching mode during edit', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->assertSee(__('Update expense'))
+        ->set('mode', 'plan')
+        ->assertSee(__('Convert to planned expense'));
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'start_date' => '2026-04-01',
+        'amount' => 5000,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id)
+        ->assertSee(__('Update planned expense'))
+        ->set('mode', 'enter')
+        ->assertSee(__('Convert to entered expense'));
 });
