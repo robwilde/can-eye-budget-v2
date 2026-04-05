@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Contracts\BasiqServiceContract;
+use App\Contracts\GitHubServiceContract;
 use App\Services\BasiqService;
+use App\Services\GitHubService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -25,6 +27,13 @@ final class AppServiceProvider extends ServiceProvider
         ));
 
         $this->app->alias(BasiqServiceContract::class, BasiqService::class);
+
+        $this->app->singleton(GitHubServiceContract::class, fn (): GitHubService => new GitHubService(
+            token: (string) config('services.github.token'),
+            repo: (string) config('services.github.feedback_repo'),
+        ));
+
+        $this->app->alias(GitHubServiceContract::class, GitHubService::class);
     }
 
     /**
