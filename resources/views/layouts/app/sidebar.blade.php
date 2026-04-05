@@ -92,6 +92,8 @@
 
         {{ $slot }}
 
+        <livewire:feedback-widget />
+
         @fluxScripts
     </body>
 </html>
