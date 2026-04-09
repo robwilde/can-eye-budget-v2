@@ -15,4 +15,10 @@ interface GitHubServiceContract
      * @throws ConnectionException
      */
     public function createFeedbackIssue(FeedbackSubmission $submission): string;
+
+    /**
+     * @throws RequestException
+     * @throws ConnectionException
+     */
+    public function uploadScreenshot(string $storagePath): string;
 }
