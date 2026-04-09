@@ -7,11 +7,14 @@ namespace App\Livewire;
 use App\Contracts\GitHubServiceContract;
 use App\DTOs\FeedbackSubmission;
 use App\Enums\FeedbackCategory;
+use Exception;
 use Flux\Flux;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Livewire\Component;
 
@@ -31,6 +34,32 @@ final class FeedbackWidget extends Component
 
     public string $viewport = '';
 
+    public function captureScreenshot(string $url, string $userAgent, string $viewport): ?string
+    {
+        $screenshotUrl = config('services.feedback.screenshot_url');
+
+        if (! $screenshotUrl || ! app()->isLocal()) {
+            return null;
+        }
+
+        try {
+            $response = Http::timeout(15)
+                ->get($screenshotUrl.'/screenshot', ['url' => $url]);
+
+            if ($response->failed()) {
+                report("Feedback screenshot failed: {$response->body()}");
+
+                return null;
+            }
+
+            return $response->json('screenshot');
+        } catch (Exception $e) {
+            report("Feedback screenshot failed: {$e->getMessage()}");
+
+            return null;
+        }
+    }
+
     public function setScreenshotAndOpen(string $screenshot, string $pageUrl, string $userAgent, string $viewport): void
     {
         $this->screenshot = $screenshot;
@@ -40,14 +69,10 @@ final class FeedbackWidget extends Component
         $this->showModal = true;
     }
 
-    /**
-     * @throws RequestException
-     * @throws ConnectionException
-     */
     public function submit(GitHubServiceContract $github): void
     {
         $this->validate([
-            'category' => ['required', 'string'],
+            'category' => ['required', Rule::enum(FeedbackCategory::class)],
             'description' => ['required', 'string', 'max:2000'],
         ]);
 
@@ -76,24 +101,39 @@ final class FeedbackWidget extends Component
             'userEmail' => auth()->user()->email,
         ]);
 
-        $issueUrl = $github->createFeedbackIssue($submission);
+        try {
+            $issueUrl = $github->createFeedbackIssue($submission);
+        } catch (RequestException|ConnectionException $e) {
+            report($e);
+
+            Flux::toast(
+                text: 'Could not create the issue — please try again',
+                heading: 'GitHub error',
+                variant: 'danger',
+            );
+
+            return;
+        }
+
         $issueNumber = basename($issueUrl);
 
         $this->resetForm();
 
         if ($screenshotFailed) {
             Flux::toast(
-                text: "Issue #{$issueNumber} created but screenshot could not be attached",
-                heading: 'Feedback submitted',
+                text: "Screenshot could not be attached — {$issueUrl}",
+                heading: "Issue #{$issueNumber} created",
                 variant: 'warning',
             );
         } else {
             Flux::toast(
-                text: "Issue #{$issueNumber} created on GitHub",
-                heading: 'Feedback submitted',
+                text: $issueUrl,
+                heading: "Issue #{$issueNumber} created",
                 variant: 'success',
             );
         }
+
+        $this->dispatch('feedback-issue-created', url: $issueUrl);
     }
 
     public function render(): View
@@ -118,9 +158,15 @@ final class FeedbackWidget extends Component
             return null;
         }
 
-        $data = preg_replace('/^data:image\/\w+;base64,/', '', $this->screenshot);
+        $pngDataUrlPrefix = 'data:image/png;base64,';
 
-        if ($data === null || $data === '') {
+        if (! str_starts_with($this->screenshot, $pngDataUrlPrefix)) {
+            return null;
+        }
+
+        $data = mb_substr($this->screenshot, mb_strlen($pngDataUrlPrefix));
+
+        if ($data === '') {
             return null;
         }
 
