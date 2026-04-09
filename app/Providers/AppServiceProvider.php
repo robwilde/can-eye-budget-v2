@@ -31,6 +31,7 @@ final class AppServiceProvider extends ServiceProvider
         $this->app->singleton(GitHubServiceContract::class, fn (): GitHubService => new GitHubService(
             token: (string) config('services.github.token'),
             repo: (string) config('services.github.feedback_repo'),
+            releaseId: (string) config('services.github.feedback_release_id'),
         ));
 
         $this->app->alias(GitHubServiceContract::class, GitHubService::class);
