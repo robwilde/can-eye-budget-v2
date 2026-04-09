@@ -110,6 +110,27 @@ final readonly class BasiqService implements BasiqServiceContract
 
     /**
      * @throws ConnectionException
+     * @throws RequestException
+     */
+    public function createConnection(string $basiqUserId, string $institutionId, string $loginId, string $password): string
+    {
+        $response = $this->api()->post("/users/{$basiqUserId}/connections", [
+            'institution' => ['id' => $institutionId],
+            'loginId' => $loginId,
+            'password' => $password,
+        ])->json();
+
+        $jobUrl = $response['links']['job'] ?? null;
+
+        if (! is_string($jobUrl) || $jobUrl === '') {
+            throw new RuntimeException("Basiq connection response missing job link for user: {$basiqUserId}");
+        }
+
+        return basename($jobUrl);
+    }
+
+    /**
+     * @throws ConnectionException
      */
     public function getJob(string $jobId): BasiqJob
     {
