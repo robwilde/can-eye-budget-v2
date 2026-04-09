@@ -52,11 +52,23 @@ final class FeedbackWidget extends Component
         ]);
 
         $screenshotPath = $this->saveScreenshot();
+        $screenshotUrl = null;
+
+        $screenshotFailed = false;
+
+        if ($screenshotPath) {
+            try {
+                $screenshotUrl = $github->uploadScreenshot($screenshotPath);
+            } catch (RequestException|ConnectionException $e) {
+                report($e);
+                $screenshotFailed = true;
+            }
+        }
 
         $submission = FeedbackSubmission::from([
             'category' => FeedbackCategory::from($this->category),
             'description' => $this->description,
-            'screenshotPath' => $screenshotPath,
+            'screenshotPath' => $screenshotUrl,
             'pageUrl' => $this->pageUrl,
             'userAgent' => $this->userAgent,
             'viewport' => $this->viewport,
@@ -65,14 +77,23 @@ final class FeedbackWidget extends Component
         ]);
 
         $issueUrl = $github->createFeedbackIssue($submission);
+        $issueNumber = basename($issueUrl);
 
         $this->resetForm();
 
-        Flux::toast(
-            text: 'View issue on GitHub',
-            heading: 'Feedback submitted',
-            variant: 'success',
-        );
+        if ($screenshotFailed) {
+            Flux::toast(
+                text: "Issue #{$issueNumber} created but screenshot could not be attached",
+                heading: 'Feedback submitted',
+                variant: 'warning',
+            );
+        } else {
+            Flux::toast(
+                text: "Issue #{$issueNumber} created on GitHub",
+                heading: 'Feedback submitted',
+                variant: 'success',
+            );
+        }
     }
 
     public function render(): View
