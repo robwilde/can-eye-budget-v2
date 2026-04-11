@@ -180,6 +180,20 @@ test('refresh dispatches job and creates log', function () {
     expect(BasiqRefreshLog::query()->where('user_id', $user->id)->count())->toBe(1);
 });
 
+test('refresh is no-op when user has pending refresh log', function () {
+    Queue::fake();
+
+    $user = User::factory()->withBasiq()->create();
+    BasiqRefreshLog::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(ConnectBank::class)
+        ->call('refresh');
+
+    Queue::assertNothingPushed();
+    expect(BasiqRefreshLog::query()->where('user_id', $user->id)->count())->toBe(1);
+});
+
 test('refresh is no-op at daily limit', function () {
     Queue::fake();
 
