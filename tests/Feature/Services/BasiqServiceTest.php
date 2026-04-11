@@ -448,3 +448,45 @@ test('getJob throws RequestException on 404', function () {
     $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
     $service->getJob('bad-id');
 })->throws(RequestException::class);
+
+test('refreshConnections sends POST and extracts job IDs', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users/usr-1/connections/refresh' => Http::response([
+            'data' => [
+                ['id' => 'job-1', 'type' => 'job'],
+                ['id' => 'job-2', 'type' => 'job'],
+            ],
+        ], 202),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $jobIds = $service->refreshConnections('usr-1');
+
+    expect($jobIds)->toBe(['job-1', 'job-2']);
+
+    Http::assertSent(fn (Request $r) => $r->url() === 'https://au-api.basiq.io/users/usr-1/connections/refresh'
+        && $r->method() === 'POST');
+});
+
+test('refreshConnections returns empty array when no data', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users/usr-1/connections/refresh' => Http::response(['data' => []], 202),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $jobIds = $service->refreshConnections('usr-1');
+
+    expect($jobIds)->toBe([]);
+});
+
+test('refreshConnections throws RequestException on API error', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users/usr-1/connections/refresh' => Http::response(['error' => 'forbidden'], 403),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $service->refreshConnections('usr-1');
+})->throws(RequestException::class);

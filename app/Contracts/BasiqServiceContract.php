@@ -59,4 +59,12 @@ interface BasiqServiceContract
      * @throws ConnectionException
      */
     public function getJob(string $jobId): BasiqJob;
+
+    /**
+     * @return array<int, string>
+     *
+     * @throws RequestException
+     * @throws ConnectionException
+     */
+    public function refreshConnections(string $basiqUserId): array;
 }
