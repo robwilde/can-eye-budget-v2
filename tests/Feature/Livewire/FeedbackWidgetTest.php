@@ -345,7 +345,7 @@ test('submit shows warning toast when screenshot upload fails', function () {
         ->assertDispatched('feedback-issue-created', url: 'https://github.com/robwilde/can-eye-budget-v2/issues/88');
 });
 
-test('submit handles GitHub API failure gracefully', function () {
+test('submit shows error toast on GitHub API failure and preserves form', function () {
     $user = User::factory()->create();
 
     $mock = Mockery::mock(GitHubServiceContract::class);
@@ -359,10 +359,15 @@ test('submit handles GitHub API failure gracefully', function () {
 
     app()->instance(GitHubServiceContract::class, $mock);
 
-    Livewire::actingAs($user)
+    $component = Livewire::actingAs($user)
         ->test(FeedbackWidget::class)
         ->set('description', 'This will fail')
         ->set('category', 'bug')
         ->set('pageUrl', 'https://app.test')
-        ->call('submit');
-})->throws(Illuminate\Http\Client\RequestException::class);
+        ->call('submit')
+        ->assertDispatched('toast-show', slots: ['text' => 'Could not create the issue — please try again', 'heading' => 'GitHub error'], dataset: ['variant' => 'danger'])
+        ->assertNotDispatched('feedback-issue-created');
+
+    expect($component->get('description'))->toBe('This will fail')
+        ->and($component->get('category'))->toBe('bug');
+});

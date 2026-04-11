@@ -373,6 +373,50 @@ test('paginateTransactions stops when data is empty even if next link exists', f
     Http::assertSentCount(3);
 });
 
+test('createConnection sends correct POST payload and returns job ID', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users/usr-1/connections' => Http::response([
+            'id' => 'conn-1',
+            'links' => ['job' => 'https://au-api.basiq.io/jobs/job-abc-123'],
+        ]),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $jobId = $service->createConnection('usr-1', 'AU00000', 'Wentworth-Smith', 'whislter');
+
+    expect($jobId)->toBe('job-abc-123');
+
+    Http::assertSent(fn (Request $r) => $r->url() === 'https://au-api.basiq.io/users/usr-1/connections'
+        && $r->method() === 'POST'
+        && $r['institution']['id'] === 'AU00000'
+        && $r['loginId'] === 'Wentworth-Smith'
+        && $r['password'] === 'whislter');
+});
+
+test('createConnection throws RequestException on API error', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users/usr-1/connections' => Http::response(['error' => 'invalid'], 422),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $service->createConnection('usr-1', 'AU00000', 'bad-login', 'bad-pass');
+})->throws(RequestException::class);
+
+test('createConnection throws RuntimeException when job link is missing', function () {
+    Http::fake([
+        '*/token' => Http::response(['access_token' => 'tok']),
+        '*/users/usr-1/connections' => Http::response([
+            'id' => 'conn-1',
+            'links' => [],
+        ]),
+    ]);
+
+    $service = new BasiqService(apiKey: 'key', baseUrl: 'https://au-api.basiq.io');
+    $service->createConnection('usr-1', 'AU00000', 'Wentworth-Smith', 'whislter');
+})->throws(RuntimeException::class, 'Basiq connection response missing job link for user: usr-1');
+
 test('getJob returns BasiqJob with derived status', function () {
     Http::fake([
         '*/token' => Http::response(['access_token' => 'tok']),
