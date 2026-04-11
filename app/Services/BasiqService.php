@@ -140,6 +140,22 @@ final readonly class BasiqService implements BasiqServiceContract
     }
 
     /**
+     * @return array<int, string>
+     *
+     * @throws ConnectionException
+     * @throws RequestException
+     */
+    public function refreshConnections(string $basiqUserId): array
+    {
+        $response = $this->api()->post("/users/{$basiqUserId}/connections/refresh");
+
+        /** @var array<int, array{id: string}> $data */
+        $data = $response->json('data', []);
+
+        return array_column($data, 'id');
+    }
+
+    /**
      * @param  array<string, string>  $body
      *
      * @throws ConnectionException
