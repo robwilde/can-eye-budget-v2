@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Contracts\BasiqServiceContract;
+use App\Enums\RefreshStatus;
+use App\Enums\RefreshTrigger;
+use App\Jobs\RefreshBasiqConnectionsJob;
+use App\Models\BasiqRefreshLog;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Str;
@@ -16,6 +20,13 @@ final class ConnectBank extends Component
 {
     #[Validate('in:connect,manage')]
     public string $action = 'connect';
+
+    public function mount(): void
+    {
+        if (auth()->user()->basiq_user_id) {
+            $this->action = 'manage';
+        }
+    }
 
     /**
      * @throws RequestException
@@ -46,8 +57,67 @@ final class ConnectBank extends Component
         $this->redirect($consentUrl);
     }
 
+    public function refresh(): void
+    {
+        $user = auth()->user();
+
+        if (! $user->basiq_user_id) {
+            return;
+        }
+
+        $hasPendingRefresh = BasiqRefreshLog::query()
+            ->where('user_id', $user->id)
+            ->where('status', RefreshStatus::Pending)
+            ->exists();
+
+        if ($hasPendingRefresh) {
+            return;
+        }
+
+        $todayRefreshCount = BasiqRefreshLog::query()
+            ->where('user_id', $user->id)
+            ->whereDate('created_at', today())
+            ->count();
+
+        if ($todayRefreshCount >= 20) {
+            return;
+        }
+
+        $log = BasiqRefreshLog::create([
+            'user_id' => $user->id,
+            'trigger' => RefreshTrigger::Manual,
+            'status' => RefreshStatus::Pending,
+        ]);
+
+        RefreshBasiqConnectionsJob::dispatch($user, $log);
+    }
+
     public function render(): View
     {
-        return view('livewire.connect-bank');
+        $user = auth()->user();
+        $isConnected = (bool) $user->basiq_user_id;
+
+        $todayRefreshCount = $isConnected
+            ? BasiqRefreshLog::query()
+                ->where('user_id', $user->id)
+                ->whereDate('created_at', today())
+                ->count()
+            : 0;
+
+        return view('livewire.connect-bank', [
+            'isConnected' => $isConnected,
+            'accounts' => $isConnected ? $user->accounts()->active()->visible()->get() : collect(),
+            'transactionCount' => $isConnected ? $user->transactions()->count() : 0,
+            'lastSyncedAt' => $user->last_synced_at,
+            'refreshLogs' => $isConnected
+                ? BasiqRefreshLog::query()
+                    ->where('user_id', $user->id)
+                    ->latest()
+                    ->limit(10)
+                    ->get()
+                : collect(),
+            'todayRefreshCount' => $todayRefreshCount,
+            'canRefresh' => $isConnected && $todayRefreshCount < 20,
+        ]);
     }
 }
