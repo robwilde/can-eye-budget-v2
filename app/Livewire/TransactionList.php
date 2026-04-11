@@ -6,10 +6,10 @@ namespace App\Livewire;
 
 use App\Casts\MoneyCast;
 use App\Enums\TransactionDirection;
+use App\Enums\TransactionPeriod;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Transaction;
-use Carbon\CarbonInterface;
 use Illuminate\View\View;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -33,7 +33,13 @@ final class TransactionList extends Component
     public ?int $category = null;
 
     #[Url]
-    public string $period = '30d';
+    public string $period = 'this-month';
+
+    #[Url]
+    public ?string $from = null;
+
+    #[Url]
+    public ?string $to = null;
 
     #[Url(except: '')]
     public string $search = '';
@@ -48,6 +54,17 @@ final class TransactionList extends Component
     {
         if (! in_array($this->direction, self::VALID_DIRECTIONS, true)) {
             $this->direction = 'all';
+        }
+
+        $this->period = match ($this->period) {
+            '30d' => 'this-month',
+            '90d' => '3m',
+            '12m' => '1y',
+            default => $this->period,
+        };
+
+        if (! TransactionPeriod::tryFrom($this->period)) {
+            $this->period = 'this-month';
         }
     }
 
@@ -96,8 +113,21 @@ final class TransactionList extends Component
         $this->resetPage();
     }
 
+    public function updatedFrom(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatedTo(): void
+    {
+        $this->resetPage();
+    }
+
     public function render(): View
     {
+        $periodEnum = TransactionPeriod::tryFrom($this->period) ?? TransactionPeriod::ThisMonth;
+        $dates = $periodEnum->dateRange(auth()->user(), $this->from, $this->to);
+
         $directionEnum = match ($this->direction) {
             'incoming' => TransactionDirection::Credit,
             'outgoing' => TransactionDirection::Debit,
@@ -115,7 +145,8 @@ final class TransactionList extends Component
                     ->orWhere('clean_description', 'like', "%{$term}%")
                     ->orWhere('merchant_name', 'like', "%{$term}%");
             }))
-            ->where('post_date', '>=', $this->periodStart())
+            ->when($dates['start'], fn ($q, $s) => $q->where('post_date', '>=', $s))
+            ->when($dates['end'], fn ($q, $e) => $q->where('post_date', '<=', $e))
             ->withRelations()
             ->orderBy(
                 in_array($this->sortBy, self::SORTABLE_COLUMNS, true) ? $this->sortBy : 'post_date',
@@ -135,17 +166,9 @@ final class TransactionList extends Component
                 ? Category::query()->whereKey($this->category)->value('name')
                 : null,
             'formatMoney' => MoneyCast::format(...),
+            'periodLabel' => $periodEnum->label(),
+            'hasPayCycle' => auth()->user()->hasPayCycleConfigured(),
+            'showCustomRange' => $periodEnum === TransactionPeriod::Custom,
         ]);
-    }
-
-    private function periodStart(): CarbonInterface
-    {
-        return match ($this->period) {
-            '7d' => now()->subDays(7),
-            '30d' => now()->subDays(30),
-            '90d' => now()->subDays(90),
-            '12m' => now()->subMonths(12),
-            default => now()->subDays(30),
-        };
     }
 }
