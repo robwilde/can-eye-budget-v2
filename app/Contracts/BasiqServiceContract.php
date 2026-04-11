@@ -52,5 +52,11 @@ interface BasiqServiceContract
      * @throws RequestException
      * @throws ConnectionException
      */
+    public function createConnection(string $basiqUserId, string $institutionId, string $loginId, string $password): string;
+
+    /**
+     * @throws RequestException
+     * @throws ConnectionException
+     */
     public function getJob(string $jobId): BasiqJob;
 }
