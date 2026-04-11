@@ -5,11 +5,13 @@
 declare(strict_types=1);
 
 use App\Casts\MoneyCast;
+use App\Enums\PayFrequency;
 use App\Livewire\TransactionList;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Livewire\Livewire;
 
 test('component renders for authenticated user', function () {
@@ -622,4 +624,212 @@ test('amounts do not show color coding when direction is filtered', function () 
 test('route requires authentication', function () {
     $this->get(route('transactions'))
         ->assertRedirect(route('login'));
+});
+
+test('filters by this month period', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-04-15'));
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'THIS MONTH PURCHASE',
+        'post_date' => CarbonImmutable::parse('2026-04-10'),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'LAST MONTH PURCHASE',
+        'post_date' => CarbonImmutable::parse('2026-03-20'),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['period' => 'this-month'])
+        ->assertSee('THIS MONTH PURCHASE')
+        ->assertDontSee('LAST MONTH PURCHASE');
+});
+
+test('filters by 3 month period', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-04-15'));
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'RECENT PURCHASE',
+        'post_date' => CarbonImmutable::parse('2026-02-01'),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'OLD PURCHASE',
+        'post_date' => CarbonImmutable::parse('2025-12-01'),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['period' => '3m'])
+        ->assertSee('RECENT PURCHASE')
+        ->assertDontSee('OLD PURCHASE');
+});
+
+test('filters by all period shows all transactions', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-04-15'));
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'RECENT PURCHASE',
+        'post_date' => CarbonImmutable::parse('2026-04-10'),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'ANCIENT PURCHASE',
+        'post_date' => CarbonImmutable::parse('2020-01-01'),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['period' => 'all'])
+        ->assertSee('RECENT PURCHASE')
+        ->assertSee('ANCIENT PURCHASE');
+});
+
+test('filters by pay cycle period', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-04-11'));
+
+    $user = User::factory()->create([
+        'pay_amount' => 300000,
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => CarbonImmutable::parse('2026-04-18'),
+    ]);
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'IN CYCLE PURCHASE',
+        'post_date' => CarbonImmutable::parse('2026-04-10'),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'BEFORE CYCLE PURCHASE',
+        'post_date' => CarbonImmutable::parse('2026-03-30'),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['period' => 'pay-cycle'])
+        ->assertSee('IN CYCLE PURCHASE')
+        ->assertDontSee('BEFORE CYCLE PURCHASE');
+});
+
+test('pay cycle option hidden when not configured', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertDontSeeHtml('value="pay-cycle"');
+});
+
+test('pay cycle option shown when configured', function () {
+    $user = User::factory()->withPayCycle()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSeeHtml('value="pay-cycle"');
+});
+
+test('custom period filters between from and to dates', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'IN RANGE PURCHASE',
+        'post_date' => CarbonImmutable::parse('2026-03-15'),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'OUT OF RANGE PURCHASE',
+        'post_date' => CarbonImmutable::parse('2026-02-01'),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, [
+            'period' => 'custom',
+            'from' => '2026-03-01',
+            'to' => '2026-03-31',
+        ])
+        ->assertSee('IN RANGE PURCHASE')
+        ->assertDontSee('OUT OF RANGE PURCHASE');
+});
+
+test('custom period with missing dates falls back to this month', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-04-15'));
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'THIS MONTH PURCHASE',
+        'post_date' => CarbonImmutable::parse('2026-04-10'),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'LAST MONTH PURCHASE',
+        'post_date' => CarbonImmutable::parse('2026-03-20'),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['period' => 'custom'])
+        ->assertSee('THIS MONTH PURCHASE')
+        ->assertDontSee('LAST MONTH PURCHASE');
+});
+
+test('legacy 30d maps to this-month', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['period' => '30d'])
+        ->assertSet('period', 'this-month');
+});
+
+test('legacy 90d maps to 3m', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['period' => '90d'])
+        ->assertSet('period', '3m');
+});
+
+test('legacy 12m maps to 1y', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['period' => '12m'])
+        ->assertSet('period', '1y');
+});
+
+test('custom range date inputs shown when custom selected', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['period' => 'custom'])
+        ->assertSeeHtml('wire:model.live="from"')
+        ->assertSeeHtml('wire:model.live="to"');
+});
+
+test('custom range date inputs hidden for other periods', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['period' => 'this-month'])
+        ->assertDontSeeHtml('wire:model.live="from"')
+        ->assertDontSeeHtml('wire:model.live="to"');
 });

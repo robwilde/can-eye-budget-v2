@@ -105,6 +105,40 @@ final class User extends Authenticatable
             && $this->next_pay_date !== null;
     }
 
+    /**
+     * @return array{start: CarbonImmutable, end: CarbonImmutable}|null
+     */
+    public function currentPayCycleBounds(): ?array
+    {
+        if (! $this->hasPayCycleConfigured()) {
+            return null;
+        }
+
+        $frequency = $this->pay_frequency;
+
+        if ($frequency === null) {
+            return null;
+        }
+
+        $nextPay = CarbonImmutable::instance($this->next_pay_date);
+        $today = CarbonImmutable::today();
+
+        if ($nextPay->lessThanOrEqualTo($today)) {
+            $nextPay = $this->fastForwardPayDate($nextPay, $today, $frequency);
+        }
+
+        $cycleStart = match ($frequency) {
+            PayFrequency::Weekly => $nextPay->subWeek(),
+            PayFrequency::Fortnightly => $nextPay->subWeeks(2),
+            PayFrequency::Monthly => $nextPay->subMonth(),
+        };
+
+        return [
+            'start' => $cycleStart,
+            'end' => $nextPay,
+        ];
+    }
+
     public function totalOwed(): int
     {
         return $this->accounts()
@@ -173,5 +207,37 @@ final class User extends Authenticatable
             'pay_frequency' => PayFrequency::class,
             'next_pay_date' => 'date',
         ];
+    }
+
+    private function fastForwardPayDate(
+        CarbonImmutable $nextPay,
+        CarbonImmutable $today,
+        PayFrequency $frequency,
+    ): CarbonImmutable {
+        $intervalsToSkip = match ($frequency) {
+            PayFrequency::Weekly => intdiv((int) $nextPay->diffInDays($today), 7),
+            PayFrequency::Fortnightly => intdiv((int) $nextPay->diffInDays($today), 14),
+            PayFrequency::Monthly => (int) $nextPay->diffInMonths($today),
+        };
+
+        if ($intervalsToSkip > 0) {
+            $nextPay = match ($frequency) {
+                PayFrequency::Weekly => $nextPay->addWeeks($intervalsToSkip),
+                PayFrequency::Fortnightly => $nextPay->addWeeks($intervalsToSkip * 2),
+                PayFrequency::Monthly => $nextPay->addMonths($intervalsToSkip),
+            };
+        }
+
+        $interval = match ($frequency) {
+            PayFrequency::Weekly => static fn (CarbonImmutable $d) => $d->addWeek(),
+            PayFrequency::Fortnightly => static fn (CarbonImmutable $d) => $d->addWeeks(2),
+            PayFrequency::Monthly => static fn (CarbonImmutable $d) => $d->addMonth(),
+        };
+
+        while ($nextPay->lessThanOrEqualTo($today)) {
+            $nextPay = $interval($nextPay);
+        }
+
+        return $nextPay;
     }
 }
