@@ -27,5 +27,25 @@ final class DatabaseSeeder extends Seeder
 
         $this->call(CategorySeeder::class);
         $this->call(BudgetSeeder::class);
+
+        $sandboxUsers = [
+            ['name' => 'Max Wentworth-Smith', 'email' => 'maxsmith@micr0soft.com', 'password' => 'whislter'],
+            ['name' => 'Whistler Smith', 'email' => 'whistler@h0tmail.com', 'password' => 'ShowBox'],
+            ['name' => 'Gilfoyle Bertram', 'email' => 'gilfoyle@mgail.com', 'password' => 'PiedPiper'],
+            ['name' => 'Gavin Belson', 'email' => 'gavinbelson@h0tmail.com', 'password' => 'hooli2016'],
+            ['name' => 'Jared Dunn', 'email' => 'Jared.D@h0tmail.com', 'password' => 'django'],
+            ['name' => 'Richard Birtles', 'email' => 'r.birtles@tetlerjones.c0m.au', 'password' => 'tabsnotspaces'],
+            ['name' => 'Laurie Bream', 'email' => 'business@manlyaccountants.com.au', 'password' => 'business2024'],
+            ['name' => 'Ash Mann', 'email' => 'ashmann@gamil.com', 'password' => 'hooli2024'],
+        ];
+
+        foreach ($sandboxUsers as $userData) {
+            User::factory()->create([
+                'name' => $userData['name'],
+                'email' => $userData['email'],
+                'password' => Hash::make($userData['password']),
+                'email_verified_at' => now(),
+            ]);
+        }
     }
 }
