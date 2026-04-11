@@ -89,7 +89,7 @@ final class AmountParser
             }
         }
 
-        return array_values($result);
+        return $result;
     }
 
     /** @param list<float|string> $tokens */
