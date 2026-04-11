@@ -92,6 +92,12 @@ final class User extends Authenticatable
         return $this->hasMany(PlannedTransaction::class);
     }
 
+    /** @return HasMany<BasiqRefreshLog, $this> */
+    public function basiqRefreshLogs(): HasMany
+    {
+        return $this->hasMany(BasiqRefreshLog::class);
+    }
+
     public function hasPayCycleConfigured(): bool
     {
         return $this->pay_amount !== null
