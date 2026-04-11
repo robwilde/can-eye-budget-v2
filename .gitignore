@@ -25,3 +25,5 @@ yarn-error.log
 /op.conf
 /context/todo/commit-context.md
 tests/Basiq/http-client.env.json
+**/CLAUDE.md
+!/CLAUDE.md
