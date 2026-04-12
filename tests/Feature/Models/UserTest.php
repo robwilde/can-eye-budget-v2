@@ -6,7 +6,9 @@ declare(strict_types=1);
 
 use App\Enums\PayFrequency;
 use App\Models\Account;
+use App\Models\AnalysisSuggestion;
 use App\Models\Budget;
+use App\Models\PipelineRun;
 use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Database\QueryException;
@@ -231,4 +233,29 @@ test('withPayCycle factory state sets all pay cycle fields', function () {
     expect($user->pay_amount)->not->toBeNull()
         ->and($user->pay_frequency)->toBe(PayFrequency::Fortnightly)
         ->and($user->next_pay_date)->not->toBeNull();
+});
+
+test('user has primary account relationship', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $user->update(['primary_account_id' => $account->id]);
+
+    expect($user->fresh()->primaryAccount->id)->toBe($account->id);
+});
+
+test('user has pipeline runs relationship', function () {
+    $user = User::factory()->create();
+    PipelineRun::factory()->count(3)->for($user)->create();
+
+    expect($user->pipelineRuns)->toHaveCount(3)
+        ->each(fn (Pest\Expectation $run) => $run->toBeInstanceOf(PipelineRun::class));
+});
+
+test('user has analysis suggestions relationship', function () {
+    $user = User::factory()->create();
+    $run = PipelineRun::factory()->for($user)->create();
+    AnalysisSuggestion::factory()->count(3)->for($run)->create(['user_id' => $user->id]);
+
+    expect($user->analysisSuggestions)->toHaveCount(3)
+        ->each(fn (Pest\Expectation $suggestion) => $suggestion->toBeInstanceOf(AnalysisSuggestion::class));
 });
