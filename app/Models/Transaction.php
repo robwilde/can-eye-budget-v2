@@ -8,6 +8,7 @@ use App\Casts\MoneyCast;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
+use App\Events\TransactionCategoryUpdated;
 use Carbon\CarbonImmutable;
 use Database\Factories\TransactionFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -175,6 +176,18 @@ final class Transaction extends Model
     public function scopeWithRelations(Builder $query): Builder
     {
         return $query->with(['account', 'category']);
+    }
+
+    protected static function booted(): void
+    {
+        self::updated(static function (Transaction $transaction): void {
+            if ($transaction->wasChanged('category_id')) {
+                event(new TransactionCategoryUpdated(
+                    $transaction,
+                    $transaction->getOriginal('category_id'),
+                ));
+            }
+        });
     }
 
     /**

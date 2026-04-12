@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Casts\MoneyCast;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Events\PlannedTransactionCategoryUpdated;
 use Carbon\CarbonImmutable;
 use Database\Factories\PlannedTransactionFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -128,6 +129,18 @@ final class PlannedTransaction extends Model
         }
 
         return $dates;
+    }
+
+    protected static function booted(): void
+    {
+        self::updated(static function (PlannedTransaction $plannedTransaction): void {
+            if ($plannedTransaction->wasChanged('category_id')) {
+                event(new PlannedTransactionCategoryUpdated(
+                    $plannedTransaction,
+                    $plannedTransaction->getOriginal('category_id'),
+                ));
+            }
+        });
     }
 
     /** @return array<string, string> */
