@@ -11,6 +11,7 @@ use App\Enums\TransactionDirection;
 use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -22,6 +23,7 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * @property int|null $pay_amount
  * @property PayFrequency|null $pay_frequency
  * @property CarbonImmutable|null $next_pay_date
+ * @property int|null $primary_account_id
  */
 final class User extends Authenticatable
 {
@@ -42,6 +44,7 @@ final class User extends Authenticatable
         'pay_amount',
         'pay_frequency',
         'next_pay_date',
+        'primary_account_id',
     ];
 
     /**
@@ -96,6 +99,24 @@ final class User extends Authenticatable
     public function basiqRefreshLogs(): HasMany
     {
         return $this->hasMany(BasiqRefreshLog::class);
+    }
+
+    /** @return BelongsTo<Account, $this> */
+    public function primaryAccount(): BelongsTo
+    {
+        return $this->belongsTo(Account::class, 'primary_account_id');
+    }
+
+    /** @return HasMany<PipelineRun, $this> */
+    public function pipelineRuns(): HasMany
+    {
+        return $this->hasMany(PipelineRun::class);
+    }
+
+    /** @return HasMany<AnalysisSuggestion, $this> */
+    public function analysisSuggestions(): HasMany
+    {
+        return $this->hasMany(AnalysisSuggestion::class);
     }
 
     public function hasPayCycleConfigured(): bool
