@@ -8,6 +8,7 @@ use App\Contracts\BasiqServiceContract;
 use App\Contracts\GitHubServiceContract;
 use App\Services\BasiqService;
 use App\Services\GitHubService;
+use App\Services\PipelineStages\IdentifyPrimaryAccountStage;
 use App\Services\PipelineStages\IdentifyRecurringTransactionsStage;
 use App\Services\TransactionAnalysisPipeline;
 use Carbon\CarbonImmutable;
@@ -40,6 +41,7 @@ final class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(TransactionAnalysisPipeline::class, fn (): TransactionAnalysisPipeline => new TransactionAnalysisPipeline(
             stages: [
+                new IdentifyPrimaryAccountStage,
                 new IdentifyRecurringTransactionsStage,
             ],
         ));
