@@ -10,6 +10,7 @@ use App\Services\BasiqService;
 use App\Services\GitHubService;
 use App\Services\PipelineStages\IdentifyPrimaryAccountStage;
 use App\Services\PipelineStages\IdentifyRecurringTransactionsStage;
+use App\Services\PipelineStages\SetPayCycleStage;
 use App\Services\TransactionAnalysisPipeline;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
@@ -42,6 +43,7 @@ final class AppServiceProvider extends ServiceProvider
         $this->app->singleton(TransactionAnalysisPipeline::class, fn (): TransactionAnalysisPipeline => new TransactionAnalysisPipeline(
             stages: [
                 new IdentifyPrimaryAccountStage,
+                new SetPayCycleStage,
                 new IdentifyRecurringTransactionsStage,
             ],
         ));
