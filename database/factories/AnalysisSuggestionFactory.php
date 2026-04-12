@@ -68,6 +68,13 @@ final class AnalysisSuggestionFactory extends Factory
         ]);
     }
 
+    public function primaryAccount(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'type' => SuggestionType::PrimaryAccount,
+        ]);
+    }
+
     public function recurringTransaction(): self
     {
         return $this->state(fn (array $attributes) => [
