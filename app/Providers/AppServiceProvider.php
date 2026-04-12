@@ -8,6 +8,7 @@ use App\Contracts\BasiqServiceContract;
 use App\Contracts\GitHubServiceContract;
 use App\Services\BasiqService;
 use App\Services\GitHubService;
+use App\Services\TransactionAnalysisPipeline;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -35,6 +36,10 @@ final class AppServiceProvider extends ServiceProvider
         ));
 
         $this->app->alias(GitHubServiceContract::class, GitHubService::class);
+
+        $this->app->singleton(TransactionAnalysisPipeline::class, fn (): TransactionAnalysisPipeline => new TransactionAnalysisPipeline(
+            stages: [],
+        ));
     }
 
     /**
