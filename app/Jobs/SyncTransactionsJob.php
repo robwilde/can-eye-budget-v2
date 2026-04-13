@@ -113,6 +113,8 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
 
         $accountMap = $this->syncAccounts($basiqService);
         $this->syncTransactions($basiqService, $accountMap);
+
+        RunTransactionAnalysisJob::dispatch($this->user);
     }
 
     /**
