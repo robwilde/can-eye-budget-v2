@@ -11,10 +11,12 @@ use App\Models\AnalysisSuggestion;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
+use App\Services\RuleActionExecutor;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\DB;
 use Livewire\Component;
+use Throwable;
 
 final class AnalysisSuggestions extends Component
 {
@@ -70,6 +72,9 @@ final class AnalysisSuggestions extends Component
         Flux::toast(text: 'Pay cycle configured', variant: 'success');
     }
 
+    /**
+     * @throws Throwable
+     */
     public function acceptRecurringTransaction(int $suggestionId): void
     {
         $suggestion = $this->findPendingSuggestion($suggestionId, SuggestionType::RecurringTransaction);
@@ -118,6 +123,29 @@ final class AnalysisSuggestions extends Component
         });
 
         Flux::toast(text: 'Recurring transaction created', variant: 'success');
+    }
+
+    public function acceptUserRule(int $suggestionId, RuleActionExecutor $executor): void
+    {
+        $suggestion = $this->findPendingSuggestion($suggestionId, SuggestionType::UserRule);
+
+        if (! $suggestion) {
+            return;
+        }
+
+        $transaction = Transaction::findCurrentVersion(
+            (int) $suggestion->payload['transaction_id'],
+            (int) auth()->id(),
+        );
+
+        if (! $transaction) {
+            return;
+        }
+
+        $executor->execute($transaction, $suggestion->payload['actions']);
+        $this->resolveSuggestion($suggestion, SuggestionStatus::Accepted);
+
+        Flux::toast(text: 'Rule applied to transaction', variant: 'success');
     }
 
     public function rejectSuggestion(int $suggestionId): void
