@@ -11,6 +11,7 @@ use App\DTOs\BasiqAccount;
 use App\DTOs\BasiqJob;
 use App\DTOs\BasiqTransaction;
 use App\Enums\AccountClass;
+use App\Jobs\RunTransactionAnalysisJob;
 use App\Jobs\SyncTransactionsJob;
 use App\Models\Account;
 use App\Models\Transaction;
@@ -654,4 +655,51 @@ test('non-404 RequestException is re-thrown for retry', function () {
 
     $user->refresh();
     expect($user->basiq_user_id)->not->toBeNull();
+});
+
+test('dispatches RunTransactionAnalysisJob after successful sync', function () {
+    Queue::fake([RunTransactionAnalysisJob::class]);
+
+    $user = User::factory()->withBasiq()->create();
+
+    fakeBasiqJobService('success', function (MockInterface $mock) {
+        $mock
+            ->shouldReceive('getAccounts')
+            ->andReturn(new Collection([makeBasiqAccount()]));
+    });
+
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
+
+    Queue::assertPushed(RunTransactionAnalysisJob::class, function ($job) use ($user) {
+        return $job->user->id === $user->id;
+    });
+});
+
+test('does not dispatch RunTransactionAnalysisJob when basiq job is pending', function () {
+    Queue::fake([RunTransactionAnalysisJob::class]);
+
+    $user = User::factory()->withBasiq()->create();
+
+    fakeBasiqJobService('pending');
+
+    $job = new SyncTransactionsJob($user, 'job-1');
+    $job->handle(app(BasiqServiceContract::class));
+
+    Queue::assertNotPushed(RunTransactionAnalysisJob::class);
+});
+
+test('does not dispatch RunTransactionAnalysisJob when basiq job fails', function () {
+    Queue::fake([RunTransactionAnalysisJob::class]);
+
+    Log::shouldReceive('warning')
+        ->once()
+        ->with('Basiq job failed', Mockery::type('array'));
+
+    $user = User::factory()->withBasiq()->create();
+
+    fakeBasiqJobService('failed');
+
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
+
+    Queue::assertNotPushed(RunTransactionAnalysisJob::class);
 });
