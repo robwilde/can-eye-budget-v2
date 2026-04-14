@@ -213,7 +213,7 @@ final class AnalysisSuggestions extends Component
 
         return view('livewire.analysis-suggestions', [
             'suggestions' => $suggestions,
-            'categories' => Category::visible()->with(['parent.parent'])->orderBy('name')->get(),
+            'categories' => Category::visibleSortedByFullPath(),
             'ruleTransactionDescriptions' => $ruleTransactionDescriptions,
         ]);
     }
