@@ -167,3 +167,37 @@ test('fullPath returns three levels for deeply nested category', function () {
 
     expect($child->fullPath())->toBe('Office / Training / Subscription');
 });
+
+test('visibleSortedByFullPath sorts by full path not leaf name', function () {
+    $bills = Category::factory()->create(['name' => 'Bills']);
+    Category::factory()->withParent($bills)->create(['name' => 'Zebra']);
+
+    $entertainment = Category::factory()->create(['name' => 'Entertainment']);
+    Category::factory()->withParent($entertainment)->create(['name' => 'Alpha']);
+
+    $result = Category::visibleSortedByFullPath();
+    $paths = $result->map(fn (Category $c) => $c->fullPath())->all();
+
+    expect($paths)->toContain('Bills / Zebra', 'Entertainment / Alpha')
+        ->and(array_search('Bills / Zebra', $paths))
+        ->toBeLessThan(array_search('Entertainment / Alpha', $paths));
+});
+
+test('visibleSortedByFullPath excludes hidden categories', function () {
+    Category::factory()->create(['name' => 'Visible']);
+    Category::factory()->hidden()->create(['name' => 'Hidden']);
+
+    $result = Category::visibleSortedByFullPath();
+    $names = $result->pluck('name')->all();
+
+    expect($names)->toContain('Visible')
+        ->and($names)->not->toContain('Hidden');
+});
+
+test('visibleSortedByFullPath returns values-reset collection', function () {
+    Category::factory()->count(3)->create();
+
+    $result = Category::visibleSortedByFullPath();
+
+    expect($result->keys()->all())->toBe(range(0, $result->count() - 1));
+});

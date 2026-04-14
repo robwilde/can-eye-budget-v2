@@ -233,18 +233,15 @@ final class TransactionModal extends Component
 
     public function render(): View
     {
-        $accounts = auth()->user()
+        $accounts = auth()
+            ->user()
             ->accounts()
             ->active()
             ->visible()
             ->orderBy('name')
             ->get();
 
-        $categories = Category::query()
-            ->visible()
-            ->with(['parent', 'parent.parent'])
-            ->orderBy('name')
-            ->get();
+        $categories = Category::visibleSortedByFullPath();
 
         return view('livewire.transaction-modal', [
             'accounts' => $accounts,
@@ -324,20 +321,7 @@ final class TransactionModal extends Component
             return false;
         }
 
-        Transaction::query()->create([
-            'user_id' => auth()->id(),
-            'account_id' => $this->accountId,
-            'category_id' => $this->categoryId,
-            'amount' => $parsed->amount,
-            'direction' => $this->transactionType === 'expense'
-                ? TransactionDirection::Debit
-                : TransactionDirection::Credit,
-            'description' => $parsed->description,
-            'post_date' => $this->date,
-            'status' => TransactionStatus::Posted,
-            'source' => TransactionSource::Manual,
-            'notes' => $this->notes !== '' ? $this->notes : null,
-        ]);
+        $this->createSingleTransaction($parsed);
 
         return true;
     }
@@ -355,31 +339,7 @@ final class TransactionModal extends Component
             return false;
         }
 
-        DB::transaction(function () use ($parsed): void {
-            $shared = [
-                'user_id' => auth()->id(),
-                'category_id' => $this->categoryId,
-                'amount' => $parsed->amount,
-                'description' => $parsed->description,
-                'post_date' => $this->date,
-                'status' => TransactionStatus::Posted,
-                'source' => TransactionSource::Manual,
-                'notes' => $this->notes !== '' ? $this->notes : null,
-            ];
-
-            $debit = Transaction::query()->create($shared + [
-                'account_id' => $this->accountId,
-                'direction' => TransactionDirection::Debit,
-            ]);
-
-            $credit = Transaction::query()->create($shared + [
-                'account_id' => $this->transferToAccountId,
-                'direction' => TransactionDirection::Credit,
-            ]);
-
-            $debit->update(['transfer_pair_id' => $credit->id]);
-            $credit->update(['transfer_pair_id' => $debit->id]);
-        });
+        DB::transaction(fn () => $this->createTransferPair($parsed));
 
         return true;
     }
@@ -394,66 +354,25 @@ final class TransactionModal extends Component
             return false;
         }
 
-        $direction = match ($this->transactionType) {
-            'income' => TransactionDirection::Credit,
-            default => TransactionDirection::Debit,
-        };
-
-        PlannedTransaction::query()->create([
-            'user_id' => auth()->id(),
-            'account_id' => $this->accountId,
-            'transfer_to_account_id' => $this->transactionType === 'transfer'
-                ? $this->transferToAccountId
-                : null,
-            'category_id' => $this->categoryId,
-            'amount' => $parsed->amount,
-            'direction' => $direction,
-            'description' => $parsed->description,
-            'start_date' => $this->date,
-            'frequency' => RecurrenceFrequency::from($this->frequency),
-            'until_date' => $this->untilType === 'until-date' ? $this->untilDate : null,
-            'is_active' => true,
-        ]);
+        PlannedTransaction::query()->create($this->buildPlannedTransactionData($parsed));
 
         return true;
     }
 
     private function updatePlannedTransaction(): bool
     {
-        $planned = PlannedTransaction::query()
-            ->where('user_id', auth()->id())
-            ->find($this->editingPlannedTransactionId);
+        $resolved = $this->resolvePlannedTransactionWithParsedAmount();
 
-        if (! $planned) {
+        if ($resolved === false) {
             return false;
         }
 
-        $parsed = AmountParser::parse($this->descriptionInput);
+        [$planned, $parsed] = $resolved;
 
-        if ($parsed->amount <= 0) {
-            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
+        $data = $this->buildPlannedTransactionData($parsed);
+        unset($data['user_id'], $data['is_active']);
 
-            return false;
-        }
-
-        $direction = match ($this->transactionType) {
-            'income' => TransactionDirection::Credit,
-            default => TransactionDirection::Debit,
-        };
-
-        $planned->update([
-            'account_id' => $this->accountId,
-            'transfer_to_account_id' => $this->transactionType === 'transfer'
-                ? $this->transferToAccountId
-                : null,
-            'category_id' => $this->categoryId,
-            'amount' => $parsed->amount,
-            'direction' => $direction,
-            'description' => $parsed->description,
-            'start_date' => $this->date,
-            'frequency' => RecurrenceFrequency::from($this->frequency),
-            'until_date' => $this->untilType === 'until-date' ? $this->untilDate : null,
-        ]);
+        $planned->update($data);
 
         return true;
     }
@@ -607,43 +526,16 @@ final class TransactionModal extends Component
      */
     private function convertEnteredToPlanned(): bool
     {
-        $transaction = Transaction::query()
-            ->where('user_id', auth()->id())
-            ->find($this->editingTransactionId);
+        $resolved = $this->resolveTransactionWithParsedAmount();
 
-        if (! $transaction) {
+        if ($resolved === false) {
             return false;
         }
 
-        $parsed = AmountParser::parse($this->descriptionInput);
+        [$transaction, $parsed] = $resolved;
 
-        if ($parsed->amount <= 0) {
-            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
-
-            return false;
-        }
-
-        $direction = match ($this->transactionType) {
-            'income' => TransactionDirection::Credit,
-            default => TransactionDirection::Debit,
-        };
-
-        DB::transaction(function () use ($transaction, $parsed, $direction): void {
-            PlannedTransaction::query()->create([
-                'user_id' => auth()->id(),
-                'account_id' => $this->accountId,
-                'transfer_to_account_id' => $this->transactionType === 'transfer'
-                    ? $this->transferToAccountId
-                    : null,
-                'category_id' => $this->categoryId,
-                'amount' => $parsed->amount,
-                'direction' => $direction,
-                'description' => $parsed->description,
-                'start_date' => $this->date,
-                'frequency' => RecurrenceFrequency::from($this->frequency),
-                'until_date' => $this->untilType === 'until-date' ? $this->untilDate : null,
-                'is_active' => true,
-            ]);
+        DB::transaction(function () use ($transaction, $parsed): void {
+            PlannedTransaction::query()->create($this->buildPlannedTransactionData($parsed));
 
             $this->softDeleteWithAncestors($transaction);
         });
@@ -656,62 +548,19 @@ final class TransactionModal extends Component
      */
     private function convertPlannedToEntered(): bool
     {
-        $planned = PlannedTransaction::query()
-            ->where('user_id', auth()->id())
-            ->find($this->editingPlannedTransactionId);
+        $resolved = $this->resolvePlannedTransactionWithParsedAmount();
 
-        if (! $planned) {
+        if ($resolved === false) {
             return false;
         }
 
-        $parsed = AmountParser::parse($this->descriptionInput);
-
-        if ($parsed->amount <= 0) {
-            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
-
-            return false;
-        }
+        [$planned, $parsed] = $resolved;
 
         DB::transaction(function () use ($planned, $parsed): void {
             if ($this->transactionType === 'transfer') {
-                $shared = [
-                    'user_id' => auth()->id(),
-                    'category_id' => $this->categoryId,
-                    'amount' => $parsed->amount,
-                    'description' => $parsed->description,
-                    'post_date' => $this->date,
-                    'status' => TransactionStatus::Posted,
-                    'source' => TransactionSource::Manual,
-                    'notes' => $this->notes !== '' ? $this->notes : null,
-                ];
-
-                $debit = Transaction::query()->create($shared + [
-                    'account_id' => $this->accountId,
-                    'direction' => TransactionDirection::Debit,
-                ]);
-
-                $credit = Transaction::query()->create($shared + [
-                    'account_id' => $this->transferToAccountId,
-                    'direction' => TransactionDirection::Credit,
-                ]);
-
-                $debit->update(['transfer_pair_id' => $credit->id]);
-                $credit->update(['transfer_pair_id' => $debit->id]);
+                $this->createTransferPair($parsed);
             } else {
-                Transaction::query()->create([
-                    'user_id' => auth()->id(),
-                    'account_id' => $this->accountId,
-                    'category_id' => $this->categoryId,
-                    'amount' => $parsed->amount,
-                    'direction' => $this->transactionType === 'expense'
-                        ? TransactionDirection::Debit
-                        : TransactionDirection::Credit,
-                    'description' => $parsed->description,
-                    'post_date' => $this->date,
-                    'status' => TransactionStatus::Posted,
-                    'source' => TransactionSource::Manual,
-                    'notes' => $this->notes !== '' ? $this->notes : null,
-                ]);
+                $this->createSingleTransaction($parsed);
             }
 
             $planned->delete();
@@ -740,6 +589,28 @@ final class TransactionModal extends Component
         }
 
         return [$transaction, $parsed];
+    }
+
+    /** @return array{PlannedTransaction, AmountParseResult}|false */
+    private function resolvePlannedTransactionWithParsedAmount(): array|false
+    {
+        $planned = PlannedTransaction::query()
+            ->where('user_id', auth()->id())
+            ->find($this->editingPlannedTransactionId);
+
+        if (! $planned) {
+            return false;
+        }
+
+        $parsed = AmountParser::parse($this->descriptionInput);
+
+        if ($parsed->amount <= 0) {
+            $this->addError('descriptionInput', __('The amount must be greater than zero.'));
+
+            return false;
+        }
+
+        return [$planned, $parsed];
     }
 
     /** @return array{Transaction, Transaction, AmountParseResult}|false */
@@ -773,6 +644,76 @@ final class TransactionModal extends Component
         $creditSide = $transaction->direction === TransactionDirection::Credit ? $transaction : $pair;
 
         return [$debitSide, $creditSide, $parsed];
+    }
+
+    private function createSingleTransaction(AmountParseResult $parsed): void
+    {
+        Transaction::query()->create([
+            'user_id' => auth()->id(),
+            'account_id' => $this->accountId,
+            'category_id' => $this->categoryId,
+            'amount' => $parsed->amount,
+            'direction' => $this->transactionType === 'expense'
+                ? TransactionDirection::Debit
+                : TransactionDirection::Credit,
+            'description' => $parsed->description,
+            'post_date' => $this->date,
+            'status' => TransactionStatus::Posted,
+            'source' => TransactionSource::Manual,
+            'notes' => $this->notes !== '' ? $this->notes : null,
+        ]);
+    }
+
+    private function createTransferPair(AmountParseResult $parsed): void
+    {
+        $shared = [
+            'user_id' => auth()->id(),
+            'category_id' => $this->categoryId,
+            'amount' => $parsed->amount,
+            'description' => $parsed->description,
+            'post_date' => $this->date,
+            'status' => TransactionStatus::Posted,
+            'source' => TransactionSource::Manual,
+            'notes' => $this->notes !== '' ? $this->notes : null,
+        ];
+
+        $debit = Transaction::query()->create($shared + [
+            'account_id' => $this->accountId,
+            'direction' => TransactionDirection::Debit,
+        ]);
+
+        $credit = Transaction::query()->create($shared + [
+            'account_id' => $this->transferToAccountId,
+            'direction' => TransactionDirection::Credit,
+        ]);
+
+        $debit->update(['transfer_pair_id' => $credit->id]);
+        $credit->update(['transfer_pair_id' => $debit->id]);
+    }
+
+    /** @return array<string, mixed> */
+    private function buildPlannedTransactionData(AmountParseResult $parsed): array
+    {
+        $direction = match ($this->transactionType) {
+            'income' => TransactionDirection::Credit,
+            default => TransactionDirection::Debit,
+        };
+
+        return [
+            'user_id' => auth()->id(),
+            'account_id' => $this->accountId,
+            'transfer_to_account_id' => $this->transactionType === 'transfer'
+                ? $this->transferToAccountId
+                : null,
+            'category_id' => $this->categoryId,
+            'amount' => $parsed->amount,
+            'direction' => $direction,
+            'description' => $parsed->description,
+            'start_date' => $this->date,
+            'frequency' => RecurrenceFrequency::from($this->frequency),
+            'until_date' => $this->untilType === 'until-date' ? $this->untilDate : null,
+            'is_active' => true,
+        ];
     }
 
     private function isTransfer(): bool

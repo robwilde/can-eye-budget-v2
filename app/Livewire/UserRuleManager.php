@@ -448,7 +448,7 @@ final class UserRuleManager extends Component
                 ->ordered()
                 ->with(['rules' => fn ($q) => $q->ordered()])
                 ->get(),
-            'categories' => Category::visible()->with(['parent.parent'])->orderBy('name')->get(),
+            'categories' => Category::visibleSortedByFullPath(),
             'plannedTransactions' => PlannedTransaction::where('user_id', auth()->id())
                 ->where('is_active', true)
                 ->orderBy('description')
