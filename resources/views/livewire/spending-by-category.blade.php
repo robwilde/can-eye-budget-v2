@@ -24,13 +24,19 @@
                         wire:ignore
                         x-data="{
                         chart: null,
+                        cleanupListener: null,
                         init() {
                             this.chart = new ApexCharts(this.$refs.chart, this.chartOptions(@js($this->categoryData, JSON_THROW_ON_ERROR)));
                             this.chart.render();
 
-                            Livewire.on('chart-updated', (event) => {
+                            this.cleanupListener = Livewire.on('chart-updated', (event) => {
+                                if (!this.$refs.chart) return;
                                 this.chart.updateOptions(this.chartOptions(event.data));
                             });
+                        },
+                        destroy() {
+                            this.cleanupListener?.();
+                            this.chart?.destroy();
                         },
                         chartOptions(data) {
                             return {
