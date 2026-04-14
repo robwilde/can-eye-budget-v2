@@ -3,7 +3,7 @@ set -euo pipefail
 
 CDP_PORT="${CDP_PORT:-9222}"
 SERVER_PORT="${SERVER_PORT:-9223}"
-CHROME_DATA_DIR="${CHROME_DATA_DIR:-/tmp/chrome-feedback-debug}"
+CHROME_DATA_DIR="${CHROME_DATA_DIR:-$HOME/.config/chrome-feedback-cdp}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 red()   { printf '\033[0;31m%s\033[0m\n' "$*"; }
@@ -32,9 +32,14 @@ if curl -sf "http://localhost:$CDP_PORT/json/version" >/dev/null 2>&1; then
     green "✓ Chrome CDP already running on :$CDP_PORT"
 else
     echo "Launching Chrome with CDP on :$CDP_PORT..."
+    if [ ! -d "$CHROME_DATA_DIR" ]; then
+        dim "  First run — this is a fresh Chrome profile."
+        dim "  Install any needed extensions; they will persist across restarts."
+    fi
     nohup google-chrome \
         --remote-debugging-port="$CDP_PORT" \
         --user-data-dir="$CHROME_DATA_DIR" \
+        --window-size=1280,900 \
         >/dev/null 2>&1 &
     sleep 2
     if curl -sf "http://localhost:$CDP_PORT/json/version" >/dev/null 2>&1; then
