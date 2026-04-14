@@ -81,4 +81,11 @@ final class AnalysisSuggestionFactory extends Factory
             'type' => SuggestionType::RecurringTransaction,
         ]);
     }
+
+    public function userRule(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'type' => SuggestionType::UserRule,
+        ]);
+    }
 }

@@ -119,6 +119,18 @@ final class User extends Authenticatable
         return $this->hasMany(AnalysisSuggestion::class);
     }
 
+    /** @return HasMany<UserRuleGroup, $this> */
+    public function userRuleGroups(): HasMany
+    {
+        return $this->hasMany(UserRuleGroup::class);
+    }
+
+    /** @return HasMany<UserRule, $this> */
+    public function userRules(): HasMany
+    {
+        return $this->hasMany(UserRule::class);
+    }
+
     public function hasPayCycleConfigured(): bool
     {
         return $this->pay_amount !== null
