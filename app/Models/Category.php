@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Collection;
 
 /**
  * @property int $id
@@ -45,6 +46,17 @@ final class Category extends Model
         'color',
         'is_hidden',
     ];
+
+    /** @return Collection<int, self> */
+    public static function visibleSortedByFullPath(): Collection
+    {
+        return self::query()
+            ->visible()
+            ->with(['parent', 'parent.parent'])
+            ->get()
+            ->sortBy(fn (self $category): string => $category->fullPath())
+            ->values();
+    }
 
     /** @return BelongsTo<self, $this> */
     public function parent(): BelongsTo
