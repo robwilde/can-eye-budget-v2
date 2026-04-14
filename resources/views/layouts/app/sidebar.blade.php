@@ -27,6 +27,9 @@
                     <flux:sidebar.item icon="building-library" :href="route('connect-bank')" :current="request()->routeIs('connect-bank')" wire:navigate>
                         {{ __('Connect Bank') }}
                     </flux:sidebar.item>
+                    <flux:sidebar.item icon="funnel" :href="route('rules')" :current="request()->routeIs('rules')" wire:navigate>
+                        {{ __('Rules') }}
+                    </flux:sidebar.item>
                 </flux:sidebar.group>
             </flux:sidebar.nav>
 
