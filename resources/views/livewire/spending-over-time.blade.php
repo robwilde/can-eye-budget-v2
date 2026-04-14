@@ -26,15 +26,21 @@
                         chart: null,
                         rawData: @js($this->timeSeriesData, JSON_THROW_ON_ERROR),
                         aggregation: @js($aggregation, JSON_THROW_ON_ERROR),
+                        cleanupListener: null,
                         init() {
                             this.chart = new ApexCharts(this.$refs.chart, this.chartOptions(this.rawData, this.aggregation));
                             this.chart.render();
 
-                            Livewire.on('spending-over-time-updated', (event) => {
+                            this.cleanupListener = Livewire.on('spending-over-time-updated', (event) => {
+                                if (!this.$refs.chart) return;
                                 this.rawData = event.data;
                                 this.aggregation = event.aggregation;
                                 this.chart.updateOptions(this.chartOptions(event.data, event.aggregation));
                             });
+                        },
+                        destroy() {
+                            this.cleanupListener?.();
+                            this.chart?.destroy();
                         },
                         escapeHtml(str) {
                             var div = document.createElement('div');
