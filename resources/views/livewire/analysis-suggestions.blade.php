@@ -132,12 +132,13 @@
                                 </div>
 
                                 <div class="flex shrink-0 items-center gap-2">
-                                    <flux:select size="sm" wire:model="recurringCategories.{{ $suggestion->id }}" class="w-40">
-                                        <flux:select.option value="">No category</flux:select.option>
-                                        @foreach($categories as $category)
-                                            <flux:select.option value="{{ $category->id }}">{{ $category->fullPath() }}</flux:select.option>
-                                        @endforeach
-                                    </flux:select>
+                                    <x-category-combobox
+                                        wire:model="recurringCategories.{{ $suggestion->id }}"
+                                        :categories="$categories"
+                                        placeholder="No category"
+                                        size="sm"
+                                        class="w-40"
+                                    />
 
                                     <flux:button
                                         variant="primary"

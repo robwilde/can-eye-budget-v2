@@ -248,12 +248,12 @@
 
                         <flux:field class="flex-1">
                             @if(isset($action['type']) && $action['type'] === RuleActionType::SetCategory->value)
-                                <flux:select wire:model="actions.{{ $index }}.value" size="sm">
-                                    <flux:select.option value="">Select category...</flux:select.option>
-                                    @foreach($categories as $category)
-                                        <flux:select.option value="{{ $category->id }}">{{ $category->fullPath() }}</flux:select.option>
-                                    @endforeach
-                                </flux:select>
+                                <x-category-combobox
+                                    wire:model="actions.{{ $index }}.value"
+                                    :categories="$categories"
+                                    placeholder="Select category..."
+                                    size="sm"
+                                />
                             @elseif(isset($action['type']) && $action['type'] === RuleActionType::LinkToPlannedTransaction->value)
                                 <flux:select wire:model="actions.{{ $index }}.value" size="sm">
                                     <flux:select.option value="">Select planned transaction...</flux:select.option>

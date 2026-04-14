@@ -181,14 +181,12 @@
                 </flux:select>
             @endif
 
-            <flux:select wire:model="categoryId" :label="__('Category')">
-                <flux:select.option value="">{{ __('No category') }}</flux:select.option>
-                @foreach($categories as $category)
-                    <flux:select.option value="{{ $category->id }}">
-                        {{ $category->fullPath() }}
-                    </flux:select.option>
-                @endforeach
-            </flux:select>
+            <x-category-combobox
+                wire:model="categoryId"
+                :categories="$categories"
+                :label="__('Category')"
+                :placeholder="__('No category')"
+            />
 
             @if($mode === 'plan')
                 <flux:input
