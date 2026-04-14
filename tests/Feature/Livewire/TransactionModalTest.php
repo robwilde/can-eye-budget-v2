@@ -177,8 +177,33 @@ test('category dropdown shows only visible categories', function () {
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
-        ->assertSee('Groceries')
-        ->assertDontSee('Hidden Cat');
+        ->assertViewHas('categories', function ($categories) {
+            $names = $categories->pluck('name')->all();
+
+            return in_array('Groceries', $names, true) && ! in_array('Hidden Cat', $names, true);
+        });
+});
+
+test('categories are sorted by full path in transaction modal render', function () {
+    $bills = Category::factory()->create(['name' => 'Bills']);
+    Category::factory()->withParent($bills)->create(['name' => 'Zebra']);
+
+    $entertainment = Category::factory()->create(['name' => 'Entertainment']);
+    Category::factory()->withParent($entertainment)->create(['name' => 'Alpha']);
+
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->assertViewHas('categories', function ($categories) {
+            $paths = $categories->map(fn ($c) => $c->fullPath())->all();
+            $billsIndex = array_search('Bills / Zebra', $paths, true);
+            $entertainmentIndex = array_search('Entertainment / Alpha', $paths, true);
+
+            return $billsIndex !== false
+                && $entertainmentIndex !== false
+                && $billsIndex < $entertainmentIndex;
+        });
 });
 
 test('dispatches transaction-saved event on save', function () {
@@ -353,7 +378,8 @@ test('basiq transaction allows updating category and notes via child', function 
         ->assertDispatched('transaction-saved');
 
     $transaction->refresh();
-    expect($transaction->category_id)->toBeNull()
+    expect($transaction->category_id)
+        ->toBeNull()
         ->and($transaction->notes)->toBeNull();
 
     $child = Transaction::query()
@@ -667,7 +693,8 @@ test('edit transfer creates child pairs cross-linked to each other', function ()
 
     $debit->refresh();
     $credit->refresh();
-    expect($debit->amount)->toBe(10000)
+    expect($debit->amount)
+        ->toBe(10000)
         ->and($debit->description)->toBe('original')
         ->and($credit->amount)->toBe(10000)
         ->and($credit->description)->toBe('original');
@@ -684,7 +711,8 @@ test('edit transfer creates child pairs cross-linked to each other', function ()
         ->amount->toBe(20000)
         ->description->toBe('updated transfer')
         ->direction->toBe(TransactionDirection::Debit)
-        ->transfer_pair_id->toBe($creditChild->id)
+        ->transfer_pair_id
+        ->toBe($creditChild->id)
         ->and($creditChild)
         ->not->toBeNull()
         ->amount->toBe(20000)
@@ -722,7 +750,8 @@ test('delete transfer soft-deletes both sides', function () {
         ->assertSet('showModal', false)
         ->assertDispatched('transaction-saved');
 
-    expect(Transaction::query()->where('user_id', $user->id)->count())->toBe(0)
+    expect(Transaction::query()->where('user_id', $user->id)->count())
+        ->toBe(0)
         ->and(Transaction::withTrashed()->where('user_id', $user->id)->count())->toBe(2);
 });
 
@@ -737,7 +766,8 @@ test('delete non-transfer soft-deletes single transaction', function () {
         ->call('deleteTransaction')
         ->assertSet('showModal', false);
 
-    expect(Transaction::query()->where('id', $transaction->id)->exists())->toBeFalse()
+    expect(Transaction::query()->where('id', $transaction->id)->exists())
+        ->toBeFalse()
         ->and(Transaction::withTrashed()->where('id', $transaction->id)->exists())->toBeTrue();
 });
 
@@ -1783,7 +1813,8 @@ test('cannot delete basiq original but can delete basiq child', function () {
         ->dispatch('edit-transaction', id: $child->id)
         ->call('deleteTransaction');
 
-    expect(Transaction::query()->find($child->id))->toBeNull()
+    expect(Transaction::query()->find($child->id))
+        ->toBeNull()
         ->and(Transaction::withTrashed()->find($child->id))->not->toBeNull();
 });
 
@@ -1831,7 +1862,8 @@ test('converting expense to transfer creates child and new credit side', functio
         ->assertHasNoErrors();
 
     $expense->refresh();
-    expect($expense->direction)->toBe(TransactionDirection::Debit)
+    expect($expense->direction)
+        ->toBe(TransactionDirection::Debit)
         ->and($expense->description)->toBe('original expense');
 
     $debitChild = Transaction::query()
@@ -1949,7 +1981,8 @@ test('converting transfer to expense creates child without pair and soft-deletes
         ->not->toBeNull()
         ->direction->toBe(TransactionDirection::Debit)
         ->transfer_pair_id->toBeNull()
-        ->amount->toBe(5000)
+        ->amount
+        ->toBe(5000)
         ->and(Transaction::query()->find($credit->id))->toBeNull()
         ->and(Transaction::withTrashed()->find($credit->id))->not->toBeNull();
 
@@ -2127,9 +2160,11 @@ test('deleting converted transfer deletes both sides', function () {
         ->dispatch('edit-transaction', id: $debitChild->id)
         ->call('deleteTransaction');
 
-    expect(Transaction::query()->find($debitChild->id))->toBeNull()
+    expect(Transaction::query()->find($debitChild->id))
+        ->toBeNull()
         ->and(Transaction::query()->find($creditSide->id))->toBeNull()
-        ->and(Transaction::withTrashed()->find($debitChild->id))->not->toBeNull()
+        ->and(Transaction::withTrashed()->find($debitChild->id))->not
+        ->toBeNull()
         ->and(Transaction::withTrashed()->find($creditSide->id))->not->toBeNull();
 });
 
@@ -2186,7 +2221,8 @@ test('planned transfer can be converted to planned expense', function () {
         ->assertHasNoErrors();
 
     $planned->refresh();
-    expect($planned->transfer_to_account_id)->toBeNull()
+    expect($planned->transfer_to_account_id)
+        ->toBeNull()
         ->and($planned->direction)->toBe(TransactionDirection::Debit);
 });
 
@@ -2284,7 +2320,8 @@ test('converting entered expense to planned expense soft-deletes transaction and
         ->assertHasNoErrors()
         ->assertDispatched('transaction-saved');
 
-    expect(Transaction::query()->find($transaction->id))->toBeNull()
+    expect(Transaction::query()->find($transaction->id))
+        ->toBeNull()
         ->and(Transaction::withTrashed()->find($transaction->id))->not->toBeNull();
 
     $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
@@ -2368,9 +2405,11 @@ test('converting entered transfer to planned transfer soft-deletes both sides', 
         ->assertSet('showModal', false)
         ->assertHasNoErrors();
 
-    expect(Transaction::query()->find($debit->id))->toBeNull()
+    expect(Transaction::query()->find($debit->id))
+        ->toBeNull()
         ->and(Transaction::query()->find($credit->id))->toBeNull()
-        ->and(Transaction::withTrashed()->find($debit->id))->not->toBeNull()
+        ->and(Transaction::withTrashed()->find($debit->id))->not
+        ->toBeNull()
         ->and(Transaction::withTrashed()->find($credit->id))->not->toBeNull();
 
     $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
@@ -2586,7 +2625,8 @@ test('converting entered transfer to planned expense with mode and type change',
         ->assertSet('showModal', false)
         ->assertHasNoErrors();
 
-    expect(Transaction::query()->find($debit->id))->toBeNull()
+    expect(Transaction::query()->find($debit->id))
+        ->toBeNull()
         ->and(Transaction::query()->find($credit->id))->toBeNull();
 
     $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
@@ -2706,8 +2746,10 @@ test('converting edited transaction to planned soft-deletes entire ancestor chai
         ->assertSet('showModal', false)
         ->assertHasNoErrors();
 
-    expect(Transaction::withTrashed()->find($child->id)->deleted_at)->not->toBeNull()
-        ->and(Transaction::withTrashed()->find($parent->id)->deleted_at)->not->toBeNull()
+    expect(Transaction::withTrashed()->find($child->id)->deleted_at)->not
+        ->toBeNull()
+        ->and(Transaction::withTrashed()->find($parent->id)->deleted_at)->not
+        ->toBeNull()
         ->and(Transaction::query()->current()->where('user_id', $user->id)->count())->toBe(0);
 
     expect(PlannedTransaction::query()->where('user_id', $user->id)->first())->not->toBeNull();
@@ -2764,7 +2806,8 @@ test('converting edited transfer to planned soft-deletes entire ancestor chain i
 
     $allTrashed = Transaction::withTrashed()->where('user_id', $user->id)->get();
 
-    expect($allTrashed)->toHaveCount(4)
+    expect($allTrashed)
+        ->toHaveCount(4)
         ->each(fn ($t) => $t->deleted_at->not->toBeNull());
 
     expect(PlannedTransaction::query()->where('user_id', $user->id)->first())->not->toBeNull();
@@ -2808,7 +2851,8 @@ test('converting planned transfer to entered preserves notes', function () {
         ->where('direction', TransactionDirection::Credit)
         ->first();
 
-    expect($debit->notes)->toBe('monthly savings note')
+    expect($debit->notes)
+        ->toBe('monthly savings note')
         ->and($credit->notes)->toBe('monthly savings note');
 });
 
