@@ -195,9 +195,26 @@ final class AnalysisSuggestions extends Component
             }
         }
 
+        $ruleTransactionDescriptions = [];
+        $userRuleSuggestions = $suggestions->get(SuggestionType::UserRule->value);
+
+        if ($userRuleSuggestions?->isNotEmpty()) {
+            $transactionIds = $userRuleSuggestions
+                ->pluck('payload.transaction_id')
+                ->filter()
+                ->unique()
+                ->values();
+
+            $ruleTransactionDescriptions = Transaction::whereIn('id', $transactionIds)
+                ->where('user_id', auth()->id())
+                ->pluck('description', 'id')
+                ->all();
+        }
+
         return view('livewire.analysis-suggestions', [
             'suggestions' => $suggestions,
             'categories' => Category::visible()->with(['parent.parent'])->orderBy('name')->get(),
+            'ruleTransactionDescriptions' => $ruleTransactionDescriptions,
         ]);
     }
 

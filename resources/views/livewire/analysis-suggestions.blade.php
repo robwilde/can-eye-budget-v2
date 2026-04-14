@@ -2,6 +2,7 @@
     use App\Casts\MoneyCast;
     use App\Enums\PayFrequency;
     use App\Enums\RecurrenceFrequency;
+    use App\Enums\RuleActionType;
     use App\Enums\SuggestionType;
 @endphp
 <div wire:poll.30s>
@@ -146,6 +147,59 @@
                                         wire:target="acceptRecurringTransaction({{ $suggestion->id }})"
                                     >
                                         <flux:icon.loading wire:loading wire:target="acceptRecurringTransaction({{ $suggestion->id }})" class="size-4"/>
+                                        Accept
+                                    </flux:button>
+                                    <flux:button
+                                        variant="ghost"
+                                        size="sm"
+                                        wire:click="rejectSuggestion({{ $suggestion->id }})"
+                                        wire:loading.attr="disabled"
+                                        wire:target="rejectSuggestion({{ $suggestion->id }})"
+                                    >
+                                        Dismiss
+                                    </flux:button>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                </flux:card>
+            @endif
+
+            @if($suggestions->has(SuggestionType::UserRule->value))
+                <flux:card>
+                    <flux:heading>Rule Matches</flux:heading>
+                    <flux:text class="mt-1">Your rules matched the following transactions.</flux:text>
+
+                    <div class="mt-4 max-h-96 space-y-3 overflow-y-auto">
+                        @foreach($suggestions->get(SuggestionType::UserRule->value) as $suggestion)
+                            <div wire:key="suggestion-{{ $suggestion->id }}" class="flex items-center justify-between gap-4 rounded-lg border border-neutral-200 p-3 dark:border-neutral-700">
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-2">
+                                        <flux:text class="truncate font-medium">{{ $suggestion->payload['rule_name'] }}</flux:text>
+                                    </div>
+                                    <div class="mt-1 flex flex-wrap items-center gap-1">
+                                        @foreach($suggestion->payload['actions'] as $action)
+                                            <flux:badge size="sm" color="purple">
+                                                {{ RuleActionType::from($action['type'])->label() }}
+                                            </flux:badge>
+                                        @endforeach
+                                    </div>
+                                    @if(isset($ruleTransactionDescriptions[$suggestion->payload['transaction_id']]))
+                                        <flux:text size="sm" class="mt-1 text-zinc-500">
+                                            {{ $ruleTransactionDescriptions[$suggestion->payload['transaction_id']] }}
+                                        </flux:text>
+                                    @endif
+                                </div>
+
+                                <div class="flex shrink-0 items-center gap-2">
+                                    <flux:button
+                                        variant="primary"
+                                        size="sm"
+                                        wire:click="acceptUserRule({{ $suggestion->id }})"
+                                        wire:loading.attr="disabled"
+                                        wire:target="acceptUserRule({{ $suggestion->id }})"
+                                    >
+                                        <flux:icon.loading wire:loading wire:target="acceptUserRule({{ $suggestion->id }})" class="size-4"/>
                                         Accept
                                     </flux:button>
                                     <flux:button

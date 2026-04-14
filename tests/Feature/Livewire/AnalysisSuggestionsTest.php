@@ -16,6 +16,8 @@ use App\Models\PipelineRun;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Models\UserRule;
+use App\Models\UserRuleGroup;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -66,6 +68,16 @@ function recurringPayload(int $accountId, array $overrides = []): array
     ], $overrides);
 }
 
+function userRulePayload(int $ruleId, string $ruleName, int $transactionId, array $actions = []): array
+{
+    return [
+        'rule_id' => $ruleId,
+        'rule_name' => $ruleName,
+        'transaction_id' => $transactionId,
+        'actions' => $actions ?: [['type' => 'set_category', 'value' => '1']],
+    ];
+}
+
 function createSuggestion(object $testContext, string $type, array $payload, array $overrides = []): AnalysisSuggestion
 {
     $factory = AnalysisSuggestion::factory();
@@ -74,6 +86,7 @@ function createSuggestion(object $testContext, string $type, array $payload, arr
         'primary' => $factory->primaryAccount(),
         'payCycle' => $factory->payCycle(),
         'recurring' => $factory->recurringTransaction(),
+        'userRule' => $factory->userRule(),
     };
 
     return $factory->create(array_merge([
@@ -347,6 +360,83 @@ test('cannot reject already resolved suggestion', function () {
         ->call('rejectSuggestion', $suggestion->id);
 
     expect($suggestion->fresh()->status)->toBe(SuggestionStatus::Accepted);
+});
+
+// ─── Accept User Rule ───────────────────────────────────
+
+test('displays user rule suggestion with rule name and actions summary', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    $rule = UserRule::factory()->for($this->user)->for($group, 'group')->create([
+        'name' => 'Categorise Netflix',
+    ]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'description' => 'NETFLIX SUBSCRIPTION',
+    ]);
+
+    createSuggestion($this, 'userRule', userRulePayload(
+        $rule->id,
+        'Categorise Netflix',
+        $transaction->id,
+        [['type' => 'set_category', 'value' => '1']],
+    ));
+
+    Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->assertSee('Rule Matches')
+        ->assertSee('Categorise Netflix')
+        ->assertSee('Set Category');
+});
+
+test('accept user rule executes actions on transaction and marks accepted', function () {
+    $category = Category::factory()->create();
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    $rule = UserRule::factory()->for($this->user)->for($group, 'group')->create([
+        'name' => 'Auto-categorise',
+    ]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => null,
+    ]);
+
+    $suggestion = createSuggestion($this, 'userRule', userRulePayload(
+        $rule->id,
+        'Auto-categorise',
+        $transaction->id,
+        [['type' => 'set_category', 'value' => (string) $category->id]],
+    ));
+
+    Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->call('acceptUserRule', $suggestion->id);
+
+    expect($transaction->fresh()->category_id)->toBe($category->id)
+        ->and($suggestion->fresh()->status)->toBe(SuggestionStatus::Accepted)
+        ->and($suggestion->fresh()->resolved_at)->not->toBeNull();
+});
+
+test('reject user rule marks suggestion as rejected', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    $rule = UserRule::factory()->for($this->user)->for($group, 'group')->create();
+    $transaction = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+    ]);
+
+    $suggestion = createSuggestion($this, 'userRule', userRulePayload(
+        $rule->id,
+        $rule->name,
+        $transaction->id,
+    ));
+
+    Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->call('rejectSuggestion', $suggestion->id);
+
+    expect($suggestion->fresh()->status)->toBe(SuggestionStatus::Rejected)
+        ->and($suggestion->fresh()->resolved_at)->not->toBeNull();
 });
 
 // ─── Edge Cases ──────────────────────────────────────────
