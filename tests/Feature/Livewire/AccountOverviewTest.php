@@ -7,6 +7,7 @@ declare(strict_types=1);
 use App\Casts\MoneyCast;
 use App\Livewire\AccountOverview;
 use App\Models\Account;
+use App\Models\AnalysisSuggestion;
 use App\Models\Transaction;
 use App\Models\User;
 use Livewire\Livewire;
@@ -291,6 +292,61 @@ test('uses three-column grid on medium screens', function () {
     Livewire::actingAs($user)
         ->test(AccountOverview::class)
         ->assertSeeHtml('md:grid-cols-3');
+});
+
+test('shows pending suggestions banner with count when suggestions exist', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create();
+    AnalysisSuggestion::factory()->for($user)->count(3)->create();
+
+    Livewire::actingAs($user)
+        ->test(AccountOverview::class)
+        ->assertSee('3 suggestions ready to review')
+        ->assertSeeHtml('href="'.route('connect-bank').'"');
+});
+
+test('pending suggestions banner uses singular label for one suggestion', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create();
+    AnalysisSuggestion::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(AccountOverview::class)
+        ->assertSee('1 suggestion ready to review');
+});
+
+test('pending suggestions banner is hidden when there are none', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(AccountOverview::class)
+        ->assertDontSee('ready to review');
+});
+
+test('pending suggestions banner ignores resolved suggestions', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create();
+    AnalysisSuggestion::factory()->for($user)->accepted()->create();
+    AnalysisSuggestion::factory()->for($user)->rejected()->create();
+    AnalysisSuggestion::factory()->for($user)->superseded()->create();
+
+    Livewire::actingAs($user)
+        ->test(AccountOverview::class)
+        ->assertDontSee('ready to review');
+});
+
+test('pending suggestions banner only counts current user suggestions', function () {
+    $user = User::factory()->create();
+    $otherUser = User::factory()->create();
+    Account::factory()->for($user)->create();
+    AnalysisSuggestion::factory()->for($user)->create();
+    AnalysisSuggestion::factory()->for($otherUser)->count(5)->create();
+
+    Livewire::actingAs($user)
+        ->test(AccountOverview::class)
+        ->assertSee('1 suggestion ready to review')
+        ->assertDontSee('6 suggestions');
 });
 
 test('hidden group accounts are excluded from totals', function () {
