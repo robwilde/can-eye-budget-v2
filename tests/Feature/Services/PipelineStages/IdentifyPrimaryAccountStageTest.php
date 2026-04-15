@@ -110,6 +110,20 @@ test('picks strongest income source when multiple exist', function () {
         ->and($suggestion->payload['income_amount'])->toBe(300_000);
 });
 
+test('income_amount reflects most recent pay when salary has increased over time', function () {
+    createSalaryGroup($this->user, $this->account, 'SALARY DEPOSIT', 600_000, 6, 30, CarbonImmutable::parse('2025-03-28'));
+    createSalaryGroup($this->user, $this->account, 'SALARY DEPOSIT', 800_000, 4, 30, CarbonImmutable::parse('2025-09-27'));
+    createSalaryGroup($this->user, $this->account, 'SALARY DEPOSIT', 1_100_000, 3, 30, CarbonImmutable::parse('2026-01-27'));
+
+    $context = makeContext($this->user);
+    $result = $this->stage->execute($context);
+
+    $suggestion = AnalysisSuggestion::find($result->suggestionIds[0]);
+    expect($suggestion->payload['income_description'])->toBe('SALARY DEPOSIT')
+        ->and($suggestion->payload['income_amount'])->toBe(1_100_000)
+        ->and($suggestion->payload['income_frequency'])->toBe('monthly');
+});
+
 test('picks strongest across accounts', function () {
     $transactionAccount = $this->account;
     $savingsAccount = Account::factory()->savings()->for($this->user)->create();
