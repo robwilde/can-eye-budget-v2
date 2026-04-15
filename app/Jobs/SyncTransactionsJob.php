@@ -127,11 +127,12 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
         }
 
         $accountMap = $this->syncAccounts($basiqService);
-        $this->syncTransactions($basiqService, $accountMap);
+        $transactionCounts = $this->syncTransactions($basiqService, $accountMap);
 
         $this->log?->update([
             'status' => RefreshStatus::Success,
             'accounts_synced' => $accountMap->count(),
+            'transactions_synced' => $transactionCounts['created'] + $transactionCounts['updated'],
         ]);
 
         RunTransactionAnalysisJob::dispatch($this->user);
@@ -173,11 +174,12 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
 
     /**
      * @param  Collection<string, int>  $accountMap
+     * @return array{created: int, updated: int}
      *
      * @throws ConnectionException
      * @throws RequestException
      */
-    private function syncTransactions(BasiqServiceContract $basiqService, Collection $accountMap): void
+    private function syncTransactions(BasiqServiceContract $basiqService, Collection $accountMap): array
     {
         $filter = null;
         if ($this->user->last_synced_at) {
@@ -228,5 +230,7 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
             'created' => $created,
             'updated' => $updated,
         ]);
+
+        return ['created' => $created, 'updated' => $updated];
     }
 }

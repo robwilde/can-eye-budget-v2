@@ -156,7 +156,7 @@ test('failed basiq job marks attached refresh log as Failed', function () {
     expect($log->refresh()->status)->toBe(RefreshStatus::Failed);
 });
 
-test('successful sync marks attached refresh log as Success with accounts_synced', function () {
+test('successful sync marks attached refresh log as Success with accounts_synced and transactions_synced', function () {
     $user = User::factory()->withBasiq()->create();
     $log = BasiqRefreshLog::factory()->for($user)->create([
         'status' => RefreshStatus::Pending,
@@ -171,13 +171,22 @@ test('successful sync marks attached refresh log as Success with accounts_synced
                 makeBasiqAccount('basiq-acc-1'),
                 makeBasiqAccount('basiq-acc-2', ['name' => 'Savings']),
             ]));
+
+        $mock
+            ->shouldReceive('paginateTransactions')
+            ->andReturn(LazyCollection::make([
+                makeBasiqTransaction('txn-1', 'basiq-acc-1'),
+                makeBasiqTransaction('txn-2', 'basiq-acc-1', ['amount' => '-10.00']),
+                makeBasiqTransaction('txn-3', 'basiq-acc-2', ['amount' => '100.00', 'direction' => 'credit']),
+            ]));
     });
 
     new SyncTransactionsJob($user, 'job-1', $log)->handle(app(BasiqServiceContract::class));
 
     $log->refresh();
     expect($log->status)->toBe(RefreshStatus::Success)
-        ->and($log->accounts_synced)->toBe(2);
+        ->and($log->accounts_synced)->toBe(2)
+        ->and($log->transactions_synced)->toBe(3);
 });
 
 test('failed() lifecycle hook marks attached refresh log as Failed', function () {

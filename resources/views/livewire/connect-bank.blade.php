@@ -1,4 +1,4 @@
-@php use App\Enums\RefreshStatus; @endphp
+@php use App\Enums\RefreshStatus; use Illuminate\Support\Str; @endphp
 <div class="space-y-6">
     @if(! $isConnected)
         <div class="rounded-xl border border-neutral-200 p-8 text-center dark:border-neutral-700">
@@ -73,6 +73,17 @@
                             <div class="flex items-center gap-3">
                                 <flux:text size="sm">{{ $log->created_at->diffForHumans() }}</flux:text>
                                 <flux:text size="sm" class="text-zinc-500">{{ $log->trigger->label() }}</flux:text>
+                                @if($log->status === RefreshStatus::Success && ($log->accounts_synced !== null || $log->transactions_synced !== null))
+                                    <flux:text size="sm" class="text-zinc-500">
+                                        @if($log->accounts_synced !== null)
+                                            {{ $log->accounts_synced }} {{ Str::plural('account', $log->accounts_synced) }}
+                                        @endif
+                                        @if($log->accounts_synced !== null && $log->transactions_synced !== null) · @endif
+                                        @if($log->transactions_synced !== null)
+                                            {{ $log->transactions_synced }} {{ Str::plural('transaction', $log->transactions_synced) }}
+                                        @endif
+                                    </flux:text>
+                                @endif
                             </div>
                             @if($log->status === RefreshStatus::Success)
                                 <flux:badge size="sm" color="green">Success</flux:badge>
