@@ -7,6 +7,7 @@ namespace App\Livewire;
 use App\Casts\MoneyCast;
 use App\Enums\AccountClass;
 use App\Models\Account;
+use App\Models\AnalysisSuggestion;
 use Illuminate\View\View;
 use Livewire\Component;
 
@@ -56,6 +57,11 @@ final class AccountOverview extends Component
             ->filter(fn ($a) => in_array($a->type, [AccountClass::CreditCard, AccountClass::Loan], true))
             ->count();
 
+        $pendingSuggestionCount = AnalysisSuggestion::query()
+            ->where('user_id', $user->id)
+            ->pending()
+            ->count();
+
         return view('livewire.account-overview', [
             'accounts' => $accounts,
             'totalOwed' => $totalOwed,
@@ -66,6 +72,7 @@ final class AccountOverview extends Component
             'debtAccountCount' => $debtAccountCount,
             'hasPayCycle' => $user->hasPayCycleConfigured(),
             'lastSynced' => $lastSynced,
+            'pendingSuggestionCount' => $pendingSuggestionCount,
             'formatMoney' => MoneyCast::format(...),
         ]);
     }
