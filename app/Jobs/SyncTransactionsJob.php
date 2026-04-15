@@ -25,13 +25,15 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
+    public const int UNIQUE_FOR = 300;
+
     public int $tries = 10;
 
     public int $backoff = 5;
 
     public int $timeout = 120;
 
-    public int $uniqueFor = 300;
+    public int $uniqueFor = self::UNIQUE_FOR;
 
     public function __construct(
         public readonly User $user,
