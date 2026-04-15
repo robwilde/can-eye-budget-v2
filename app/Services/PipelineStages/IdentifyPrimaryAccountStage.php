@@ -110,7 +110,7 @@ final readonly class IdentifyPrimaryAccountStage implements PipelineStageContrac
             'payload' => [
                 'account_id' => $bestOverall['account']->id,
                 'account_name' => $bestOverall['account']->name,
-                'income_amount' => $bestOverall['median_amount'],
+                'income_amount' => $bestOverall['latest_amount'],
                 'income_frequency' => $bestOverall['frequency']->value,
                 'income_description' => $bestOverall['description'],
                 'confidence_score' => round($finalConfidence, 4),
@@ -127,7 +127,7 @@ final readonly class IdentifyPrimaryAccountStage implements PipelineStageContrac
     }
 
     /**
-     * @return array{account: Account, confidence: float, median_amount: int, frequency: PayFrequency, description: string, transaction_ids: list<int>}|null
+     * @return array{account: Account, confidence: float, latest_amount: int, frequency: PayFrequency, description: string, transaction_ids: list<int>}|null
      */
     private function analyzeAccount(Account $account, PipelineContext $context): ?array
     {
@@ -170,7 +170,7 @@ final readonly class IdentifyPrimaryAccountStage implements PipelineStageContrac
 
     /**
      * @param  Collection<int, Transaction>  $transactions
-     * @return array{account: Account, confidence: float, median_amount: int, frequency: PayFrequency, description: string, transaction_ids: list<int>}|null
+     * @return array{account: Account, confidence: float, latest_amount: int, frequency: PayFrequency, description: string, transaction_ids: list<int>}|null
      */
     private function analyzeGroup(Account $account, string $description, Collection $transactions): ?array
     {
@@ -195,13 +195,13 @@ final readonly class IdentifyPrimaryAccountStage implements PipelineStageContrac
         }
 
         $amounts = $sorted->pluck('amount')->map(fn ($a) => abs((int) $a))->all();
-        $medianAmount = $this->median($amounts);
+        $latestAmount = abs((int) $sorted->last()->amount);
         $amountCV = $this->coefficientOfVariation($amounts);
 
         $intervalScore = max(0.0, 1.0 - $intervalCV * 3.33);
         $amountScore = max(0.0, 1.0 - $amountCV / 0.10);
         $countScore = min(1.0, log($sorted->count(), 2) / log(8, 2));
-        $salaryScore = $this->salaryScore($medianAmount);
+        $salaryScore = $this->salaryScore($latestAmount);
 
         $confidence = (self::WEIGHT_INTERVAL * $intervalScore)
             + (self::WEIGHT_AMOUNT * $amountScore)
@@ -211,7 +211,7 @@ final readonly class IdentifyPrimaryAccountStage implements PipelineStageContrac
         return [
             'account' => $account,
             'confidence' => round($confidence, 4),
-            'median_amount' => (int) round($medianAmount),
+            'latest_amount' => $latestAmount,
             'frequency' => $frequency,
             'description' => $description,
             'transaction_ids' => $sorted->pluck('id')->all(),
