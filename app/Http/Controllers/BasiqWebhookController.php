@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Actions\Basiq\CreateOrReuseRefreshLog;
+use App\Enums\RefreshTrigger;
 use App\Jobs\SyncTransactionsJob;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -17,7 +19,7 @@ final class BasiqWebhookController extends Controller
         'transactions.updated',
     ];
 
-    public function __invoke(Request $request): Response
+    public function __invoke(Request $request, CreateOrReuseRefreshLog $createOrReuseRefreshLog): Response
     {
         $eventType = $request->input('eventTypeId');
         $entityUrl = $request->input('links.eventEntity', '');
@@ -44,11 +46,14 @@ final class BasiqWebhookController extends Controller
             return response()->noContent();
         }
 
-        SyncTransactionsJob::dispatch($user);
+        $log = $createOrReuseRefreshLog($user, RefreshTrigger::Webhook);
+
+        SyncTransactionsJob::dispatch($user, null, $log);
 
         Log::info('Basiq webhook dispatched sync', [
             'eventTypeId' => $eventType,
             'userId' => $user->id,
+            'refreshLogId' => $log->id,
         ]);
 
         return response()->noContent();

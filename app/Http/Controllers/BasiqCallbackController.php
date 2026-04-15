@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Actions\Basiq\CreateOrReuseRefreshLog;
+use App\Enums\RefreshTrigger;
 use App\Jobs\SyncTransactionsJob;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
 final class BasiqCallbackController extends Controller
 {
-    public function __invoke(Request $request): RedirectResponse
+    public function __invoke(Request $request, CreateOrReuseRefreshLog $createOrReuseRefreshLog): RedirectResponse
     {
         $sessionState = session()->pull('basiq_consent_state');
 
@@ -28,7 +30,9 @@ final class BasiqCallbackController extends Controller
             return to_route('dashboard')->with('error', 'Bank connection failed. Please try again.');
         }
 
-        SyncTransactionsJob::dispatch($request->user(), $jobId);
+        $log = $createOrReuseRefreshLog($request->user(), RefreshTrigger::Manual, $jobId);
+
+        SyncTransactionsJob::dispatch($request->user(), $jobId, $log);
 
         return to_route('dashboard')->with('success', 'Bank connected successfully. Your transactions are syncing.');
     }
