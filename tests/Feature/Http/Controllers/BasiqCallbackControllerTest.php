@@ -111,6 +111,21 @@ test('array jobId is treated as invalid and does not dispatch job', function () 
     Queue::assertNothingPushed();
 });
 
+test('literal "null" or "undefined" jobId is rejected and does not dispatch job', function (string $jobId) {
+    Queue::fake();
+
+    $user = User::factory()->withBasiq()->create();
+    $state = 'valid-state-token-1234567890abcdefghij';
+
+    $this->actingAs($user)
+        ->withSession(['basiq_consent_state' => $state])
+        ->get(route('basiq.callback', ['state' => $state, 'jobId' => $jobId]))
+        ->assertRedirect(route('dashboard'))
+        ->assertSessionHas('error', 'Bank connection failed. Please try again.');
+
+    Queue::assertNothingPushed();
+})->with(['null', 'NULL', 'undefined', 'Undefined']);
+
 test('session state is forgotten after validation', function () {
     Queue::fake();
 
