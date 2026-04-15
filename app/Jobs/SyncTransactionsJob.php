@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Contracts\BasiqServiceContract;
+use App\Enums\TransactionSource;
 use App\Models\Account;
 use App\Models\Transaction;
 use App\Models\User;
@@ -190,6 +191,7 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
                     'post_date' => $dto->postDate,
                     'transaction_date' => $dto->transactionDate,
                     'status' => $dto->status ?? 'posted',
+                    'source' => TransactionSource::Basiq,
                     'basiq_account_id' => $dto->account,
                     'merchant_name' => $dto->merchant,
                     'anzsic_code' => $dto->anzsic,

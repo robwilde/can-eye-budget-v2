@@ -1,5 +1,22 @@
 @php use App\Enums\AccountClass; @endphp
 <div class="space-y-6">
+    @if($pendingSuggestionCount > 0)
+        <flux:card class="flex items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="rounded-lg bg-amber-500/10 p-2 dark:bg-amber-400/10">
+                    <flux:icon.sparkles class="size-5 text-amber-500 dark:text-amber-400"/>
+                </div>
+                <div>
+                    <flux:heading size="sm">
+                        {{ $pendingSuggestionCount }} {{ Str::plural('suggestion', $pendingSuggestionCount) }} ready to review
+                    </flux:heading>
+                    <flux:text size="sm">We've analysed your transactions and have recommendations waiting.</flux:text>
+                </div>
+            </div>
+            <flux:button variant="primary" size="sm" href="{{ route('connect-bank') }}">Review</flux:button>
+        </flux:card>
+    @endif
+
     @if($accounts->isEmpty())
         <div class="rounded-xl border border-neutral-200 p-8 text-center dark:border-neutral-700">
             <flux:icon.building-library class="mx-auto size-12 text-zinc-400"/>
@@ -40,6 +57,13 @@
                 </div>
                 <div class="mt-3">
                     @if($hasPayCycle && $buffer !== null)
+                        @php
+                            $bufferTextClass = match(true) {
+                                $buffer > 0 => 'text-green-600 dark:text-green-500',
+                                $buffer < 0 => 'text-red-600 dark:text-red-500',
+                                default => 'text-zinc-500 dark:text-zinc-400',
+                            };
+                        @endphp
                         <div class="flex items-center gap-1.5">
                             @if($buffer > 0)
                                 <flux:icon.arrow-trending-up class="size-4 text-green-600 dark:text-green-500"/>
@@ -48,7 +72,7 @@
                             @else
                                 <flux:icon.minus class="size-4 text-zinc-500 dark:text-zinc-400"/>
                             @endif
-                            <p class="text-sm font-semibold tabular-nums {{ $buffer > 0 ? 'text-green-600 dark:text-green-500' : ($buffer < 0 ? 'text-red-600 dark:text-red-500' : 'text-zinc-500 dark:text-zinc-400') }}">
+                            <p class="text-sm font-semibold tabular-nums {{ $bufferTextClass }}">
                                 @if($buffer > 0)
                                     +{{ $formatMoney($buffer) }} above what you need
                                 @elseif($buffer < 0)

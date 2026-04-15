@@ -11,6 +11,7 @@ use App\DTOs\BasiqAccount;
 use App\DTOs\BasiqJob;
 use App\DTOs\BasiqTransaction;
 use App\Enums\AccountClass;
+use App\Enums\TransactionSource;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Jobs\SyncTransactionsJob;
 use App\Models\Account;
@@ -243,6 +244,7 @@ test('successful job syncs transactions with correct field mapping', function ()
         ->post_date->format('Y-m-d')->toBe('2026-03-10')
         ->transaction_date->format('Y-m-d')->toBe('2026-03-09')
         ->status->value->toBe('posted')
+        ->source->toBe(TransactionSource::Basiq)
         ->basiq_account_id->toBe('basiq-acc-1')
         ->merchant_name->toBe('Woolworths')
         ->anzsic_code->toBe('4111')
@@ -574,6 +576,7 @@ test('end-to-end sync through real BasiqService with Http::fake', function () {
         ->direction->value->toBe('debit')
         ->description->toBe('WOOLWORTHS 1234')
         ->post_date->format('Y-m-d')->toBe('2026-03-10')
+        ->source->toBe(TransactionSource::Basiq)
         ->merchant_name->toBe('Woolworths')
         ->anzsic_code->toBe('4111');
 
@@ -581,7 +584,8 @@ test('end-to-end sync through real BasiqService with Http::fake', function () {
     expect($txn2)
         ->amount->toBe(15000)
         ->direction->value->toBe('credit')
-        ->description->toBe('SALARY DEPOSIT');
+        ->description->toBe('SALARY DEPOSIT')
+        ->source->toBe(TransactionSource::Basiq);
 
     $user->refresh();
     expect($user->last_synced_at)->not->toBeNull()
