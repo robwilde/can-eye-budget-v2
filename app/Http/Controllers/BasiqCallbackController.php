@@ -24,7 +24,7 @@ final class BasiqCallbackController extends Controller
 
         $jobId = $request->query('jobId');
 
-        if (! is_string($jobId) || $jobId === '') {
+        if (! is_string($jobId) || in_array(mb_strtolower($jobId), ['', 'null', 'undefined'], true)) {
             return to_route('dashboard')->with('error', 'Bank connection failed. Please try again.');
         }
 
