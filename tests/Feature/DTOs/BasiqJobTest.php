@@ -101,3 +101,20 @@ test('failedSteps returns empty array when no steps fail', function () {
 
     expect($dto->failedSteps())->toBe([]);
 });
+
+test('failedSteps tolerates null result without warnings', function () {
+    $dto = BasiqJob::from([
+        'id' => 'job-7',
+        'steps' => [
+            ['title' => 'retrieve-accounts', 'status' => 'failed', 'result' => null],
+        ],
+    ]);
+
+    expect($dto->failedSteps())->toBe([
+        [
+            'title' => 'retrieve-accounts',
+            'error_type' => null,
+            'error_url' => null,
+        ],
+    ]);
+});

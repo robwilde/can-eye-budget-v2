@@ -69,6 +69,20 @@ test('connection.created webhook dispatches SyncTransactionsJob and creates a We
     });
 });
 
+test('concurrent webhooks reuse the in-flight pending log rather than creating duplicates', function () {
+    Queue::fake();
+
+    $user = User::factory()->withBasiq()->create();
+    $body = webhookPayload('connection.created', $user->basiq_user_id);
+
+    $this->postJson('/webhooks/basiq', json_decode($body, true), signWebhookPayload($body))
+        ->assertNoContent();
+    $this->postJson('/webhooks/basiq', json_decode($body, true), signWebhookPayload($body))
+        ->assertNoContent();
+
+    expect(BasiqRefreshLog::count())->toBe(1);
+});
+
 test('transactions.updated webhook dispatches SyncTransactionsJob', function () {
     Queue::fake();
 
