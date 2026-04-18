@@ -11,10 +11,13 @@ use App\DTOs\BasiqAccount;
 use App\DTOs\BasiqJob;
 use App\DTOs\BasiqTransaction;
 use App\Enums\AccountClass;
+use App\Enums\RefreshStatus;
+use App\Enums\RefreshTrigger;
 use App\Enums\TransactionSource;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Jobs\SyncTransactionsJob;
 use App\Models\Account;
+use App\Models\BasiqRefreshLog;
 use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Support\Collection;
@@ -116,10 +119,14 @@ test('pending job releases back to queue', function () {
     expect($job->job)->toBeNull();
 });
 
-test('failed job logs warning and stops', function () {
+test('failed job logs warning with failed_steps and stops', function () {
     Log::shouldReceive('warning')
         ->once()
-        ->with('Basiq job failed', Mockery::on(fn ($ctx) => $ctx['jobId'] === 'job-1'));
+        ->with('Basiq job failed', Mockery::on(fn ($ctx) => $ctx['jobId'] === 'job-1'
+            && $ctx['failed_steps'] === [
+                ['title' => 'verify-credentials', 'error_type' => null, 'error_url' => null],
+            ]
+        ));
 
     $user = User::factory()->withBasiq()->create();
 
@@ -130,6 +137,67 @@ test('failed job logs warning and stops', function () {
     expect(Account::count())
         ->toBe(0)
         ->and(Transaction::count())->toBe(0);
+});
+
+test('failed basiq job marks attached refresh log as Failed', function () {
+    Log::shouldReceive('warning')->once();
+
+    $user = User::factory()->withBasiq()->create();
+    $log = BasiqRefreshLog::factory()->for($user)->create([
+        'status' => RefreshStatus::Pending,
+        'trigger' => RefreshTrigger::Manual,
+        'job_ids' => ['job-1'],
+    ]);
+
+    fakeBasiqJobService('failed');
+
+    new SyncTransactionsJob($user, 'job-1', $log)->handle(app(BasiqServiceContract::class));
+
+    expect($log->refresh()->status)->toBe(RefreshStatus::Failed);
+});
+
+test('successful sync marks attached refresh log as Success with accounts_synced and transactions_synced', function () {
+    $user = User::factory()->withBasiq()->create();
+    $log = BasiqRefreshLog::factory()->for($user)->create([
+        'status' => RefreshStatus::Pending,
+        'trigger' => RefreshTrigger::Manual,
+        'job_ids' => ['job-1'],
+    ]);
+
+    fakeBasiqJobService('success', function (MockInterface $mock) {
+        $mock
+            ->shouldReceive('getAccounts')
+            ->andReturn(new Collection([
+                makeBasiqAccount('basiq-acc-1'),
+                makeBasiqAccount('basiq-acc-2', ['name' => 'Savings']),
+            ]));
+
+        $mock
+            ->shouldReceive('paginateTransactions')
+            ->andReturn(LazyCollection::make([
+                makeBasiqTransaction('txn-1', 'basiq-acc-1'),
+                makeBasiqTransaction('txn-2', 'basiq-acc-1', ['amount' => '-10.00']),
+                makeBasiqTransaction('txn-3', 'basiq-acc-2', ['amount' => '100.00', 'direction' => 'credit']),
+            ]));
+    });
+
+    new SyncTransactionsJob($user, 'job-1', $log)->handle(app(BasiqServiceContract::class));
+
+    $log->refresh();
+    expect($log->status)->toBe(RefreshStatus::Success)
+        ->and($log->accounts_synced)->toBe(2)
+        ->and($log->transactions_synced)->toBe(3);
+});
+
+test('failed() lifecycle hook marks attached refresh log as Failed', function () {
+    $user = User::factory()->withBasiq()->create();
+    $log = BasiqRefreshLog::factory()->for($user)->create(['status' => RefreshStatus::Pending]);
+
+    Log::shouldReceive('error')->once();
+
+    new SyncTransactionsJob($user, 'job-1', $log)->failed(new RuntimeException('boom'));
+
+    expect($log->refresh()->status)->toBe(RefreshStatus::Failed);
 });
 
 test('successful job syncs accounts via updateOrCreate', function () {

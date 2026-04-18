@@ -13,7 +13,11 @@ use App\Jobs\RefreshBasiqConnectionsJob;
 use App\Jobs\SyncTransactionsJob;
 use App\Models\BasiqRefreshLog;
 use App\Models\User;
+use GuzzleHttp\Psr7\Response as GuzzleResponse;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Mockery\MockInterface;
 
@@ -153,6 +157,57 @@ test('middleware returns WithoutOverlapping keyed on user id', function () {
 
     expect($middleware)->toHaveCount(1)
         ->and($middleware[0])->toBeInstanceOf(WithoutOverlapping::class);
+});
+
+test('404 from refreshConnections clears basiq_user_id and marks log Failed', function () {
+    $user = User::factory()->withBasiq()->create();
+    $originalBasiqUserId = $user->basiq_user_id;
+    $log = BasiqRefreshLog::factory()->for($user)->create([
+        'job_ids' => null,
+        'status' => RefreshStatus::Pending,
+    ]);
+
+    $response = new Response(new GuzzleResponse(404, [], json_encode([
+        'type' => 'list',
+        'data' => [['type' => 'error', 'code' => 'resource-not-found']],
+    ], JSON_THROW_ON_ERROR)));
+
+    fakeRefreshService(function (MockInterface $mock) use ($response) {
+        $mock->shouldReceive('refreshConnections')
+            ->once()
+            ->andThrow(new RequestException($response));
+    });
+
+    Log::shouldReceive('error')
+        ->once()
+        ->with('Basiq user not found (404). Clearing stale basiq_user_id.', Mockery::on(
+            fn ($ctx) => $ctx['basiqUserId'] === $originalBasiqUserId
+        ));
+
+    new RefreshBasiqConnectionsJob($user, $log)->handle(app(BasiqServiceContract::class));
+
+    $user->refresh();
+    expect($user->basiq_user_id)->toBeNull()
+        ->and($log->fresh()->status)->toBe(RefreshStatus::Failed);
+});
+
+test('non-404 RequestException from refreshConnections is re-thrown for retry', function () {
+    $user = User::factory()->withBasiq()->create();
+    $log = BasiqRefreshLog::factory()->for($user)->create(['job_ids' => null]);
+
+    $response = new Response(new GuzzleResponse(500, [], '{"error":"upstream"}'));
+
+    fakeRefreshService(function (MockInterface $mock) use ($response) {
+        $mock->shouldReceive('refreshConnections')
+            ->once()
+            ->andThrow(new RequestException($response));
+    });
+
+    expect(fn () => new RefreshBasiqConnectionsJob($user, $log)->handle(app(BasiqServiceContract::class)))
+        ->toThrow(RequestException::class);
+
+    $user->refresh();
+    expect($user->basiq_user_id)->not->toBeNull();
 });
 
 test('failed method updates log status to Failed', function () {

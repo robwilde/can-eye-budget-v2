@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Contracts\BasiqServiceContract;
+use App\Enums\RefreshStatus;
 use App\Enums\TransactionSource;
 use App\Models\Account;
+use App\Models\BasiqRefreshLog;
 use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -23,17 +25,20 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
+    public const int UNIQUE_FOR = 300;
+
     public int $tries = 10;
 
     public int $backoff = 5;
 
     public int $timeout = 120;
 
-    public int $uniqueFor = 300;
+    public int $uniqueFor = self::UNIQUE_FOR;
 
     public function __construct(
         public readonly User $user,
         public readonly ?string $jobId = null,
+        public readonly ?BasiqRefreshLog $log = null,
     ) {}
 
     public function uniqueId(): int
@@ -64,6 +69,7 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
                 ]);
 
                 $this->user->update(['basiq_user_id' => null]);
+                $this->log?->update(['status' => RefreshStatus::Failed]);
                 $this->fail($e);
 
                 return;
@@ -75,6 +81,8 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
 
     public function failed(Throwable $exception): void
     {
+        $this->log?->update(['status' => RefreshStatus::Failed]);
+
         Log::error('SyncTransactionsJob failed', [
             'userId' => $this->user->id,
             'exception' => $exception,
@@ -106,14 +114,28 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
             }
 
             if ($job->status === 'failed') {
-                Log::warning('Basiq job failed', ['jobId' => $this->jobId, 'userId' => $this->user->id]);
+                $failedSteps = $job->failedSteps();
+
+                Log::warning('Basiq job failed', [
+                    'jobId' => $this->jobId,
+                    'userId' => $this->user->id,
+                    'failed_steps' => $failedSteps,
+                ]);
+
+                $this->log?->update(['status' => RefreshStatus::Failed]);
 
                 return;
             }
         }
 
         $accountMap = $this->syncAccounts($basiqService);
-        $this->syncTransactions($basiqService, $accountMap);
+        $transactionCounts = $this->syncTransactions($basiqService, $accountMap);
+
+        $this->log?->update([
+            'status' => RefreshStatus::Success,
+            'accounts_synced' => $accountMap->count(),
+            'transactions_synced' => $transactionCounts['created'] + $transactionCounts['updated'],
+        ]);
 
         RunTransactionAnalysisJob::dispatch($this->user);
     }
@@ -154,11 +176,12 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
 
     /**
      * @param  Collection<string, int>  $accountMap
+     * @return array{created: int, updated: int}
      *
      * @throws ConnectionException
      * @throws RequestException
      */
-    private function syncTransactions(BasiqServiceContract $basiqService, Collection $accountMap): void
+    private function syncTransactions(BasiqServiceContract $basiqService, Collection $accountMap): array
     {
         $filter = null;
         if ($this->user->last_synced_at) {
@@ -209,5 +232,7 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
             'created' => $created,
             'updated' => $updated,
         ]);
+
+        return ['created' => $created, 'updated' => $updated];
     }
 }

@@ -64,3 +64,57 @@ test('from preserves step result data', function () {
 
     expect($dto->steps)->toBe($steps);
 });
+
+test('failedSteps returns only failed steps with their result info', function () {
+    $dto = BasiqJob::from([
+        'id' => 'job-5',
+        'steps' => [
+            ['title' => 'verify-credentials', 'status' => 'success'],
+            [
+                'title' => 'retrieve-accounts',
+                'status' => 'failed',
+                'result' => ['type' => 'institution-unavailable', 'url' => '/errors/abc'],
+            ],
+            ['title' => 'retrieve-transactions', 'status' => 'failed'],
+        ],
+    ]);
+
+    expect($dto->failedSteps())->toBe([
+        [
+            'title' => 'retrieve-accounts',
+            'error_type' => 'institution-unavailable',
+            'error_url' => '/errors/abc',
+        ],
+        [
+            'title' => 'retrieve-transactions',
+            'error_type' => null,
+            'error_url' => null,
+        ],
+    ]);
+});
+
+test('failedSteps returns empty array when no steps fail', function () {
+    $dto = BasiqJob::from([
+        'id' => 'job-6',
+        'steps' => [['title' => 'verify-credentials', 'status' => 'success']],
+    ]);
+
+    expect($dto->failedSteps())->toBe([]);
+});
+
+test('failedSteps tolerates null result without warnings', function () {
+    $dto = BasiqJob::from([
+        'id' => 'job-7',
+        'steps' => [
+            ['title' => 'retrieve-accounts', 'status' => 'failed', 'result' => null],
+        ],
+    ]);
+
+    expect($dto->failedSteps())->toBe([
+        [
+            'title' => 'retrieve-accounts',
+            'error_type' => null,
+            'error_url' => null,
+        ],
+    ]);
+});

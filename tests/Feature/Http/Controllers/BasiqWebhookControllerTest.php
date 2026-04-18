@@ -8,7 +8,10 @@
 
 declare(strict_types=1);
 
+use App\Enums\RefreshStatus;
+use App\Enums\RefreshTrigger;
 use App\Jobs\SyncTransactionsJob;
+use App\Models\BasiqRefreshLog;
 use App\Models\User;
 use Illuminate\Support\Facades\Queue;
 
@@ -43,7 +46,7 @@ beforeEach(function () {
     config(['services.basiq.webhook_secret' => 'whsec_'.base64_encode(random_bytes(32))]);
 });
 
-test('connection.created webhook dispatches SyncTransactionsJob', function () {
+test('connection.created webhook dispatches SyncTransactionsJob and creates a Webhook-triggered pending log', function () {
     Queue::fake();
 
     $user = User::factory()->withBasiq()->create();
@@ -53,9 +56,31 @@ test('connection.created webhook dispatches SyncTransactionsJob', function () {
     $this->postJson('/webhooks/basiq', json_decode($body, true), $headers)
         ->assertNoContent();
 
-    Queue::assertPushed(SyncTransactionsJob::class, static function (SyncTransactionsJob $job) use ($user) {
-        return $job->user->id === $user->id && $job->jobId === null;
+    $log = BasiqRefreshLog::sole();
+    expect($log)
+        ->user_id->toBe($user->id)
+        ->trigger->toBe(RefreshTrigger::Webhook)
+        ->status->toBe(RefreshStatus::Pending);
+
+    Queue::assertPushed(SyncTransactionsJob::class, static function (SyncTransactionsJob $job) use ($user, $log) {
+        return $job->user->id === $user->id
+            && $job->jobId === null
+            && $job->log?->is($log);
     });
+});
+
+test('concurrent webhooks reuse the in-flight pending log rather than creating duplicates', function () {
+    Queue::fake();
+
+    $user = User::factory()->withBasiq()->create();
+    $body = webhookPayload('connection.created', $user->basiq_user_id);
+
+    $this->postJson('/webhooks/basiq', json_decode($body, true), signWebhookPayload($body))
+        ->assertNoContent();
+    $this->postJson('/webhooks/basiq', json_decode($body, true), signWebhookPayload($body))
+        ->assertNoContent();
+
+    expect(BasiqRefreshLog::count())->toBe(1);
 });
 
 test('transactions.updated webhook dispatches SyncTransactionsJob', function () {

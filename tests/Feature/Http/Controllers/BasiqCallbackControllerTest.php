@@ -4,11 +4,14 @@
 
 declare(strict_types=1);
 
+use App\Enums\RefreshStatus;
+use App\Enums\RefreshTrigger;
 use App\Jobs\SyncTransactionsJob;
+use App\Models\BasiqRefreshLog;
 use App\Models\User;
 use Illuminate\Support\Facades\Queue;
 
-test('valid state and jobId dispatches sync job and redirects with success', function () {
+test('valid state and jobId dispatches sync job, creates pending log, redirects with success', function () {
     Queue::fake();
 
     $user = User::factory()->withBasiq()->create();
@@ -20,8 +23,17 @@ test('valid state and jobId dispatches sync job and redirects with success', fun
         ->assertRedirect(route('dashboard'))
         ->assertSessionHas('success', 'Bank connected successfully. Your transactions are syncing.');
 
-    Queue::assertPushed(SyncTransactionsJob::class, function (SyncTransactionsJob $job) use ($user) {
-        return $job->jobId === 'job-123' && $job->user->is($user);
+    $log = BasiqRefreshLog::sole();
+    expect($log)
+        ->user_id->toBe($user->id)
+        ->trigger->toBe(RefreshTrigger::Manual)
+        ->status->toBe(RefreshStatus::Pending)
+        ->job_ids->toBe(['job-123']);
+
+    Queue::assertPushed(SyncTransactionsJob::class, function (SyncTransactionsJob $job) use ($user, $log) {
+        return $job->jobId === 'job-123'
+            && $job->user->is($user)
+            && $job->log?->is($log);
     });
 });
 
@@ -110,6 +122,21 @@ test('array jobId is treated as invalid and does not dispatch job', function () 
 
     Queue::assertNothingPushed();
 });
+
+test('literal "null" or "undefined" jobId is rejected and does not dispatch job', function (string $jobId) {
+    Queue::fake();
+
+    $user = User::factory()->withBasiq()->create();
+    $state = 'valid-state-token-1234567890abcdefghij';
+
+    $this->actingAs($user)
+        ->withSession(['basiq_consent_state' => $state])
+        ->get(route('basiq.callback', ['state' => $state, 'jobId' => $jobId]))
+        ->assertRedirect(route('dashboard'))
+        ->assertSessionHas('error', 'Bank connection failed. Please try again.');
+
+    Queue::assertNothingPushed();
+})->with(['null', 'NULL', 'undefined', 'Undefined']);
 
 test('session state is forgotten after validation', function () {
     Queue::fake();

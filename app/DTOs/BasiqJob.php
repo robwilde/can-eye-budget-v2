@@ -20,6 +20,19 @@ final class BasiqJob extends Dto
         $this->status = self::resolveStatus($steps);
     }
 
+    /** @return list<array{title: string, error_type: ?string, error_url: ?string}> */
+    public function failedSteps(): array
+    {
+        return array_values(array_map(
+            static fn (array $step): array => [
+                'title' => $step['title'],
+                'error_type' => data_get($step, 'result.type'),
+                'error_url' => data_get($step, 'result.url'),
+            ],
+            array_filter($this->steps, static fn (array $step): bool => $step['status'] === 'failed'),
+        ));
+    }
+
     /** @param  array<int, array{title: string, status: string}>  $steps */
     private static function resolveStatus(array $steps): string
     {

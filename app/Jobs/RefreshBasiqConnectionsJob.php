@@ -11,6 +11,8 @@ use App\Models\User;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -45,7 +47,47 @@ final class RefreshBasiqConnectionsJob implements ShouldBeUnique, ShouldQueue
         ];
     }
 
+    /**
+     * @throws RequestException
+     * @throws ConnectionException
+     */
     public function handle(BasiqServiceContract $basiqService): void
+    {
+        try {
+            $this->process($basiqService);
+        } catch (RequestException $e) {
+            if ($e->response->status() === 404) {
+                Log::error('Basiq user not found (404). Clearing stale basiq_user_id.', [
+                    'userId' => $this->user->id,
+                    'basiqUserId' => $this->user->basiq_user_id,
+                ]);
+
+                $this->user->update(['basiq_user_id' => null]);
+                $this->log->update(['status' => RefreshStatus::Failed]);
+                $this->fail($e);
+
+                return;
+            }
+
+            throw $e;
+        }
+    }
+
+    public function failed(Throwable $exception): void
+    {
+        $this->log->update(['status' => RefreshStatus::Failed]);
+
+        Log::error('RefreshBasiqConnectionsJob failed', [
+            'userId' => $this->user->id,
+            'logId' => $this->log->id,
+            'exception' => $exception,
+        ]);
+    }
+
+    /**
+     * @throws RequestException|ConnectionException
+     */
+    private function process(BasiqServiceContract $basiqService): void
     {
         if ($this->log->job_ids === null) {
             $jobIds = $basiqService->refreshConnections($this->user->basiq_user_id);
@@ -73,17 +115,6 @@ final class RefreshBasiqConnectionsJob implements ShouldBeUnique, ShouldQueue
         $this->log->update([
             'status' => RefreshStatus::Success,
             'accounts_synced' => $this->user->accounts()->count(),
-        ]);
-    }
-
-    public function failed(Throwable $exception): void
-    {
-        $this->log->update(['status' => RefreshStatus::Failed]);
-
-        Log::error('RefreshBasiqConnectionsJob failed', [
-            'userId' => $this->user->id,
-            'logId' => $this->log->id,
-            'exception' => $exception,
         ]);
     }
 }
