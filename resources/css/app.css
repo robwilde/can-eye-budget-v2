@@ -7,26 +7,104 @@
 @source '../../vendor/livewire/flux-pro/stubs/**/*.blade.php';
 @source '../../vendor/livewire/flux/stubs/**/*.blade.php';
 
+@font-face { font-family: 'Lato'; font-weight: 300; font-style: normal; font-display: swap; src: url('../fonts/Lato-Light.ttf') format('truetype'); }
+@font-face { font-family: 'Lato'; font-weight: 400; font-style: normal; font-display: swap; src: url('../fonts/Lato-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Lato'; font-weight: 400; font-style: italic;  font-display: swap; src: url('../fonts/Lato-Italic.ttf')  format('truetype'); }
+@font-face { font-family: 'Lato'; font-weight: 700; font-style: normal; font-display: swap; src: url('../fonts/Lato-Bold.ttf')    format('truetype'); }
+@font-face { font-family: 'Lato'; font-weight: 900; font-style: normal; font-display: swap; src: url('../fonts/Lato-Black.ttf')   format('truetype'); }
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    /* Type */
+    --font-sans: 'Lato', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-display: 'Lato', ui-sans-serif, system-ui, sans-serif;
 
-    --color-zinc-50: #fafafa;
-    --color-zinc-100: #f5f5f5;
-    --color-zinc-200: #e5e5e5;
-    --color-zinc-300: #d4d4d4;
-    --color-zinc-400: #a3a3a3;
-    --color-zinc-500: #737373;
-    --color-zinc-600: #525252;
-    --color-zinc-700: #404040;
-    --color-zinc-800: #262626;
-    --color-zinc-900: #171717;
-    --color-zinc-950: #0a0a0a;
+    /* Brand: teal */
+    --color-cib-teal-50:  #E6F4F2;
+    --color-cib-teal-100: #BDE0DC;
+    --color-cib-teal-200: #7EC3BC;
+    --color-cib-teal-300: #3FA69B;
+    --color-cib-teal-400: #1E8F85;
+    --color-cib-teal-500: #16766E;
+    --color-cib-teal-600: #0E5E57;
+    --color-cib-teal-700: #0A4942;
+    --color-cib-teal-800: #06332E;
 
-    --color-accent: var(--color-neutral-800);
-    --color-accent-content: var(--color-neutral-800);
+    /* Brand: yellow */
+    --color-cib-yellow-300: #FFD866;
+    --color-cib-yellow-400: #F8C93A;
+    --color-cib-yellow-500: #E9B81C;
+    --color-cib-yellow-600: #B88808;
+
+    /* Brand: green */
+    --color-cib-green-300: #7BE084;
+    --color-cib-green-400: #3DC85A;
+    --color-cib-green-500: #2AAF46;
+    --color-cib-green-600: #18923A;
+
+    /* Brand: cream + ink */
+    --color-cib-cream-50:  #FFF7E1;
+    --color-cib-cream-100: #F8E7B8;
+    --color-cib-black:     #111111;
+    --color-cib-ink:       #1A1C1B;
+    --color-cib-white:     #FFFFFF;
+
+    /* Brand: neutrals */
+    --color-cib-n-50:  #F7F8F7;
+    --color-cib-n-100: #EEF0EF;
+    --color-cib-n-200: #DBDEDD;
+    --color-cib-n-300: #BCC1C0;
+    --color-cib-n-400: #8C9492;
+    --color-cib-n-500: #5E6664;
+    --color-cib-n-600: #3E4544;
+    --color-cib-n-700: #262B2A;
+    --color-cib-n-800: #14191A;
+
+    /* Money semantics */
+    --color-money-owed:           #E5484D;
+    --color-money-owed-soft:      #FDECEC;
+    --color-money-available:      #2AAF46;
+    --color-money-available-soft: #E3F6E8;
+    --color-money-needed:         #262B2A;
+    --color-money-needed-soft:    #EEF0EF;
+    --color-money-planned:        #F1A51C;
+    --color-money-planned-soft:   #FCF0D6;
+
+    /* Surfaces + foreground (semantic aliases) */
+    --color-bg-page:       #F7F8F7;
+    --color-bg-surface:    #FFFFFF;
+    --color-bg-sunken:     #EEF0EF;
+    --color-bg-inverse:    #14191A;
+    --color-fg-1:          #1A1C1B;
+    --color-fg-2:          #3E4544;
+    --color-fg-3:          #5E6664;
+    --color-fg-inverse:    #FFFFFF;
+    --color-border-1:      #DBDEDD;
+    --color-border-2:      #BCC1C0;
+    --color-border-strong: #111111;
+
+    /* Retain accent hooks used by Flux */
+    --color-accent:            var(--color-cib-teal-500);
+    --color-accent-content:    var(--color-cib-teal-500);
     --color-accent-foreground: var(--color-white);
+
+    /* Shadows (pop = hard-shadow cartoon vibe) */
+    --shadow-pop:    3px 3px 0 0 #111111;
+    --shadow-pop-sm: 2px 2px 0 0 #111111;
+    --shadow-pop-lg: 5px 5px 0 0 #111111;
+
+    /* Radius */
+    --radius-xs:   4px;
+    --radius-sm:   8px;
+    --radius-md:   12px;
+    --radius-lg:   18px;
+    --radius-xl:   28px;
+    --radius-pill: 999px;
+
+    /* Motion */
+    --ease-snap: cubic-bezier(.2, .9, .2, 1.2);
+    --duration-snap: 200ms;
 }
 
 @layer theme {
