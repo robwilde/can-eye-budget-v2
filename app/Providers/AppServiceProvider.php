@@ -13,9 +13,11 @@ use App\Services\PipelineStages\IdentifyRecurringTransactionsStage;
 use App\Services\PipelineStages\SetPayCycleStage;
 use App\Services\PipelineStages\UserRulesStage;
 use App\Services\TransactionAnalysisPipeline;
+use App\View\Composers\LayoutShellComposer;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
@@ -49,6 +51,8 @@ final class AppServiceProvider extends ServiceProvider
                 $this->app->make(UserRulesStage::class),
             ],
         ));
+
+        $this->app->scoped(LayoutShellComposer::class);
     }
 
     /**
@@ -57,6 +61,11 @@ final class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureDefaults();
+
+        View::composer(
+            ['*app.sidebar', '*app.partials.topbar'],
+            static fn ($view) => app(LayoutShellComposer::class)->compose($view),
+        );
     }
 
     /**
