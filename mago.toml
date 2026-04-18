@@ -1,0 +1,47 @@
+# Welcome to Mago!
+# https://mago.carthage.software/guide/configuration
+version = "1.21"
+php-version = "8.4"
+
+[source]
+paths = ["app/", "config/", "routes/", "database/factories/", "database/seeders/", "tests/"]
+includes = ["vendor"]
+excludes = ["bootstrap/cache/**", "storage/**"]
+
+[source.glob]
+literal-separator = true
+
+[formatter]
+preset = "laravel-pint"
+
+[linter]
+integrations = ["laravel", "pest"]
+
+[linter.rules]
+ambiguous-function-call = { enabled = false }
+literal-named-argument = { enabled = false }
+halstead = { effort-threshold = 7000 }
+
+[analyzer]
+find-unused-definitions = true
+find-unused-expressions = true
+find-overly-wide-return-types = true
+analyze-dead-code = true
+memoize-properties = true
+allow-possibly-undefined-array-keys = true
+check-throws = true
+unchecked-exceptions = [
+    "Illuminate\\Validation\\ValidationException",
+    "Illuminate\\Auth\\AuthenticationException",
+    "Illuminate\\Auth\\Access\\AuthorizationException",
+    "Symfony\\Component\\HttpKernel\\Exception\\HttpException",
+]
+check-missing-override = true
+find-unused-parameters = true
+strict-list-index-checks = true
+no-boolean-literal-comparison = true
+check-missing-type-hints = true
+check-closure-missing-type-hints = true
+check-arrow-function-missing-type-hints = true
+check-use-statements = true
+register-super-globals = true
