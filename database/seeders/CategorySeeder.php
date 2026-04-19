@@ -11,119 +11,168 @@ final class CategorySeeder extends Seeder
 {
     public function run(): void
     {
-        $categories = [
-            'Office' => [
-                'Online Service' => ['Apple'],
-                'Software',
-                'AI Apps',
-                'Newsletter',
-                'Training' => ['Subscription', 'Course'],
-                'Hardware' => ['Rentals'],
-                'Mobile App',
-                '3D Printing',
-                'Laptop',
-                'Tools',
-                'IoT',
-            ],
-            'Personal' => [
-                'Health',
-                'Subscription',
-                'Finance' => ['Bank Fees'],
-                'Hunter',
-                'Pet',
-                'Kitchen',
-                'Clothes',
-                'Gifts',
-                'Grooming',
-                'Beddings',
-                'Bathroom',
-                'Holiday',
-                'Plants',
-                'Fines',
-                'Charity',
-            ],
-            'Entertainment' => [
-                'Streaming',
-                'Patreon',
-                'Adult',
-                'Twitch',
-                'Gaming',
-                'Apps',
-                'Alcohol',
-                'Event',
-                'VR',
-            ],
-            'Food' => [
-                'Groceries',
-                'Restaurant',
-                'Quick Foods',
-            ],
-            'Bills' => [
-                'Rent',
-                'Cleaning',
-                'Mobile',
-                'Internet',
-                'Electricity',
-                'Hotwater',
-                'Food',
-            ],
-            'Income' => [
-                'Salary',
-                'Client',
-                'Medicare',
-            ],
-            'Transfer' => [
-                'Optimus to Spaceship',
-                'Optimus to CC',
-                'Optimus to uBank',
-                'FairGo Finance',
-                'uBank to uSavings',
-                'Optimus to Latitude',
-                'uBank to Optimus',
-                'Optimus to Cash',
-                'uSavings to uBank',
-            ],
-            'Loan' => [
-                'Motorcycle',
-                'Latitude' => ['Interest', 'Fees'],
-                'Shane',
-            ],
-            'Transport' => [
-                'Motorcycle' => ['Fuel'],
-                'Uber',
-                'Scooter',
-                'Tolls',
-                'Parking',
-                'Translink',
-            ],
-        ];
+        foreach ($this->definitions() as $spec) {
+            $parent = Category::create([
+                'name' => $spec['name'],
+                'icon' => $spec['icon'],
+            ]);
 
-        foreach ($categories as $parentName => $children) {
-            $parent = Category::create(['name' => $parentName]);
-            $this->seedChildren($parent, $children);
+            $this->seedChildren($parent, $spec['children']);
         }
     }
 
-    /** @param array<int|string, string|list<string>> $children */
+    /**
+     * @return list<array{name: string, icon: string, children: list<string|array{name: string, icon?: string, children?: list<string>}>}>
+     */
+    private function definitions(): array
+    {
+        return [
+            [
+                'name' => 'Office',
+                'icon' => 'bolt',
+                'children' => [
+                    ['name' => 'Online Service', 'children' => ['Apple']],
+                    'Software',
+                    'AI Apps',
+                    'Newsletter',
+                    ['name' => 'Training', 'children' => ['Subscription', 'Course']],
+                    ['name' => 'Hardware', 'children' => ['Rentals']],
+                    'Mobile App',
+                    '3D Printing',
+                    'Laptop',
+                    'Tools',
+                    'IoT',
+                ],
+            ],
+            [
+                'name' => 'Personal',
+                'icon' => 'sparkles',
+                'children' => [
+                    'Health',
+                    'Subscription',
+                    ['name' => 'Finance', 'children' => ['Bank Fees']],
+                    'Hunter',
+                    'Pet',
+                    ['name' => 'Kitchen', 'icon' => 'coffee'],
+                    'Clothes',
+                    'Gifts',
+                    'Grooming',
+                    'Beddings',
+                    'Bathroom',
+                    'Holiday',
+                    'Plants',
+                    'Fines',
+                    'Charity',
+                ],
+            ],
+            [
+                'name' => 'Entertainment',
+                'icon' => 'sparkles',
+                'children' => [
+                    'Streaming',
+                    'Patreon',
+                    'Adult',
+                    'Twitch',
+                    'Gaming',
+                    'Apps',
+                    'Alcohol',
+                    'Event',
+                    'VR',
+                ],
+            ],
+            [
+                'name' => 'Food',
+                'icon' => 'shopping-cart',
+                'children' => [
+                    'Groceries',
+                    'Restaurant',
+                    'Quick Foods',
+                ],
+            ],
+            [
+                'name' => 'Bills',
+                'icon' => 'activity',
+                'children' => [
+                    ['name' => 'Rent', 'icon' => 'house-heart'],
+                    'Cleaning',
+                    'Mobile',
+                    'Internet',
+                    'Electricity',
+                    'Hotwater',
+                    'Food',
+                ],
+            ],
+            [
+                'name' => 'Income',
+                'icon' => 'arrow-trending-up',
+                'children' => [
+                    'Salary',
+                    'Client',
+                    'Medicare',
+                ],
+            ],
+            [
+                'name' => 'Transfer',
+                'icon' => 'building-library',
+                'children' => [
+                    'Optimus to Spaceship',
+                    'Optimus to CC',
+                    'Optimus to uBank',
+                    'FairGo Finance',
+                    'uBank to uSavings',
+                    'Optimus to Latitude',
+                    'uBank to Optimus',
+                    'Optimus to Cash',
+                    'uSavings to uBank',
+                ],
+            ],
+            [
+                'name' => 'Loan',
+                'icon' => 'building-library',
+                'children' => [
+                    'Motorcycle',
+                    ['name' => 'Latitude', 'children' => ['Interest', 'Fees']],
+                    'Shane',
+                ],
+            ],
+            [
+                'name' => 'Transport',
+                'icon' => 'home',
+                'children' => [
+                    ['name' => 'Motorcycle', 'children' => ['Fuel']],
+                    'Uber',
+                    'Scooter',
+                    'Tolls',
+                    'Parking',
+                    'Translink',
+                ],
+            ],
+        ];
+    }
+
+    /** @param list<string|array{name: string, icon?: string, children?: list<string>}> $children */
     private function seedChildren(Category $parent, array $children): void
     {
-        foreach ($children as $key => $value) {
-            if (is_string($key)) {
-                $child = Category::create([
-                    'name' => $key,
+        foreach ($children as $child) {
+            if (is_string($child)) {
+                Category::create([
+                    'name' => $child,
                     'parent_id' => $parent->id,
                 ]);
 
-                foreach ($value as $grandchildName) {
-                    Category::create([
-                        'name' => $grandchildName,
-                        'parent_id' => $child->id,
-                    ]);
-                }
-            } else {
+                continue;
+            }
+
+            $node = Category::create([
+                'name' => $child['name'],
+                'parent_id' => $parent->id,
+                'icon' => $child['icon'] ?? null,
+            ]);
+
+            foreach ($child['children'] ?? [] as $grandchildName) {
                 Category::create([
-                    'name' => $value,
-                    'parent_id' => $parent->id,
+                    'name' => $grandchildName,
+                    'parent_id' => $node->id,
                 ]);
             }
         }
