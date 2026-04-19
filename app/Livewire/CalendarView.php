@@ -67,7 +67,7 @@ final class CalendarView extends Component
         unset($this->calendarData, $this->agenda, $this->weekStrip); // @phpstan-ignore property.notFound
     }
 
-    /** @return array{monthLabel: string, weeks: list<list<array{date: int, fullDate: string, isCurrentMonth: bool, isToday: bool, transactions: list<array{id: int|null, category: string, amount: int, direction: string, type: string, source: string, isTransfer: bool, planned_transaction_id: int|null, reconciliation_status: string|null, linked_transaction_id: int|null, occurrence_date: string|null}>}>>, isCurrentMonth: bool} */
+    /** @return array{monthLabel: string, weeks: list<list<array{date: int, fullDate: string, isCurrentMonth: bool, isToday: bool, transactions: list<array{id: int|null, category: string, icon: string|null, amount: int, direction: string, type: string, source: string, isTransfer: bool, planned_transaction_id: int|null, reconciliation_status: string|null, linked_transaction_id: int|null, occurrence_date: string|null}>}>>, isCurrentMonth: bool} */
     #[Computed(persist: true)]
     public function calendarData(): array
     {
@@ -82,7 +82,11 @@ final class CalendarView extends Component
             ->where('user_id', auth()->id())
             ->current()
             ->whereBetween('post_date', [$gridStart, $gridEnd])
-            ->with('category:id,name')
+            ->with([
+                'category:id,name,icon,parent_id',
+                'category.parent:id,icon,parent_id',
+                'category.parent.parent:id,icon,parent_id',
+            ])
             ->orderBy('post_date')
             ->get();
 
@@ -107,7 +111,11 @@ final class CalendarView extends Component
             ->where('is_active', true)
             ->where('start_date', '<=', $gridEnd)
             ->where(fn ($q) => $q->whereNull('until_date')->orWhere('until_date', '>=', $gridStart))
-            ->with('category:id,name')
+            ->with([
+                'category:id,name,icon,parent_id',
+                'category.parent:id,icon,parent_id',
+                'category.parent.parent:id,icon,parent_id',
+            ])
             ->get();
 
         foreach ($plannedTransactions as $planned) {
@@ -125,6 +133,7 @@ final class CalendarView extends Component
                 $existing[] = [
                     'id' => null,
                     'category' => $planned->category?->name ?? $planned->description, // @phpstan-ignore nullsafe.neverNull
+                    'icon' => $planned->category?->resolveIcon(),
                     'amount' => $planned->amount,
                     'direction' => $planned->direction->value,
                     'type' => 'planned',
@@ -151,6 +160,7 @@ final class CalendarView extends Component
                 $actualTxns = $dayTransactions->map(fn (Transaction $t) => [
                     'id' => $t->id,
                     'category' => $t->category?->name ?? $t->description, // @phpstan-ignore nullsafe.neverNull
+                    'icon' => $t->category?->resolveIcon(),
                     'amount' => $t->amount,
                     'direction' => $t->direction->value,
                     'type' => 'actual',

@@ -82,7 +82,7 @@ final class Dashboard extends Component
         return auth()->user()
             ->transactions()
             ->current()
-            ->with(['account', 'category'])
+            ->with(['account', 'category.parent.parent'])
             ->latest('post_date')
             ->limit(5)
             ->get();
