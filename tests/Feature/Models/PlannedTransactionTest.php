@@ -400,3 +400,72 @@ test('every workday skips weekends in occurrences', function () {
         '2026-04-01',
     ]);
 });
+
+// ── scopeUpcoming() ───────────────────────────────────────────────
+
+test('upcoming scope includes active plans with no until_date', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'start_date' => now()->subDays(7),
+        'is_active' => true,
+        'until_date' => null,
+    ]);
+
+    expect(PlannedTransaction::query()->upcoming()->count())->toBe(1);
+});
+
+test('upcoming scope includes active plans with future until_date', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'start_date' => now()->subDays(7),
+        'is_active' => true,
+        'until_date' => now()->addMonths(2),
+    ]);
+
+    expect(PlannedTransaction::query()->upcoming()->count())->toBe(1);
+});
+
+test('upcoming scope excludes inactive plans', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->inactive()->for($user)->for($account)->create([
+        'start_date' => now()->subDays(3),
+        'until_date' => null,
+    ]);
+
+    expect(PlannedTransaction::query()->upcoming()->count())->toBe(0);
+});
+
+test('upcoming scope excludes plans whose until_date has passed', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'start_date' => now()->subMonths(2),
+        'is_active' => true,
+        'until_date' => now()->subDays(1),
+    ]);
+
+    expect(PlannedTransaction::query()->upcoming()->count())->toBe(0);
+});
+
+test('upcoming scope orders by start_date ascending', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $later = PlannedTransaction::factory()->for($user)->for($account)->create([
+        'start_date' => now()->addDays(10),
+    ]);
+    $earlier = PlannedTransaction::factory()->for($user)->for($account)->create([
+        'start_date' => now()->addDays(2),
+    ]);
+
+    $results = PlannedTransaction::query()->upcoming()->get();
+
+    expect($results->pluck('id')->all())->toBe([$earlier->id, $later->id]);
+});

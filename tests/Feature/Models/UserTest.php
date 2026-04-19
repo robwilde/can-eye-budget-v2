@@ -5,10 +5,13 @@
 declare(strict_types=1);
 
 use App\Enums\PayFrequency;
+use App\Enums\RecurrenceFrequency;
+use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\AnalysisSuggestion;
 use App\Models\Budget;
 use App\Models\PipelineRun;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Database\QueryException;
@@ -258,4 +261,84 @@ test('user has analysis suggestions relationship', function () {
 
     expect($user->analysisSuggestions)->toHaveCount(3)
         ->each(fn (Pest\Expectation $suggestion) => $suggestion->toBeInstanceOf(AnalysisSuggestion::class));
+});
+
+// ── totalNeededUntilPayday() ──────────────────────────────────────
+
+test('totalNeededUntilPayday returns zero when no pay cycle configured', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 10000,
+        'start_date' => now(),
+        'frequency' => RecurrenceFrequency::EveryWeek,
+    ]);
+
+    expect($user->totalNeededUntilPayday())->toBe(0);
+});
+
+test('totalNeededUntilPayday sums debit occurrences between today and next pay date', function () {
+    $user = User::factory()->withPayCycle()->create([
+        'next_pay_date' => now()->addDays(14)->startOfDay(),
+    ]);
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 5000,
+        'start_date' => now()->addDays(2)->startOfDay(),
+        'frequency' => RecurrenceFrequency::EveryWeek,
+    ]);
+
+    expect($user->totalNeededUntilPayday())->toBe(10000);
+});
+
+test('totalNeededUntilPayday excludes credit direction plans', function () {
+    $user = User::factory()->withPayCycle()->create([
+        'next_pay_date' => now()->addDays(10)->startOfDay(),
+    ]);
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Credit,
+        'amount' => 50000,
+        'start_date' => now()->addDays(3)->startOfDay(),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+
+    expect($user->totalNeededUntilPayday())->toBe(0);
+});
+
+test('totalNeededUntilPayday excludes inactive plans', function () {
+    $user = User::factory()->withPayCycle()->create([
+        'next_pay_date' => now()->addDays(10)->startOfDay(),
+    ]);
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->inactive()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 7500,
+        'start_date' => now()->addDays(2)->startOfDay(),
+        'frequency' => RecurrenceFrequency::EveryWeek,
+    ]);
+
+    expect($user->totalNeededUntilPayday())->toBe(0);
+});
+
+test('totalNeededUntilPayday uses absolute amount', function () {
+    $user = User::factory()->withPayCycle()->create([
+        'next_pay_date' => now()->addDays(10)->startOfDay(),
+    ]);
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => -4200,
+        'start_date' => now()->addDays(2)->startOfDay(),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+
+    expect($user->totalNeededUntilPayday())->toBe(4200);
 });
