@@ -1,125 +1,98 @@
 @php
     use App\Enums\RecurrenceFrequency;
     use Carbon\CarbonImmutable;
-
-    $typeColor = match($transactionType) {
-        'expense' => 'text-red-600 dark:text-red-400',
-        'income' => 'text-green-600 dark:text-green-400',
-        'transfer' => 'text-amber-600 dark:text-amber-400',
-        default => '',
-    };
-
-    $headerBg = match($transactionType) {
-        'expense' => 'bg-red-50 dark:bg-red-950/30',
-        'income' => 'bg-green-50 dark:bg-green-950/30',
-        'transfer' => 'bg-amber-50 dark:bg-amber-950/30',
-        default => '',
-    };
-
-    $borderColor = match($transactionType) {
-        'expense' => 'border-l-4 border-l-red-500',
-        'income' => 'border-l-4 border-l-green-500',
-        'transfer' => 'border-l-4 border-l-amber-500',
-        default => '',
-    };
-
-    $buttonClasses = match($transactionType) {
-        'expense' => 'bg-red-600! hover:bg-red-700! text-white!',
-        'income' => 'bg-green-600! hover:bg-green-700! text-white!',
-        'transfer' => 'bg-amber-600! hover:bg-amber-700! text-white!',
-        default => '',
-    };
+    use Illuminate\Support\Str;
 @endphp
 <div>
-    <flux:modal wire:model="showModal" class="md:w-lg {{ $borderColor }}">
-        <form wire:submit="save" class="space-y-6">
-            <div class="-mx-6 -mt-6 mb-6 rounded-t-xl px-6 py-4 {{ $headerBg }}">
-                <div class="flex items-center justify-between">
+    <flux:modal wire:model="showModal" class="md:w-lg rounded-t-xl border-t-2 border-cib-black">
+        <form wire:submit="save" class="space-y-5">
+            {{-- Header: title + date --}}
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <flux:heading size="lg" class="font-black">
+                        @if($editingPlannedTransactionId)
+                            {{ __('Edit planned') }}
+                        @elseif($editingTransactionId)
+                            {{ __('Edit transaction') }}
+                        @else
+                            {{ __('Add transaction') }}
+                        @endif
+                    </flux:heading>
                     @if($isBasiqTransaction)
-                        <flux:heading size="lg" class="{{ $typeColor }}">
-                            @if($transactionType === 'transfer')
-                                {{ __('Between Accounts') }}
-                            @elseif($transactionType === 'income')
-                                {{ __('Income') }}
-                            @else
-                                {{ __('Expense') }}
-                            @endif
-                        </flux:heading>
-                    @else
-                        <flux:dropdown>
-                            <flux:button variant="ghost" class="text-lg! font-semibold! {{ $typeColor }}" icon:trailing="chevron-down" type="button">
-                                @if($transactionType === 'transfer')
-                                    {{ __('transfer between accounts') }}
-                                @elseif($transactionType === 'income')
-                                    {{ __('income') }}
-                                @else
-                                    {{ __('expense') }}
-                                @endif
-                            </flux:button>
-
-                            <flux:menu>
-                                <flux:menu.item wire:click="$set('transactionType', 'expense')" class="text-red-600 dark:text-red-400">
-                                    {{ __('expense') }}
-                                </flux:menu.item>
-                                <flux:menu.item wire:click="$set('transactionType', 'income')" class="text-green-600 dark:text-green-400">
-                                    {{ __('income') }}
-                                </flux:menu.item>
-                                <flux:menu.item wire:click="$set('transactionType', 'transfer')" class="text-amber-600 dark:text-amber-400">
-                                    {{ __('transfer between accounts') }}
-                                </flux:menu.item>
-                            </flux:menu>
-                        </flux:dropdown>
+                        <flux:badge color="blue" size="sm" icon="cloud-arrow-down" class="mt-1">
+                            {{ __('Synced from bank') }}
+                        </flux:badge>
                     @endif
+                </div>
 
-                    <div class="flex items-center gap-2">
-                        @if($isBasiqTransaction)
-                            <flux:badge color="blue" size="sm" icon="cloud-arrow-down">
-                                {{ __('Synced from bank') }}
-                            </flux:badge>
-                        @endif
-                        @if($date)
-                            @if($isBasiqTransaction)
-                                <flux:badge color="zinc">
-                                    {{ CarbonImmutable::parse($date)->format('D j M Y') }}
-                                </flux:badge>
-                            @else
-                                <flux:input
-                                    type="date"
-                                    wire:model.live="date"
-                                    class="py-1! text-sm!"
-                                />
-                            @endif
-                        @endif
-                    </div>
+                <div>
+                    @if($date && $isBasiqTransaction)
+                        <flux:badge color="zinc">
+                            {{ CarbonImmutable::parse($date)->format('D j M Y') }}
+                        </flux:badge>
+                    @elseif($date)
+                        <flux:input
+                            type="date"
+                            wire:model.live="date"
+                            class="py-1! text-sm!"
+                        />
+                    @endif
                 </div>
             </div>
 
+            {{-- Type toggle: three-pill segmented control (manual only) --}}
             @if(!$isBasiqTransaction)
-                <div class="flex items-center justify-center gap-4">
-                    <flux:text size="sm" class="text-zinc-500">{{ __('Enter vs Plan') }}</flux:text>
-                    <div class="flex gap-1">
-                        <flux:button
-                                variant="{{ $mode === 'enter' ? 'filled' : 'ghost' }}"
-                                size="sm"
-                                wire:click="$set('mode', 'enter')"
-                                type="button"
-                                icon="check"
-                        >
-                            {{ __('Enter') }}
-                        </flux:button>
-                        <flux:button
-                                variant="{{ $mode === 'plan' ? 'filled' : 'ghost' }}"
-                                size="sm"
-                                wire:click="$set('mode', 'plan')"
-                                type="button"
-                                icon="pencil"
-                        >
-                            {{ __('Plan') }}
-                        </flux:button>
-                    </div>
+                <div class="type-toggle" role="group" aria-label="{{ __('Transaction type') }}">
+                    <button type="button"
+                            aria-pressed="{{ $transactionType === 'expense' ? 'true' : 'false' }}"
+                            class="{{ $transactionType === 'expense' ? 'active out' : '' }}"
+                            wire:click="$set('transactionType', 'expense')">
+                        {{ __('Expense') }}
+                    </button>
+                    <button type="button"
+                            aria-pressed="{{ $transactionType === 'income' ? 'true' : 'false' }}"
+                            class="{{ $transactionType === 'income' ? 'active inc' : '' }}"
+                            wire:click="$set('transactionType', 'income')">
+                        {{ __('Income') }}
+                    </button>
+                    <button type="button"
+                            aria-pressed="{{ $transactionType === 'transfer' ? 'true' : 'false' }}"
+                            class="{{ $transactionType === 'transfer' ? 'active xfr' : '' }}"
+                            wire:click="$set('transactionType', 'transfer')">
+                        {{ __('Transfer') }}
+                    </button>
+                </div>
+            @else
+                <flux:heading class="font-black">
+                    @if($transactionType === 'transfer')
+                        {{ __('Between Accounts') }}
+                    @elseif($transactionType === 'income')
+                        {{ __('Income') }}
+                    @else
+                        {{ __('Expense') }}
+                    @endif
+                </flux:heading>
+            @endif
+
+            {{-- Enter vs Plan toggle (manual only) --}}
+            @if(!$isBasiqTransaction)
+                <div class="type-toggle" role="group" aria-label="{{ __('Enter vs Plan') }}">
+                    <button type="button"
+                            aria-pressed="{{ $mode === 'enter' ? 'true' : 'false' }}"
+                            class="{{ $mode === 'enter' ? 'active' : '' }}"
+                            wire:click="$set('mode', 'enter')">
+                        {{ __('Enter') }}
+                    </button>
+                    <button type="button"
+                            aria-pressed="{{ $mode === 'plan' ? 'true' : 'false' }}"
+                            class="{{ $mode === 'plan' ? 'active' : '' }}"
+                            wire:click="$set('mode', 'plan')">
+                        {{ __('Plan') }}
+                    </button>
                 </div>
             @endif
 
+            {{-- Description / amount-with-description input --}}
             @if($transactionType === 'transfer')
                 <flux:input
                     wire:key="description-transfer"
@@ -143,24 +116,28 @@
 
             @if($isBasiqTransaction)
                 <flux:input
-                        wire:model.blur="cleanDescription"
-                        :label="__('Clean description')"
-                        :placeholder="__('Your description for this transaction')"
+                    wire:model.blur="cleanDescription"
+                    :label="__('Clean description')"
+                    :placeholder="__('Your description for this transaction')"
                 />
             @endif
 
-            <div class="rounded-lg bg-zinc-50 px-4 py-3 dark:bg-zinc-800">
-                <flux:text size="sm" class="text-zinc-500">{{ __('Parsed amount') }}</flux:text>
-                <div class="mt-1 text-lg font-semibold tabular-nums">
+            {{-- Parsed amount card --}}
+            <div class="rounded-md border-2 border-cib-black bg-cib-cream-50 px-4 py-3 shadow-pop-sm">
+                <flux:text size="sm" class="font-bold uppercase tracking-wider text-cib-n-600">
+                    {{ __('Parsed amount') }}
+                </flux:text>
+                <div class="mt-1 text-2xl font-black tabular-nums text-cib-black">
                     {{ $formatMoney($parsedAmount) }}
                 </div>
             </div>
 
+            {{-- Account selection --}}
             <flux:select
-                    wire:model="accountId"
-                    :label="$transactionType === 'transfer' ? __('From account') : __('Account')"
-                    required
-                    :disabled="$isBasiqTransaction"
+                wire:model="accountId"
+                :label="$transactionType === 'transfer' ? __('From account') : __('Account')"
+                required
+                :disabled="$isBasiqTransaction"
             >
                 <flux:select.option value="">{{ __('Select account') }}</flux:select.option>
                 @foreach($accounts as $account)
@@ -181,24 +158,47 @@
                 </flux:select>
             @endif
 
-            <x-category-combobox
-                wire:model="categoryId"
-                :categories="$categories"
-                :label="__('Category')"
-                :placeholder="__('No category')"
-            />
+            {{-- Category chip grid --}}
+            <div>
+                <label class="cib-label">{{ __('Category') }}</label>
+                <div class="grid grid-cols-4 gap-2 max-h-80 overflow-y-auto pr-1">
+                    <button type="button"
+                            class="cat-chip"
+                            aria-pressed="{{ $categoryId === null ? 'true' : 'false' }}"
+                            wire:click="$set('categoryId', null)">
+                        <span class="cat-color inline-grid h-5 w-5 place-items-center rounded-full bg-cib-n-100 font-black">
+                            &nbsp;
+                        </span>
+                        <span class="truncate">{{ __('Uncategorised') }}</span>
+                    </button>
+                    @foreach($categories as $c)
+                        <button type="button"
+                                class="cat-chip"
+                                aria-pressed="{{ $categoryId === $c->id ? 'true' : 'false' }}"
+                                wire:click="$set('categoryId', {{ $c->id }})">
+                            @if($c->icon)
+                                <flux:icon name="{{ $c->icon }}" class="cat-color" />
+                            @else
+                                <span class="cat-color inline-grid h-5 w-5 place-items-center rounded-full bg-cib-n-100 font-black text-xs">
+                                    {{ Str::upper(Str::substr($c->name, 0, 1)) }}
+                                </span>
+                            @endif
+                            <span class="truncate w-full">{{ $c->name }}</span>
+                        </button>
+                    @endforeach
+                </div>
+            </div>
 
+            {{-- Plan-mode fields --}}
             @if($mode === 'plan')
                 <flux:input
-                        wire:model="date"
-                        :label="__('Date')"
-                        type="date"
-                        required
-                        :disabled="$isBasiqTransaction"
+                    wire:model="date"
+                    :label="__('Date')"
+                    type="date"
+                    required
+                    :disabled="$isBasiqTransaction"
                 />
-            @endif
 
-            @if($mode === 'plan')
                 <flux:select wire:model="frequency" :label="__('Frequency')" required>
                     @foreach(RecurrenceFrequency::cases() as $freq)
                         <flux:select.option value="{{ $freq->value }}">
@@ -208,67 +208,87 @@
                 </flux:select>
 
                 <div class="space-y-3">
-                    <div class="flex gap-1">
-                        <flux:button
-                                variant="{{ $untilType === 'always' ? 'filled' : 'ghost' }}"
-                                size="sm"
-                                wire:click="$set('untilType', 'always')"
-                                type="button"
-                        >
+                    <div class="type-toggle" role="group" aria-label="{{ __('Repeat until') }}">
+                        <button type="button"
+                                aria-pressed="{{ $untilType === 'always' ? 'true' : 'false' }}"
+                                class="{{ $untilType === 'always' ? 'active' : '' }}"
+                                wire:click="$set('untilType', 'always')">
                             {{ __('Always') }}
-                        </flux:button>
-                        <flux:button
-                                variant="{{ $untilType === 'until-date' ? 'filled' : 'ghost' }}"
-                                size="sm"
-                                wire:click="$set('untilType', 'until-date')"
-                                type="button"
-                        >
+                        </button>
+                        <button type="button"
+                                aria-pressed="{{ $untilType === 'until-date' ? 'true' : 'false' }}"
+                                class="{{ $untilType === 'until-date' ? 'active' : '' }}"
+                                wire:click="$set('untilType', 'until-date')">
                             {{ __('Until date') }}
-                        </flux:button>
+                        </button>
                     </div>
 
                     @if($untilType === 'until-date')
                         <flux:input
-                                wire:model="untilDate"
-                                :label="__('Until date')"
-                                type="date"
-                                required
+                            wire:model="untilDate"
+                            :label="__('Until date')"
+                            type="date"
+                            required
                         />
                     @endif
                 </div>
             @endif
 
+            {{-- Transfer / basiq notes --}}
             @if($transactionType === 'transfer' || $isBasiqTransaction)
                 <flux:textarea
-                        wire:model="notes"
-                        :label="$transactionType === 'transfer' ? __('Transfer description') : __('Notes')"
-                        :placeholder="__('Optional notes')"
-                        rows="2"
+                    wire:model="notes"
+                    :label="$transactionType === 'transfer' ? __('Transfer description') : __('Notes')"
+                    :placeholder="__('Optional notes')"
+                    rows="2"
                 />
             @endif
 
-            <div class="flex">
+            {{-- Rule-suggest card (plan-mode, non-transfer, manual) --}}
+            @if(!$isBasiqTransaction && $mode === 'plan' && $transactionType !== 'transfer')
+                <div class="rule-suggest" role="complementary">
+                    <flux:icon name="sparkles" class="mt-0.5 shrink-0" />
+                    <div>
+                        <div class="t">{{ __('Make this a rule?') }}</div>
+                        <div class="s">{{ __('Auto-apply category, amount and tag next time a matching transaction appears.') }}</div>
+                        {{-- TODO #196-followup: wire to UserRuleManager or a dedicated RuleFromTransactionModal --}}
+                        <button type="button" class="link" wire:click="$dispatch('open-rule-from-transaction')">
+                            {{ __('Set up rule') }}
+                        </button>
+                    </div>
+                </div>
+            @endif
+
+            {{-- Sticky footer --}}
+            <div class="modal-foot">
                 @if($editingPlannedTransactionId)
                     <flux:button
-                            variant="danger"
-                            wire:click="deletePlannedTransaction"
-                            wire:confirm="{{ __('Are you sure you want to delete this planned transaction?') }}"
-                            type="button"
+                        variant="danger"
+                        wire:click="deletePlannedTransaction"
+                        wire:confirm="{{ __('Are you sure you want to delete this planned transaction?') }}"
+                        type="button"
                     >
                         {{ __('Delete') }}
                     </flux:button>
                 @elseif($editingTransactionId && !$isBasiqTransaction)
                     <flux:button
-                            variant="danger"
-                            wire:click="deleteTransaction"
-                            wire:confirm="{{ __('Are you sure you want to delete this transaction?') }}"
-                            type="button"
+                        variant="danger"
+                        wire:click="deleteTransaction"
+                        wire:confirm="{{ __('Are you sure you want to delete this transaction?') }}"
+                        type="button"
                     >
                         {{ __('Delete') }}
                     </flux:button>
                 @endif
                 <flux:spacer/>
-                <flux:button type="submit" variant="primary" class="{{ $buttonClasses }}">
+                <flux:modal.close>
+                    <flux:button variant="ghost" type="button">{{ __('Cancel') }}</flux:button>
+                </flux:modal.close>
+                <flux:button
+                    type="submit"
+                    variant="primary"
+                    class="bg-cib-yellow-400! text-cib-black! border-2! border-cib-black! shadow-pop!"
+                >
                     @if($editingTransactionId && $mode === 'plan')
                         @if($transactionType === 'transfer')
                             {{ __('Convert to planned transfer') }}
