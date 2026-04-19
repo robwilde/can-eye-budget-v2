@@ -282,4 +282,169 @@ select:focus[data-flux-control] {
         font: 900 11px/1 var(--font-display);
         border: 2px solid #111;
     }
+
+    .cib-title {
+        font: 900 24px/1 var(--font-display);
+        letter-spacing: -0.01em;
+        color: var(--color-fg-1);
+    }
+    .cib-subtitle {
+        font: 700 12px/1.2 var(--font-sans);
+        color: var(--color-fg-3);
+        margin-top: 2px;
+    }
+
+    .quickline {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding: 4px 0;
+    }
+    .quickline::-webkit-scrollbar { display: none; }
+    .quickline .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 14px;
+        border: 2px solid var(--color-border-strong);
+        border-radius: var(--radius-pill);
+        font: 700 12px/1 var(--font-sans);
+        white-space: nowrap;
+        background: var(--color-bg-surface);
+    }
+    .quickline .pill .pill-label {
+        font: 900 10px/1 var(--font-display);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--color-fg-3);
+    }
+    .quickline .pill .pill-value {
+        font: 900 13px/1 var(--font-display);
+        color: var(--color-fg-1);
+    }
+    .quickline .pill-income { background: var(--color-money-available-soft); }
+    .quickline .pill-income  .pill-value { color: var(--color-cib-green-600); }
+    .quickline .pill-posted { background: var(--color-money-owed-soft); }
+    .quickline .pill-posted  .pill-value { color: var(--color-money-owed); }
+    .quickline .pill-planned { background: var(--color-money-planned-soft); }
+    .quickline .pill-planned .pill-value { color: var(--color-money-planned); }
+    .quickline .pill-buffer-pos { background: var(--color-cib-teal-100); }
+    .quickline .pill-buffer-pos .pill-value { color: var(--color-cib-teal-600); }
+    .quickline .pill-buffer-neg { background: var(--color-money-owed-soft); }
+    .quickline .pill-buffer-neg .pill-value { color: var(--color-money-owed); }
+    .quickline .pill-buffer-empty { background: var(--color-cib-n-100); }
+    .quickline .pill-buffer-empty .pill-value { color: var(--color-fg-3); font-weight: 700; font-size: 11px; }
+
+    .week-strip {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        padding: 6px 0;
+        scrollbar-width: none;
+    }
+    .week-strip::-webkit-scrollbar { display: none; }
+    .week-strip .day-cell {
+        appearance: none;
+        cursor: pointer;
+        min-width: 52px;
+        scroll-snap-align: center;
+        padding: 8px 8px 6px;
+        border-radius: var(--radius-md);
+        border: 2px solid transparent;
+        background: var(--color-bg-surface);
+        color: var(--color-fg-1);
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+    }
+    .week-strip .day-cell .day-name {
+        font: 900 10px/1 var(--font-display);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--color-fg-3);
+    }
+    .week-strip .day-cell .day-num {
+        font: 900 18px/1 var(--font-display);
+        color: var(--color-fg-1);
+    }
+    .week-strip .day-cell .badge-payday {
+        font: 900 8px/1 var(--font-display);
+        letter-spacing: 0.12em;
+        color: var(--color-cib-black);
+        margin-top: 2px;
+    }
+    .week-strip .day-cell.is-today { border-color: var(--color-border-strong); }
+    .week-strip .day-cell.is-today::after {
+        content: "";
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        background: var(--color-cib-teal-500);
+        margin-top: 2px;
+    }
+    .week-strip .day-cell.is-payday {
+        background: var(--color-cib-yellow-300);
+        box-shadow: var(--shadow-pop-sm);
+    }
+    .week-strip .day-cell.is-selected {
+        background: var(--color-cib-black);
+        color: var(--color-cib-white);
+    }
+    .week-strip .day-cell.is-selected .day-name { color: var(--color-cib-n-300); }
+    .week-strip .day-cell.is-selected .day-num { color: var(--color-cib-yellow-400); }
+    .week-strip .dots {
+        display: flex;
+        gap: 3px;
+        margin-top: 2px;
+        min-height: 6px;
+    }
+    .week-strip .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    .week-strip .dot-income { background: var(--color-cib-green-500); }
+    .week-strip .dot-posted { background: var(--color-money-owed); }
+    .week-strip .dot-planned { background: var(--color-money-planned); }
+
+    .agenda { display: flex; flex-direction: column; gap: 14px; }
+    .agenda-group .agenda-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        padding: 0 4px 6px;
+    }
+    .agenda-group .agenda-head h3 {
+        margin: 0;
+        font: 900 14px/1 var(--font-display);
+        letter-spacing: -0.005em;
+    }
+    .agenda-group .agenda-head .net { font: 900 13px/1 var(--font-display); }
+    .agenda-group .agenda-head .net.pos { color: var(--color-cib-green-600); }
+    .agenda-group .agenda-head .net.neg { color: var(--color-money-owed); }
+    .agenda-group .day-card {
+        background: var(--color-bg-surface);
+        border: 2px solid var(--color-border-strong);
+        border-radius: var(--radius-md);
+        padding: 4px 12px;
+        box-shadow: var(--shadow-pop-sm);
+    }
+
+    .tx-row.planned {
+        border-bottom-style: dashed;
+    }
+    .tx-row.planned .tx-ico { background: var(--color-money-planned-soft); color: var(--color-money-planned); }
+    .tx-row.planned .tx-amt { color: var(--color-money-planned); }
+
+    .empty-state {
+        padding: 32px 16px;
+        text-align: center;
+        border: 2px dashed var(--color-border-2);
+        border-radius: var(--radius-md);
+        color: var(--color-fg-3);
+    }
 }

@@ -11,6 +11,7 @@ use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Livewire\Livewire;
 
 test('component renders for authenticated user', function () {
@@ -863,4 +864,200 @@ test('actual transaction includes planned_transaction_id when linked', function 
         ->firstWhere('type', 'actual');
 
     expect($actualEntry['planned_transaction_id'])->toBe($planned->id);
+});
+
+// ── Week strip + agenda (Ticket 5 / #195) ────────────────────────
+
+test('selectedDate defaults to today on mount', function () {
+    $user = User::factory()->create();
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    expect($component->get('selectedDate'))->toBe(CarbonImmutable::today()->format('Y-m-d'));
+});
+
+test('weekStrip contains 7 cells centred on today (-2/+5)', function () {
+    $user = User::factory()->create();
+    $today = CarbonImmutable::today();
+
+    $strip = Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->get('weekStrip');
+
+    expect($strip)->toHaveCount(7)
+        ->and($strip[0]['date'])->toBe($today->subDays(2)->format('Y-m-d'))
+        ->and($strip[6]['date'])->toBe($today->addDays(4)->format('Y-m-d'))
+        ->and(collect($strip)->firstWhere('isToday', true)['date'])->toBe($today->format('Y-m-d'));
+});
+
+test('PAYDAY badge lands on next_pay_date', function () {
+    $payday = CarbonImmutable::today()->addDays(3);
+    $user = User::factory()->withPayCycle()->create([
+        'next_pay_date' => $payday,
+    ]);
+
+    $strip = Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->get('weekStrip');
+
+    $paydayCell = collect($strip)->firstWhere('date', $payday->format('Y-m-d'));
+
+    expect($paydayCell)->not->toBeNull()
+        ->and($paydayCell['isPayday'])->toBeTrue();
+});
+
+test('selectDate action filters agenda to selected date onward', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $earlier = CarbonImmutable::today()->startOfMonth()->addDays(2);
+    $later = CarbonImmutable::today()->startOfMonth()->addDays(10);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -1000,
+        'post_date' => $earlier,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -2000,
+        'post_date' => $later,
+    ]);
+
+    $component = Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->call('selectDate', $later->format('Y-m-d'));
+
+    $agenda = $component->get('agenda');
+
+    expect(collect($agenda)->pluck('date')->all())->toBe([$later->format('Y-m-d')]);
+});
+
+test('quickline totals match pay cycle transaction sums', function () {
+    $today = CarbonImmutable::today();
+    $user = User::factory()->withPayCycle()->create([
+        'next_pay_date' => $today->addDays(5),
+    ]);
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $account->id,
+        'amount' => 150000,
+        'post_date' => $today->subDay(),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -30000,
+        'post_date' => $today->subDay(),
+    ]);
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'amount' => 15000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $today->addDays(2),
+    ]);
+
+    $quickline = Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->get('quickline');
+
+    expect($quickline['income'])->toBe(150000)
+        ->and($quickline['posted'])->toBe(30000)
+        ->and($quickline['planned'])->toBe(15000)
+        ->and($quickline['bufferAtPayday'])->toBeInt();
+});
+
+test('quickline returns zeroes and null buffer when pay cycle not configured', function () {
+    $user = User::factory()->create([
+        'pay_amount' => null,
+        'pay_frequency' => null,
+        'next_pay_date' => null,
+    ]);
+
+    $quickline = Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->get('quickline');
+
+    expect($quickline)->toMatchArray([
+        'income' => 0,
+        'posted' => 0,
+        'planned' => 0,
+        'bufferAtPayday' => null,
+    ]);
+});
+
+test('agenda group net total is credit minus debit in cents', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = CarbonImmutable::today();
+
+    Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $account->id,
+        'amount' => 5000,
+        'post_date' => $date,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -2000,
+        'post_date' => $date,
+    ]);
+
+    $agenda = Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->call('selectDate', $date->format('Y-m-d'))
+        ->get('agenda');
+
+    $group = collect($agenda)->firstWhere('date', $date->format('Y-m-d'));
+
+    expect($group)->not->toBeNull()
+        ->and($group['net'])->toBe(3000);
+});
+
+test('month nav resets selectedDate to start of new month', function () {
+    $user = User::factory()->create();
+
+    $component = Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->call('previousMonth');
+
+    $expected = CarbonImmutable::now()->startOfMonth()->subMonth()->format('Y-m-d');
+
+    expect($component->get('selectedDate'))->toBe($expected);
+});
+
+test('weekStrip dots reflect transaction kinds on that date', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $today = CarbonImmutable::today();
+
+    Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $account->id,
+        'amount' => 1000,
+        'post_date' => $today,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -500,
+        'post_date' => $today,
+    ]);
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'start_date' => $today,
+        'amount' => 2000,
+        'direction' => TransactionDirection::Debit,
+    ]);
+
+    $strip = Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->get('weekStrip');
+
+    $todayCell = collect($strip)->firstWhere('date', $today->format('Y-m-d'));
+
+    expect($todayCell['dots'])->toContain('income')
+        ->and($todayCell['dots'])->toContain('posted')
+        ->and($todayCell['dots'])->toContain('planned');
 });
