@@ -134,6 +134,17 @@
     @apply  mb-0! leading-tight!;
 }
 
+/* CIB: default-state pop-shadow treatment for Flux text-style inputs.
+   Global — any Flux input inherits the neo-brutalist border/shadow. If this
+   bleeds onto an unrestyled page, tighten the selector rather than roll back. */
+input[data-flux-control]:not([type="checkbox"]):not([type="radio"]),
+textarea[data-flux-control],
+select[data-flux-control] {
+    border: 2px solid var(--color-border-strong);
+    border-radius: 10px;
+    box-shadow: var(--shadow-pop-sm);
+}
+
 input:focus[data-flux-control],
 textarea:focus[data-flux-control],
 select:focus[data-flux-control] {
@@ -446,5 +457,123 @@ select:focus[data-flux-control] {
         border: 2px dashed var(--color-border-2);
         border-radius: var(--radius-md);
         color: var(--color-fg-3);
+    }
+
+    /* ---------- TransactionModal (Ticket #196) ---------- */
+
+    .type-toggle {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+        gap: 6px;
+        background: var(--color-cib-n-100);
+        padding: 4px;
+        border-radius: 12px;
+        border: 2px solid var(--color-border-strong);
+    }
+    .type-toggle button {
+        appearance: none;
+        border: 2px solid transparent;
+        padding: 9px 4px;
+        border-radius: 9px;
+        background: transparent;
+        font: 700 13px/1 var(--font-sans);
+        cursor: pointer;
+        color: var(--color-fg-2);
+    }
+    .type-toggle button.active {
+        background: var(--color-cib-white);
+        color: var(--color-cib-black);
+        border-color: var(--color-border-strong);
+        box-shadow: var(--shadow-pop-sm);
+    }
+    .type-toggle button.active.inc { color: var(--color-cib-green-600); }
+    .type-toggle button.active.out { color: var(--color-money-owed); }
+    .type-toggle button.active.xfr { color: var(--color-cib-teal-600); }
+
+    .cat-chip {
+        appearance: none;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+        padding: 10px 4px;
+        border-radius: 10px;
+        background: var(--color-cib-n-50);
+        border: 2px solid var(--color-border-1);
+        font: 700 11px/1.1 var(--font-sans);
+        color: var(--color-fg-2);
+        text-align: center;
+        min-height: 68px;
+    }
+    .cat-chip svg { width: 20px; height: 20px; }
+    .cat-chip[aria-pressed="true"] {
+        background: var(--color-cib-black);
+        color: var(--color-cib-white);
+        border-color: var(--color-cib-black);
+        box-shadow: 2px 2px 0 0 var(--color-cib-teal-400);
+    }
+    .cat-chip[aria-pressed="true"] .cat-color { color: var(--color-cib-yellow-400); }
+
+    .rule-suggest {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        background: var(--color-cib-teal-400);
+        color: var(--color-cib-white);
+        border: 2px solid var(--color-border-strong);
+        border-radius: 12px;
+        padding: 12px;
+        box-shadow: var(--shadow-pop);
+    }
+    .rule-suggest svg { flex-shrink: 0; }
+    .rule-suggest .t { font: 900 13px/1 var(--font-display); }
+    .rule-suggest .s { font: 400 12px/1.3 var(--font-sans); margin-top: 3px; opacity: 0.9; }
+    .rule-suggest .link {
+        appearance: none;
+        background: transparent;
+        border: 0;
+        padding: 0;
+        font: 700 12px/1 var(--font-sans);
+        color: inherit;
+        margin-top: 6px;
+        text-decoration: underline;
+        cursor: pointer;
+    }
+
+    .modal-foot {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        padding-top: 14px;
+        border-top: 1px solid var(--color-border-1);
+        background: var(--color-bg-surface);
+        position: sticky;
+        bottom: 0;
+    }
+
+    .cib-label {
+        display: block;
+        margin-bottom: 6px;
+        font: 900 11px/1 var(--font-display);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--color-fg-3);
+    }
+}
+
+/* Flux modal slide-up (Ticket #196). Outside @layer components so it matches
+   Flux's own dialog selector specificity without needing !important. */
+@keyframes cib-slideup {
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
+}
+[data-flux-modal] [data-flux-modal-dialog] {
+    animation: cib-slideup 260ms var(--ease-snap);
+}
+@media (prefers-reduced-motion: reduce) {
+    [data-flux-modal] [data-flux-modal-dialog] {
+        animation: none;
     }
 }

@@ -1420,77 +1420,64 @@ test('updating planned transfer saves both account ids', function () {
 
 // ── Header Colors (#119) ──────────────────────────────────────
 
-test('expense header renders red background', function () {
+test('expense type renders the active "out" type-toggle pill', function () {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('transactionType', 'expense')
-        ->assertSeeHtml('bg-red-50')
-        ->assertSeeHtml('border-l-red-500')
-        ->assertSeeHtml('bg-red-600!');
+        ->assertSeeHtml('class="active out"')
+        ->assertSeeHtml('aria-pressed="true"');
 });
 
-test('income header renders green background', function () {
+test('income type renders the active "inc" type-toggle pill', function () {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('transactionType', 'income')
-        ->assertSeeHtml('bg-green-50')
-        ->assertSeeHtml('border-l-green-500')
-        ->assertSeeHtml('bg-green-600!');
+        ->assertSeeHtml('class="active inc"')
+        ->assertSeeHtml('aria-pressed="true"');
 });
 
-test('transfer header renders amber background', function () {
+test('transfer type renders the active "xfr" type-toggle pill', function () {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('transactionType', 'transfer')
-        ->assertSeeHtml('bg-amber-50')
-        ->assertSeeHtml('border-l-amber-500')
-        ->assertSeeHtml('bg-amber-600!');
+        ->assertSeeHtml('class="active xfr"')
+        ->assertSeeHtml('aria-pressed="true"');
 });
 
-test('transfer uses amber not blue', function () {
+test('transfer does not render blue styling from the old theme', function () {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('transactionType', 'transfer')
-        ->assertSeeHtml('text-amber-600')
-        ->assertDontSeeHtml('text-blue-600');
+        ->assertSeeHtml('active xfr')
+        ->assertDontSeeHtml('text-blue-600')
+        ->assertDontSeeHtml('bg-amber-50');
 });
 
-test('submit button has type-specific classes', function () {
-    $user = User::factory()->create();
-
-    Livewire::actingAs($user)
-        ->test(TransactionModal::class)
-        ->dispatch('open-transaction-modal', date: '2026-03-15')
-        ->set('transactionType', 'expense')
-        ->assertSeeHtml('bg-red-600!')
-        ->assertSeeHtml('hover:bg-red-700!')
-        ->assertSeeHtml('text-white!');
-
-    Livewire::actingAs($user)
-        ->test(TransactionModal::class)
-        ->dispatch('open-transaction-modal', date: '2026-03-15')
-        ->set('transactionType', 'income')
-        ->assertSeeHtml('bg-green-600!')
-        ->assertSeeHtml('hover:bg-green-700!');
-
-    Livewire::actingAs($user)
-        ->test(TransactionModal::class)
-        ->dispatch('open-transaction-modal', date: '2026-03-15')
-        ->set('transactionType', 'transfer')
-        ->assertSeeHtml('bg-amber-600!')
-        ->assertSeeHtml('hover:bg-amber-700!');
+test('submit button renders neo-brutalist yellow-pop save across all types', function () {
+    foreach (['expense', 'income', 'transfer'] as $type) {
+        Livewire::actingAs(User::factory()->create())
+            ->test(TransactionModal::class)
+            ->dispatch('open-transaction-modal', date: '2026-03-15')
+            ->set('transactionType', $type)
+            ->assertSeeHtml('bg-cib-yellow-400!')
+            ->assertSeeHtml('border-cib-black!')
+            ->assertSeeHtml('text-cib-black!')
+            ->assertDontSeeHtml('bg-red-600!')
+            ->assertDontSeeHtml('bg-green-600!')
+            ->assertDontSeeHtml('bg-amber-600!');
+    }
 });
 
 test('expense type hides notes field', function () {
