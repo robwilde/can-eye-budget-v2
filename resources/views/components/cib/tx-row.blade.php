@@ -8,6 +8,7 @@
     'name',
     'amount',
     'tone' => 'out',
+    'icon' => null,
 ])
 
 @php
@@ -22,7 +23,11 @@
             wire:click="$dispatch('edit-transaction', { id: {{ (int) $transactionId }} })"
         @endif
 >
-    <div @class(['tx-ico', $tone])>{{ $icon ?? '' }}</div>
+    <div @class(['tx-ico', $tone])>
+        @if ($icon)
+            <flux:icon :name="$icon" variant="mini"/>
+        @endif
+    </div>
     <div>
         <div class="tx-name">{{ $name }}</div>
         @isset($meta)

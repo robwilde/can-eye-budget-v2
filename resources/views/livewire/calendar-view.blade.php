@@ -109,6 +109,7 @@
                                 :name="$txn['category']"
                                 :amount="$txn['amount']"
                                 :tone="$tone"
+                                :icon="$txn['icon'] ?? null"
                             />
                         @endforeach
                     </div>

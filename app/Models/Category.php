@@ -107,6 +107,11 @@ final class Category extends Model
         return implode(' / ', $segments);
     }
 
+    public function resolveIcon(): ?string
+    {
+        return $this->icon ?? $this->parent?->resolveIcon();
+    }
+
     /** @return HasMany<Budget, $this> */
     public function budgets(): HasMany
     {

@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Models\Category;
 use App\Models\Transaction;
+use Illuminate\Support\Facades\DB;
 
 test('factory creates a valid category', function () {
     $category = Category::factory()->create();
@@ -179,8 +180,8 @@ test('visibleSortedByFullPath sorts by full path not leaf name', function () {
     $paths = $result->map(fn (Category $c) => $c->fullPath())->all();
 
     expect($paths)->toContain('Bills / Zebra', 'Entertainment / Alpha')
-        ->and(array_search('Bills / Zebra', $paths))
-        ->toBeLessThan(array_search('Entertainment / Alpha', $paths));
+        ->and(array_search('Bills / Zebra', $paths, true))
+        ->toBeLessThan(array_search('Entertainment / Alpha', $paths, true));
 });
 
 test('visibleSortedByFullPath excludes hidden categories', function () {
@@ -200,4 +201,51 @@ test('visibleSortedByFullPath returns values-reset collection', function () {
     $result = Category::visibleSortedByFullPath();
 
     expect($result->keys()->all())->toBe(range(0, $result->count() - 1));
+});
+
+test('resolveIcon returns own icon when set', function () {
+    $category = Category::factory()->withIcon('shopping-cart')->create();
+
+    expect($category->resolveIcon())->toBe('shopping-cart');
+});
+
+test('resolveIcon falls back to parent icon when own icon is null', function () {
+    $parent = Category::factory()->withIcon('shopping-cart')->create();
+    $child = Category::factory()->withParent($parent)->create();
+
+    expect($child->resolveIcon())->toBe('shopping-cart');
+});
+
+test('resolveIcon walks ancestors until an icon is found', function () {
+    $grandparent = Category::factory()->withIcon('coffee')->create();
+    $parent = Category::factory()->withParent($grandparent)->create();
+    $child = Category::factory()->withParent($parent)->create();
+
+    expect($child->resolveIcon())->toBe('coffee');
+});
+
+test('resolveIcon returns null when neither category nor ancestors set an icon', function () {
+    $parent = Category::factory()->create();
+    $child = Category::factory()->withParent($parent)->create();
+
+    expect($child->resolveIcon())->toBeNull();
+});
+
+test('resolveIcon fires no queries when parent.parent is eager-loaded on a grandchild', function () {
+    $grandparent = Category::factory()->withIcon('bolt')->create();
+    $parent = Category::factory()->withParent($grandparent)->create();
+    Category::factory()->withParent($parent)->create();
+
+    $grandchild = Category::query()
+        ->with('parent.parent')
+        ->where('parent_id', $parent->id)
+        ->firstOrFail();
+
+    DB::enableQueryLog();
+    DB::flushQueryLog();
+
+    $icon = $grandchild->resolveIcon();
+
+    expect($icon)->toBe('bolt')
+        ->and(DB::getQueryLog())->toBeEmpty();
 });

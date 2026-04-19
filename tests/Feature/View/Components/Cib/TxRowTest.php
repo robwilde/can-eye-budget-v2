@@ -62,16 +62,22 @@ it('omits the .tx-meta element when meta slot is not provided', function () {
     expect($html)->not->toContain('class="tx-meta"');
 });
 
-it('renders icon slot content inside .tx-ico', function () {
-    $html = Blade::render(<<<'BLADE'
-        <x-cib.tx-row :transaction-id="1" name="Coffee" :amount="500" tone="out">
-            <x-slot:icon>
-                <svg data-icon="coffee"></svg>
-            </x-slot:icon>
-        </x-cib.tx-row>
-    BLADE);
+it('renders a flux icon inside .tx-ico when the icon prop is set', function () {
+    $html = Blade::render(
+        '<x-cib.tx-row :transaction-id="1" name="Coffee" :amount="500" tone="out" icon="coffee" />'
+    );
 
-    expect($html)->toContain('data-icon="coffee"');
+    expect($html)
+        ->toContain('tx-ico out')
+        ->toMatch('/<svg[^>]*data-flux-icon/i');
+});
+
+it('omits the icon svg when no icon prop is provided', function () {
+    $html = Blade::render('<x-cib.tx-row :transaction-id="1" name="Coffee" :amount="500" />');
+
+    expect($html)
+        ->toContain('tx-ico')
+        ->not->toMatch('/<svg[^>]*data-flux-icon/i');
 });
 
 it('dispatches open-reconciliation-modal when plannedTransactionId is set', function () {

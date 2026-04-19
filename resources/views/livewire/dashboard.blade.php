@@ -44,6 +44,7 @@
                             :name="$tx->description ?? '—'"
                             :amount="$tx->amount"
                             :tone="$tx->direction === TransactionDirection::Debit ? 'out' : 'in'"
+                            :icon="$tx->category?->resolveIcon()"
                     />
                 @empty
                     <p class="text-sm text-gray-500">No recent activity.</p>
