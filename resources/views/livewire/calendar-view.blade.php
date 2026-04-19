@@ -1,215 +1,119 @@
-@php use Carbon\CarbonImmutable; @endphp
-<div data-testid="calendar-view">
-    <div class="rounded-xl border border-neutral-200 dark:border-neutral-700">
-        <div class="flex items-center justify-between p-4">
-            <div class="flex items-center gap-2">
-                <flux:button wire:click="previousMonth" variant="ghost" icon="chevron-left" size="sm"/>
-                <flux:heading>{{ $this->calendarData['monthLabel'] }}</flux:heading>
-                <flux:button wire:click="nextMonth" variant="ghost" icon="chevron-right" size="sm"/>
+@use('Carbon\CarbonImmutable')
+<div data-testid="calendar-view" class="space-y-4">
+    <header class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-center gap-3">
+            <flux:button wire:click="previousMonth" variant="ghost" icon="chevron-left" size="sm" />
+            <div>
+                <h1 class="cib-title">{{ $this->headerLabel['label'] }}</h1>
+                @if ($this->headerLabel['rangeLabel'])
+                    <div class="cib-subtitle">{{ $this->headerLabel['rangeLabel'] }}</div>
+                @endif
             </div>
-            @unless($this->calendarData['isCurrentMonth'])
-                <flux:button wire:click="goToToday" variant="subtle" size="sm">Today</flux:button>
-            @endunless
+            <flux:button wire:click="nextMonth" variant="ghost" icon="chevron-right" size="sm" />
         </div>
+        @unless ($this->calendarData['isCurrentMonth'])
+            <flux:button wire:click="goToToday" variant="subtle" size="sm">Today</flux:button>
+        @endunless
+    </header>
 
-        <flux:separator/>
+    <div class="quickline">
+        <span class="pill pill-income">
+            <span class="pill-label">Income</span>
+            <span class="pill-value tabular-nums">{{ $formatMoney($this->quickline['income']) }}</span>
+        </span>
+        <span class="pill pill-posted">
+            <span class="pill-label">Posted</span>
+            <span class="pill-value tabular-nums">{{ $formatMoney($this->quickline['posted']) }}</span>
+        </span>
+        <span class="pill pill-planned">
+            <span class="pill-label">Planned</span>
+            <span class="pill-value tabular-nums">{{ $formatMoney($this->quickline['planned']) }}</span>
+        </span>
+        <span @class([
+            'pill',
+            'pill-buffer-pos' => ($this->quickline['bufferAtPayday'] ?? 0) >= 0 && $this->quickline['bufferAtPayday'] !== null,
+            'pill-buffer-neg' => ($this->quickline['bufferAtPayday'] ?? 0) < 0,
+            'pill-buffer-empty' => $this->quickline['bufferAtPayday'] === null,
+        ])>
+            <span class="pill-label">Buffer</span>
+            <span class="pill-value tabular-nums">
+                @if ($this->quickline['bufferAtPayday'] === null)
+                    set pay cycle
+                @else
+                    {{ $formatMoney($this->quickline['bufferAtPayday']) }}
+                @endif
+            </span>
+        </span>
+    </div>
 
-        <div class="hidden md:block">
-            <div class="grid grid-cols-7 border-b border-neutral-200 dark:border-neutral-700">
-                @foreach(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as $day)
-                    <div class="px-2 py-2 text-center text-xs font-medium uppercase tracking-wider text-zinc-500">
-                        {{ $day }}
+    <div class="week-strip">
+        @foreach ($this->weekStrip as $cell)
+            <button
+                type="button"
+                wire:key="day-{{ $cell['date'] }}"
+                wire:click="selectDate('{{ $cell['date'] }}')"
+                aria-pressed="{{ $cell['isSelected'] ? 'true' : 'false' }}"
+                @class([
+                    'day-cell',
+                    'is-today' => $cell['isToday'],
+                    'is-payday' => $cell['isPayday'],
+                    'is-selected' => $cell['isSelected'],
+                ])
+            >
+                <div class="day-name">{{ $cell['dayName'] }}</div>
+                <div class="day-num">{{ $cell['dayOfMonth'] }}</div>
+                @if ($cell['isPayday'])
+                    <div class="badge-payday">PAYDAY</div>
+                @endif
+                @if (count($cell['dots']) > 0)
+                    <div class="dots">
+                        @foreach ($cell['dots'] as $dot)
+                            <span @class(['dot', "dot-{$dot}"])></span>
+                        @endforeach
                     </div>
-                @endforeach
-            </div>
+                @endif
+            </button>
+        @endforeach
+    </div>
 
-            @foreach($this->calendarData['weeks'] as $weekIndex => $week)
-                <div class="grid grid-cols-7 {{ !$loop->last ? 'border-b border-neutral-200 dark:border-neutral-700' : '' }}">
-                    @foreach($week as $day)
-                        <div
-                                wire:key="day-{{ $day['fullDate'] }}"
-                                wire:click="$dispatch('open-transaction-modal', { date: '{{ $day['fullDate'] }}' })"
-                                class="min-h-28 cursor-pointer border-r border-neutral-200 p-1.5 last:border-r-0 hover:bg-zinc-50 dark:border-neutral-700 dark:hover:bg-zinc-800 {{ !$day['isCurrentMonth'] ? 'bg-zinc-50 dark:bg-zinc-900/50' : '' }}"
-                        >
-                            <div class="mb-1 text-right text-xs font-medium {{ $day['isToday'] ? 'flex items-center justify-end' : '' }} {{ !$day['isCurrentMonth'] ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-700 dark:text-zinc-300' }}">
-                                @if($day['isToday'])
-                                    <span class="inline-flex size-6 items-center justify-center rounded-full bg-indigo-600 text-white">{{ $day['date'] }}</span>
-                                @else
-                                    {{ $day['date'] }}
-                                @endif
-                            </div>
-                            @if(count($day['transactions']) > 0)
-                                <div class="max-h-24 space-y-0.5 overflow-y-auto">
-                                    @foreach($day['transactions'] as $txn)
-                                        @php
-                                            $isPlanned = ($txn['type'] ?? 'actual') === 'planned';
-                                            $reconStatus = $txn['reconciliation_status'] ?? null;
-                                            $isReconciled = $reconStatus === 'reconciled';
-                                            $isSuggested = $reconStatus === 'suggested';
-
-                                            $bgColor = match(true) {
-                                                $isReconciled && $txn['direction'] === 'debit' => 'bg-red-50 dark:bg-red-950/30',
-                                                $isReconciled => 'bg-green-50 dark:bg-green-950/30',
-                                                $isSuggested => 'border border-dashed border-amber-400 bg-amber-50/50 dark:border-amber-600 dark:bg-amber-950/20',
-                                                $isPlanned && $txn['direction'] === 'debit' => 'border border-dashed border-red-300 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20',
-                                                $isPlanned => 'border border-dashed border-green-300 bg-green-50/50 dark:border-green-800 dark:bg-green-950/20',
-                                                ($txn['isTransfer'] ?? false) => 'bg-blue-50 dark:bg-blue-950/30',
-                                                $txn['direction'] === 'debit' => 'bg-red-50 dark:bg-red-950/30',
-                                                default => 'bg-green-50 dark:bg-green-950/30',
-                                            };
-                                            $amountColor = match(true) {
-                                                $isReconciled && $txn['direction'] === 'debit' => 'text-red-600 dark:text-red-400',
-                                                $isReconciled => 'text-green-600 dark:text-green-400',
-                                                $isSuggested => 'text-amber-600 dark:text-amber-400',
-                                                $isPlanned && $txn['direction'] === 'debit' => 'text-red-400 dark:text-red-600',
-                                                $isPlanned => 'text-green-400 dark:text-green-600',
-                                                ($txn['isTransfer'] ?? false) => 'text-blue-600 dark:text-blue-400',
-                                                $txn['direction'] === 'debit' => 'text-red-600 dark:text-red-400',
-                                                default => 'text-green-600 dark:text-green-400',
-                                            };
-                                        @endphp
-                                        @if($isPlanned)
-                                            <button
-                                                type="button"
-                                                wire:click.stop="$dispatch('open-reconciliation-modal', { plannedId: {{ $txn['planned_transaction_id'] }}, occurrenceDate: '{{ $txn['occurrence_date'] }}' })"
-                                                class="flex w-full cursor-pointer items-center justify-between gap-1 rounded px-1 py-0.5 text-xs hover:ring-1 hover:ring-indigo-300 dark:hover:ring-indigo-600 {{ $bgColor }}"
-                                            >
-                                                @php
-                                                    $plannedTextColor = match(true) {
-                                                        !$day['isCurrentMonth'] => 'text-zinc-400 dark:text-zinc-600',
-                                                        $isReconciled => 'text-zinc-600 dark:text-zinc-400',
-                                                        default => 'text-zinc-500 dark:text-zinc-500',
-                                                    };
-                                                @endphp
-                                                <span class="flex items-center gap-0.5 truncate {{ $plannedTextColor }}">
-                                                    @if($isReconciled)
-                                                        <flux:icon.check-circle variant="mini" class="size-3 shrink-0 text-green-500"/>
-                                                    @elseif($isSuggested)
-                                                        <span class="relative">
-                                                            <flux:icon.clock variant="mini" class="size-3 shrink-0"/>
-                                                            <span class="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-amber-400"></span>
-                                                        </span>
-                                                    @else
-                                                        <flux:icon.clock variant="mini" class="size-3 shrink-0"/>
-                                                    @endif
-                                                    {{ $txn['category'] }}
-                                                </span>
-                                                <span class="shrink-0 tabular-nums font-medium {{ $amountColor }}">{{ $formatMoney($txn['amount']) }}</span>
-                                            </button>
-                                        @else
-                                            <button
-                                                type="button"
-                                                wire:click.stop="$dispatch('edit-transaction', { id: {{ $txn['id'] }} })"
-                                                class="flex w-full cursor-pointer items-center justify-between gap-1 rounded px-1 py-0.5 text-xs hover:ring-1 hover:ring-indigo-300 dark:hover:ring-indigo-600 {{ $bgColor }}"
-                                            >
-                                                <span class="truncate {{ !$day['isCurrentMonth'] ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-600 dark:text-zinc-400' }}">{{ $txn['category'] }}</span>
-                                                <span class="shrink-0 tabular-nums font-medium {{ $amountColor }}">{{ $formatMoney($txn['amount']) }}</span>
-                                            </button>
-                                        @endif
-                                    @endforeach
-                                </div>
-                            @endif
-                        </div>
-                    @endforeach
-                </div>
+    @if (count($this->agenda) === 0)
+        <div class="empty-state">
+            <flux:icon.calendar class="mx-auto size-12 text-zinc-400" />
+            <flux:heading size="lg" class="mt-4">No transactions</flux:heading>
+            <flux:text class="mt-2">No transactions found from {{ CarbonImmutable::parse($this->selectedDate)->format('j M Y') }} onward.</flux:text>
+        </div>
+    @else
+        <div class="agenda">
+            @foreach ($this->agenda as $group)
+                <section wire:key="agenda-{{ $group['date'] }}" class="agenda-group">
+                    <header class="agenda-head">
+                        <h3>{{ $group['heading'] }}</h3>
+                        <span @class(['net tabular-nums', 'pos' => $group['net'] >= 0, 'neg' => $group['net'] < 0])>
+                            {{ $formatMoney($group['net']) }}
+                        </span>
+                    </header>
+                    <div class="day-card">
+                        @foreach ($group['transactions'] as $txn)
+                            @php
+                                $isPlanned = ($txn['type'] ?? 'actual') === 'planned';
+                                $tone = match (true) {
+                                    $isPlanned => 'plan',
+                                    ($txn['direction'] ?? null) === 'credit' => 'inc',
+                                    default => 'out',
+                                };
+                            @endphp
+                            <x-cib.tx-row
+                                :transaction-id="$isPlanned ? null : $txn['id']"
+                                :planned-transaction-id="$isPlanned ? $txn['planned_transaction_id'] : null"
+                                :occurrence-date="$isPlanned ? $txn['occurrence_date'] : null"
+                                :name="$txn['category']"
+                                :amount="$txn['amount']"
+                                :tone="$tone"
+                            />
+                        @endforeach
+                    </div>
+                </section>
             @endforeach
         </div>
-
-        <div class="md:hidden">
-            @php
-                $daysWithTransactions = collect($this->calendarData['weeks'])
-                    ->flatten(1)
-                    ->filter(fn ($day) => $day['isCurrentMonth'] && count($day['transactions']) > 0);
-            @endphp
-
-            @if($daysWithTransactions->isEmpty())
-                <div class="p-8 text-center">
-                    <flux:icon.calendar class="mx-auto size-12 text-zinc-400"/>
-                    <flux:heading size="lg" class="mt-4">No transactions</flux:heading>
-                    <flux:text class="mt-2">No transactions found for {{ $this->calendarData['monthLabel'] }}.</flux:text>
-                </div>
-            @else
-                <div class="divide-y divide-neutral-200 dark:divide-neutral-700">
-                    @foreach($daysWithTransactions as $day)
-                        <div
-                            wire:key="mobile-{{ $day['fullDate'] }}"
-                            wire:click="$dispatch('open-transaction-modal', { date: '{{ $day['fullDate'] }}' })"
-                            class="cursor-pointer px-4 py-3"
-                        >
-                            <div class="mb-2 text-sm font-medium {{ $day['isToday'] ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-700 dark:text-zinc-300' }}">
-                                {{ CarbonImmutable::parse($day['fullDate'])->format('D j M') }}
-                            </div>
-                            <div class="space-y-1">
-                                @foreach($day['transactions'] as $txn)
-                                    @php
-                                        $isPlanned = ($txn['type'] ?? 'actual') === 'planned';
-                                        $reconStatus = $txn['reconciliation_status'] ?? null;
-                                        $isReconciled = $reconStatus === 'reconciled';
-                                        $isSuggested = $reconStatus === 'suggested';
-
-                                        $amountColor = match(true) {
-                                            $isReconciled && $txn['direction'] === 'debit' => 'text-red-600 dark:text-red-400',
-                                            $isReconciled => 'text-green-600 dark:text-green-400',
-                                            $isSuggested => 'text-amber-600 dark:text-amber-400',
-                                            $isPlanned && $txn['direction'] === 'debit' => 'text-red-400 dark:text-red-600',
-                                            $isPlanned => 'text-green-400 dark:text-green-600',
-                                            ($txn['isTransfer'] ?? false) => 'text-blue-600 dark:text-blue-400',
-                                            $txn['direction'] === 'debit' => 'text-red-600 dark:text-red-400',
-                                            default => 'text-green-600 dark:text-green-400',
-                                        };
-
-                                        $mobileBorder = match(true) {
-                                            $isReconciled => 'border border-solid ' . ($txn['direction'] === 'debit' ? 'border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20' : 'border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/20'),
-                                            $isSuggested => 'border border-dashed border-amber-400 bg-amber-50/50 dark:border-amber-600 dark:bg-amber-950/20',
-                                            $isPlanned => 'border border-dashed ' . ($txn['direction'] === 'debit' ? 'border-red-300 dark:border-red-800' : 'border-green-300 dark:border-green-800'),
-                                            default => '',
-                                        };
-                                    @endphp
-                                    @if($isPlanned)
-                                        <button
-                                            type="button"
-                                            wire:click.stop="$dispatch('open-reconciliation-modal', { plannedId: {{ $txn['planned_transaction_id'] }}, occurrenceDate: '{{ $txn['occurrence_date'] }}' })"
-                                            class="flex w-full cursor-pointer items-center justify-between rounded-md px-2 py-1 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 {{ $mobileBorder }}"
-                                        >
-                                            <span class="flex items-center gap-1 truncate {{ $isReconciled ? 'text-zinc-600 dark:text-zinc-400' : 'text-zinc-500 dark:text-zinc-500' }}">
-                                                @if($isReconciled)
-                                                    <flux:icon.check-circle variant="mini" class="size-3.5 shrink-0 text-green-500"/>
-                                                @elseif($isSuggested)
-                                                    <span class="relative">
-                                                        <flux:icon.clock variant="mini" class="size-3.5 shrink-0"/>
-                                                        <span class="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-amber-400"></span>
-                                                    </span>
-                                                @else
-                                                    <flux:icon.clock variant="mini" class="size-3.5 shrink-0"/>
-                                                @endif
-                                                {{ $txn['category'] }}
-                                            </span>
-                                            <span class="shrink-0 tabular-nums font-medium {{ $amountColor }}">{{ $formatMoney($txn['amount']) }}</span>
-                                        </button>
-                                    @else
-                                        <button
-                                            type="button"
-                                            wire:click.stop="$dispatch('edit-transaction', { id: {{ $txn['id'] }} })"
-                                            class="flex w-full cursor-pointer items-center justify-between rounded-md px-2 py-1 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                                        >
-                                            <span class="truncate text-zinc-600 dark:text-zinc-400">{{ $txn['category'] }}</span>
-                                            <span class="shrink-0 tabular-nums font-medium {{ $amountColor }}">{{ $formatMoney($txn['amount']) }}</span>
-                                        </button>
-                                    @endif
-                                @endforeach
-                            </div>
-                        </div>
-                    @endforeach
-                </div>
-            @endif
-        </div>
-
-        @if(collect($this->calendarData['weeks'])->flatten(1)->every(fn ($day) => count($day['transactions']) === 0))
-            <div class="hidden p-8 text-center md:block">
-                <flux:icon.calendar class="mx-auto size-12 text-zinc-400"/>
-                <flux:heading size="lg" class="mt-4">No transactions</flux:heading>
-                <flux:text class="mt-2">No transactions found for {{ $this->calendarData['monthLabel'] }}.</flux:text>
-            </div>
-        @endif
-    </div>
+    @endif
 </div>
