@@ -73,3 +73,24 @@ it('renders icon slot content inside .tx-ico', function () {
 
     expect($html)->toContain('data-icon="coffee"');
 });
+
+it('dispatches open-reconciliation-modal when plannedTransactionId is set', function () {
+    $html = Blade::render(
+        '<x-cib.tx-row :planned-transaction-id="7" occurrence-date="2026-04-19" name="Rent" :amount="150000" tone="plan" />'
+    );
+
+    expect($html)
+        ->toContain("wire:click=\"\$dispatch('open-reconciliation-modal', { plannedId: 7, occurrenceDate: '2026-04-19' })\"")
+        ->toContain('tx-row planned');
+});
+
+it('JS-encodes occurrenceDate to neutralise apostrophe injection', function () {
+    $html = Blade::render(
+        '<x-cib.tx-row :planned-transaction-id="1" :occurrence-date="$date" name="Rent" :amount="100" />',
+        ['date' => "'); alert(1); x=('"]
+    );
+
+    expect($html)
+        ->not->toContain("'); alert(1)")
+        ->toContain('\u0027');
+});
