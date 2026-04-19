@@ -10,6 +10,7 @@ use App\Enums\TransactionDirection;
 use App\Events\PlannedTransactionCategoryUpdated;
 use Carbon\CarbonImmutable;
 use Database\Factories\PlannedTransactionFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -84,6 +85,22 @@ final class PlannedTransaction extends Model
     public function transactions(): HasMany
     {
         return $this->hasMany(Transaction::class);
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeUpcoming(Builder $query): Builder
+    {
+        $today = CarbonImmutable::today();
+
+        return $query
+            ->where('is_active', true)
+            ->where(function (Builder $q) use ($today): void {
+                $q->whereNull('until_date')->orWhere('until_date', '>=', $today);
+            })
+            ->orderBy('start_date');
     }
 
     /** @return Collection<int, CarbonImmutable> */

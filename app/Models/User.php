@@ -227,6 +227,27 @@ final class User extends Authenticatable
         return $availableToSpend - $projectedSpend;
     }
 
+    public function totalNeededUntilPayday(): int
+    {
+        $bounds = $this->currentPayCycleBounds();
+
+        if ($bounds === null) {
+            return 0;
+        }
+
+        $today = CarbonImmutable::today();
+
+        if ($today->greaterThanOrEqualTo($bounds['end'])) {
+            return 0;
+        }
+
+        return (int) $this->plannedTransactions()
+            ->where('is_active', true)
+            ->where('direction', TransactionDirection::Debit)
+            ->get()
+            ->sum(static fn (PlannedTransaction $plan) => $plan->occurrencesBetween($today, $bounds['end'])->count() * abs($plan->amount));
+    }
+
     /**
      * @return array<string, string>
      */
