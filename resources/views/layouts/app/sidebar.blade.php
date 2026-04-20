@@ -66,6 +66,7 @@
 </main>
 
 <livewire:feedback-widget/>
+<livewire:transaction-modal/>
 
 @fluxScripts
 </body>

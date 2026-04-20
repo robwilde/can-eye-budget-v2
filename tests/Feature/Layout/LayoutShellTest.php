@@ -78,6 +78,13 @@ it('wires the FAB to dispatch open-transaction-modal', function () {
     $response->assertSee('data-testid="mobile-tabbar-fab"', false);
 });
 
+it('mounts the TransactionModal listener inside the app layout so the mobile FAB works on every page', function () {
+    $response = $this->get(route('dashboard'));
+
+    $response->assertOk();
+    $response->assertSeeLivewire('transaction-modal');
+});
+
 it('exposes the Log spend CTA in the topbar', function () {
     $response = $this->get(route('dashboard'));
 
