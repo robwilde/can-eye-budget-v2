@@ -39,12 +39,38 @@
         Spend
     </a>
 
-    <a
-        href="{{ route('profile.edit') }}"
-        wire:navigate
-        class="flex flex-col items-center gap-1 rounded-xl px-3 py-2 text-xs font-bold {{ request()->routeIs('profile.*') ? 'bg-cib-yellow-400 text-cib-black' : 'text-white' }}"
-    >
-        <flux:icon name="ellipsis-horizontal" class="size-5" />
-        More
-    </a>
+    <flux:dropdown position="top" align="end">
+        <button
+            type="button"
+            aria-haspopup="menu"
+            aria-label="More"
+            class="flex flex-col items-center gap-1 rounded-xl px-3 py-2 text-xs font-bold {{ request()->routeIs('profile.*') ? 'bg-cib-yellow-400 text-cib-black' : 'text-white' }}"
+        >
+            <flux:icon name="ellipsis-horizontal" class="size-5" />
+            More
+        </button>
+
+        <flux:menu class="border-2 border-cib-black bg-white text-cib-black shadow-pop rounded-lg">
+            <flux:menu.item
+                :href="route('profile.edit')"
+                icon="cog"
+                wire:navigate
+                class="data-active:bg-cib-yellow-400 data-active:text-cib-black data-active:font-black"
+            >
+                {{ __('Settings') }}
+            </flux:menu.item>
+            <form method="POST" action="{{ route('logout') }}" class="w-full">
+                @csrf
+                <flux:menu.item
+                    as="button"
+                    type="submit"
+                    icon="arrow-right-start-on-rectangle"
+                    class="w-full cursor-pointer data-active:bg-cib-yellow-400 data-active:text-cib-black data-active:font-black"
+                    data-test="mobile-logout-button"
+                >
+                    {{ __('Log out') }}
+                </flux:menu.item>
+            </form>
+        </flux:menu>
+    </flux:dropdown>
 </nav>
