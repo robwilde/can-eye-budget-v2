@@ -104,6 +104,66 @@ test('renders empty when no pending suggestions', function () {
         ->assertDontSee('Analysis Suggestions');
 });
 
+// ─── CIB visual tokens (Ticket #213) ─────────────────────
+
+test('primary-account suggestion uses the rule-suggest CIB class', function () {
+    createSuggestion($this, 'primary', primaryAccountPayload($this->account->id));
+
+    Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->assertSeeHtml('class="rule-suggest')
+        ->assertSee('Primary Account Detected');
+});
+
+test('pay-cycle suggestion uses the rule-suggest CIB class', function () {
+    createSuggestion($this, 'payCycle', payCyclePayload($this->account->id));
+
+    Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->assertSeeHtml('class="rule-suggest')
+        ->assertSee('Pay Cycle Detected');
+});
+
+test('recurring-transaction list wraps in day-card with passive tx-row markup', function () {
+    createSuggestion($this, 'recurring', recurringPayload($this->account->id, [
+        'matched_transaction_ids' => [1, 2, 3],
+    ]));
+
+    $component = Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class);
+
+    $component
+        ->assertSeeHtml('class="day-card')
+        ->assertSeeHtml('class="tx-row')
+        ->assertDontSeeHtml("\$dispatch('edit-transaction'");
+});
+
+test('user-rule list wraps in day-card with passive tx-row markup', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    $rule = UserRule::factory()->for($this->user)->for($group, 'group')->create([
+        'name' => 'Categorise Netflix',
+    ]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'description' => 'NETFLIX SUBSCRIPTION',
+    ]);
+
+    createSuggestion($this, 'userRule', userRulePayload(
+        $rule->id,
+        'Categorise Netflix',
+        $transaction->id,
+    ));
+
+    $component = Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class);
+
+    $component
+        ->assertSeeHtml('class="day-card')
+        ->assertSeeHtml('class="tx-row')
+        ->assertDontSeeHtml("\$dispatch('edit-transaction'");
+});
+
 test('displays primary account suggestion with account name', function () {
     createSuggestion($this, 'primary', primaryAccountPayload($this->account->id));
 

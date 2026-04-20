@@ -100,3 +100,53 @@ it('JS-encodes occurrenceDate to neutralise apostrophe injection', function () {
         ->not->toContain("'); alert(1)")
         ->toContain('\u0027');
 });
+
+it('renders as a passive div when both transactionId and plannedTransactionId are null', function () {
+    $html = Blade::render(
+        '<x-cib.tx-row :transaction-id="null" :planned-transaction-id="null" name="Foo" :amount="100" />'
+    );
+
+    expect($html)
+        ->toContain('<div')
+        ->not->toContain('<button')
+        ->not->toContain('wire:click')
+        ->toContain('tx-row passive');
+});
+
+it('renders the actions slot inside a tx-actions container', function () {
+    $html = Blade::render(<<<'BLADE'
+        <x-cib.tx-row :transaction-id="null" :planned-transaction-id="null" name="Foo" :amount="100">
+            <x-slot:actions>
+                <span data-testid="accept">Accept</span>
+            </x-slot:actions>
+        </x-cib.tx-row>
+    BLADE);
+
+    expect($html)
+        ->toContain('class="tx-actions"')
+        ->toContain('data-testid="accept"');
+});
+
+it('omits the tx-actions container when no actions slot is supplied', function () {
+    $html = Blade::render(
+        '<x-cib.tx-row :transaction-id="null" :planned-transaction-id="null" name="Foo" :amount="100" />'
+    );
+
+    expect($html)->not->toContain('tx-actions');
+});
+
+it('throws when actions slot is used alongside a transactionId (active mode)', function () {
+    Blade::render(<<<'BLADE'
+        <x-cib.tx-row :transaction-id="1" name="Foo" :amount="100">
+            <x-slot:actions>Accept</x-slot:actions>
+        </x-cib.tx-row>
+    BLADE);
+})->throws(Illuminate\View\ViewException::class, 'actions slot requires passive mode');
+
+it('throws when actions slot is used alongside a plannedTransactionId (planned mode)', function () {
+    Blade::render(<<<'BLADE'
+        <x-cib.tx-row :planned-transaction-id="1" occurrence-date="2026-04-20" name="Foo" :amount="100" tone="plan">
+            <x-slot:actions>Accept</x-slot:actions>
+        </x-cib.tx-row>
+    BLADE);
+})->throws(Illuminate\View\ViewException::class, 'actions slot requires passive mode');
