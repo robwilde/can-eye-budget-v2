@@ -1,19 +1,20 @@
 @php use App\Enums\RefreshStatus; use Illuminate\Support\Str; @endphp
 <div class="space-y-6">
     @if(! $isConnected)
-        <div class="rounded-xl border border-neutral-200 p-8 text-center dark:border-neutral-700">
-            <flux:icon.building-library class="mx-auto size-12 text-zinc-400"/>
-            <flux:heading size="lg" class="mt-4">No bank connected</flux:heading>
-            <flux:text class="mt-2">Connect your bank to automatically sync your accounts and transactions.</flux:text>
-            <div class="mt-6">
+        <x-cib.empty-state
+            icon="building-library"
+            title="No bank connected"
+            description="Connect your bank to automatically sync your accounts and transactions."
+        >
+            <x-slot:action>
                 <flux:button variant="primary" icon="plus" wire:click="connect" wire:loading.attr="disabled">
                     <flux:icon.loading wire:loading wire:target="connect" class="size-4"/>
                     {{ __('Connect Bank') }}
                 </flux:button>
-            </div>
-        </div>
+            </x-slot:action>
+        </x-cib.empty-state>
     @else
-        <flux:card>
+        <x-cib.card>
             <div class="flex items-center justify-between">
                 <div>
                     <flux:heading size="lg">Connection Status</flux:heading>
@@ -30,17 +31,27 @@
                     {{ __('Manage Connections') }}
                 </flux:button>
             </div>
-        </flux:card>
+        </x-cib.card>
 
-        <flux:card>
+        <x-cib.card>
             <div class="flex items-center justify-between">
                 <flux:heading size="lg">Sync Summary</flux:heading>
                 <div class="flex items-center gap-3">
-                    <flux:text size="sm">{{ $todayRefreshCount }} of 20 refreshes used today</flux:text>
-                    <flux:button size="sm" variant="primary" wire:click="refresh" wire:loading.attr="disabled" :disabled="! $canRefresh">
+                    <x-cib.stat-pill tone="neutral">
+                        {{ $todayRefreshCount }} of 20 refreshes used today
+                    </x-cib.stat-pill>
+                    <button
+                        type="button"
+                        data-testid="connect-bank-refresh-now"
+                        wire:click="refresh"
+                        wire:loading.attr="disabled"
+                        @disabled(! $canRefresh)
+                        class="inline-flex items-center gap-2 rounded-md border-2 border-cib-black bg-cib-yellow-400 px-4 py-2 text-sm font-bold text-cib-black shadow-pop transition-transform hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+                    >
                         <flux:icon.loading wire:loading wire:target="refresh" class="size-4"/>
+                        <flux:icon name="arrow-path" class="size-4"/>
                         {{ __('Refresh Now') }}
-                    </flux:button>
+                    </button>
                 </div>
             </div>
             <div class="mt-4 flex flex-wrap items-center gap-3">
@@ -56,20 +67,20 @@
             @if($accounts->isNotEmpty())
                 <div class="mt-3 flex flex-wrap gap-2">
                     @foreach($accounts as $account)
-                        <flux:badge size="sm" color="zinc">{{ $account->name }}</flux:badge>
+                        <x-cib.stat-pill tone="neutral">{{ $account->name }}</x-cib.stat-pill>
                     @endforeach
                 </div>
             @endif
-        </flux:card>
+        </x-cib.card>
 
-        <flux:card>
+        <x-cib.card>
             <flux:heading size="lg">Refresh History</flux:heading>
             @if($refreshLogs->isEmpty())
                 <flux:text class="mt-2">No refresh history yet.</flux:text>
             @else
-                <div class="mt-4 divide-y divide-neutral-200 dark:divide-neutral-700">
+                <div class="mt-4 space-y-2">
                     @foreach($refreshLogs as $log)
-                        <div wire:key="log-{{ $log->id }}" class="flex items-center justify-between py-3">
+                        <div wire:key="log-{{ $log->id }}" class="day-card flex items-center justify-between py-3">
                             <div class="flex items-center gap-3">
                                 <flux:text size="sm">{{ $log->created_at->diffForHumans() }}</flux:text>
                                 <flux:text size="sm" class="text-zinc-500">{{ $log->trigger->label() }}</flux:text>
@@ -85,17 +96,13 @@
                                     </flux:text>
                                 @endif
                             </div>
-                            @if($log->status === RefreshStatus::Success)
-                                <flux:badge size="sm" color="green">Success</flux:badge>
-                            @elseif($log->status === RefreshStatus::Pending)
-                                <flux:badge size="sm" color="yellow">Pending</flux:badge>
-                            @else
-                                <flux:badge size="sm" color="red">Failed</flux:badge>
-                            @endif
+                            <x-cib.stat-pill :tone="$statusTones[$log->id]">
+                                {{ $log->status->label() }}
+                            </x-cib.stat-pill>
                         </div>
                     @endforeach
                 </div>
             @endif
-        </flux:card>
+        </x-cib.card>
     @endif
 </div>

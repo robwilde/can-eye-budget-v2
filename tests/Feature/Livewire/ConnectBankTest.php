@@ -148,6 +148,90 @@ test('unconnected user sees only the connect button', function () {
         ->assertDontSee('Connection Status');
 });
 
+test('disconnected state renders the cib empty-state primitive', function () {
+    $user = User::factory()->create(['basiq_user_id' => null]);
+
+    fakeBasiqService();
+
+    Livewire::actingAs($user)
+        ->test(ConnectBank::class)
+        ->assertSeeHtml('class="empty-state"')
+        ->assertSee('No bank connected');
+});
+
+test('connected state renders three cib-card wrappers', function () {
+    $user = User::factory()->withBasiq()->create();
+
+    $html = Livewire::actingAs($user)
+        ->test(ConnectBank::class)
+        ->html();
+
+    expect(mb_substr_count($html, 'cib-card'))->toBeGreaterThanOrEqual(3);
+});
+
+test('refresh-counter renders as a neutral stat-pill', function () {
+    $user = User::factory()->withBasiq()->create();
+    BasiqRefreshLog::factory()->count(5)->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(ConnectBank::class)
+        ->assertSeeHtml('stat-pill stat-pill-neutral')
+        ->assertSee('5 of 20 refreshes used today');
+});
+
+test('refresh-now CTA uses yellow-on-black pill class with testid', function () {
+    $user = User::factory()->withBasiq()->create();
+
+    $component = Livewire::actingAs($user)->test(ConnectBank::class);
+
+    $component->assertSeeHtml('data-testid="connect-bank-refresh-now"');
+
+    foreach (['bg-cib-yellow-400', 'text-cib-black', 'border-2', 'border-cib-black', 'shadow-pop'] as $class) {
+        $component->assertSeeHtml($class);
+    }
+});
+
+test('refresh history rows render inside day-card containers', function () {
+    $user = User::factory()->withBasiq()->create();
+    BasiqRefreshLog::factory()->completed()->for($user)->create();
+
+    $html = Livewire::actingAs($user)
+        ->test(ConnectBank::class)
+        ->html();
+
+    expect($html)->toContain('class="day-card');
+});
+
+test('successful refresh status renders as income-tone stat-pill', function () {
+    $user = User::factory()->withBasiq()->create();
+    BasiqRefreshLog::factory()->completed()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(ConnectBank::class)
+        ->assertSeeHtml('stat-pill-income')
+        ->assertDontSeeHtml('color="green"');
+});
+
+test('pending refresh status renders as planned-tone stat-pill', function () {
+    $user = User::factory()->withBasiq()->create();
+    BasiqRefreshLog::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(ConnectBank::class)
+        ->assertSeeHtml('stat-pill-planned')
+        ->assertDontSeeHtml('color="yellow"');
+});
+
+test('failed refresh status renders as posted-tone stat-pill', function () {
+    $user = User::factory()->withBasiq()->create();
+    BasiqRefreshLog::factory()->failed()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(ConnectBank::class)
+        ->assertSeeHtml('stat-pill-posted')
+        ->assertDontSeeHtml('color="red"');
+});
+
 test('action defaults to manage for connected users', function () {
     $user = User::factory()->withBasiq()->create();
 

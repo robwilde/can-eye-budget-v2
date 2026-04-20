@@ -104,20 +104,34 @@ final class ConnectBank extends Component
                 ->count()
             : 0;
 
+        $refreshLogs = $isConnected
+            ? BasiqRefreshLog::query()
+                ->where('user_id', $user->id)
+                ->latest()
+                ->limit(10)
+                ->get()
+            : collect();
+
         return view('livewire.connect-bank', [
             'isConnected' => $isConnected,
             'accounts' => $isConnected ? $user->accounts()->active()->visible()->get() : collect(),
             'transactionCount' => $isConnected ? $user->transactions()->count() : 0,
             'lastSyncedAt' => $user->last_synced_at,
-            'refreshLogs' => $isConnected
-                ? BasiqRefreshLog::query()
-                    ->where('user_id', $user->id)
-                    ->latest()
-                    ->limit(10)
-                    ->get()
-                : collect(),
+            'refreshLogs' => $refreshLogs,
+            'statusTones' => $refreshLogs->mapWithKeys(
+                fn (BasiqRefreshLog $log) => [$log->id => $this->statPillToneFor($log->status)]
+            )->all(),
             'todayRefreshCount' => $todayRefreshCount,
             'canRefresh' => $isConnected && $todayRefreshCount < 20,
         ]);
+    }
+
+    private function statPillToneFor(RefreshStatus $status): string
+    {
+        return match ($status) {
+            RefreshStatus::Success => 'income',
+            RefreshStatus::Pending => 'planned',
+            RefreshStatus::Failed => 'posted',
+        };
     }
 }
