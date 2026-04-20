@@ -11,8 +11,6 @@ final class SmokeTest extends Component
 {
     public int $count = 0;
 
-    public ?string $filter = 'all';
-
     public function increment(): void
     {
         $this->count++;
