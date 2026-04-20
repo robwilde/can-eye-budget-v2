@@ -561,6 +561,42 @@ select:focus[data-flux-control] {
         letter-spacing: 0.1em;
         color: var(--color-fg-3);
     }
+
+    /* ---------- CIB primitives extension (Ticket #212) ---------- */
+
+    .cib-card {
+        background: var(--color-bg-surface);
+        border: 2px solid var(--color-border-strong);
+        border-radius: var(--radius-md);
+        padding: 16px;
+        box-shadow: var(--shadow-pop-sm);
+    }
+    .cib-card.teal   { background: var(--color-cib-teal-400); color: var(--color-cib-white); }
+    .cib-card.yellow { background: var(--color-cib-yellow-300); }
+
+    .stat-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        border: 2px solid var(--color-border-strong);
+        border-radius: var(--radius-pill);
+        font: 700 12px/1 var(--font-sans);
+        background: var(--color-bg-surface);
+    }
+    .stat-pill-income       { background: var(--color-money-available-soft); }
+    .stat-pill-income       .pill-value { color: var(--color-cib-green-600); }
+    .stat-pill-posted       { background: var(--color-money-owed-soft); }
+    .stat-pill-posted       .pill-value { color: var(--color-money-owed); }
+    .stat-pill-planned      { background: var(--color-money-planned-soft); }
+    .stat-pill-planned      .pill-value { color: var(--color-money-planned); }
+    .stat-pill-buffer-pos   { background: var(--color-cib-teal-100); }
+    .stat-pill-buffer-pos   .pill-value { color: var(--color-cib-teal-600); }
+    .stat-pill-buffer-neg   { background: var(--color-money-owed-soft); }
+    .stat-pill-buffer-neg   .pill-value { color: var(--color-money-owed); }
+    .stat-pill-buffer-empty { background: var(--color-cib-n-100); }
+    .stat-pill-buffer-empty .pill-value { color: var(--color-fg-3); font-weight: 700; font-size: 11px; }
+    .stat-pill-neutral      { background: var(--color-cib-n-100); }
 }
 
 /* Flux modal slide-up (Ticket #196). Outside @layer components so it matches
