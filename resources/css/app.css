@@ -229,6 +229,7 @@ select:focus[data-flux-control] {
         align-items: center;
     }
     .tx-row:last-child { border-bottom: 0; }
+    .tx-row.passive { cursor: default; }
     .tx-ico {
         width: 36px; height: 36px; border-radius: 10px;
         display: grid; place-items: center;
