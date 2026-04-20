@@ -64,8 +64,8 @@ test('description textarea accepts input', function () use ($testScreenshotBase6
     JS);
 
     $page->assertSee('Send Feedback')
-        ->type('[data-flux-textarea]', 'This is a test description')
-        ->assertValue('[data-flux-textarea]', 'This is a test description');
+        ->type('textarea[name="description"]', 'This is a test description')
+        ->assertValue('textarea[name="description"]', 'This is a test description');
 });
 
 test('screenshot preview renders when screenshot data is present', function () use ($testScreenshotBase64, $findWidget) {
