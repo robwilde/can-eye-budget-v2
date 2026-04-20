@@ -42,18 +42,11 @@
     <flux:spacer/>
 
     @if($shellUser)
-        <div class="mt-auto flex items-center gap-2 border-t-[1.5px] border-white/18 px-2 pt-3">
-            <flux:avatar
-                    :initials="$shellUser->initials()"
-                    class="size-8 border-[1.5px] border-cib-black bg-cib-yellow-400! text-cib-black!"
-            />
-            <div class="text-sm truncate in-data-flux-sidebar-collapsed-desktop:hidden">
-                <div class="font-bold leading-tight truncate">{{ $shellUser->name }}</div>
-                <div class="text-xs text-white/70 truncate">
-                    {{ $shellAccountCount }} {{ Str::plural('account', $shellAccountCount) }} · synced {{ $shellSyncedHuman }}
-                </div>
-            </div>
-        </div>
+        <x-sidebar-user-menu
+            :user="$shellUser"
+            :account-count="$shellAccountCount"
+            :synced-human="$shellSyncedHuman"
+        />
     @endif
 </flux:sidebar>
 
