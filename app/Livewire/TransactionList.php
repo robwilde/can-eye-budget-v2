@@ -159,8 +159,12 @@ final class TransactionList extends Component
             ->active()
             ->get(['id', 'name']);
 
+        $grouped = $transactions->getCollection()
+            ->groupBy(static fn (Transaction $t): string => $t->post_date->format('Y-m-d'));
+
         return view('livewire.transaction-list', [
             'transactions' => $transactions,
+            'grouped' => $grouped,
             'accounts' => $accounts,
             'categoryName' => $this->category
                 ? Category::query()->whereKey($this->category)->value('name')

@@ -579,7 +579,7 @@ test('legacy direction values normalize to all', function (string $legacy) {
         ->assertSet('direction', 'all');
 })->with(['spending', 'income']);
 
-test('amounts show color coding when direction is all', function () {
+test('amounts render with cib tx-amt tone classes for debit and credit', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -600,11 +600,11 @@ test('amounts show color coding when direction is all', function () {
     Livewire::actingAs($user)
         ->test(TransactionList::class)
         ->assertSet('direction', 'all')
-        ->assertSeeHtml('text-red-600')
-        ->assertSeeHtml('text-green-600');
+        ->assertSeeHtml('tx-amt out')
+        ->assertSeeHtml('tx-amt inc');
 });
 
-test('amounts do not show color coding when direction is filtered', function () {
+test('legacy tailwind color utilities removed from transaction rows', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -832,4 +832,180 @@ test('custom range date inputs hidden for other periods', function () {
         ->test(TransactionList::class, ['period' => 'this-month'])
         ->assertDontSeeHtml('wire:model.live="from"')
         ->assertDontSeeHtml('wire:model.live="to"');
+});
+
+test('direction filter renders via x-cib.filter-toggle with inc tone when incoming', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['direction' => 'incoming'])
+        ->assertSeeHtml('class="type-toggle')
+        ->assertSeeHtml('active inc');
+});
+
+test('direction filter renders via x-cib.filter-toggle with out tone when outgoing', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['direction' => 'outgoing'])
+        ->assertSeeHtml('class="type-toggle')
+        ->assertSeeHtml('active out');
+});
+
+test('direction filter uses plain buttons inside type-toggle not flux button pills', function () {
+    $user = User::factory()->create();
+
+    $html = Livewire::actingAs($user)
+        ->test(TransactionList::class, ['direction' => 'outgoing'])
+        ->html();
+
+    preg_match('/<div[^>]*class="type-toggle[^"]*"[^>]*>(.*?)<\/div>/s', $html, $match);
+
+    expect($match)->not->toBeEmpty();
+    expect($match[1])->not->toContain('data-flux-button');
+});
+
+test('account filter renders via x-cib.filter-toggle when multiple accounts', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create(['name' => 'Everyday']);
+    Account::factory()->for($user)->create(['name' => 'Savings']);
+
+    $html = Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->html();
+
+    expect(mb_substr_count($html, 'class="type-toggle'))->toBe(2);
+});
+
+test('account filter hidden when only one account', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create(['name' => 'Everyday']);
+
+    $html = Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->html();
+
+    expect(mb_substr_count($html, 'class="type-toggle'))->toBe(1);
+});
+
+test('empty state uses x-cib.empty-state primitive with banknotes icon', function () {
+    $user = User::factory()->create();
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSeeHtml('class="empty-state"')
+        ->assertSee('No transactions found');
+
+    expect($component->html())->not->toContain('rounded-xl border border-neutral-200 p-8 text-center');
+});
+
+test('transactions are grouped into agenda-group sections per post_date', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'DAY A TXN',
+        'post_date' => CarbonImmutable::parse('2026-04-10'),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'DAY B TXN',
+        'post_date' => CarbonImmutable::parse('2026-04-12'),
+    ]);
+
+    $html = Livewire::actingAs($user)
+        ->test(TransactionList::class, ['period' => 'all'])
+        ->html();
+
+    expect(mb_substr_count($html, 'class="agenda-group'))->toBe(2);
+    expect(mb_substr_count($html, 'class="day-card'))->toBe(2);
+    expect($html)->toContain('class="sec-head');
+});
+
+test('column header sort buttons use cib-label typography', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'post_date' => now()->subDays(2),
+    ]);
+
+    $html = Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->html();
+
+    expect(mb_substr_count($html, 'cib-label'))->toBeGreaterThanOrEqual(3);
+    expect($html)->not->toContain('text-xs font-medium uppercase tracking-wider text-zinc-500');
+});
+
+test('transaction row dispatches edit-transaction via tx-row primitive', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'post_date' => now()->subDays(2),
+    ]);
+
+    $html = Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->html();
+
+    expect($html)->toContain('class="tx-row');
+    expect($html)->toContain("\$dispatch('edit-transaction'");
+});
+
+test('pagination wraps in cib-card with flex justify-between', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->count(30)->create([
+        'account_id' => $account->id,
+        'post_date' => now()->subDays(3),
+    ]);
+
+    $html = Livewire::actingAs($user)
+        ->test(TransactionList::class, ['period' => 'all'])
+        ->html();
+
+    $paginationPos = mb_strpos($html, 'Pagination Navigation');
+    $cibCardPos = mb_strrpos($html, 'cib-card');
+
+    expect($cibCardPos)->toBeInt()
+        ->and($paginationPos)->toBeInt()
+        ->and($cibCardPos)->toBeLessThan($paginationPos)
+        ->and($html)->toContain('flex items-center justify-between');
+});
+
+test('grouped collection is passed to view keyed by post_date Y-m-d', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'DAY A TXN 1',
+        'post_date' => CarbonImmutable::parse('2026-04-10'),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'DAY A TXN 2',
+        'post_date' => CarbonImmutable::parse('2026-04-10'),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'DAY B TXN',
+        'post_date' => CarbonImmutable::parse('2026-04-12'),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['period' => 'all'])
+        ->assertViewHas('grouped', fn ($grouped): bool => $grouped->has('2026-04-10')
+            && $grouped->has('2026-04-12')
+            && $grouped->get('2026-04-10')->count() === 2
+            && $grouped->get('2026-04-12')->count() === 1);
 });

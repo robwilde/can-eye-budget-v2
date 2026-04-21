@@ -2,3 +2,6 @@
 command = "php"
 args = ["artisan", "boost:mcp"]
 cwd = "/var/home/mrwilde/Projects/MrWilde/Apps/CanEye-Project/can-eye-budget-v2"
+
+[tui]
+notification_condition = "always"

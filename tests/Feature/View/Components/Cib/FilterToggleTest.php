@@ -86,3 +86,35 @@ it('renders buttons as type=button for form safety', function () {
 
     expect(mb_substr_count($html, 'type="button"'))->toBe(3);
 });
+
+it('emits unquoted null for options with null value so nullable int properties stay typed', function () {
+    $options = [
+        ['value' => null, 'label' => 'All Accounts'],
+        ['value' => 1,    'label' => 'Everyday'],
+        ['value' => 2,    'label' => 'Savings'],
+    ];
+
+    $html = Blade::render(
+        '<x-cib.filter-toggle :options="$options" :selected="null" wire-model="account" />',
+        ['options' => $options]
+    );
+
+    expect($html)
+        ->toContain("wire:click=\"\$set('account', null)\"")
+        ->toContain("wire:click=\"\$set('account', '1')\"")
+        ->toContain("wire:click=\"\$set('account', '2')\"");
+});
+
+it('marks the null-valued option as active when selected is null', function () {
+    $options = [
+        ['value' => null, 'label' => 'All Accounts'],
+        ['value' => 1,    'label' => 'Everyday'],
+    ];
+
+    $html = Blade::render(
+        '<x-cib.filter-toggle :options="$options" :selected="null" wire-model="account" />',
+        ['options' => $options]
+    );
+
+    expect(mb_substr_count($html, 'class="active"'))->toBe(1);
+});
