@@ -16,7 +16,11 @@
                     $tone => $isActive && $tone,
                 ])
                 @if ($wireModel)
-                    wire:click="$set('{{ $wireModel }}', '{{ $option['value'] }}')"
+                    @if ($option['value'] === null)
+                        wire:click="$set('{{ $wireModel }}', null)"
+                    @else
+                        wire:click="$set('{{ $wireModel }}', '{{ $option['value'] }}')"
+                    @endif
                 @endif
         >{{ $option['label'] }}</button>
     @endforeach
