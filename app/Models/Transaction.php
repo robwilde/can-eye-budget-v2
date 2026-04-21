@@ -175,7 +175,7 @@ final class Transaction extends Model
      */
     public function scopeWithRelations(Builder $query): Builder
     {
-        return $query->with(['account', 'category']);
+        return $query->with(['account', 'category.parent.parent']);
     }
 
     protected static function booted(): void
