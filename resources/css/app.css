@@ -222,11 +222,16 @@ select:focus[data-flux-control] {
         cursor: pointer;
         width: 100%;
         display: grid;
-        grid-template-columns: 36px 1fr auto;
+        grid-template-columns: 36px 1fr auto auto;
         gap: 12px;
         padding: 10px 4px;
         border-bottom: 1px solid var(--color-border-1);
         align-items: center;
+    }
+    .tx-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
     }
     .tx-row:last-child { border-bottom: 0; }
     .tx-row.passive { cursor: default; }
@@ -598,6 +603,88 @@ select:focus[data-flux-control] {
     .stat-pill-buffer-empty { background: var(--color-cib-n-100); }
     .stat-pill-buffer-empty .pill-value { color: var(--color-fg-3); font-weight: 700; font-size: 11px; }
     .stat-pill-neutral      { background: var(--color-cib-n-100); }
+
+    /* Category editor left-panel list row (ticket #215). Shares the
+       visual flavour of .tx-row but renders a plain integer count
+       instead of a MoneyCast-formatted amount. */
+    .cat-list-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 14px;
+        border-bottom: 2px solid var(--color-border-strong);
+        background: var(--color-bg-surface);
+        cursor: pointer;
+        text-align: left;
+        transition: background 120ms ease;
+    }
+
+    .cat-list-row:last-child {
+        border-bottom: 0;
+    }
+
+    .cat-list-row:hover {
+        background: var(--color-cib-n-50);
+    }
+
+    .cat-list-row.is-active {
+        background: var(--color-cib-yellow-300);
+    }
+
+    .cat-list-row.is-hidden {
+        opacity: 0.5;
+    }
+
+    .cat-list-row .cat-name {
+        font: 600 14px/1.2 var(--font-sans);
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .cat-list-row .cat-count {
+        font: 900 11px/1 var(--font-display);
+        color: var(--color-fg-3);
+        padding: 4px 8px;
+        background: var(--color-cib-n-100);
+        border-radius: 999px;
+    }
+
+    /* Yellow-on-black CTA pill (ticket #215). Used for primary actions
+       where the default Flux teal variant would break the CIB palette. */
+    .cib-yellow-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 16px;
+        font: 900 13px/1 var(--font-display);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        background: var(--color-cib-yellow-400);
+        color: #111;
+        border: 2px solid var(--color-border-strong);
+        border-radius: 999px;
+        box-shadow: var(--shadow-pop-sm);
+        cursor: pointer;
+        transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+
+    .cib-yellow-pill:hover {
+        transform: translate(-1px, -1px);
+        box-shadow: 3px 3px 0 0 var(--color-border-strong);
+    }
+
+    .cib-yellow-pill:active {
+        transform: translate(1px, 1px);
+        box-shadow: 1px 1px 0 0 var(--color-border-strong);
+    }
+
+    .cib-yellow-pill:focus-visible {
+        outline: 2px solid var(--color-cib-yellow-600);
+        outline-offset: 2px;
+    }
 }
 
 /* Flux modal slide-up (Ticket #196). Outside @layer components so it matches
