@@ -14,23 +14,25 @@
                         <flux:label>{{ __('Show hidden') }}</flux:label>
                     </flux:field>
 
-                    <div class="flex-1 overflow-y-auto rounded-lg border border-neutral-200 dark:border-neutral-700">
-                        <div class="divide-y divide-neutral-200 dark:divide-neutral-700">
-                            @forelse($categories as $category)
-                                <button
-                                        wire:key="cat-{{ $category['id'] }}"
-                                        wire:click="selectCategory({{ $category['id'] }})"
-                                        class="flex w-full items-center justify-between px-3 py-2 text-left text-sm transition hover:bg-zinc-50 dark:hover:bg-zinc-800 {{ $selectedCategoryId === $category['id'] ? 'bg-amber-50 dark:bg-amber-900/20' : '' }} {{ $category['is_hidden'] ? 'opacity-50' : '' }}"
-                                >
-                                    <span class="min-w-0 truncate">{{ $category['full_path'] }}</span>
-                                    <flux:badge size="sm" color="zinc" class="ml-2 shrink-0">{{ $category['transactions_count'] }}</flux:badge>
-                                </button>
-                            @empty
-                                <div class="p-4 text-center">
-                                    <flux:text size="sm">{{ __('No categories found.') }}</flux:text>
-                                </div>
-                            @endforelse
-                        </div>
+                    <div class="flex-1 overflow-y-auto">
+                        @forelse($categories as $category)
+                            <button
+                                    wire:key="cat-{{ $category['id'] }}"
+                                    wire:click="selectCategory({{ $category['id'] }})"
+                                    @class([
+                                        'cat-list-row w-full',
+                                        'is-active' => $selectedCategoryId === $category['id'],
+                                        'is-hidden' => $category['is_hidden'],
+                                    ])
+                            >
+                                <span class="cat-name">{{ $category['full_path'] }}</span>
+                                <span class="cat-count">{{ $category['transactions_count'] }}</span>
+                            </button>
+                        @empty
+                            <div class="p-4 text-center">
+                                <flux:text size="sm">{{ __('No categories found.') }}</flux:text>
+                            </div>
+                        @endforelse
                     </div>
 
                     @if($showCreateForm)
@@ -57,8 +59,11 @@
                 {{-- Right Panel: Category Detail & Transactions --}}
                 <div class="flex w-3/5 flex-col">
                     @if($selectedCategoryId)
-                        <div class="mb-4 flex items-center gap-2">
-                            <flux:input wire:model="editingName" size="sm" class="flex-1"/>
+                        <div class="mb-4 flex items-end gap-2">
+                            <div class="flex-1">
+                                <label class="cib-label" for="category-name-input">{{ __('Category name') }}</label>
+                                <flux:input id="category-name-input" wire:model="editingName" size="sm"/>
+                            </div>
                             <flux:button wire:click="saveRename" variant="primary" size="sm">{{ __('Save') }}</flux:button>
                             <flux:button wire:click="toggleHidden({{ $selectedCategoryId }})" variant="ghost" size="sm" icon="eye-slash">
                                 {{ __('Hide') }}
