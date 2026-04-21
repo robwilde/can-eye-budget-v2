@@ -293,3 +293,105 @@ test('institution is optional when adding account', function () {
 
     expect(Account::query()->where('name', 'No Institution')->first()->institution)->toBeNull();
 });
+
+/* ------------------------------------------------------------------ */
+/*  CIB visual contract (ticket #215) */
+/* ------------------------------------------------------------------ */
+
+test('cib: account group headers render via x-cib.sec-head + neutral x-cib.stat-pill', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->count(2)->create(['group' => AccountGroup::DayToDay]);
+    Account::factory()->for($user)->longTermSavings()->create();
+
+    Livewire::actingAs($user)
+        ->test(AccountManager::class)
+        ->assertSeeHtml('class="sec-head')
+        ->assertSeeHtml('stat-pill-neutral')
+        ->assertSee('Day to Day')
+        ->assertSee('Long Term Savings');
+});
+
+test('cib: account rows render via passive x-cib.tx-row with tone icon meta and amount', function () {
+    $user = User::factory()->create();
+
+    Account::factory()->for($user)->create([
+        'name' => 'Everyday',
+        'type' => AccountClass::Transaction,
+        'balance' => 150050,
+        'institution' => null,
+        'credit_limit' => null,
+    ]);
+    Account::factory()->for($user)->create([
+        'name' => 'Overdraft',
+        'type' => AccountClass::Transaction,
+        'balance' => -4200,
+        'institution' => null,
+        'credit_limit' => null,
+    ]);
+    Account::factory()->for($user)->create([
+        'name' => 'Card',
+        'type' => AccountClass::CreditCard,
+        'balance' => -50000,
+        'credit_limit' => 500000,
+        'institution' => 'Westpac',
+    ]);
+
+    $component = Livewire::actingAs($user)->test(AccountManager::class);
+    $html = $component->html();
+
+    expect(mb_substr_count($html, 'class="tx-row passive'))->toBe(3);
+
+    $component
+        ->assertSeeHtml('class="tx-amt inc"')
+        ->assertSeeHtml('class="tx-amt out"')
+        ->assertSeeHtml('class="tx-meta"')
+        ->assertSee('Limit $5,000.00');
+
+    expect($html)->not->toContain('text-red-600 dark:text-red-500');
+});
+
+test('cib: empty state renders via x-cib.empty-state with yellow-on-black cta', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(AccountManager::class)
+        ->assertSeeHtml('class="empty-state')
+        ->assertSeeHtml('class="empty-state-action')
+        ->assertSee('No accounts yet')
+        ->assertSeeHtml('cib-yellow-pill');
+});
+
+test('cib: primary add account cta uses yellow-on-black pill not flux primary', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create();
+
+    $component = Livewire::actingAs($user)->test(AccountManager::class);
+    $html = $component->html();
+
+    $component->assertSeeHtml('cib-yellow-pill');
+
+    expect($html)->not->toMatch('/variant="primary"[^>]*wire:click="openAddModal"/');
+});
+
+test('cib: manage categories trigger sits inside a cib-card', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(AccountManager::class)
+        ->assertSeeHtml('class="cib-card')
+        ->assertSee('Manage Categories');
+});
+
+test('cib: add account modal labels render as cib-label spans', function () {
+    $user = User::factory()->create();
+
+    $component = Livewire::actingAs($user)
+        ->test(AccountManager::class)
+        ->call('openAddModal');
+
+    $html = $component->html();
+
+    expect(mb_substr_count($html, 'class="cib-label'))->toBeGreaterThanOrEqual(5);
+
+    $component->assertSeeHtml('wire:model="name"');
+});

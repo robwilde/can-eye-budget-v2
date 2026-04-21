@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Livewire\CategoryEditor;
+use App\Models\Account;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
@@ -264,4 +265,41 @@ test('categories sorted by transaction count descending', function () {
     $categories = $component->viewData('categories');
     expect($categories->first()['name'])->toBe('Many')
         ->and($categories->last()['name'])->toBe('Few');
+});
+
+/* ------------------------------------------------------------------ */
+/*  CIB visual contract (ticket #215) */
+/* ------------------------------------------------------------------ */
+
+test('cib: category list rows use cat-list-row markup', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $bills = Category::factory()->create(['name' => 'Bills']);
+    Transaction::factory()->for($user)->for($account)->count(3)->create(['category_id' => $groceries->id]);
+    Transaction::factory()->for($user)->for($account)->count(5)->create(['category_id' => $bills->id]);
+
+    $component = Livewire::actingAs($user)->test(CategoryEditor::class);
+    $html = $component->html();
+
+    expect(mb_substr_count($html, 'class="cat-list-row'))->toBeGreaterThanOrEqual(2);
+
+    $component
+        ->assertSee('Groceries')
+        ->assertSee('Bills')
+        ->assertSeeHtml('<span class="cat-count">3</span>')
+        ->assertSeeHtml('<span class="cat-count">5</span>');
+
+    expect($html)->not->toContain('rounded-lg border border-neutral-200 dark:border-neutral-700');
+});
+
+test('cib: rename field label renders as cib-label span', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['name' => 'Utilities']);
+
+    $component = Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $category->id);
+
+    $component->assertSeeHtml('class="cib-label');
 });
