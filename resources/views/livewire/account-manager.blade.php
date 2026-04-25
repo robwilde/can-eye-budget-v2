@@ -2,66 +2,78 @@
 <div class="space-y-6">
     <div class="flex items-center justify-between">
         <flux:heading size="xl">{{ __('Accounts') }}</flux:heading>
-        <flux:button variant="primary" icon="plus" wire:click="openAddModal">
+        <button type="button" wire:click="openAddModal" class="cib-yellow-pill">
+            <flux:icon.plus class="size-4"/>
             {{ __('Add Account') }}
-        </flux:button>
+        </button>
     </div>
 
     @forelse($grouped as $groupValue => $accounts)
         @php $groupEnum = AccountGroup::from($groupValue); @endphp
-        <div>
-            <div class="mb-3 flex items-center gap-2">
-                <flux:heading size="lg">{{ $groupEnum->label() }}</flux:heading>
-                <flux:badge size="sm" color="zinc">{{ $accounts->count() }}</flux:badge>
-            </div>
+        <section class="agenda-group">
+            <x-cib.sec-head :title="$groupEnum->label()">
+                <x-cib.stat-pill tone="neutral" :value="(string) $accounts->count()"/>
+            </x-cib.sec-head>
+            <div class="day-card">
+                @foreach($accounts as $account)
+                    @php
+                        $tone = $account->balance < 0 ? 'out' : 'inc';
+                        $metaParts = array_filter([
+                            $account->type->label(),
+                            $account->institution,
+                        ]);
+                        $metaText = implode(' · ', $metaParts);
+                        if ($account->credit_limit !== null) {
+                            $metaText = trim(($metaText ? $metaText.' · ' : '').'Limit '.$formatMoney($account->credit_limit));
+                        }
+                    @endphp
+                    <x-cib.tx-row
+                            wire:key="account-{{ $account->id }}"
+                            :name="$account->name"
+                            :amount="$account->balance"
+                            :tone="$tone"
+                            :icon="$account->type->icon()"
+                    >
+                        @if($metaText)
+                            <x-slot:meta>{{ $metaText }}</x-slot:meta>
+                        @endif
+                        <x-slot:actions>
+                            <div class="hidden items-center gap-1 md:flex">
+                                <flux:button variant="ghost" size="sm" icon="pencil" wire:click="openEditModal({{ $account->id }})"/>
+                                <flux:button variant="ghost" size="sm" icon="trash" wire:click="confirmDelete({{ $account->id }})"
+                                             class="text-red-500 hover:text-red-600"/>
+                            </div>
 
-            <div class="rounded-xl border border-neutral-200 dark:border-neutral-700">
-                <div class="divide-y divide-neutral-200 dark:divide-neutral-700">
-                    @foreach($accounts as $account)
-                        <div wire:key="account-{{ $account->id }}" class="flex items-center justify-between px-4 py-3">
-                            <div class="min-w-0 flex-1">
-                                <div class="flex items-center gap-2">
-                                    <flux:icon :name="$account->type->icon()" class="size-5 shrink-0 text-zinc-400"/>
-                                    <flux:heading size="sm" class="truncate">{{ $account->name }}</flux:heading>
-                                    <flux:badge size="sm" color="zinc">{{ $account->type->label() }}</flux:badge>
-                                </div>
-                                @if($account->institution)
-                                    <flux:text size="sm" class="mt-0.5 pl-7">{{ $account->institution }}</flux:text>
-                                @endif
-                            </div>
-                            <div class="flex items-center gap-4">
-                                <div class="text-right">
-                                    <flux:text class="tabular-nums font-medium {{ $account->balance < 0 ? 'text-red-600 dark:text-red-500' : '' }}">
-                                        {{ $formatMoney($account->balance) }}
-                                    </flux:text>
-                                    @if($account->credit_limit !== null)
-                                        <flux:text size="sm" class="tabular-nums text-zinc-500">
-                                            Limit {{ $formatMoney($account->credit_limit) }}
-                                        </flux:text>
-                                    @endif
-                                </div>
-                                <div class="flex items-center gap-1">
-                                    <flux:button variant="ghost" size="sm" icon="pencil" wire:click="openEditModal({{ $account->id }})"/>
-                                    <flux:button variant="ghost" size="sm" icon="trash" wire:click="confirmDelete({{ $account->id }})"
-                                                 class="text-red-500 hover:text-red-600"/>
-                                </div>
-                            </div>
-                        </div>
-                    @endforeach
-                </div>
+                            <flux:dropdown class="md:hidden" align="end">
+                                <flux:button variant="ghost" size="sm" icon="ellipsis-vertical" :aria-label="__('Account actions')"/>
+
+                                <flux:menu>
+                                    <flux:menu.item icon="pencil" wire:click="openEditModal({{ $account->id }})">
+                                        {{ __('Edit') }}
+                                    </flux:menu.item>
+                                    <flux:menu.item icon="trash" variant="danger" wire:click="confirmDelete({{ $account->id }})">
+                                        {{ __('Delete') }}
+                                    </flux:menu.item>
+                                </flux:menu>
+                            </flux:dropdown>
+                        </x-slot:actions>
+                    </x-cib.tx-row>
+                @endforeach
             </div>
-        </div>
+        </section>
     @empty
-        <flux:card class="p-8 text-center">
-            <flux:icon.building-library class="mx-auto size-12 text-zinc-400"/>
-            <flux:heading size="lg" class="mt-4">{{ __('No accounts yet') }}</flux:heading>
-            <flux:text class="mt-2">{{ __('Add your first account to start tracking your finances.') }}</flux:text>
-            <div class="mt-6">
-                <flux:button variant="primary" icon="plus" wire:click="openAddModal">
+        <x-cib.empty-state
+                icon="building-library"
+                :title="__('No accounts yet')"
+                :description="__('Add your first account to start tracking your finances.')"
+        >
+            <x-slot:action>
+                <button type="button" wire:click="openAddModal" class="cib-yellow-pill">
+                    <flux:icon.plus class="size-4"/>
                     {{ __('Add Account') }}
-                </flux:button>
-            </div>
-        </flux:card>
+                </button>
+            </x-slot:action>
+        </x-cib.empty-state>
     @endforelse
 
     <flux:modal wire:model="showFormModal" class="md:w-lg">
@@ -75,21 +87,27 @@
                 </flux:text>
             </div>
 
-            <flux:input
-                    wire:model="name"
-                    :label="__('Name')"
-                    placeholder="e.g. Everyday Account"
-                    required
-            />
+            <div>
+                <label class="cib-label" for="account-name">{{ __('Name') }}</label>
+                <flux:input
+                        id="account-name"
+                        wire:model="name"
+                        placeholder="e.g. Everyday Account"
+                        required
+                />
+            </div>
 
-            <flux:input
-                    wire:model="balance"
-                    :label="__('Current Balance')"
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    required
-            />
+            <div>
+                <label class="cib-label" for="account-balance">{{ __('Current Balance') }}</label>
+                <flux:input
+                        id="account-balance"
+                        wire:model="balance"
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                        required
+                />
+            </div>
 
             <flux:field variant="inline">
                 <flux:checkbox wire:model.live="hasCreditLimit"/>
@@ -109,30 +127,42 @@
                 />
             @endif
 
-            <flux:textarea
-                    wire:model="description"
-                    :label="__('Description')"
-                    placeholder="{{ __('Optional description') }}"
-                    rows="2"
-            />
+            <div>
+                <label class="cib-label" for="account-description">{{ __('Description') }}</label>
+                <flux:textarea
+                        id="account-description"
+                        wire:model="description"
+                        placeholder="{{ __('Optional description') }}"
+                        rows="2"
+                />
+            </div>
 
-            <flux:select wire:model="type" :label="__('Account Type')" required>
-                @foreach($accountTypes as $accountType)
-                    <flux:select.option value="{{ $accountType->value }}">{{ $accountType->label() }}</flux:select.option>
-                @endforeach
-            </flux:select>
+            <div>
+                <label class="cib-label" for="account-type">{{ __('Account Type') }}</label>
+                <flux:select id="account-type" wire:model="type" required>
+                    @foreach($accountTypes as $accountType)
+                        <flux:select.option value="{{ $accountType->value }}">{{ $accountType->label() }}</flux:select.option>
+                    @endforeach
+                </flux:select>
+            </div>
 
-            <flux:select wire:model="group" :label="__('Account Group')" required>
-                @foreach($accountGroups as $accountGroup)
-                    <flux:select.option value="{{ $accountGroup->value }}">{{ $accountGroup->label() }}</flux:select.option>
-                @endforeach
-            </flux:select>
+            <div>
+                <label class="cib-label" for="account-group">{{ __('Account Group') }}</label>
+                <flux:select id="account-group" wire:model="group" required>
+                    @foreach($accountGroups as $accountGroup)
+                        <flux:select.option value="{{ $accountGroup->value }}">{{ $accountGroup->label() }}</flux:select.option>
+                    @endforeach
+                </flux:select>
+            </div>
 
-            <flux:input
-                    wire:model="institution"
-                    :label="__('Institution')"
-                    placeholder="e.g. Commonwealth Bank"
-            />
+            <div>
+                <label class="cib-label" for="account-institution">{{ __('Institution') }}</label>
+                <flux:input
+                        id="account-institution"
+                        wire:model="institution"
+                        placeholder="e.g. Commonwealth Bank"
+                />
+            </div>
 
             <div class="flex">
                 <flux:spacer/>
@@ -171,9 +201,11 @@
         </div>
     </flux:modal>
 
-    <flux:modal.trigger name="category-editor">
-        <flux:button variant="ghost" icon="tag" class="w-full">
-            {{ __('Manage Categories') }}
-        </flux:button>
-    </flux:modal.trigger>
+    <x-cib.card>
+        <flux:modal.trigger name="category-editor">
+            <flux:button variant="ghost" icon="tag" class="w-full">
+                {{ __('Manage Categories') }}
+            </flux:button>
+        </flux:modal.trigger>
+    </x-cib.card>
 </div>

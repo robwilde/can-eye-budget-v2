@@ -8,4 +8,5 @@
     @if ($href)
         <a class="link" href="{{ $href }}">See all →</a>
     @endif
+    {{ $slot }}
 </div>
