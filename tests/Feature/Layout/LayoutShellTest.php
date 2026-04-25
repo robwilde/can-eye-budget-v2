@@ -62,6 +62,13 @@ it('shows a sync chip reflecting the latest BasiqRefreshLog', function () {
     $response->assertSee('Basiq', false);
 });
 
+it('forces flux appearance to light to keep CIB surfaces readable', function () {
+    $response = $this->get(route('dashboard'));
+
+    $response->assertOk();
+    $response->assertSee("window.localStorage.setItem('flux.appearance', 'light')", false);
+});
+
 it('renders the mobile tabbar only below lg', function () {
     $response = $this->get(route('dashboard'));
 

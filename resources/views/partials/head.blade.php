@@ -10,4 +10,6 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 
 @vite(['resources/css/app.css', 'resources/js/app.js'])
+{{-- CIB design system is light-only; override system/user pref before Flux reads it. --}}
+<script>try { window.localStorage.setItem('flux.appearance', 'light'); } catch (e) {}</script>
 @fluxAppearance

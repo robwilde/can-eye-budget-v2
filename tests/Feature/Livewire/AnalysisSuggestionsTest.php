@@ -164,6 +164,98 @@ test('user-rule list wraps in day-card with passive tx-row markup', function () 
         ->assertDontSeeHtml("\$dispatch('edit-transaction'");
 });
 
+// ─── Accept/Dismiss button visibility (Bug #222) ──────────
+
+test('primary-account accept button uses yellow-pill markup, not flux primary', function () {
+    $suggestion = createSuggestion($this, 'primary', primaryAccountPayload($this->account->id));
+
+    $component = Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->assertSeeHtml('wire:click="acceptPrimaryAccount('.$suggestion->id.')"')
+        ->assertSeeHtml('bg-cib-yellow-400')
+        ->assertSeeHtml('border-2 border-cib-black')
+        ->assertSeeHtml('shadow-pop-sm')
+        ->assertSee('Accept');
+
+    expect($component->html())->toMatch('/wire:click="acceptPrimaryAccount\(\d+\)"[^>]*?bg-cib-yellow-400/s');
+});
+
+test('pay-cycle accept button uses yellow-pill markup, not flux primary', function () {
+    $suggestion = createSuggestion($this, 'payCycle', payCyclePayload($this->account->id));
+
+    $component = Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->assertSeeHtml('wire:click="acceptPayCycle('.$suggestion->id.')"')
+        ->assertSeeHtml('bg-cib-yellow-400')
+        ->assertSee('Accept');
+
+    expect($component->html())->toMatch('/wire:click="acceptPayCycle\(\d+\)"[^>]*?bg-cib-yellow-400/s');
+});
+
+test('recurring-transaction accept button uses yellow-pill markup, not flux primary', function () {
+    $suggestion = createSuggestion($this, 'recurring', recurringPayload($this->account->id, [
+        'matched_transaction_ids' => [1, 2, 3],
+    ]));
+
+    $component = Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->assertSeeHtml('wire:click="acceptRecurringTransaction('.$suggestion->id.')"')
+        ->assertSeeHtml('bg-cib-yellow-400')
+        ->assertSee('Accept');
+
+    expect($component->html())->toMatch('/wire:click="acceptRecurringTransaction\(\d+\)"[^>]*?bg-cib-yellow-400/s');
+});
+
+test('user-rule accept button uses yellow-pill markup, not flux primary', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    $rule = UserRule::factory()->for($this->user)->for($group, 'group')->create([
+        'name' => 'Categorise Netflix',
+    ]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'description' => 'NETFLIX SUBSCRIPTION',
+    ]);
+
+    $suggestion = createSuggestion($this, 'userRule', userRulePayload(
+        $rule->id,
+        'Categorise Netflix',
+        $transaction->id,
+    ));
+
+    $component = Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->assertSeeHtml('wire:click="acceptUserRule('.$suggestion->id.')"')
+        ->assertSeeHtml('bg-cib-yellow-400')
+        ->assertSee('Accept');
+
+    expect($component->html())->toMatch('/wire:click="acceptUserRule\(\d+\)"[^>]*?bg-cib-yellow-400/s');
+});
+
+test('dismiss button uses white-pill markup, not flux ghost', function () {
+    $suggestion = createSuggestion($this, 'primary', primaryAccountPayload($this->account->id));
+
+    $component = Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->assertSeeHtml('wire:click="rejectSuggestion('.$suggestion->id.')"')
+        ->assertSeeHtml('bg-cib-white')
+        ->assertSee('Dismiss');
+
+    expect($component->html())->toMatch('/wire:click="rejectSuggestion\(\d+\)"[^>]*?bg-cib-white/s');
+});
+
+test('no flux:button markup remains in suggestion action clusters', function () {
+    createSuggestion($this, 'primary', primaryAccountPayload($this->account->id));
+    createSuggestion($this, 'payCycle', payCyclePayload($this->account->id));
+    createSuggestion($this, 'recurring', recurringPayload($this->account->id, [
+        'matched_transaction_ids' => [1, 2, 3],
+    ]));
+
+    Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->assertDontSeeHtml('data-flux-button');
+});
+
 test('displays primary account suggestion with account name', function () {
     createSuggestion($this, 'primary', primaryAccountPayload($this->account->id));
 
