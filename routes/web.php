@@ -17,6 +17,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');
     Route::view('smoke-test', 'smoke-test')->name('smoke-test');
     Route::view('connect-bank', 'connect-bank')->name('connect-bank');
+    Route::view('import-bank', 'import-bank')->name('import-bank');
     Route::view('transactions', 'transactions')->name('transactions');
     Route::view('calendar', 'calendar')->name('calendar');
     Route::view('accounts', 'accounts')->name('accounts');
