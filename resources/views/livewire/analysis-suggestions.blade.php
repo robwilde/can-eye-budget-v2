@@ -24,27 +24,11 @@
                                 {{ PayFrequency::from($suggestion->payload['income_frequency'])->label() }}
                             </div>
                         </div>
-                        <div class="flex shrink-0 items-center gap-2">
-                            <flux:button
-                                variant="primary"
-                                size="sm"
-                                wire:click="acceptPrimaryAccount({{ $suggestion->id }})"
-                                wire:loading.attr="disabled"
-                                wire:target="acceptPrimaryAccount({{ $suggestion->id }})"
-                            >
-                                <flux:icon.loading wire:loading wire:target="acceptPrimaryAccount({{ $suggestion->id }})" class="size-4"/>
-                                Accept
-                            </flux:button>
-                            <flux:button
-                                variant="ghost"
-                                size="sm"
-                                wire:click="rejectSuggestion({{ $suggestion->id }})"
-                                wire:loading.attr="disabled"
-                                wire:target="rejectSuggestion({{ $suggestion->id }})"
-                            >
-                                Dismiss
-                            </flux:button>
-                        </div>
+                        <x-suggestion-actions
+                            accept-method="acceptPrimaryAccount"
+                            :suggestion-id="$suggestion->id"
+                        />
+
                     </div>
                 @endforeach
             @endif
@@ -82,26 +66,11 @@
                                 </flux:field>
                             </div>
 
-                            <div class="mt-4 flex items-center gap-2">
-                                <flux:button
-                                    variant="primary"
-                                    size="sm"
-                                    wire:click="acceptPayCycle({{ $suggestion->id }})"
-                                    wire:loading.attr="disabled"
-                                    wire:target="acceptPayCycle({{ $suggestion->id }})"
-                                >
-                                    <flux:icon.loading wire:loading wire:target="acceptPayCycle({{ $suggestion->id }})" class="size-4"/>
-                                    Accept
-                                </flux:button>
-                                <flux:button
-                                    variant="ghost"
-                                    size="sm"
-                                    wire:click="rejectSuggestion({{ $suggestion->id }})"
-                                    wire:loading.attr="disabled"
-                                    wire:target="rejectSuggestion({{ $suggestion->id }})"
-                                >
-                                    Dismiss
-                                </flux:button>
+                            <div class="mt-4">
+                                <x-suggestion-actions
+                                    accept-method="acceptPayCycle"
+                                    :suggestion-id="$suggestion->id"
+                                />
                             </div>
                         </div>
                     </div>
@@ -136,25 +105,10 @@
                                             class="w-40"
                                         />
 
-                                        <flux:button
-                                            variant="primary"
-                                            size="sm"
-                                            wire:click="acceptRecurringTransaction({{ $suggestion->id }})"
-                                            wire:loading.attr="disabled"
-                                            wire:target="acceptRecurringTransaction({{ $suggestion->id }})"
-                                        >
-                                            <flux:icon.loading wire:loading wire:target="acceptRecurringTransaction({{ $suggestion->id }})" class="size-4"/>
-                                            Accept
-                                        </flux:button>
-                                        <flux:button
-                                            variant="ghost"
-                                            size="sm"
-                                            wire:click="rejectSuggestion({{ $suggestion->id }})"
-                                            wire:loading.attr="disabled"
-                                            wire:target="rejectSuggestion({{ $suggestion->id }})"
-                                        >
-                                            Dismiss
-                                        </flux:button>
+                                        <x-suggestion-actions
+                                            accept-method="acceptRecurringTransaction"
+                                            :suggestion-id="$suggestion->id"
+                                        />
                                     </x-slot:actions>
                                 </x-cib.tx-row>
                             </div>
@@ -194,25 +148,10 @@
                                         @endif
                                     </x-slot:meta>
                                     <x-slot:actions>
-                                        <flux:button
-                                            variant="primary"
-                                            size="sm"
-                                            wire:click="acceptUserRule({{ $suggestion->id }})"
-                                            wire:loading.attr="disabled"
-                                            wire:target="acceptUserRule({{ $suggestion->id }})"
-                                        >
-                                            <flux:icon.loading wire:loading wire:target="acceptUserRule({{ $suggestion->id }})" class="size-4"/>
-                                            Accept
-                                        </flux:button>
-                                        <flux:button
-                                            variant="ghost"
-                                            size="sm"
-                                            wire:click="rejectSuggestion({{ $suggestion->id }})"
-                                            wire:loading.attr="disabled"
-                                            wire:target="rejectSuggestion({{ $suggestion->id }})"
-                                        >
-                                            Dismiss
-                                        </flux:button>
+                                        <x-suggestion-actions
+                                            accept-method="acceptUserRule"
+                                            :suggestion-id="$suggestion->id"
+                                        />
                                     </x-slot:actions>
                                 </x-cib.tx-row>
                             </div>
