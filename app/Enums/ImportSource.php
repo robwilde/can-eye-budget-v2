@@ -4,19 +4,17 @@ declare(strict_types=1);
 
 namespace App\Enums;
 
-enum TransactionSource: string
+enum ImportSource: string
 {
     case Manual = 'manual';
     case Basiq = 'basiq';
-    case Planned = 'planned';
     case Csv = 'csv';
 
     public function label(): string
     {
         return match ($this) {
             self::Manual => 'Manual',
-            self::Basiq => 'Basiq',
-            self::Planned => 'Planned',
+            self::Basiq => 'Connected via bank',
             self::Csv => 'CSV import',
         };
     }
