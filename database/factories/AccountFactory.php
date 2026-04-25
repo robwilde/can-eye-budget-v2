@@ -7,6 +7,7 @@ namespace Database\Factories;
 use App\Enums\AccountClass;
 use App\Enums\AccountGroup;
 use App\Enums\AccountStatus;
+use App\Enums\ImportSource;
 use App\Models\Account;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -30,6 +31,7 @@ final class AccountFactory extends Factory
             'balance' => fake()->numberBetween(10000, 500000),
             'group' => AccountGroup::DayToDay,
             'status' => AccountStatus::Active,
+            'import_source' => ImportSource::Manual,
         ];
     }
 
@@ -90,6 +92,15 @@ final class AccountFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'basiq_account_id' => fake()->uuid(),
+            'import_source' => ImportSource::Basiq,
+        ]);
+    }
+
+    public function csvImport(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'import_source' => ImportSource::Csv,
+            'account_last4' => (string) fake()->numberBetween(1000, 9999),
         ]);
     }
 
