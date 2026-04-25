@@ -535,7 +535,7 @@ select:focus[data-flux-control] {
     }
     .rule-suggest svg { flex-shrink: 0; }
     .rule-suggest .t { font: 900 13px/1 var(--font-display); }
-    .rule-suggest .s { font: 400 12px/1.3 var(--font-sans); margin-top: 3px; opacity: 0.9; }
+    .rule-suggest .s { font: 400 12px/1.3 var(--font-sans); margin-top: 3px; }
     .rule-suggest .link {
         appearance: none;
         background: transparent;
