@@ -8,6 +8,7 @@ use App\Casts\MoneyCast;
 use App\Enums\AccountClass;
 use App\Enums\AccountGroup;
 use App\Enums\AccountStatus;
+use App\Enums\ImportSource;
 use Carbon\CarbonImmutable;
 use Database\Factories\AccountFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -20,7 +21,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int $id
  * @property int $user_id
  * @property string|null $basiq_account_id
+ * @property ImportSource $import_source
  * @property string $name
+ * @property string|null $account_last4
  * @property AccountClass $type
  * @property string $institution
  * @property string $currency
@@ -28,6 +31,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int|null $credit_limit
  * @property int|null $available_funds
  * @property string|null $description
+ * @property array<string, string>|null $column_mapping
  * @property AccountGroup $group
  * @property AccountStatus $status
  * @property CarbonImmutable $created_at
@@ -44,7 +48,9 @@ final class Account extends Model
     protected $fillable = [
         'user_id',
         'basiq_account_id',
+        'import_source',
         'name',
+        'account_last4',
         'type',
         'institution',
         'currency',
@@ -52,6 +58,7 @@ final class Account extends Model
         'credit_limit',
         'available_funds',
         'description',
+        'column_mapping',
         'group',
         'status',
     ];
@@ -68,6 +75,12 @@ final class Account extends Model
         return $this->hasMany(Transaction::class);
     }
 
+    /** @return HasMany<BankImport, $this> */
+    public function bankImports(): HasMany
+    {
+        return $this->hasMany(BankImport::class);
+    }
+
     /**
      * @param  Builder<self>  $query
      * @return Builder<self>
@@ -75,6 +88,35 @@ final class Account extends Model
     public function scopeActive(Builder $query): Builder
     {
         return $query->whereIn('status', [AccountStatus::Active, AccountStatus::Available]);
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeCsvImport(Builder $query): Builder
+    {
+        return $query->where('import_source', ImportSource::Csv);
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeBasiqConnected(Builder $query): Builder
+    {
+        return $query->where('import_source', ImportSource::Basiq);
+    }
+
+    public function isImportSource(ImportSource $source): bool
+    {
+        return $this->import_source === $source;
+    }
+
+    public function acceptsCsvImports(): bool
+    {
+        return $this->import_source === ImportSource::Csv
+            || $this->import_source === ImportSource::Manual;
     }
 
     /**
@@ -122,9 +164,11 @@ final class Account extends Model
             'type' => AccountClass::class,
             'group' => AccountGroup::class,
             'status' => AccountStatus::class,
+            'import_source' => ImportSource::class,
             'balance' => MoneyCast::class,
             'credit_limit' => MoneyCast::class,
             'available_funds' => MoneyCast::class,
+            'column_mapping' => 'array',
         ];
     }
 }
