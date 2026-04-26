@@ -686,7 +686,7 @@ select:focus[data-flux-control] {
         outline-offset: 2px;
     }
 
-    /* ---------- Pay-cycle calendar widget (Ticket #228) ---------- */
+    /* ---------- Pay-cycle calendar widget (Ticket #230) ---------- */
 
     .pay-cycle-cal { display: flex; flex-direction: column; gap: 14px; }
     .pay-cycle-cal .cyc-empty-link {
@@ -910,7 +910,7 @@ select:focus[data-flux-control] {
         font: 700 13px/1.5 var(--font-sans);
     }
 
-    /* ---------- 12-month projection widget (Ticket #228) ---------- */
+    /* ---------- 12-month projection widget (Ticket #231) ---------- */
 
     .monthly-projection {
         background: var(--color-bg-surface);
