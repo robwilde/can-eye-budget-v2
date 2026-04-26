@@ -5,9 +5,8 @@ declare(strict_types=1);
 namespace App\Livewire\Dashboard;
 
 use App\Casts\MoneyCast;
+use App\Services\Projection\BalanceProjection;
 use App\Services\Projection\MonthlyProjectionService;
-use App\Services\Projection\ProjectedMonth;
-use Illuminate\Support\Collection;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -16,71 +15,54 @@ final class MonthlyProjection extends Component
 {
     public int $months = 12;
 
-    /**
-     * @return Collection<int, ProjectedMonth>
-     */
     #[Computed]
-    public function projection(): Collection
+    public function projection(): ?BalanceProjection
     {
         $user = auth()->user();
 
         if ($user === null) {
-            /** @var Collection<int, ProjectedMonth> */
-            return collect();
+            return null;
         }
 
         return app(MonthlyProjectionService::class)->forUser($user, $this->months);
     }
 
     #[Computed]
-    public function firstRiskyMonth(): ?ProjectedMonth
+    public function hasPrimaryAccount(): bool
     {
-        return $this->projection->first(static fn (ProjectedMonth $month) => $month->isRisky()); // @phpstan-ignore property.notFound
+        return $this->projection !== null; // @phpstan-ignore property.notFound
     }
 
     /**
-     * @return array{categories: list<string>, income: list<int>, expense: list<int>, cumulative: list<int>, riskyIndexes: list<int>, oneOffs: list<array{x: string, label: string, amountCents: int}>}
+     * @return array{points: list<array{x: string, y: int}>, firstNegative: ?string, startingBalanceCents: int, hasPrimaryAccount: bool}
      */
     #[Computed]
     public function chartPayload(): array
     {
-        $categories = [];
-        $income = [];
-        $expense = [];
-        $cumulative = [];
-        $riskyIndexes = [];
-        $oneOffs = [];
+        $projection = $this->projection; // @phpstan-ignore property.notFound
 
-        foreach ($this->projection as $month) { // @phpstan-ignore property.notFound
-            $label = $month->isYearStart && $month->monthIndex !== 0
-                ? sprintf('%s %d', $month->label, $month->year)
-                : $month->label;
+        if ($projection === null) {
+            return [
+                'points' => [],
+                'firstNegative' => null,
+                'startingBalanceCents' => 0,
+                'hasPrimaryAccount' => false,
+            ];
+        }
 
-            $categories[] = $label;
-            $income[] = $month->incomeCents;
-            $expense[] = $month->expenseCents;
-            $cumulative[] = $month->cumulativeNetCents;
-
-            if ($month->isRisky()) {
-                $riskyIndexes[] = $month->monthIndex;
-            }
-
-            foreach ($month->oneOffs as $oneOff) {
-                $oneOffs[] = [
-                    'x' => $label,
-                    'label' => $oneOff->description,
-                    'amountCents' => $oneOff->amountCents,
-                ];
-            }
+        $points = [];
+        foreach ($projection->points as $point) {
+            $points[] = [
+                'x' => $point->date->format('Y-m-d'),
+                'y' => $point->balanceCents,
+            ];
         }
 
         return [
-            'categories' => $categories,
-            'income' => $income,
-            'expense' => $expense,
-            'cumulative' => $cumulative,
-            'riskyIndexes' => $riskyIndexes,
-            'oneOffs' => $oneOffs,
+            'points' => $points,
+            'firstNegative' => $projection->firstNegativeDate?->format('Y-m-d'),
+            'startingBalanceCents' => $projection->startingBalanceCents,
+            'hasPrimaryAccount' => true,
         ];
     }
 

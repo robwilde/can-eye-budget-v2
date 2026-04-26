@@ -4,70 +4,56 @@
 
 declare(strict_types=1);
 
-use App\Enums\PayFrequency;
-use App\Enums\RecurrenceFrequency;
-use App\Enums\TransactionDirection;
 use App\Livewire\Dashboard\MonthlyProjection;
 use App\Models\Account;
-use App\Models\PlannedTransaction;
 use App\Models\User;
-use Carbon\CarbonImmutable;
 use Livewire\Livewire;
 
-test('renders empty-state when pay cycle is not configured', function () {
+test('renders empty-state when primary account is not configured', function () {
+    $user = User::factory()->create(['primary_account_id' => null]);
+
+    Livewire::actingAs($user)
+        ->test(MonthlyProjection::class)
+        ->assertSee('Set your primary account to see your buffer projection');
+});
+
+test('chart payload startingBalanceCents equals primary account balance', function () {
     $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 242000]);
+    $user->update(['primary_account_id' => $account->id]);
 
-    Livewire::actingAs($user)
-        ->test(MonthlyProjection::class)
-        ->assertSee('12-month projection unavailable');
-});
-
-test('renders chart canvas when projection has data', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'pay_amount' => 200000,
-        'pay_frequency' => PayFrequency::Fortnightly,
-    ]);
-
-    Livewire::actingAs($user)
-        ->test(MonthlyProjection::class)
-        ->assertSee('Next 12 months')
-        ->assertSeeHtml('wire:ignore');
-});
-
-test('surfaces the closest risky month in a warning banner', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'pay_amount' => 100000,
-        'pay_frequency' => PayFrequency::Monthly,
-    ]);
-    $account = Account::factory()->for($user)->create();
-
-    PlannedTransaction::factory()->for($user)->for($account)->create([
-        'direction' => TransactionDirection::Debit,
-        'amount' => 250000,
-        'start_date' => CarbonImmutable::today()->startOfMonth()->addDays(3),
-        'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
-    ]);
-
-    Livewire::actingAs($user)
-        ->test(MonthlyProjection::class)
-        ->assertSee('first month where planned spend exceeds projected income');
-});
-
-test('chart payload categories label January with year for non-current January', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'pay_amount' => 100000,
-        'pay_frequency' => PayFrequency::Monthly,
-    ]);
-
-    $payload = Livewire::actingAs($user)
+    $payload = Livewire::actingAs($user->fresh())
         ->test(MonthlyProjection::class)
         ->instance()
         ->chartPayload();
 
-    $hasYearLabel = collect($payload['categories'])
-        ->skip(1)
-        ->contains(fn (string $label) => str_contains($label, ' '));
+    expect($payload['startingBalanceCents'])->toBe(242000)
+        ->and($payload['hasPrimaryAccount'])->toBeTrue();
+});
 
-    expect($hasYearLabel)->toBeTrue();
+test('chart payload points list has correct shape', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 100000]);
+    $user->update(['primary_account_id' => $account->id]);
+
+    $payload = Livewire::actingAs($user->fresh())
+        ->test(MonthlyProjection::class)
+        ->instance()
+        ->chartPayload();
+
+    expect($payload['points'])->toBeArray()
+        ->and($payload['points'])->not->toBeEmpty()
+        ->and($payload['points'][0])->toHaveKeys(['x', 'y'])
+        ->and($payload['points'][0]['x'])->toBeString()
+        ->and($payload['points'][0]['y'])->toBeInt();
+});
+
+test('wire:ignore is present on chart container', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 100000]);
+    $user->update(['primary_account_id' => $account->id]);
+
+    Livewire::actingAs($user->fresh())
+        ->test(MonthlyProjection::class)
+        ->assertSeeHtml('wire:ignore');
 });

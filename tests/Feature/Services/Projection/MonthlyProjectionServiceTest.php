@@ -4,258 +4,274 @@
 
 declare(strict_types=1);
 
-use App\Enums\PayFrequency;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\User;
+use App\Services\Projection\BalanceProjection;
 use App\Services\Projection\MonthlyProjectionService;
-use App\Services\Projection\ProjectedMonth;
 use Carbon\CarbonImmutable;
 
-test('returns empty collection when pay cycle is not configured', function () {
+test('returns null when user has no primary account configured', function () {
+    $user = User::factory()->create(['primary_account_id' => null]);
+
+    $projection = app(MonthlyProjectionService::class)->forUser($user);
+
+    expect($projection)->toBeNull();
+});
+
+test('returns a BalanceProjection when primary account is set, even with zero scheduled events', function () {
     $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 250000]);
+    $user->update(['primary_account_id' => $account->id]);
 
-    $months = app(MonthlyProjectionService::class)->forUser($user);
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
 
-    expect($months)->toBeEmpty();
+    expect($projection)->toBeInstanceOf(BalanceProjection::class)
+        ->and($projection->points)->toHaveCount(1);
 });
 
-test('returns 12 months by default starting at the current month', function () {
-    $user = User::factory()->withPayCycle()->create();
+test('starting point balance and date match primary account balance and today', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 242000]);
+    $user->update(['primary_account_id' => $account->id]);
 
-    $months = app(MonthlyProjectionService::class)->forUser($user);
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
 
-    expect($months)->toHaveCount(12)
-        ->and($months->first()->isCurrent)->toBeTrue()
-        ->and($months->first()->monthStart->equalTo(CarbonImmutable::today()->startOfMonth()))->toBeTrue();
+    expect($projection->startingBalanceCents)->toBe(242000)
+        ->and($projection->startsAt->equalTo(CarbonImmutable::today()))->toBeTrue()
+        ->and($projection->points[0]->balanceCents)->toBe(242000)
+        ->and($projection->points[0]->date->equalTo(CarbonImmutable::today()))->toBeTrue();
 });
 
-test('returns the requested number of months when not 12', function () {
-    $user = User::factory()->withPayCycle()->create();
+test('starting point has zero event amount and a Starting balance description', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 100000]);
+    $user->update(['primary_account_id' => $account->id]);
 
-    $months = app(MonthlyProjectionService::class)->forUser($user, 6);
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
 
-    expect($months)->toHaveCount(6);
+    expect($projection->points[0]->eventAmountCents)->toBe(0)
+        ->and($projection->points[0]->eventDescription)->toBe('Starting balance');
 });
 
-test('isYearStart is true for the first month and for January', function () {
-    $user = User::factory()->withPayCycle()->create();
-
-    $months = app(MonthlyProjectionService::class)->forUser($user);
-
-    expect($months->first()->isYearStart)->toBeTrue();
-
-    $january = $months->first(fn (ProjectedMonth $month) => $month->monthStart->month === 1 && $month->monthIndex !== 0);
-
-    if ($january !== null) {
-        expect($january->isYearStart)->toBeTrue();
-    }
-});
-
-test('income is smoothed for fortnightly pay using the 26/12 average', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'pay_amount' => 300000,
-        'pay_frequency' => PayFrequency::Fortnightly,
-    ]);
-
-    $months = app(MonthlyProjectionService::class)->forUser($user, 1);
-
-    expect($months->first()->incomeCents)->toBe(intdiv(300000 * 26, 12));
-});
-
-test('income is smoothed for weekly pay using the 52/12 average', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'pay_amount' => 100000,
-        'pay_frequency' => PayFrequency::Weekly,
-    ]);
-
-    $months = app(MonthlyProjectionService::class)->forUser($user, 1);
-
-    expect($months->first()->incomeCents)->toBe(intdiv(100000 * 52, 12));
-});
-
-test('income equals raw pay amount for monthly frequency', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'pay_amount' => 600000,
-        'pay_frequency' => PayFrequency::Monthly,
-    ]);
-
-    $months = app(MonthlyProjectionService::class)->forUser($user, 1);
-
-    expect($months->first()->incomeCents)->toBe(600000);
-});
-
-test('sums planned debit transactions occurring in the month into expenses', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'pay_amount' => 500000,
-        'pay_frequency' => PayFrequency::Monthly,
-    ]);
-    $account = Account::factory()->for($user)->create();
-
-    $thisMonthStart = CarbonImmutable::today()->startOfMonth();
+test('one credit-direction DontRepeat planned transaction steps balance up by exactly that amount', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 100000]);
+    $user->update(['primary_account_id' => $account->id]);
 
     PlannedTransaction::factory()->for($user)->for($account)->create([
-        'direction' => TransactionDirection::Debit,
-        'amount' => 80000,
-        'start_date' => $thisMonthStart->addDays(2),
+        'direction' => TransactionDirection::Credit,
+        'amount' => 50000,
+        'start_date' => CarbonImmutable::today()->addDays(3),
         'frequency' => RecurrenceFrequency::DontRepeat,
         'is_active' => true,
     ]);
 
-    $months = app(MonthlyProjectionService::class)->forUser($user, 1);
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
 
-    expect($months->first()->expenseCents)->toBe(80000);
+    expect($projection->points)->toHaveCount(2)
+        ->and($projection->points[1]->balanceCents)->toBe(150000)
+        ->and($projection->points[1]->eventAmountCents)->toBe(50000);
 });
 
-test('expands recurring planned transactions across all 12 months', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'pay_amount' => 500000,
-        'pay_frequency' => PayFrequency::Monthly,
-    ]);
-    $account = Account::factory()->for($user)->create();
-
-    $thisMonthStart = CarbonImmutable::today()->startOfMonth();
+test('one debit-direction DontRepeat planned transaction steps balance down by exactly that amount', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 100000]);
+    $user->update(['primary_account_id' => $account->id]);
 
     PlannedTransaction::factory()->for($user)->for($account)->create([
         'direction' => TransactionDirection::Debit,
-        'amount' => 25000,
-        'start_date' => $thisMonthStart->addDays(2),
+        'amount' => 30000,
+        'start_date' => CarbonImmutable::today()->addDays(2),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'is_active' => true,
+    ]);
+
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
+
+    expect($projection->points)->toHaveCount(2)
+        ->and($projection->points[1]->balanceCents)->toBe(70000)
+        ->and($projection->points[1]->eventAmountCents)->toBe(-30000);
+});
+
+test('recurring monthly credit produces one event per month within the window', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 100000]);
+    $user->update(['primary_account_id' => $account->id]);
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Credit,
+        'amount' => 100000,
+        'start_date' => CarbonImmutable::today()->addDays(1),
         'frequency' => RecurrenceFrequency::EveryMonth,
         'is_active' => true,
     ]);
 
-    $months = app(MonthlyProjectionService::class)->forUser($user);
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh(), 12);
 
-    foreach ($months as $month) {
-        expect($month->expenseCents)->toBe(25000);
-    }
+    expect(count($projection->points))->toBeGreaterThanOrEqual(13)
+        ->and(count($projection->points))->toBeLessThanOrEqual(14);
 });
 
-test('credit-direction planned transactions are added to income', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'pay_amount' => 100000,
-        'pay_frequency' => PayFrequency::Monthly,
-    ]);
-    $account = Account::factory()->for($user)->create();
-
-    $thisMonthStart = CarbonImmutable::today()->startOfMonth();
+test('planned transactions whose only occurrences fall outside the window are excluded', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 100000]);
+    $user->update(['primary_account_id' => $account->id]);
 
     PlannedTransaction::factory()->for($user)->for($account)->create([
-        'direction' => TransactionDirection::Credit,
-        'amount' => 20000,
-        'start_date' => $thisMonthStart->addDays(5),
+        'direction' => TransactionDirection::Debit,
+        'amount' => 99999,
+        'start_date' => CarbonImmutable::today()->addYears(2),
         'frequency' => RecurrenceFrequency::DontRepeat,
         'is_active' => true,
     ]);
 
-    $months = app(MonthlyProjectionService::class)->forUser($user, 1);
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
 
-    expect($months->first()->incomeCents)->toBe(120000);
+    expect($projection->points)->toHaveCount(1)
+        ->and($projection->points[0]->balanceCents)->toBe(100000);
 });
 
-test('excludes transfer-categorised planned transactions from expenses', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'pay_amount' => 500000,
-        'pay_frequency' => PayFrequency::Monthly,
-    ]);
-    $account = Account::factory()->for($user)->create();
+test('transfer-categorised planned transactions are excluded via the excludingTransfers scope', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 100000]);
+    $user->update(['primary_account_id' => $account->id]);
     $transferCategory = Category::factory()->create(['name' => 'Transfer']);
 
     PlannedTransaction::factory()->for($user)->for($account)->create([
         'category_id' => $transferCategory->id,
         'direction' => TransactionDirection::Debit,
-        'amount' => 99000,
-        'start_date' => CarbonImmutable::today()->startOfMonth()->addDays(3),
+        'amount' => 50000,
+        'start_date' => CarbonImmutable::today()->addDays(1),
         'frequency' => RecurrenceFrequency::DontRepeat,
         'is_active' => true,
     ]);
 
-    $months = app(MonthlyProjectionService::class)->forUser($user, 1);
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
 
-    expect($months->first()->expenseCents)->toBe(0);
+    expect($projection->points)->toHaveCount(1);
 });
 
-test('surfaces DontRepeat debit planned transactions as one-offs in matching month', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'pay_amount' => 500000,
-        'pay_frequency' => PayFrequency::Monthly,
-    ]);
-    $account = Account::factory()->for($user)->create();
-
-    $thisMonthStart = CarbonImmutable::today()->startOfMonth();
+test('firstNegativeDate is null when balance never crosses below zero', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 100000]);
+    $user->update(['primary_account_id' => $account->id]);
 
     PlannedTransaction::factory()->for($user)->for($account)->create([
-        'description' => 'Annual insurance',
+        'direction' => TransactionDirection::Credit,
+        'amount' => 25000,
+        'start_date' => CarbonImmutable::today()->addDays(5),
+        'frequency' => RecurrenceFrequency::EveryMonth,
+        'is_active' => true,
+    ]);
+
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
+
+    expect($projection->firstNegativeDate)->toBeNull();
+});
+
+test('firstNegativeDate equals the date of the first event that takes balance below zero', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 50000]);
+    $user->update(['primary_account_id' => $account->id]);
+
+    $crashDate = CarbonImmutable::today()->addDays(10);
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 80000,
+        'start_date' => $crashDate,
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'is_active' => true,
+    ]);
+
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
+
+    expect($projection->firstNegativeDate)->not->toBeNull()
+        ->and($projection->firstNegativeDate->equalTo($crashDate))->toBeTrue();
+});
+
+test('aggregates same-day credit and debit into a single net point', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 100000]);
+    $user->update(['primary_account_id' => $account->id]);
+
+    $sameDay = CarbonImmutable::today()->addDays(5);
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Credit,
+        'amount' => 200000,
+        'start_date' => $sameDay,
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'is_active' => true,
+    ]);
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
         'direction' => TransactionDirection::Debit,
         'amount' => 150000,
-        'start_date' => $thisMonthStart->addDays(5),
+        'start_date' => $sameDay,
         'frequency' => RecurrenceFrequency::DontRepeat,
         'is_active' => true,
     ]);
 
-    $months = app(MonthlyProjectionService::class)->forUser($user);
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
 
-    $current = $months->first();
-    $next = $months->skip(1)->first();
-
-    expect($current->oneOffs)->toHaveCount(1)
-        ->and($current->oneOffs[0]->description)->toBe('Annual insurance')
-        ->and($next->oneOffs)->toHaveCount(0);
+    expect($projection->points)->toHaveCount(2)
+        ->and($projection->points[1]->date->equalTo($sameDay))->toBeTrue()
+        ->and($projection->points[1]->balanceCents)->toBe(150000)
+        ->and($projection->points[1]->eventAmountCents)->toBe(50000)
+        ->and($projection->points[1]->eventDescription)->toBe('2 events');
 });
 
-test('cumulative net is the running sum of monthly net', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'pay_amount' => 100000,
-        'pay_frequency' => PayFrequency::Monthly,
-    ]);
+test('firstNegativeDate uses net daily balance and is not influenced by intra-day ordering', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 100000]);
+    $user->update(['primary_account_id' => $account->id]);
 
-    $months = app(MonthlyProjectionService::class)->forUser($user, 3);
-
-    expect($months[0]->cumulativeNetCents)->toBe(100000)
-        ->and($months[1]->cumulativeNetCents)->toBe(200000)
-        ->and($months[2]->cumulativeNetCents)->toBe(300000);
-});
-
-test('isRisky is true when expenses exceed income', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'pay_amount' => 100000,
-        'pay_frequency' => PayFrequency::Monthly,
-    ]);
-    $account = Account::factory()->for($user)->create();
+    $sameDay = CarbonImmutable::today()->addDays(7);
 
     PlannedTransaction::factory()->for($user)->for($account)->create([
         'direction' => TransactionDirection::Debit,
-        'amount' => 200000,
-        'start_date' => CarbonImmutable::today()->startOfMonth()->addDays(3),
+        'amount' => 150000,
+        'start_date' => $sameDay,
         'frequency' => RecurrenceFrequency::DontRepeat,
         'is_active' => true,
     ]);
 
-    $months = app(MonthlyProjectionService::class)->forUser($user, 1);
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Credit,
+        'amount' => 200000,
+        'start_date' => $sameDay,
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'is_active' => true,
+    ]);
 
-    expect($months->first()->isRisky())->toBeTrue();
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
+
+    expect($projection->firstNegativeDate)->toBeNull();
 });
 
-test('isolates one user from another users planned transactions', function () {
-    $user = User::factory()->withPayCycle()->create([
-        'pay_amount' => 100000,
-        'pay_frequency' => PayFrequency::Monthly,
-    ]);
-    $otherUser = User::factory()->withPayCycle()->create();
+test('user isolation — another users planned transactions do not leak into this users projection', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 100000]);
+    $user->update(['primary_account_id' => $account->id]);
+
+    $otherUser = User::factory()->create();
     $otherAccount = Account::factory()->for($otherUser)->create();
 
     PlannedTransaction::factory()->for($otherUser)->for($otherAccount)->create([
         'direction' => TransactionDirection::Debit,
         'amount' => 99999,
-        'start_date' => CarbonImmutable::today()->startOfMonth()->addDays(3),
+        'start_date' => CarbonImmutable::today()->addDays(1),
         'frequency' => RecurrenceFrequency::EveryMonth,
         'is_active' => true,
     ]);
 
-    $months = app(MonthlyProjectionService::class)->forUser($user, 1);
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
 
-    expect($months->first()->expenseCents)->toBe(0);
+    expect($projection->points)->toHaveCount(1)
+        ->and($projection->points[0]->balanceCents)->toBe(100000);
 });

@@ -4,120 +4,93 @@ declare(strict_types=1);
 
 namespace App\Services\Projection;
 
-use App\Enums\PayFrequency;
-use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\PlannedTransaction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Collection;
 
 final readonly class MonthlyProjectionService
 {
-    private const int ONE_OFF_THRESHOLD_CENTS = 20000;
-
-    private const float ONE_OFF_PAY_RATIO = 0.25;
-
-    /**
-     * @return Collection<int, ProjectedMonth>
-     */
-    public function forUser(User $user, int $months = 12, bool $includeHistoricalBaseline = false): Collection
+    public function forUser(User $user, int $monthsAhead = 12): ?BalanceProjection
     {
-        if (! $user->hasPayCycleConfigured()) {
-            /** @var Collection<int, ProjectedMonth> */
-            return collect();
+        $primaryAccount = $user->primaryAccount;
+
+        if ($primaryAccount === null) {
+            return null;
         }
 
-        $perMonthIncomeCents = $this->smoothedMonthlyIncomeCents($user);
-        $oneOffThresholdCents = $this->oneOffThresholdCents($user);
+        $today = CarbonImmutable::today();
+        $endDate = $today->addMonthsNoOverflow($monthsAhead);
 
         $plannedTransactions = PlannedTransaction::query()
             ->where('user_id', $user->id)
             ->where('is_active', true)
             ->excludingTransfers()
+            ->where('start_date', '<=', $endDate)
+            ->where(static function ($query) use ($today): void {
+                $query->whereNull('until_date')->orWhere('until_date', '>=', $today);
+            })
             ->get();
 
-        $startMonth = CarbonImmutable::today()->startOfMonth();
-        $cumulativeNetCents = 0;
-        $projectedMonths = [];
+        $dailyBuckets = [];
 
-        for ($i = 0; $i < $months; $i++) {
-            $monthStart = $startMonth->addMonthsNoOverflow($i);
-            $monthEnd = $monthStart->endOfMonth();
+        foreach ($plannedTransactions as $planned) {
+            $signedAmount = $planned->direction === TransactionDirection::Credit
+                ? abs((int) $planned->amount)
+                : -abs((int) $planned->amount);
 
-            $expenseCents = 0;
-            $incomeCents = $perMonthIncomeCents;
-            $oneOffs = [];
+            foreach ($planned->occurrencesBetween($today, $endDate) as $occurrence) {
+                $key = $occurrence->format('Y-m-d');
 
-            foreach ($plannedTransactions as $planned) {
-                $occurrences = $planned->occurrencesBetween($monthStart, $monthEnd);
-
-                if ($occurrences->isEmpty()) {
-                    continue;
+                if (! isset($dailyBuckets[$key])) {
+                    $dailyBuckets[$key] = [
+                        'date' => $occurrence,
+                        'netCents' => 0,
+                        'descriptions' => [],
+                    ];
                 }
 
-                $absAmount = abs((int) $planned->amount);
-                $totalForMonth = $occurrences->count() * $absAmount;
-
-                if ($planned->direction === TransactionDirection::Credit) {
-                    $incomeCents += $totalForMonth;
-
-                    continue;
-                }
-
-                $expenseCents += $totalForMonth;
-
-                if ($planned->frequency === RecurrenceFrequency::DontRepeat
-                    && $absAmount >= $oneOffThresholdCents) {
-                    $first = $occurrences->first();
-                    $oneOffs[] = new ProjectedOneOff(
-                        plannedTransactionId: $planned->id,
-                        description: $planned->description,
-                        amountCents: $absAmount,
-                        occursOn: $first,
-                    );
-                }
+                $dailyBuckets[$key]['netCents'] += $signedAmount;
+                $dailyBuckets[$key]['descriptions'][] = $planned->description;
             }
-
-            $netCents = $incomeCents - $expenseCents;
-            $cumulativeNetCents += $netCents;
-
-            $projectedMonths[] = new ProjectedMonth(
-                monthStart: $monthStart,
-                label: $monthStart->format('M'),
-                year: $monthStart->year,
-                monthIndex: $i,
-                incomeCents: $incomeCents,
-                expenseCents: $expenseCents,
-                netCents: $netCents,
-                cumulativeNetCents: $cumulativeNetCents,
-                oneOffs: $oneOffs,
-                isCurrent: $i === 0,
-                isYearStart: $i === 0 || $monthStart->month === 1,
-            );
         }
 
-        /** @var Collection<int, ProjectedMonth> */
-        return collect($projectedMonths);
-    }
+        ksort($dailyBuckets);
 
-    private function smoothedMonthlyIncomeCents(User $user): int
-    {
-        $payAmount = $user->pay_amount ?? 0;
+        $startingBalanceCents = (int) $primaryAccount->balance;
+        $runningBalance = $startingBalanceCents;
+        $points = [
+            new BalancePoint(
+                date: $today,
+                balanceCents: $runningBalance,
+                eventDescription: 'Starting balance',
+                eventAmountCents: 0,
+            ),
+        ];
+        $firstNegativeDate = null;
 
-        return match ($user->pay_frequency) {
-            PayFrequency::Weekly => intdiv($payAmount * 52, 12),
-            PayFrequency::Fortnightly => intdiv($payAmount * 26, 12),
-            PayFrequency::Monthly => $payAmount,
-            null => 0,
-        };
-    }
+        foreach ($dailyBuckets as $bucket) {
+            $runningBalance += $bucket['netCents'];
+            $count = count($bucket['descriptions']);
+            $description = $count === 1 ? $bucket['descriptions'][0] : sprintf('%d events', $count);
 
-    private function oneOffThresholdCents(User $user): int
-    {
-        $monthlyIncome = $this->smoothedMonthlyIncomeCents($user);
-        $ratioThreshold = (int) ($monthlyIncome * self::ONE_OFF_PAY_RATIO);
+            $points[] = new BalancePoint(
+                date: $bucket['date'],
+                balanceCents: $runningBalance,
+                eventDescription: $description,
+                eventAmountCents: $bucket['netCents'],
+            );
 
-        return min(self::ONE_OFF_THRESHOLD_CENTS, $ratioThreshold > 0 ? $ratioThreshold : self::ONE_OFF_THRESHOLD_CENTS);
+            if ($firstNegativeDate === null && $runningBalance < 0) {
+                $firstNegativeDate = $bucket['date'];
+            }
+        }
+
+        return new BalanceProjection(
+            startingBalanceCents: $startingBalanceCents,
+            startsAt: $today,
+            points: $points,
+            firstNegativeDate: $firstNegativeDate,
+        );
     }
 }
