@@ -33,6 +33,10 @@
                                :class="$navItem">
                 {{ __('Connect Bank') }}
             </flux:sidebar.item>
+            <flux:sidebar.item icon="arrow-up-tray" :href="route('import-bank')" :current="request()->routeIs('import-bank')" wire:navigate
+                               :class="$navItem">
+                {{ __('Import Bank') }}
+            </flux:sidebar.item>
             <flux:sidebar.item icon="funnel" :href="route('rules')" :current="request()->routeIs('rules')" wire:navigate :class="$navItem">
                 {{ __('Rules') }}
             </flux:sidebar.item>

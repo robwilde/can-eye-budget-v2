@@ -5,6 +5,7 @@
         'transactions' => ['Transactions', 'All activity'],
         'accounts' => ['Accounts', 'Connected banks'],
         'connect-bank' => ['Connect', 'Link a bank'],
+        'import-bank' => ['Import', 'Upload a CSV statement'],
         'rules' => ['Rules', 'Automations'],
     ];
 

@@ -16,6 +16,7 @@
     "laravel/framework": "^12.56.0",
     "laravel/horizon": "^5.45.5",
     "laravel/tinker": "^2.11.1",
+    "league/csv": "^9.28",
     "livewire/blaze": "1.0.7",
     "livewire/flux": "^2.13.2",
     "livewire/livewire": "^4.2.4",
