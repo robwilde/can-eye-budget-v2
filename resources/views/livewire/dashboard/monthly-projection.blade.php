@@ -1,51 +1,27 @@
-@use('App\Casts\MoneyCast')
-
 <section class="monthly-projection">
-    @if ($this->projection->isEmpty())
+    @if (! $this->hasPrimaryAccount)
         <x-cib.empty-state
-                icon="chart-bar-square"
-                title="12-month projection unavailable"
-                description="Set up your pay cycle and a few planned transactions to forecast the next year."
+                icon="banknotes"
+                title="Set your primary account to see your buffer projection"
+                description="The 12-month balance line uses your primary account's current cash balance as the starting point."
         >
             <x-slot:action>
-                <a class="link" href="{{ route('pay-cycle.edit') }}">
-                    Configure pay cycle →
+                <a class="link" href="{{ route('accounts') }}">
+                    Configure primary account →
                 </a>
             </x-slot:action>
         </x-cib.empty-state>
     @else
-        <header class="proj-head">
-            <div>
-                <h3>Next 12 months</h3>
-                <p class="proj-sub">
-                    Income smoothed across pay cycles · expenses from active planned transactions.
-                </p>
-            </div>
-            <div class="proj-legend">
-                <span class="lg lg-inc"><span class="sw"></span>Income</span>
-                <span class="lg lg-exp"><span class="sw"></span>Expenses</span>
-                <span class="lg lg-cum"><span class="sw"></span>Cumulative buffer</span>
-            </div>
-        </header>
-
-        @if ($this->firstRiskyMonth !== null)
-            <div class="proj-warn">
-                <flux:icon.exclamation-triangle variant="micro"/>
-                <div>
-                    <b>{{ $this->firstRiskyMonth->label }} {{ $this->firstRiskyMonth->year }}</b>
-                    is the first month where planned spend exceeds projected income.
-                    Expenses {{ MoneyCast::format($this->firstRiskyMonth->expenseCents) }} vs income {{ MoneyCast::format($this->firstRiskyMonth->incomeCents) }}.
-                </div>
-            </div>
-        @endif
-
         <div
                 wire:ignore
                 x-data="{
                     chart: null,
                     init() {
+                        this.$nextTick(() => this.renderChart());
+                    },
+                    renderChart() {
+                        if (this.chart || !this.$refs.canvas) return;
                         const payload = @js($this->chartPayload, JSON_THROW_ON_ERROR);
-                        const riskyIndexSet = new Set(payload.riskyIndexes);
 
                         const formatMoney = (cents) => {
                             const dollars = Math.abs(cents / 100);
@@ -56,40 +32,54 @@
                             return (cents < 0 ? '-$' : '$') + formatted;
                         };
 
-                        const expenseColors = payload.expense.map((_, idx) =>
-                            riskyIndexSet.has(idx) ? '#E5484D' : '#FBA3A6'
-                        );
+                        const series = [{
+                            name: 'Projected balance',
+                            data: payload.points.map(p => ({
+                                x: new Date(p.x).getTime(),
+                                y: p.y,
+                            })),
+                        }];
+
+                        const xaxisAnnotations = [];
+                        if (payload.firstNegative !== null) {
+                            xaxisAnnotations.push({
+                                x: new Date(payload.firstNegative).getTime(),
+                                borderColor: '#E5484D',
+                                strokeDashArray: 4,
+                                label: {
+                                    text: 'First negative balance',
+                                    borderColor: '#E5484D',
+                                    style: {
+                                        color: '#fff',
+                                        background: '#E5484D',
+                                        fontWeight: 700,
+                                        fontSize: '10px',
+                                    },
+                                },
+                            });
+                        }
 
                         this.chart = new ApexCharts(this.$refs.canvas, {
                             chart: {
-                                type: 'line',
+                                type: 'area',
                                 height: 320,
                                 toolbar: { show: false },
                                 fontFamily: 'Lato, ui-sans-serif, system-ui, sans-serif',
+                                zoom: { enabled: false },
                             },
+                            series: series,
+                            colors: ['#0E5E57'],
                             stroke: {
-                                width: [0, 0, 3],
+                                width: 3,
                                 curve: 'smooth',
                             },
-                            series: [
-                                { name: 'Income', type: 'bar', data: payload.income },
-                                { name: 'Expenses', type: 'bar', data: payload.expense },
-                                { name: 'Cumulative', type: 'line', data: payload.cumulative },
-                            ],
-                            colors: ['#2AAF46', '#E5484D', '#0E5E57'],
                             fill: {
-                                opacity: [1, 1, 1],
-                                colors: ['#2AAF46', ({ seriesIndex, dataPointIndex }) => {
-                                    if (seriesIndex !== 1) {
-                                        return '#0E5E57';
-                                    }
-                                    return expenseColors[dataPointIndex];
-                                }, '#0E5E57'],
-                            },
-                            plotOptions: {
-                                bar: {
-                                    columnWidth: '60%',
-                                    borderRadius: 3,
+                                type: 'gradient',
+                                gradient: {
+                                    shadeIntensity: 1,
+                                    opacityFrom: 0.4,
+                                    opacityTo: 0.05,
+                                    stops: [0, 100],
                                 },
                             },
                             dataLabels: { enabled: false },
@@ -99,8 +89,15 @@
                                 strokeDashArray: 3,
                             },
                             xaxis: {
-                                categories: payload.categories,
-                                labels: { style: { fontWeight: 700, fontSize: '11px' } },
+                                type: 'datetime',
+                                labels: {
+                                    style: { fontWeight: 700, fontSize: '11px' },
+                                    datetimeFormatter: {
+                                        year: 'yyyy',
+                                        month: 'MMM yy',
+                                        day: 'dd MMM',
+                                    },
+                                },
                                 axisBorder: { color: '#111' },
                                 axisTicks: { color: '#111' },
                             },
@@ -109,33 +106,41 @@
                                     formatter: (value) => formatMoney(value),
                                     style: { fontWeight: 700, fontSize: '10px' },
                                 },
+                                title: {
+                                    text: 'Projected balance',
+                                    style: { fontWeight: 700, fontSize: '10px', color: '#0E5E57' },
+                                },
+                            },
+                            markers: {
+                                size: 4,
+                                strokeColors: '#0E5E57',
+                                strokeWidth: 2,
+                                fillOpacity: 1,
+                                hover: { sizeOffset: 2 },
                             },
                             tooltip: {
-                                shared: true,
+                                shared: false,
                                 intersect: false,
+                                x: { format: 'dd MMM yyyy' },
                                 y: { formatter: (value) => formatMoney(value) },
                             },
                             annotations: {
-                                points: payload.oneOffs.map((oneOff) => ({
-                                    x: oneOff.x,
+                                yaxis: [{
                                     y: 0,
-                                    marker: {
-                                        size: 5,
-                                        fillColor: '#F1A51C',
-                                        strokeColor: '#111',
-                                        strokeWidth: 1.5,
-                                    },
+                                    borderColor: '#E5484D',
+                                    strokeDashArray: 4,
                                     label: {
-                                        borderColor: '#111',
+                                        text: 'Zero',
+                                        borderColor: '#E5484D',
                                         style: {
-                                            color: '#111',
-                                            background: '#FCF0D6',
+                                            color: '#fff',
+                                            background: '#E5484D',
                                             fontWeight: 700,
                                             fontSize: '10px',
                                         },
-                                        text: oneOff.label + ' · ' + formatMoney(oneOff.amountCents),
                                     },
-                                })),
+                                }],
+                                xaxis: xaxisAnnotations,
                             },
                         });
                         this.chart.render();
@@ -144,7 +149,6 @@
                         this.chart?.destroy();
                     },
                 }"
-                x-init="init()"
                 class="proj-canvas"
         >
             <div x-ref="canvas"></div>
