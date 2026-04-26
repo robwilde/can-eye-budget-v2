@@ -91,6 +91,21 @@ final class PlannedTransaction extends Model
      * @param  Builder<self>  $query
      * @return Builder<self>
      */
+    public function scopeExcludingTransfers(Builder $query): Builder
+    {
+        return $query->whereDoesntHave('category', function (Builder $q): void {
+            $q->where('name', 'Transfer')
+                ->orWhereHas(
+                    'parent',
+                    fn (Builder $p): Builder => $p->where('name', 'Transfer'),
+                );
+        });
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
     public function scopeUpcoming(Builder $query): Builder
     {
         $today = CarbonImmutable::today();
