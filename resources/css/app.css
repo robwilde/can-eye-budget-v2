@@ -741,7 +741,7 @@ select:focus[data-flux-control] {
     }
     .cyc-dows {
         display: grid;
-        grid-template-columns: repeat(7, 1fr);
+        grid-template-columns: repeat(7, minmax(0, 1fr));
         background: var(--color-cib-ink);
         color: var(--color-cib-white);
     }
@@ -756,7 +756,7 @@ select:focus[data-flux-control] {
     .cyc-dow:last-child { border-right: 0; }
     .cyc-week-stream {
         display: grid;
-        grid-template-columns: repeat(7, 1fr);
+        grid-template-columns: repeat(7, minmax(0, 1fr));
         border-top: 2px solid var(--color-border-strong);
     }
     .cyc-day {
@@ -840,6 +840,7 @@ select:focus[data-flux-control] {
         padding: 2px 0;
         white-space: nowrap;
         overflow: hidden;
+        min-width: 0;
     }
     .cyc-pip-dot {
         width: 6px;
@@ -854,6 +855,8 @@ select:focus[data-flux-control] {
         overflow: hidden;
         text-overflow: ellipsis;
         color: var(--color-fg-2);
+        min-width: 0;
+        flex: 1;
     }
     .cyc-pip.inc .cyc-pip-name {
         color: var(--color-cib-green-600);
@@ -910,7 +913,7 @@ select:focus[data-flux-control] {
         font: 700 13px/1.5 var(--font-sans);
     }
 
-    /* ---------- 12-month projection widget (Ticket #231) ---------- */
+    /* ---------- 12-month projection widget (Ticket #233 — running-balance redesign) ---------- */
 
     .monthly-projection {
         background: var(--color-bg-surface);
@@ -919,72 +922,7 @@ select:focus[data-flux-control] {
         box-shadow: var(--shadow-pop);
         padding: 18px 20px 16px;
     }
-    .proj-head {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 16px;
-        flex-wrap: wrap;
-        margin-bottom: 12px;
-    }
-    .proj-head h3 {
-        font: 900 16px/1 var(--font-display);
-        letter-spacing: -0.01em;
-    }
-    .proj-sub {
-        font: 700 12px/1.3 var(--font-sans);
-        color: var(--color-fg-3);
-        margin-top: 5px;
-    }
-    .proj-sub b { color: var(--color-fg-1); }
-    .proj-legend {
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
-    }
-    .proj-legend .lg {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font: 700 11px/1 var(--font-sans);
-        color: var(--color-fg-2);
-    }
-    .proj-legend .sw {
-        width: 12px;
-        height: 12px;
-        border-radius: 3px;
-        border: 2px solid var(--color-border-strong);
-    }
-    .proj-legend .lg-inc .sw { background: var(--color-cib-green-400); }
-    .proj-legend .lg-exp .sw { background: var(--color-money-owed); }
-    .proj-legend .lg-cum .sw {
-        background: var(--color-cib-teal-600);
-        border-radius: 999px;
-        height: 4px;
-        align-self: center;
-        border: 0;
-        box-shadow: 0 0 0 1px var(--color-border-strong);
-    }
-    .proj-warn {
-        display: flex;
-        align-items: flex-start;
-        gap: 10px;
-        background: var(--color-money-owed-soft);
-        border: 2px solid var(--color-money-owed);
-        color: var(--color-money-owed);
-        border-radius: 10px;
-        padding: 10px 12px;
-        font: 700 12px/1.4 var(--font-sans);
-        margin-bottom: 12px;
-    }
-    .proj-warn b { color: var(--color-fg-1); }
     .proj-canvas { min-height: 320px; }
-    .proj-empty {
-        text-align: center;
-        padding: 32px 16px;
-        color: var(--color-fg-3);
-        font: 700 13px/1.5 var(--font-sans);
-    }
 }
 
 /* Flux modal slide-up (Ticket #196). Outside @layer components so it matches
