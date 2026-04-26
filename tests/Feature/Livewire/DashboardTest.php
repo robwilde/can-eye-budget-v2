@@ -132,17 +132,14 @@ test('triad matches User helper methods on the same seed', function () {
 
 // ── Sidebar widgets ────────────────────────────────────────────────
 
-test('recent activity shows last 5 current transactions', function () {
+test('renders pay cycle calendar widget in place of recent activity', function () {
     $user = User::factory()->withPayCycle()->create();
-    $account = Account::factory()->for($user)->create();
-
-    Transaction::factory()->for($user)->for($account)->count(10)->create([
-        'post_date' => now()->subDays(2),
-    ]);
+    Account::factory()->for($user)->create();
 
     Livewire::actingAs($user)
         ->test(Dashboard::class)
-        ->assertSee('Recent activity');
+        ->assertSeeLivewire('dashboard.pay-cycle-calendar')
+        ->assertDontSee('Recent activity');
 });
 
 test('budgets this cycle section renders when budgets exist', function () {

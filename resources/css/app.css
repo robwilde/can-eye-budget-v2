@@ -685,6 +685,306 @@ select:focus[data-flux-control] {
         outline: 2px solid var(--color-cib-yellow-600);
         outline-offset: 2px;
     }
+
+    /* ---------- Pay-cycle calendar widget (Ticket #230) ---------- */
+
+    .pay-cycle-cal { display: flex; flex-direction: column; gap: 14px; }
+    .pay-cycle-cal .cyc-empty-link {
+        color: var(--color-cib-teal-500);
+        text-decoration: underline;
+        font: 700 13px/1 var(--font-sans);
+    }
+    .cyc-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    .cyc-title {
+        font: 900 16px/1 var(--font-display);
+        letter-spacing: -0.01em;
+    }
+    .cyc-sub {
+        font: 700 12px/1.3 var(--font-sans);
+        color: var(--color-fg-3);
+        margin-top: 4px;
+    }
+    .cyc-nav {
+        display: inline-flex;
+        gap: 4px;
+        background: var(--color-bg-surface);
+        border: 2px solid var(--color-border-strong);
+        border-radius: 999px;
+        padding: 3px;
+        box-shadow: var(--shadow-pop-sm);
+    }
+    .cyc-nav button {
+        appearance: none;
+        background: transparent;
+        border: 0;
+        padding: 6px 10px;
+        font: 700 12px/1 var(--font-sans);
+        color: var(--color-fg-1);
+        border-radius: 999px;
+        cursor: pointer;
+    }
+    .cyc-nav button:hover { background: var(--color-cib-n-100); }
+    .cyc-nav button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .cyc-grid {
+        background: var(--color-bg-surface);
+        border: 2px solid var(--color-border-strong);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-pop);
+        overflow: hidden;
+    }
+    .cyc-dows {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        background: var(--color-cib-ink);
+        color: var(--color-cib-white);
+    }
+    .cyc-dow {
+        font: 900 11px/1 var(--font-display);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 10px 8px;
+        text-align: center;
+        border-right: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    .cyc-dow:last-child { border-right: 0; }
+    .cyc-week-stream {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        border-top: 2px solid var(--color-border-strong);
+    }
+    .cyc-day {
+        appearance: none;
+        background: var(--color-bg-surface);
+        border: 0;
+        border-right: 1px solid var(--color-border-1);
+        border-bottom: 1px solid var(--color-border-1);
+        text-align: left;
+        padding: 8px 8px 6px;
+        min-height: 110px;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        font-family: var(--font-sans), serif;
+        position: relative;
+        transition: background 200ms var(--ease-snap);
+    }
+    .cyc-day:hover { background: var(--color-cib-n-50); }
+    .cyc-day.past { background: var(--color-cib-n-50); }
+    .cyc-day.past:hover { background: var(--color-cib-n-100); }
+    .cyc-day.today { background: var(--color-cib-cream-50); }
+    .cyc-day.today::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border: 3px solid var(--color-border-strong);
+        pointer-events: none;
+        z-index: 2;
+    }
+    .cyc-day.payday { background: var(--color-cib-yellow-400); }
+    .cyc-day.lastpay { background: var(--color-money-available-soft); }
+    .cyc-day.active {
+        outline: 3px solid var(--color-cib-teal-500);
+        outline-offset: -3px;
+        z-index: 3;
+    }
+
+    .cyc-day-top {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 6px;
+    }
+    .cyc-dnum {
+        font: 900 18px/1 var(--font-display);
+        letter-spacing: -0.01em;
+        color: var(--color-fg-1);
+    }
+    .cyc-today-pill {
+        background: var(--color-cib-ink);
+        color: var(--color-cib-white);
+        font: 900 9px/1 var(--font-display);
+        padding: 3px 6px;
+        border-radius: 999px;
+        letter-spacing: 0.08em;
+    }
+    .cyc-paytag {
+        background: var(--color-cib-ink);
+        color: var(--color-cib-yellow-400);
+        font: 900 9px/1 var(--font-display);
+        padding: 3px 6px;
+        border-radius: 999px;
+        letter-spacing: 0.08em;
+    }
+    .cyc-paytag.dim {
+        background: var(--color-cib-green-600);
+        color: var(--color-cib-white);
+    }
+    .cyc-day-body {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        flex: 1;
+    }
+    .cyc-pip {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font: 700 11px/1.2 var(--font-sans);
+        padding: 2px 0;
+        white-space: nowrap;
+        overflow: hidden;
+    }
+    .cyc-pip-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+    .cyc-pip.out .cyc-pip-dot { background: var(--color-money-owed); }
+    .cyc-pip.inc .cyc-pip-dot { background: var(--color-cib-green-500); }
+    .cyc-pip.plan .cyc-pip-dot { background: var(--color-money-planned); }
+    .cyc-pip-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--color-fg-2);
+    }
+    .cyc-pip.inc .cyc-pip-name {
+        color: var(--color-cib-green-600);
+        font-weight: 900;
+    }
+    .cyc-pip-more {
+        font: 700 10px/1 var(--font-sans);
+        color: var(--color-fg-3);
+        padding-top: 2px;
+    }
+    .cyc-day-net {
+        font: 900 12px/1 var(--font-display);
+        font-variant-numeric: tabular-nums;
+        margin-top: 4px;
+    }
+    .cyc-day-net.pos { color: var(--color-cib-green-600); }
+    .cyc-day-net.neg { color: var(--color-money-owed); }
+
+    .cyc-detail { margin-top: 8px; }
+    .cyc-detail-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+    }
+    .cyc-detail-dow {
+        font: 900 11px/1 var(--font-display);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--color-fg-3);
+    }
+    .cyc-detail-date {
+        font: 900 22px/1 var(--font-display);
+        letter-spacing: -0.01em;
+        margin-top: 5px;
+    }
+    .cyc-detail-meta { display: flex; gap: 6px; }
+    .cyc-detail-body { display: flex; flex-direction: column; gap: 6px; }
+    .chip-today,
+    .chip-pay,
+    .chip-count {
+        font: 700 11px/1 var(--font-sans);
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 2px solid var(--color-border-strong);
+    }
+    .chip-today { background: var(--color-cib-cream-50); }
+    .chip-pay { background: var(--color-cib-yellow-400); }
+    .chip-count { background: var(--color-bg-surface); color: var(--color-fg-2); }
+    .pay-cycle-cal .cyc-empty {
+        padding: 14px;
+        text-align: center;
+        color: var(--color-fg-3);
+        font: 700 13px/1.5 var(--font-sans);
+    }
+
+    /* ---------- 12-month projection widget (Ticket #231) ---------- */
+
+    .monthly-projection {
+        background: var(--color-bg-surface);
+        border: 2px solid var(--color-border-strong);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-pop);
+        padding: 18px 20px 16px;
+    }
+    .proj-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+    }
+    .proj-head h3 {
+        font: 900 16px/1 var(--font-display);
+        letter-spacing: -0.01em;
+    }
+    .proj-sub {
+        font: 700 12px/1.3 var(--font-sans);
+        color: var(--color-fg-3);
+        margin-top: 5px;
+    }
+    .proj-sub b { color: var(--color-fg-1); }
+    .proj-legend {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+    .proj-legend .lg {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font: 700 11px/1 var(--font-sans);
+        color: var(--color-fg-2);
+    }
+    .proj-legend .sw {
+        width: 12px;
+        height: 12px;
+        border-radius: 3px;
+        border: 2px solid var(--color-border-strong);
+    }
+    .proj-legend .lg-inc .sw { background: var(--color-cib-green-400); }
+    .proj-legend .lg-exp .sw { background: var(--color-money-owed); }
+    .proj-legend .lg-cum .sw {
+        background: var(--color-cib-teal-600);
+        border-radius: 999px;
+        height: 4px;
+        align-self: center;
+        border: 0;
+        box-shadow: 0 0 0 1px var(--color-border-strong);
+    }
+    .proj-warn {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        background: var(--color-money-owed-soft);
+        border: 2px solid var(--color-money-owed);
+        color: var(--color-money-owed);
+        border-radius: 10px;
+        padding: 10px 12px;
+        font: 700 12px/1.4 var(--font-sans);
+        margin-bottom: 12px;
+    }
+    .proj-warn b { color: var(--color-fg-1); }
+    .proj-canvas { min-height: 320px; }
+    .proj-empty {
+        text-align: center;
+        padding: 32px 16px;
+        color: var(--color-fg-3);
+        font: 700 13px/1.5 var(--font-sans);
+    }
 }
 
 /* Flux modal slide-up (Ticket #196). Outside @layer components so it matches
