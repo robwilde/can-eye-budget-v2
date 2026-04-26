@@ -75,19 +75,6 @@ final class Dashboard extends Component
         ];
     }
 
-    /** @return Collection<int, Transaction> */
-    #[Computed]
-    public function recentTransactions(): Collection
-    {
-        return auth()->user()
-            ->transactions()
-            ->current()
-            ->with(['account', 'category.parent.parent'])
-            ->latest('post_date')
-            ->limit(5)
-            ->get();
-    }
-
     /**
      * @return Collection<int, array{budget: Budget, spent: int, limit: int}>
      */
