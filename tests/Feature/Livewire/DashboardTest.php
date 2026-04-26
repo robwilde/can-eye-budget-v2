@@ -35,15 +35,38 @@ test('renders negative buffer with YOU ARE SHORT BY headline', function () {
     ]);
     $account = Account::factory()->for($user)->create(['balance' => 5000]);
 
-    Transaction::factory()->debit()->for($user)->for($account)->count(30)->create([
-        'amount' => 10000,
-        'post_date' => now()->subDays(1),
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 50000,
+        'is_active' => true,
+        'start_date' => now()->addDay(),
+        'frequency' => RecurrenceFrequency::DontRepeat,
     ]);
 
     Livewire::actingAs($user)
         ->test(Dashboard::class)
         ->assertSee('YOU ARE SHORT BY')
         ->assertDontSee('YOU CAN AFFORD');
+});
+
+test('headline buffer equals available minus needed', function () {
+    $user = User::factory()->withPayCycle()->create([
+        'next_pay_date' => now()->addDays(7),
+    ]);
+    $account = Account::factory()->for($user)->create(['balance' => 242000]);
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 111390,
+        'is_active' => true,
+        'start_date' => now()->addDay(),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(Dashboard::class)->instance();
+
+    expect($component->buffer())
+        ->toBe($component->totalAvailable() - $component->totalNeeded());
 });
 
 test('renders empty state when pay cycle is not configured', function () {
@@ -358,6 +381,60 @@ test('spend last 7 days ignores credits and only sums debits', function () {
         ->spendLast7Days();
 
     expect($spend['sum'])->toBe(4000);
+});
+
+test('spend last 7 days excludes internal transfers', function () {
+    $user = User::factory()->withPayCycle()->create();
+    $accountA = Account::factory()->for($user)->create();
+    $accountB = Account::factory()->for($user)->create();
+
+    $debit = Transaction::factory()->debit()->for($user)->for($accountA)->create([
+        'amount' => 250000,
+        'post_date' => now()->subDay(),
+    ]);
+    $credit = Transaction::factory()->credit()->for($user)->for($accountB)->create([
+        'amount' => 250000,
+        'post_date' => now()->subDay(),
+        'transfer_pair_id' => $debit->id,
+    ]);
+    $debit->update(['transfer_pair_id' => $credit->id]);
+
+    Transaction::factory()->debit()->for($user)->for($accountA)->create([
+        'amount' => 5000,
+        'post_date' => now()->subDay(),
+    ]);
+
+    $spend = Livewire::actingAs($user)
+        ->test(Dashboard::class)
+        ->instance()
+        ->spendLast7Days();
+
+    expect($spend['sum'])->toBe(5000);
+});
+
+test('spend last 7 days excludes transactions categorised at the parent Transfer level', function () {
+    $user = User::factory()->withPayCycle()->create();
+    $account = Account::factory()->for($user)->create();
+    $transferParent = Category::factory()->create(['name' => 'Transfer']);
+
+    Transaction::factory()->debit()->for($user)->for($account)->create([
+        'amount' => 250000,
+        'post_date' => now()->subDay(),
+        'transfer_pair_id' => null,
+        'category_id' => $transferParent->id,
+    ]);
+
+    Transaction::factory()->debit()->for($user)->for($account)->create([
+        'amount' => 5000,
+        'post_date' => now()->subDay(),
+    ]);
+
+    $spend = Livewire::actingAs($user)
+        ->test(Dashboard::class)
+        ->instance()
+        ->spendLast7Days();
+
+    expect($spend['sum'])->toBe(5000);
 });
 
 // ── Layout ─────────────────────────────────────────────────────────
