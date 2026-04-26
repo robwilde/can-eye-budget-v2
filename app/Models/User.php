@@ -199,32 +199,13 @@ final class User extends Authenticatable
         return (int) now()->startOfDay()->diffInDays($this->next_pay_date, false);
     }
 
-    public function averageDailySpending(int $lookbackDays = 30): int
-    {
-        if ($lookbackDays <= 0) {
-            return 0;
-        }
-
-        $totalDebits = $this->transactions()
-            ->current()
-            ->where('direction', TransactionDirection::Debit)
-            ->where('post_date', '>=', now()->subDays($lookbackDays))
-            ->sum('amount');
-
-        return abs(intdiv((int) $totalDebits, $lookbackDays));
-    }
-
     public function bufferUntilNextPay(int $availableToSpend): ?int
     {
-        $daysUntilPay = $this->daysUntilNextPay();
-
-        if ($daysUntilPay === null) {
+        if ($this->daysUntilNextPay() === null) {
             return null;
         }
 
-        $projectedSpend = $this->averageDailySpending() * $daysUntilPay;
-
-        return $availableToSpend - $projectedSpend;
+        return $availableToSpend - $this->totalNeededUntilPayday();
     }
 
     public function totalNeededUntilPayday(): int
@@ -244,6 +225,7 @@ final class User extends Authenticatable
         return (int) $this->plannedTransactions()
             ->where('is_active', true)
             ->where('direction', TransactionDirection::Debit)
+            ->excludingTransfers()
             ->get()
             ->sum(static fn (PlannedTransaction $plan) => $plan->occurrencesBetween($today, $bounds['end'])->count() * abs($plan->amount));
     }

@@ -10,6 +10,7 @@ use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\AnalysisSuggestion;
 use App\Models\Budget;
+use App\Models\Category;
 use App\Models\PipelineRun;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
@@ -166,62 +167,22 @@ test('daysUntilNextPay returns zero on pay day', function () {
     expect($user->daysUntilNextPay())->toBe(0);
 });
 
-test('averageDailySpending calculates from debit transactions', function () {
-    $user = User::factory()->create();
-    $account = Account::factory()->for($user)->create();
-
-    Transaction::factory()->debit()->for($user)->for($account)->create([
-        'amount' => 10000,
-        'post_date' => now()->subDays(15),
-    ]);
-    Transaction::factory()->debit()->for($user)->for($account)->create([
-        'amount' => 20000,
-        'post_date' => now()->subDays(5),
-    ]);
-
-    expect($user->averageDailySpending(30))->toBe(1000);
-});
-
-test('averageDailySpending excludes credit transactions', function () {
-    $user = User::factory()->create();
-    $account = Account::factory()->for($user)->create();
-
-    Transaction::factory()->debit()->for($user)->for($account)->create([
-        'amount' => 30000,
-        'post_date' => now()->subDays(10),
-    ]);
-    Transaction::factory()->credit()->for($user)->for($account)->create([
-        'amount' => 50000,
-        'post_date' => now()->subDays(5),
-    ]);
-
-    expect($user->averageDailySpending(30))->toBe(1000);
-});
-
-test('averageDailySpending returns zero when no debit transactions', function () {
-    $user = User::factory()->create();
-
-    expect($user->averageDailySpending(30))->toBe(0);
-});
-
-test('bufferUntilNextPay returns difference between available and projected spend', function () {
+test('bufferUntilNextPay returns available minus planned spend until payday', function () {
     $user = User::factory()->withPayCycle()->create([
-        'next_pay_date' => now()->addDays(7),
+        'next_pay_date' => now()->addDays(14),
     ]);
-    $account = Account::factory()->for($user)->create();
+    $account = Account::factory()->for($user)->create(['balance' => 200000]);
 
-    Transaction::factory()->debit()->for($user)->for($account)->create([
-        'amount' => 30000,
-        'post_date' => now()->subDays(10),
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 50000,
+        'is_active' => true,
+        'start_date' => now()->addDays(3),
+        'frequency' => RecurrenceFrequency::DontRepeat,
     ]);
 
-    $available = 200000;
-    $buffer = $user->bufferUntilNextPay($available);
-
-    $dailySpend = $user->averageDailySpending();
-    $expected = $available - ($dailySpend * 7);
-
-    expect($buffer)->toBe($expected);
+    expect($user->bufferUntilNextPay($user->totalAvailable()))
+        ->toBe($user->totalAvailable() - $user->totalNeededUntilPayday());
 });
 
 test('bufferUntilNextPay returns null when no pay cycle configured', function () {
@@ -341,4 +302,61 @@ test('totalNeededUntilPayday uses absolute amount', function () {
     ]);
 
     expect($user->totalNeededUntilPayday())->toBe(4200);
+});
+
+test('totalNeededUntilPayday excludes planned transfers', function () {
+    $user = User::factory()->withPayCycle()->create([
+        'next_pay_date' => now()->addDays(7),
+    ]);
+    $account = Account::factory()->for($user)->create();
+    $transferParent = Category::factory()->create(['name' => 'Transfer']);
+    $transferChild = Category::factory()->create(['parent_id' => $transferParent->id, 'name' => 'Optimus to CC']);
+    $billCategory = Category::factory()->create(['name' => 'Insurance']);
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 25000,
+        'category_id' => $billCategory->id,
+        'is_active' => true,
+        'start_date' => now()->addDay(),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 250000,
+        'category_id' => $transferChild->id,
+        'is_active' => true,
+        'start_date' => now()->addDay(),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+
+    expect($user->totalNeededUntilPayday())->toBe(25000);
+});
+
+test('totalNeededUntilPayday excludes planned transfers categorised at the parent Transfer level', function () {
+    $user = User::factory()->withPayCycle()->create([
+        'next_pay_date' => now()->addDays(7),
+    ]);
+    $account = Account::factory()->for($user)->create();
+    $transferParent = Category::factory()->create(['name' => 'Transfer']);
+    $billCategory = Category::factory()->create(['name' => 'Insurance']);
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 25000,
+        'category_id' => $billCategory->id,
+        'is_active' => true,
+        'start_date' => now()->addDay(),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 250000,
+        'category_id' => $transferParent->id,
+        'is_active' => true,
+        'start_date' => now()->addDay(),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+
+    expect($user->totalNeededUntilPayday())->toBe(25000);
 });

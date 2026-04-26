@@ -156,6 +156,23 @@ final class Transaction extends Model
     }
 
     /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeExcludingTransfers(Builder $query): Builder
+    {
+        return $query
+            ->whereNull('transfer_pair_id')
+            ->whereDoesntHave('category', function (Builder $q): void {
+                $q->where('name', 'Transfer')
+                    ->orWhereHas(
+                        'parent',
+                        fn (Builder $p): Builder => $p->where('name', 'Transfer'),
+                    );
+            });
+    }
+
+    /**
      * @param  array<string, mixed>  $overrides
      */
     public function createChild(array $overrides = []): self
