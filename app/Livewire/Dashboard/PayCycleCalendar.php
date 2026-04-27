@@ -215,6 +215,7 @@ final class PayCycleCalendar extends Component
                 iso: $key,
                 day: $cursor->day,
                 dayName: $cursor->format('D'),
+                isoWeekday: $cursor->isoWeekday(),
                 isToday: $cursor->isSameDay($today),
                 isCycleStart: $cursor->isSameDay($cycleStart),
                 isCycleEnd: $cursor->isSameDay($lastRenderedDay),
