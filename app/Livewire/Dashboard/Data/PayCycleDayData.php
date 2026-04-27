@@ -13,6 +13,7 @@ final readonly class PayCycleDayData
         public string $iso,
         public int $day,
         public string $dayName,
+        public int $isoWeekday,
         public bool $isToday,
         public bool $isCycleStart,
         public bool $isCycleEnd,
