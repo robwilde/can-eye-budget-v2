@@ -29,6 +29,21 @@ function nextMondayAtLeastDaysAhead(int $minDaysAhead): CarbonImmutable
     return $candidate;
 }
 
+function nextDateOnIsoWeekday(int $isoWeekday, int $minDaysAhead): CarbonImmutable
+{
+    if ($isoWeekday < 1 || $isoWeekday > 7) {
+        throw new InvalidArgumentException(sprintf('isoWeekday must be 1..7, got %d', $isoWeekday));
+    }
+
+    $candidate = CarbonImmutable::today()->addDays($minDaysAhead);
+
+    while ($candidate->isoWeekday() !== $isoWeekday) {
+        $candidate = $candidate->addDay();
+    }
+
+    return $candidate;
+}
+
 test('shows empty-state when pay cycle is not configured', function () {
     $user = User::factory()->create();
 
@@ -506,3 +521,76 @@ test('goToCurrentCycle resets cycle offset to 0 and selects today', function () 
     expect($component->get('cycleOffset'))->toBe(0)
         ->and($component->get('selectedDate'))->toBe(CarbonImmutable::today()->format('Y-m-d'));
 });
+
+test('first day of cycle reports correct isoWeekday for any starting weekday', function (int $startWeekday) {
+    $cycleStart = nextDateOnIsoWeekday($startWeekday, 14);
+    $nextPay = $cycleStart->addDays(14);
+
+    $user = User::factory()->withPayCycle()->create([
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => $nextPay,
+    ]);
+    Account::factory()->for($user)->create();
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->days();
+
+    expect($days[0]->isoWeekday)->toBe($startWeekday)
+        ->and($days[0]->iso)->toBe($cycleStart->format('Y-m-d'));
+})->with([
+    'Monday' => 1,
+    'Tuesday' => 2,
+    'Wednesday' => 3,
+    'Thursday' => 4,
+    'Friday' => 5,
+    'Saturday' => 6,
+    'Sunday' => 7,
+]);
+
+test('every day reports its real iso weekday', function (int $startWeekday) {
+    $cycleStart = nextDateOnIsoWeekday($startWeekday, 14);
+    $nextPay = $cycleStart->addDays(14);
+
+    $user = User::factory()->withPayCycle()->create([
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => $nextPay,
+    ]);
+    Account::factory()->for($user)->create();
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->days();
+
+    foreach ($days as $day) {
+        $parsed = CarbonImmutable::createFromFormat('Y-m-d', $day->iso);
+        expect($day->isoWeekday)->toBe($parsed->isoWeekday());
+    }
+})->with([1, 2, 3, 4, 5, 6, 7]);
+
+test('blade renders grid-column-start matching the real weekday for the first day', function (int $startWeekday) {
+    $cycleStart = nextDateOnIsoWeekday($startWeekday, 14);
+    $nextPay = $cycleStart->addDays(14);
+
+    $user = User::factory()->withPayCycle()->create([
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => $nextPay,
+    ]);
+    Account::factory()->for($user)->create();
+
+    $html = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->html();
+
+    $expectedPattern = sprintf(
+        '/<button\b[^>]*wire:key="%s"[^>]*style="[^"]*grid-column-start:\s*%d\b[^"]*"[^>]*>/s',
+        preg_quote(sprintf('cyc-day-%s', $cycleStart->format('Y-m-d')), '/'),
+        $startWeekday,
+    );
+
+    expect($html)->toMatch($expectedPattern);
+})->with([1, 2, 3, 4, 5, 6, 7]);

@@ -70,7 +70,7 @@ it('renders the trigger as a real button with an accessible name', function () {
 
     expect($html)->toMatch(
         '/<button[^>]*data-test="sidebar-menu-button"[\s\S]*?'
-        .preg_quote($this->user->name, '/')
+        .preg_quote(e($this->user->name), '/')
         .'[\s\S]*?<\/button>/'
     );
 });
@@ -101,9 +101,9 @@ it('renders a real aria-label attribute on the sidebar trigger button', function
 
     expect($html)->toMatch(
         '/<button[^>]*data-test="sidebar-menu-button"[^>]*aria-label="'
-        .preg_quote($this->user->name, '/')
+        .preg_quote(e($this->user->name), '/')
         .'"|<button[^>]*aria-label="'
-        .preg_quote($this->user->name, '/')
+        .preg_quote(e($this->user->name), '/')
         .'"[^>]*data-test="sidebar-menu-button"/'
     );
 
