@@ -1,120 +1,139 @@
-@use('Carbon\CarbonImmutable')
-<div data-testid="calendar-view" class="space-y-4">
-    <header class="flex flex-wrap items-center justify-between gap-2">
-        <div class="flex items-center gap-3">
-            <flux:button wire:click="previousMonth" variant="ghost" icon="chevron-left" size="sm" />
-            <div>
-                <h1 class="cib-title">{{ $this->headerLabel['label'] }}</h1>
-                @if ($this->headerLabel['rangeLabel'])
-                    <div class="cib-subtitle">{{ $this->headerLabel['rangeLabel'] }}</div>
-                @endif
-            </div>
-            <flux:button wire:click="nextMonth" variant="ghost" icon="chevron-right" size="sm" />
+@use('App\Livewire\CalendarView')
+
+<div data-testid="calendar-view" class="pay-cycle-cal">
+    <header class="cyc-head">
+        <div>
+            <h1 class="cyc-title">{{ $this->headerLabel['label'] }}</h1>
+            <p class="cyc-sub">All transactions · history & planned · Mon–Sun</p>
         </div>
-        @unless ($this->calendarData['isCurrentMonth'])
-            <flux:button wire:click="goToToday" variant="subtle" size="sm">Today</flux:button>
-        @endunless
+        <div class="cyc-nav">
+            <button type="button" wire:click="previousMonth" title="Previous month" aria-label="Previous month">
+                <flux:icon.chevron-left variant="micro"/>
+            </button>
+            <button type="button" wire:click="goToToday" @disabled($this->headerLabel['isCurrentMonth'])>
+                Today
+            </button>
+            <button type="button" wire:click="nextMonth" title="Next month" aria-label="Next month">
+                <flux:icon.chevron-right variant="micro"/>
+            </button>
+        </div>
     </header>
 
     <div class="quickline">
         <span class="pill pill-income">
             <span class="pill-label">Income</span>
-            <span class="pill-value tabular-nums">{{ $formatMoney($this->quickline['income']) }}</span>
+            <span class="pill-value tabular-nums">{{ $formatMoney($this->monthTotals['income']) }}</span>
         </span>
         <span class="pill pill-posted">
-            <span class="pill-label">Posted</span>
-            <span class="pill-value tabular-nums">{{ $formatMoney($this->quickline['posted']) }}</span>
-        </span>
-        <span class="pill pill-planned">
-            <span class="pill-label">Planned</span>
-            <span class="pill-value tabular-nums">{{ $formatMoney($this->quickline['planned']) }}</span>
+            <span class="pill-label">Spend</span>
+            <span class="pill-value tabular-nums">{{ $formatMoney($this->monthTotals['spend']) }}</span>
         </span>
         <span @class([
             'pill',
-            'pill-buffer-pos' => ($this->quickline['bufferAtPayday'] ?? 0) >= 0 && $this->quickline['bufferAtPayday'] !== null,
-            'pill-buffer-neg' => ($this->quickline['bufferAtPayday'] ?? 0) < 0,
-            'pill-buffer-empty' => $this->quickline['bufferAtPayday'] === null,
+            'pill-buffer-pos' => $this->monthTotals['net'] >= 0,
+            'pill-buffer-neg' => $this->monthTotals['net'] < 0,
         ])>
-            <span class="pill-label">Buffer</span>
-            <span class="pill-value tabular-nums">
-                @if ($this->quickline['bufferAtPayday'] === null)
-                    set pay cycle
-                @else
-                    {{ $formatMoney($this->quickline['bufferAtPayday']) }}
-                @endif
-            </span>
+            <span class="pill-label">Net</span>
+            <span class="pill-value tabular-nums">{{ $formatMoney($this->monthTotals['net']) }}</span>
         </span>
     </div>
 
-    <div class="week-strip">
-        @foreach ($this->weekStrip as $cell)
-            <button
-                type="button"
-                wire:key="day-{{ $cell['date'] }}"
-                wire:click="selectDate('{{ $cell['date'] }}')"
-                aria-pressed="{{ $cell['isSelected'] ? 'true' : 'false' }}"
-                @class([
-                    'day-cell',
-                    'is-today' => $cell['isToday'],
-                    'is-payday' => $cell['isPayday'],
-                    'is-selected' => $cell['isSelected'],
-                ])
-            >
-                <div class="day-name">{{ $cell['dayName'] }}</div>
-                <div class="day-num">{{ $cell['dayOfMonth'] }}</div>
-                @if ($cell['isPayday'])
-                    <div class="badge-payday">PAYDAY</div>
-                @endif
-                @if (count($cell['dots']) > 0)
-                    <div class="dots">
-                        @foreach ($cell['dots'] as $dot)
-                            <span @class(['dot', "dot-{$dot}"])></span>
-                        @endforeach
+    <div class="cyc-grid" role="grid">
+        <div class="cyc-dows" role="row">
+            @foreach (['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as $label)
+                <div class="cyc-dow" role="columnheader">{{ $label }}</div>
+            @endforeach
+        </div>
+        <div class="cyc-week-stream">
+            @foreach ($this->days as $day)
+                <button
+                        type="button"
+                        wire:click="selectDate('{{ $day->iso }}')"
+                        wire:key="cal-day-{{ $day->iso }}"
+                        style="grid-column-start: {{ $day->isoWeekday }}"
+                        @class([
+                            'cyc-day',
+                            'out' => ! $day->isCurrentMonth,
+                            'past' => $day->isPast && ! $day->isToday && $day->isCurrentMonth,
+                            'cycle-band' => $day->isInActiveCycle && $day->isCurrentMonth,
+                            'today' => $day->isToday,
+                            'lastpay' => $day->isPastPayday,
+                            'payday' => $day->isNextPayday,
+                            'active' => $day->iso === $this->selectedDate,
+                        ])
+                >
+                    <div class="cyc-day-top">
+                        <span class="cyc-dnum">{{ $day->day }}</span>
+                        @if ($day->isToday)
+                            <span class="cyc-today-pill">TODAY</span>
+                        @endif
+                        @if ($day->isNextPayday)
+                            <span class="cyc-paytag">PAYDAY</span>
+                        @elseif ($day->isPastPayday)
+                            <span class="cyc-paytag dim">PAID</span>
+                        @endif
                     </div>
-                @endif
-            </button>
-        @endforeach
+                    <div class="cyc-day-body">
+                        @foreach (array_slice($day->pips, 0, CalendarView::MAX_PIPS_PER_DAY) as $pip)
+                            <div @class(['cyc-pip', $pip->kind])>
+                                <span class="cyc-pip-dot"></span>
+                                <span class="cyc-pip-name">{{ $pip->name }}</span>
+                            </div>
+                        @endforeach
+                        @if ($day->hiddenCount > 0)
+                            <div class="cyc-pip-more">+{{ $day->hiddenCount }} more</div>
+                        @endif
+                    </div>
+                    <x-cib.day-net :cents="$day->netCents"/>
+                </button>
+            @endforeach
+        </div>
     </div>
 
-    @if (count($this->agenda) === 0)
-        <div class="empty-state">
-            <flux:icon.calendar class="mx-auto size-12 text-zinc-400" />
-            <flux:heading size="lg" class="mt-4">No transactions</flux:heading>
-            <flux:text class="mt-2">No transactions found from {{ CarbonImmutable::parse($this->selectedDate)->format('j M Y') }} onward.</flux:text>
-        </div>
-    @else
-        <div class="agenda">
-            @foreach ($this->agenda as $group)
-                <section wire:key="agenda-{{ $group['date'] }}" class="agenda-group">
-                    <header class="agenda-head">
-                        <h3>{{ $group['heading'] }}</h3>
-                        <span @class(['net tabular-nums', 'pos' => $group['net'] >= 0, 'neg' => $group['net'] < 0])>
-                            {{ $formatMoney($group['net']) }}
-                        </span>
-                    </header>
-                    <div class="day-card">
-                        @foreach ($group['transactions'] as $txn)
-                            @php
-                                $isPlanned = ($txn['type'] ?? 'actual') === 'planned';
-                                $tone = match (true) {
-                                    $isPlanned => 'plan',
-                                    ($txn['direction'] ?? null) === 'credit' => 'inc',
-                                    default => 'out',
-                                };
-                            @endphp
-                            <x-cib.tx-row
-                                :transaction-id="$isPlanned ? null : $txn['id']"
-                                :planned-transaction-id="$isPlanned ? $txn['planned_transaction_id'] : null"
-                                :occurrence-date="$isPlanned ? $txn['occurrence_date'] : null"
-                                :name="$txn['category']"
-                                :amount="$txn['amount']"
-                                :tone="$tone"
-                                :icon="$txn['icon'] ?? null"
-                            />
-                        @endforeach
-                    </div>
-                </section>
-            @endforeach
+    @if ($this->selectedDay !== null)
+        <div class="cyc-detail">
+            <div class="cyc-detail-head">
+                <div>
+                    <div class="cyc-detail-dow">{{ $this->selectedDay['dayLabel'] }}</div>
+                    <div class="cyc-detail-date">{{ $this->selectedDay['dateLabel'] }}</div>
+                </div>
+                <div class="cyc-detail-meta">
+                    @if ($this->selectedDay['isToday'])
+                        <span class="chip-today">Today</span>
+                    @endif
+                    @if ($this->selectedDay['isPastPayday'])
+                        <span class="chip-paid">Paid</span>
+                    @endif
+                    @if ($this->selectedDay['isNextPayday'])
+                        <span class="chip-pay">Payday</span>
+                    @endif
+                    <span class="chip-count">
+                        {{ count($this->selectedDay['pips']) }} item{{ count($this->selectedDay['pips']) === 1 ? '' : 's' }}
+                    </span>
+                </div>
+            </div>
+            <div class="cyc-detail-body">
+                @forelse ($this->selectedDay['pips'] as $pip)
+                    @php
+                        $rowTone = match ($pip->kind) {
+                            'inc' => 'inc',
+                            'plan' => 'plan',
+                            default => 'out',
+                        };
+                    @endphp
+                    <x-cib.tx-row
+                            :transaction-id="$pip->transactionId"
+                            :planned-transaction-id="$pip->plannedTransactionId"
+                            :occurrence-date="$pip->occurrenceDate"
+                            :name="$pip->name"
+                            :amount="$pip->amount"
+                            :tone="$rowTone"
+                            :icon="$pip->icon"
+                    />
+                @empty
+                    <p class="cyc-empty">Nothing on this day.</p>
+                @endforelse
+            </div>
         </div>
     @endif
 </div>
