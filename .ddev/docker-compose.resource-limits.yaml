@@ -1,0 +1,5 @@
+services:
+  web:
+    mem_limit: 2g
+    mem_reservation: 512m
+    cpus: 4.0
