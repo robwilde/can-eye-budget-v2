@@ -199,6 +199,6 @@ mcp__playwright__browser_wait_for with text="<unique text on page>"
 **Responsive testing viewports:**
 - Mobile: 375 x 812
 - Tablet: 768 x 1024
-- Desktop: 1200 x 900 (or 1280 x 720)
+- Desktop: 1920 x 1080
 
 **Screenshot naming convention:** `{page}-{viewport}.png` (e.g., `support-mobile-375.png`)
