@@ -15,6 +15,13 @@ This file contains project-specific guidelines for the Can Eye Budget V2 project
 
 **NEVER use Laravel Boost MCP tools (`tinker`, etc.) as a workaround for running shell commands.**
 
+**NEVER run `op test.*` (or any test invocation) with `run_in_background: true`.** Test runs share the
+same DDEV web container; concurrent invocations stack their PHP processes and have caused host-level
+CPU/memory saturation requiring a manual `ddev restart`. If a test run hangs, kill it (TaskStop or
+Ctrl-C) before launching another. If polling for completion is needed, redirect output to a file and
+`tail -f` it instead of re-spawning. The `flock` guard in `op.conf` will reject concurrent `op test*`
+invocations with an explicit message — treat that message as a signal to stop, not to retry.
+
 **Always use `op` (OpCode) aliases from `op.conf`.** These automatically route through `ddev exec`.
 
 Common examples:
@@ -192,6 +199,6 @@ mcp__playwright__browser_wait_for with text="<unique text on page>"
 **Responsive testing viewports:**
 - Mobile: 375 x 812
 - Tablet: 768 x 1024
-- Desktop: 1200 x 900 (or 1280 x 720)
+- Desktop: 1920 x 1080
 
 **Screenshot naming convention:** `{page}-{viewport}.png` (e.g., `support-mobile-375.png`)

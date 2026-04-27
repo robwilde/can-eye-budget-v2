@@ -11,7 +11,8 @@ database:
     version: "11.8"
 use_dns_when_possible: true
 composer_version: "2"
-web_environment: []
+web_environment:
+    - PLAYWRIGHT_BROWSERS_PATH=/mnt/ddev-global-cache/playwright
 corepack_enable: false
 
 # Key features of DDEV's config.yaml:
@@ -290,4 +291,6 @@ corepack_enable: false
 # for them. Example:
 hooks:
   post-start:
-    - exec: npx playwright install chromium
+    # Install Chromium into the persistent DDEV global cache only when the binary is missing.
+    # PLAYWRIGHT_BROWSERS_PATH (set in web_environment) keeps the binary across `ddev restart`.
+    - exec: 'sh -c ''ls -d "$PLAYWRIGHT_BROWSERS_PATH"/chromium-* >/dev/null 2>&1 || npx playwright install chromium'''
