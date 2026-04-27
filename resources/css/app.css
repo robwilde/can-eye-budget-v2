@@ -776,6 +776,12 @@ select:focus[data-flux-control] {
         transition: background 200ms var(--ease-snap);
     }
     .cyc-day:hover { background: var(--color-cib-n-50); }
+    .cyc-day.out {
+        background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(0, 0, 0, 0.025) 6px 7px);
+        color: var(--color-fg-3);
+    }
+    .cyc-day.out .cyc-dnum { color: var(--color-fg-3); }
+    .cyc-day.cycle-band { background: color-mix(in oklab, var(--color-money-available-soft) 50%, var(--color-bg-surface)); }
     .cyc-day.past { background: var(--color-cib-n-50); }
     .cyc-day.past:hover { background: var(--color-cib-n-100); }
     .cyc-day.today { background: var(--color-cib-cream-50); }
@@ -897,6 +903,7 @@ select:focus[data-flux-control] {
     .cyc-detail-body { display: flex; flex-direction: column; gap: 6px; }
     .chip-today,
     .chip-pay,
+    .chip-paid,
     .chip-count {
         font: 700 11px/1 var(--font-sans);
         padding: 6px 10px;
@@ -905,6 +912,7 @@ select:focus[data-flux-control] {
     }
     .chip-today { background: var(--color-cib-cream-50); }
     .chip-pay { background: var(--color-cib-yellow-400); }
+    .chip-paid { background: var(--color-money-available-soft); color: var(--color-cib-green-600); }
     .chip-count { background: var(--color-bg-surface); color: var(--color-fg-2); }
     .pay-cycle-cal .cyc-empty {
         padding: 14px;

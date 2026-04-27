@@ -6,13 +6,11 @@ namespace App\Livewire\Dashboard;
 
 use App\Casts\MoneyCast;
 use App\Enums\PayFrequency;
-use App\Enums\TransactionDirection;
 use App\Livewire\Dashboard\Data\PayCycleDayData;
 use App\Livewire\Dashboard\Data\PayCyclePip;
-use App\Models\PlannedTransaction;
-use App\Models\Transaction;
+use App\Support\Calendar\DayActivity;
+use App\Support\Calendar\DayActivityLoader;
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Collection;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -115,101 +113,16 @@ final class PayCycleCalendar extends Component
 
         $userId = (int) auth()->id();
 
-        $transactions = Transaction::query()
-            ->where('user_id', $userId)
-            ->current()
-            ->excludingTransfers()
-            ->whereBetween('post_date', [$cycleStart, $lastRenderedDay])
-            ->with([
-                'category:id,name,icon,parent_id',
-                'category.parent:id,icon,parent_id',
-                'category.parent.parent:id,icon,parent_id',
-            ])
-            ->orderBy('post_date')
-            ->get();
-
-        $plannedTransactions = PlannedTransaction::query()
-            ->where('user_id', $userId)
-            ->where('is_active', true)
-            ->excludingTransfers()
-            ->where('start_date', '<=', $lastRenderedDay)
-            ->where(static fn ($q) => $q->whereNull('until_date')->orWhere('until_date', '>=', $cycleStart))
-            ->with([
-                'category:id,name,icon,parent_id',
-                'category.parent:id,icon,parent_id',
-                'category.parent.parent:id,icon,parent_id',
-            ])
-            ->get();
-
-        /** @var Collection<string, Collection<int, Transaction>> $txByDate */
-        $txByDate = $transactions->groupBy(static fn (Transaction $t) => $t->post_date->format('Y-m-d'));
-
-        /** @var array<string, list<PayCyclePip>> $plannedByDate */
-        $plannedByDate = [];
-
-        foreach ($plannedTransactions as $planned) {
-            foreach ($planned->occurrencesBetween($cycleStart, $lastRenderedDay) as $occurrence) {
-                $key = $occurrence->format('Y-m-d');
-                $plannedByDate[$key] ??= [];
-                $plannedByDate[$key][] = new PayCyclePip(
-                    kind: 'plan',
-                    name: $planned->category?->name ?? $planned->description, // @phpstan-ignore nullsafe.neverNull
-                    amount: abs((int) $planned->amount),
-                    icon: $planned->category?->resolveIcon(),
-                    transactionId: null,
-                    plannedTransactionId: $planned->id,
-                    occurrenceDate: $key,
-                );
-            }
-        }
+        $activity = (new DayActivityLoader)->load($cycleStart, $lastRenderedDay, $userId);
 
         $days = [];
         $cursor = $cycleStart;
 
         while ($cursor->lessThanOrEqualTo($lastRenderedDay)) {
             $key = $cursor->format('Y-m-d');
-            $dayPips = [];
-            $incomeCents = 0;
-            $postedCents = 0;
-            $plannedCents = 0;
+            $dayActivity = $activity[$key] ?? DayActivity::empty();
 
-            /** @var Collection<int, Transaction> $dayTxns */
-            $dayTxns = $txByDate->get($key, collect());
-
-            foreach ($dayTxns as $tx) {
-                $absAmount = abs((int) $tx->amount);
-                $isCredit = $tx->direction === TransactionDirection::Credit;
-
-                if ($isCredit) {
-                    $incomeCents += $absAmount;
-                }
-
-                if (! $isCredit) {
-                    $postedCents += $absAmount;
-                }
-
-                $dayPips[] = new PayCyclePip(
-                    kind: $tx->direction === TransactionDirection::Credit ? 'inc' : 'out',
-                    name: $tx->category?->name ?? ($tx->description !== '' ? $tx->description : 'Transaction'), // @phpstan-ignore nullsafe.neverNull
-                    amount: $absAmount,
-                    icon: $tx->category?->resolveIcon(),
-                    transactionId: $tx->id,
-                    plannedTransactionId: null,
-                    occurrenceDate: null,
-                );
-            }
-
-            foreach ($plannedByDate[$key] ?? [] as $plannedPip) {
-                $plannedCents += $plannedPip->amount;
-                $dayPips[] = $plannedPip;
-            }
-
-            usort(
-                $dayPips,
-                static fn (PayCyclePip $a, PayCyclePip $b): int => $b->amount <=> $a->amount,
-            );
-
-            $hiddenCount = max(0, count($dayPips) - self::MAX_PIPS_PER_DAY);
+            $hiddenCount = max(0, count($dayActivity->pips) - self::MAX_PIPS_PER_DAY);
 
             $days[] = new PayCycleDayData(
                 iso: $key,
@@ -220,12 +133,12 @@ final class PayCycleCalendar extends Component
                 isCycleStart: $cursor->isSameDay($cycleStart),
                 isCycleEnd: $cursor->isSameDay($lastRenderedDay),
                 isPast: $cursor->lessThan($today),
-                pips: $dayPips,
+                pips: $dayActivity->pips,
                 hiddenCount: $hiddenCount,
-                netCents: $incomeCents - $postedCents,
-                incomeCents: $incomeCents,
-                postedCents: $postedCents,
-                plannedCents: $plannedCents,
+                netCents: $dayActivity->incomeCents - $dayActivity->postedCents,
+                incomeCents: $dayActivity->incomeCents,
+                postedCents: $dayActivity->postedCents,
+                plannedCents: $dayActivity->plannedCents,
             );
 
             $cursor = $cursor->addDay();
