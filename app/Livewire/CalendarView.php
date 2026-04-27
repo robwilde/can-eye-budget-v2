@@ -5,13 +5,14 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Casts\MoneyCast;
-use App\Enums\TransactionDirection;
-use App\Models\PlannedTransaction;
-use App\Models\Transaction;
-use App\Services\ReconciliationMatcher;
+use App\Enums\PayFrequency;
+use App\Livewire\Dashboard\Data\PayCyclePip;
+use App\Livewire\Data\CalendarDayData;
+use App\Models\User;
+use App\Support\Calendar\DayActivity;
+use App\Support\Calendar\DayActivityLoader;
 use Carbon\CarbonImmutable;
 use Carbon\Constants\UnitValue;
-use Illuminate\Support\Collection;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
@@ -19,6 +20,8 @@ use Livewire\Component;
 
 final class CalendarView extends Component
 {
+    public const int MAX_PIPS_PER_DAY = 3;
+
     public string $currentMonth = '';
 
     public string $selectedDate = '';
@@ -37,39 +40,43 @@ final class CalendarView extends Component
             ? $parsed->format('Y-m-d')
             : CarbonImmutable::today()->format('Y-m-d');
 
-        unset($this->agenda, $this->weekStrip); // @phpstan-ignore property.notFound
+        unset($this->selectedDay); // @phpstan-ignore property.notFound
     }
 
     public function previousMonth(): void
     {
-        $this->currentMonth = $this->monthStart()->subMonth()->format('Y-m');
-        $this->selectedDate = $this->monthStart()->format('Y-m-d');
-        unset($this->calendarData, $this->agenda, $this->weekStrip); // @phpstan-ignore property.notFound
+        $target = $this->monthStart()->subMonth();
+        $this->currentMonth = $target->format('Y-m');
+        $this->selectedDate = $target->format('Y-m-d');
+        $this->bustCache();
     }
 
     public function nextMonth(): void
     {
-        $this->currentMonth = $this->monthStart()->addMonth()->format('Y-m');
-        $this->selectedDate = $this->monthStart()->format('Y-m-d');
-        unset($this->calendarData, $this->agenda, $this->weekStrip); // @phpstan-ignore property.notFound
+        $target = $this->monthStart()->addMonth();
+        $this->currentMonth = $target->format('Y-m');
+        $this->selectedDate = $target->format('Y-m-d');
+        $this->bustCache();
     }
 
     public function goToToday(): void
     {
         $this->currentMonth = CarbonImmutable::now()->format('Y-m');
         $this->selectedDate = CarbonImmutable::today()->format('Y-m-d');
-        unset($this->calendarData, $this->agenda, $this->weekStrip); // @phpstan-ignore property.notFound
+        $this->bustCache();
     }
 
     #[On('transaction-saved')]
     public function refreshCalendar(): void
     {
-        unset($this->calendarData, $this->agenda, $this->weekStrip); // @phpstan-ignore property.notFound
+        $this->bustCache();
     }
 
-    /** @return array{monthLabel: string, weeks: list<list<array{date: int, fullDate: string, isCurrentMonth: bool, isToday: bool, transactions: list<array{id: int|null, category: string, icon: string|null, amount: int, direction: string, type: string, source: string, isTransfer: bool, planned_transaction_id: int|null, reconciliation_status: string|null, linked_transaction_id: int|null, occurrence_date: string|null}>}>>, isCurrentMonth: bool} */
-    #[Computed(persist: true)]
-    public function calendarData(): array
+    /**
+     * @return list<CalendarDayData>
+     */
+    #[Computed]
+    public function days(): array
     {
         $monthStart = $this->monthStart();
         $monthEnd = $monthStart->endOfMonth();
@@ -78,267 +85,132 @@ final class CalendarView extends Component
         $gridStart = $monthStart->startOfWeek(UnitValue::MONDAY);
         $gridEnd = $monthEnd->endOfWeek(UnitValue::SUNDAY);
 
-        $allTransactions = Transaction::query()
-            ->where('user_id', auth()->id())
-            ->current()
-            ->whereBetween('post_date', [$gridStart, $gridEnd])
-            ->with([
-                'category:id,name,icon,parent_id',
-                'category.parent:id,icon,parent_id',
-                'category.parent.parent:id,icon,parent_id',
-            ])
-            ->orderBy('post_date')
-            ->get();
-
-        /** @var Collection<string, Collection<int, Transaction>> $transactionsByDate */
-        $transactionsByDate = $allTransactions
-            ->groupBy(fn (Transaction $t) => $t->post_date->format('Y-m-d'));
-
-        /** @var Collection<int, Collection<int, Transaction>> $linkedByPlannedId */
-        $linkedByPlannedId = $allTransactions
-            ->filter(fn (Transaction $t) => $t->planned_transaction_id !== null)
-            ->groupBy('planned_transaction_id');
-
-        /** @var Collection<int, Collection<int, Transaction>> $unlinkedByAccount */
-        $unlinkedByAccount = $allTransactions
-            ->filter(fn (Transaction $t) => $t->planned_transaction_id === null)
-            ->groupBy('account_id');
-
-        $plannedByDate = collect();
-
-        $plannedTransactions = PlannedTransaction::query()
-            ->where('user_id', auth()->id())
-            ->where('is_active', true)
-            ->where('start_date', '<=', $gridEnd)
-            ->where(fn ($q) => $q->whereNull('until_date')->orWhere('until_date', '>=', $gridStart))
-            ->with([
-                'category:id,name,icon,parent_id',
-                'category.parent:id,icon,parent_id',
-                'category.parent.parent:id,icon,parent_id',
-            ])
-            ->get();
-
-        foreach ($plannedTransactions as $planned) {
-            foreach ($planned->occurrencesBetween($gridStart, $gridEnd) as $date) {
-                $dateKey = $date->format('Y-m-d');
-                $existing = $plannedByDate->get($dateKey, []);
-
-                $reconciliationResult = $this->resolveReconciliationStatus(
-                    $planned,
-                    $date,
-                    $linkedByPlannedId,
-                    $unlinkedByAccount,
-                );
-
-                $existing[] = [
-                    'id' => null,
-                    'category' => $planned->category?->name ?? $planned->description, // @phpstan-ignore nullsafe.neverNull
-                    'icon' => $planned->category?->resolveIcon(),
-                    'amount' => $planned->amount,
-                    'direction' => $planned->direction->value,
-                    'type' => 'planned',
-                    'source' => 'planned',
-                    'isTransfer' => $planned->transfer_to_account_id !== null,
-                    'planned_transaction_id' => $planned->id,
-                    'reconciliation_status' => $reconciliationResult['status'],
-                    'linked_transaction_id' => $reconciliationResult['linked_transaction_id'],
-                    'occurrence_date' => $dateKey,
-                ];
-                $plannedByDate->put($dateKey, $existing);
-            }
-        }
-
-        $weeks = [];
-        $current = $gridStart;
-
-        while ($current <= $gridEnd) {
-            $week = [];
-            for ($i = 0; $i < 7; $i++) {
-                $dateKey = $current->format('Y-m-d');
-                $dayTransactions = $transactionsByDate->get($dateKey, collect());
-
-                $actualTxns = $dayTransactions->map(fn (Transaction $t) => [
-                    'id' => $t->id,
-                    'category' => $t->category?->name ?? $t->description, // @phpstan-ignore nullsafe.neverNull
-                    'icon' => $t->category?->resolveIcon(),
-                    'amount' => $t->amount,
-                    'direction' => $t->direction->value,
-                    'type' => 'actual',
-                    'source' => $t->source->value,
-                    'isTransfer' => $t->transfer_pair_id !== null,
-                    'planned_transaction_id' => $t->planned_transaction_id,
-                    'reconciliation_status' => null,
-                    'linked_transaction_id' => null,
-                    'occurrence_date' => null,
-                ])->values()->all();
-
-                $week[] = [
-                    'date' => $current->day,
-                    'fullDate' => $dateKey,
-                    'isCurrentMonth' => $current->month === $monthStart->month && $current->year === $monthStart->year,
-                    'isToday' => $current->isSameDay($today),
-                    'transactions' => array_merge($actualTxns, (array) $plannedByDate->get($dateKey, [])),
-                ];
-
-                $current = $current->addDay();
-            }
-            $weeks[] = $week;
-        }
-
-        return [
-            'monthLabel' => $monthStart->format('F Y'),
-            'weeks' => $weeks,
-            'isCurrentMonth' => $monthStart->month === $today->month && $monthStart->year === $today->year,
-        ];
-    }
-
-    /**
-     * @return list<array{date: string, dayOfMonth: int, dayName: string, isToday: bool, isPayday: bool, isSelected: bool, dots: list<string>}>
-     */
-    #[Computed]
-    public function weekStrip(): array
-    {
-        $today = CarbonImmutable::today();
-        $start = $today->subDays(2);
-
+        $userId = (int) auth()->id();
         $user = auth()->user();
-        $paydayKey = $user?->next_pay_date?->format('Y-m-d');
 
-        /** @var Collection<string, array<string, mixed>> $byDate */
-        $byDate = collect($this->calendarData['weeks']) // @phpstan-ignore property.notFound, argument.templateType, argument.templateType
-            ->flatten(1)
-            ->keyBy('fullDate');
+        $activity = (new DayActivityLoader)->load($gridStart, $gridEnd, $userId);
 
-        $cells = [];
+        $paydays = $user instanceof User
+            ? $this->paydaysWithinGrid($gridStart, $gridEnd, $user)
+            : [];
 
-        for ($i = 0; $i < 7; $i++) {
-            $cursor = $start->addDays($i);
+        $activeCycle = $user?->currentPayCycleBounds();
+
+        $days = [];
+        $cursor = $gridStart;
+
+        while ($cursor->lessThanOrEqualTo($gridEnd)) {
             $key = $cursor->format('Y-m-d');
+            $dayActivity = $activity[$key] ?? DayActivity::empty();
 
-            /** @var list<array<string, mixed>> $txns */
-            $txns = $byDate->get($key)['transactions'] ?? [];
+            $hiddenCount = max(0, count($dayActivity->pips) - self::MAX_PIPS_PER_DAY);
 
-            $dots = [];
+            $isCurrentMonth = $cursor->month === $monthStart->month && $cursor->year === $monthStart->year;
+            $paydayKind = $paydays[$key] ?? null;
+            $isNextPayday = $paydayKind === 'next' && $isCurrentMonth;
 
-            if (collect($txns)->contains(fn (array $t): bool => ($t['direction'] ?? null) === 'credit' && ($t['type'] ?? 'actual') === 'actual')) {
-                $dots[] = 'income';
-            }
+            $isInActiveCycle = $activeCycle !== null
+                && $cursor->greaterThanOrEqualTo($activeCycle['start'])
+                && $cursor->lessThan($activeCycle['end']);
 
-            if (collect($txns)->contains(fn (array $t): bool => ($t['direction'] ?? null) === 'debit' && ($t['type'] ?? 'actual') === 'actual')) {
-                $dots[] = 'posted';
-            }
+            $days[] = new CalendarDayData(
+                iso: $key,
+                day: $cursor->day,
+                dayName: $cursor->format('D'),
+                isoWeekday: $cursor->isoWeekday(),
+                isToday: $cursor->isSameDay($today),
+                isPast: $cursor->lessThan($today),
+                isCurrentMonth: $isCurrentMonth,
+                isPastPayday: $paydayKind === 'past',
+                isNextPayday: $isNextPayday,
+                isInActiveCycle: $isInActiveCycle,
+                pips: $dayActivity->pips,
+                hiddenCount: $hiddenCount,
+                netCents: $dayActivity->incomeCents - $dayActivity->postedCents,
+                incomeCents: $dayActivity->incomeCents,
+                postedCents: $dayActivity->postedCents,
+                plannedCents: $dayActivity->plannedCents,
+            );
 
-            if (collect($txns)->contains(fn (array $t): bool => ($t['type'] ?? 'actual') === 'planned')) {
-                $dots[] = 'planned';
-            }
-
-            $cells[] = [
-                'date' => $key,
-                'dayOfMonth' => $cursor->day,
-                'dayName' => $cursor->format('D'),
-                'isToday' => $cursor->isSameDay($today),
-                'isPayday' => $paydayKey === $key,
-                'isSelected' => $this->selectedDate === $key,
-                'dots' => $dots,
-            ];
+            $cursor = $cursor->addDay();
         }
 
-        return $cells;
+        return $days;
     }
 
     /**
-     * @return list<array{date: string, heading: string, net: int, transactions: list<array<string, mixed>>}>
+     * @return array{income: int, spend: int, net: int}
      */
     #[Computed]
-    public function agenda(): array
+    public function monthTotals(): array
     {
-        $fromKey = $this->selectedDate;
+        $income = 0;
+        $spend = 0;
 
-        return collect($this->calendarData['weeks']) // @phpstan-ignore property.notFound, argument.templateType, argument.templateType
-            ->flatten(1)
-            ->filter(fn (array $d): bool => $d['fullDate'] >= $fromKey)
-            ->filter(fn (array $d): bool => count($d['transactions']) > 0)
-            ->sortBy('fullDate')
-            ->values()
-            ->map(function (array $d): array {
-                $net = (int) collect($d['transactions']) // @phpstan-ignore argument.templateType, argument.templateType
-                    ->sum(fn (array $t): int => (($t['direction'] ?? null) === 'credit' ? 1 : -1) * abs((int) $t['amount']));
+        foreach ($this->days as $day) { // @phpstan-ignore property.notFound
+            if (! $day->isCurrentMonth) {
+                continue;
+            }
 
-                return [
-                    'date' => $d['fullDate'],
-                    'heading' => CarbonImmutable::parse($d['fullDate'])->format('j D M'),
-                    'net' => $net,
-                    'transactions' => $d['transactions'],
-                ];
-            })
-            ->all();
-    }
-
-    /**
-     * @return array{income: int, posted: int, planned: int, bufferAtPayday: int|null}
-     */
-    #[Computed]
-    public function quickline(): array
-    {
-        $user = auth()->user();
-        $bounds = $user?->currentPayCycleBounds();
-
-        if ($user === null || $bounds === null) {
-            return [
-                'income' => 0,
-                'posted' => 0,
-                'planned' => 0,
-                'bufferAtPayday' => null,
-            ];
+            $income += $day->incomeCents;
+            $spend += $day->postedCents;
         }
-
-        $txns = Transaction::query()
-            ->where('user_id', $user->id)
-            ->current()
-            ->whereBetween('post_date', [$bounds['start'], $bounds['end']])
-            ->get(['amount', 'direction']);
-
-        $income = (int) $txns
-            ->where('direction', TransactionDirection::Credit)
-            ->sum('amount');
-
-        $posted = (int) $txns
-            ->where('direction', TransactionDirection::Debit)
-            ->sum(fn (Transaction $t): int => abs((int) $t->amount));
-
-        $planned = (int) PlannedTransaction::query()
-            ->where('user_id', $user->id)
-            ->where('is_active', true)
-            ->where('direction', TransactionDirection::Debit)
-            ->where('start_date', '<=', $bounds['end'])
-            ->where(fn ($q) => $q->whereNull('until_date')->orWhere('until_date', '>=', $bounds['start']))
-            ->get()
-            ->sum(fn (PlannedTransaction $pt): int => $pt->occurrencesBetween($bounds['start'], $bounds['end'])->count() * abs((int) $pt->amount));
 
         return [
             'income' => $income,
-            'posted' => $posted,
-            'planned' => $planned,
-            'bufferAtPayday' => $user->bufferUntilNextPay($user->totalAvailable()),
+            'spend' => $spend,
+            'net' => $income - $spend,
         ];
     }
 
     /**
-     * @return array{label: string, rangeLabel: string|null}
+     * @return array{iso: string, dayLabel: string, dateLabel: string, pips: list<PayCyclePip>, netCents: int, isToday: bool, isPastPayday: bool, isNextPayday: bool}|null
+     */
+    #[Computed]
+    public function selectedDay(): ?array
+    {
+        if ($this->selectedDate === '') {
+            return null;
+        }
+
+        foreach ($this->days as $day) { // @phpstan-ignore property.notFound
+            if ($day->iso !== $this->selectedDate) {
+                continue;
+            }
+
+            $parsed = CarbonImmutable::createFromFormat('Y-m-d', $day->iso);
+
+            if (! $parsed instanceof CarbonImmutable) {
+                return null;
+            }
+
+            return [
+                'iso' => $day->iso,
+                'dayLabel' => $parsed->format('l'),
+                'dateLabel' => $parsed->format('j F'),
+                'pips' => $day->pips,
+                'netCents' => $day->netCents,
+                'isToday' => $day->isToday,
+                'isPastPayday' => $day->isPastPayday,
+                'isNextPayday' => $day->isNextPayday,
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array{label: string, isCurrentMonth: bool}
      */
     #[Computed]
     public function headerLabel(): array
     {
         $month = $this->monthStart();
-        $bounds = auth()->user()?->currentPayCycleBounds();
-
-        $rangeLabel = $bounds
-            ? sprintf('Pay cycle · %s → %s', $bounds['start']->format('j M'), $bounds['end']->format('j M'))
-            : null;
+        $today = CarbonImmutable::today();
 
         return [
             'label' => $month->format('F Y'),
-            'rangeLabel' => $rangeLabel,
+            'isCurrentMonth' => $month->month === $today->month && $month->year === $today->year,
         ];
     }
 
@@ -351,18 +223,8 @@ final class CalendarView extends Component
                     <div class="animate-pulse h-9 w-28 rounded-full bg-(--color-cib-n-100)"></div>
                     <div class="animate-pulse h-9 w-28 rounded-full bg-(--color-cib-n-100)"></div>
                     <div class="animate-pulse h-9 w-28 rounded-full bg-(--color-cib-n-100)"></div>
-                    <div class="animate-pulse h-9 w-32 rounded-full bg-(--color-cib-n-100)"></div>
                 </div>
-                <div class="flex gap-2">
-                    <div class="animate-pulse h-16 w-14 rounded-xl bg-(--color-cib-n-100)"></div>
-                    <div class="animate-pulse h-16 w-14 rounded-xl bg-(--color-cib-n-100)"></div>
-                    <div class="animate-pulse h-16 w-14 rounded-xl bg-(--color-cib-n-100)"></div>
-                    <div class="animate-pulse h-16 w-14 rounded-xl bg-(--color-cib-n-100)"></div>
-                    <div class="animate-pulse h-16 w-14 rounded-xl bg-(--color-cib-n-100)"></div>
-                    <div class="animate-pulse h-16 w-14 rounded-xl bg-(--color-cib-n-100)"></div>
-                    <div class="animate-pulse h-16 w-14 rounded-xl bg-(--color-cib-n-100)"></div>
-                </div>
-                <div class="animate-pulse h-40 rounded-xl border-2 border-(--color-border-strong) bg-(--color-bg-surface)"></div>
+                <div class="animate-pulse h-96 rounded-xl border-2 border-(--color-border-strong) bg-(--color-bg-surface)"></div>
             </div>
             HTML;
     }
@@ -375,39 +237,57 @@ final class CalendarView extends Component
     }
 
     /**
-     * @param  Collection<int, Collection<int, Transaction>>  $linkedByPlannedId
-     * @param  Collection<int, Collection<int, Transaction>>  $unlinkedByAccount
-     * @return array{status: string, linked_transaction_id: int|null}
+     * Walk back/forward from the user's next_pay_date by pay_frequency to flag every payday
+     * inside the visible grid. Returns a map of iso-date => 'past' | 'next'. The 'next' tag
+     * is reserved for the single soonest payday >= today (only one cell ever wears it).
+     *
+     * @return array<string, 'past'|'next'>
      */
-    private function resolveReconciliationStatus(
-        PlannedTransaction $planned,
-        CarbonImmutable $occurrenceDate,
-        Collection $linkedByPlannedId,
-        Collection $unlinkedByAccount,
-    ): array {
-        $linked = $linkedByPlannedId->get($planned->id, collect())
-            ->first(fn (Transaction $t) => abs($t->post_date->diffInDays($occurrenceDate)) <= ReconciliationMatcher::DATE_TOLERANCE_DAYS);
-
-        if ($linked) {
-            return ['status' => 'reconciled', 'linked_transaction_id' => $linked->id];
+    private function paydaysWithinGrid(CarbonImmutable $gridStart, CarbonImmutable $gridEnd, User $user): array
+    {
+        if ($user->next_pay_date === null || $user->pay_frequency === null || ! $user->hasPayCycleConfigured()) {
+            return [];
         }
 
-        $hasSuggestion = $unlinkedByAccount->get($planned->account_id, collect())
-            ->contains(function (Transaction $t) use ($planned, $occurrenceDate) {
-                if ($t->direction !== $planned->direction) {
-                    return false;
+        $frequency = $user->pay_frequency;
+        $today = CarbonImmutable::today();
+        $anchor = CarbonImmutable::instance($user->next_pay_date);
+
+        $step = static fn (CarbonImmutable $date, int $direction): CarbonImmutable => match ($frequency) {
+            PayFrequency::Weekly => $date->addWeeks($direction),
+            PayFrequency::Fortnightly => $date->addWeeks($direction * 2),
+            PayFrequency::Monthly => $date->addMonthsNoOverflow($direction),
+        };
+
+        $maxIterations = 500;
+
+        $cursor = $anchor;
+        $iterations = 0;
+        while ($cursor->greaterThan($gridStart) && $iterations++ < $maxIterations) {
+            $cursor = $step($cursor, -1);
+        }
+
+        /** @var array<string, 'past'|'next'> $paydays */
+        $paydays = [];
+        $nextAssigned = false;
+        $iterations = 0;
+
+        while ($cursor->lessThanOrEqualTo($gridEnd) && $iterations++ < $maxIterations) {
+            if ($cursor->greaterThanOrEqualTo($gridStart)) {
+                $key = $cursor->format('Y-m-d');
+
+                if ($cursor->lessThan($today)) {
+                    $paydays[$key] = 'past';
+                } elseif (! $nextAssigned) {
+                    $paydays[$key] = 'next';
+                    $nextAssigned = true;
                 }
+            }
 
-                if (abs($t->post_date->diffInDays($occurrenceDate)) > ReconciliationMatcher::DATE_TOLERANCE_DAYS) {
-                    return false;
-                }
+            $cursor = $step($cursor, 1);
+        }
 
-                $amountDiff = abs(abs($t->amount) - abs($planned->amount));
-
-                return $amountDiff <= abs($planned->amount) * ReconciliationMatcher::AMOUNT_TOLERANCE;
-            });
-
-        return ['status' => $hasSuggestion ? 'suggested' : 'unreconciled', 'linked_transaction_id' => null];
+        return $paydays;
     }
 
     private function monthStart(): CarbonImmutable
@@ -420,5 +300,10 @@ final class CalendarView extends Component
         }
 
         return $date->startOfMonth();
+    }
+
+    private function bustCache(): void
+    {
+        unset($this->days, $this->monthTotals, $this->selectedDay, $this->headerLabel); // @phpstan-ignore property.notFound
     }
 }
