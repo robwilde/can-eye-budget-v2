@@ -50,6 +50,7 @@
                             type="button"
                             wire:click="selectDay('{{ $day->iso }}')"
                             wire:key="cyc-day-{{ $day->iso }}"
+                            style="grid-column-start: {{ $day->isoWeekday }}"
                             @class([
                                 'cyc-day',
                                 'past' => $day->isPast && ! $day->isToday,
