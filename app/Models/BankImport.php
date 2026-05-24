@@ -21,7 +21,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $row_count
  * @property int $imported_count
  * @property int $skipped_count
+ * @property int $restored_count
  * @property string|null $error_summary
+ * @property array<int, array{row: int, description: string|null, message: string}>|null $row_errors
  * @property array<string, string>|null $column_mapping
  * @property CarbonImmutable|null $started_at
  * @property CarbonImmutable|null $completed_at
@@ -45,7 +47,9 @@ final class BankImport extends Model
         'row_count',
         'imported_count',
         'skipped_count',
+        'restored_count',
         'error_summary',
+        'row_errors',
         'column_mapping',
         'started_at',
         'completed_at',
@@ -76,6 +80,7 @@ final class BankImport extends Model
         return [
             'status' => BankImportStatus::class,
             'column_mapping' => 'array',
+            'row_errors' => 'array',
             'started_at' => 'datetime',
             'completed_at' => 'datetime',
         ];

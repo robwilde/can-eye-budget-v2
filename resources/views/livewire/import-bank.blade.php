@@ -201,13 +201,31 @@
                 <x-cib.stat-pill tone="income" data-testid="import-bank-result-imported">
                     {{ $bankImport->imported_count }} imported
                 </x-cib.stat-pill>
+                <x-cib.stat-pill tone="posted" data-testid="import-bank-result-restored">
+                    {{ $bankImport->restored_count }} restored
+                </x-cib.stat-pill>
                 <x-cib.stat-pill tone="planned" data-testid="import-bank-result-skipped">
-                    {{ $bankImport->skipped_count }} skipped (duplicates)
+                    {{ $bankImport->skipped_count }} skipped
                 </x-cib.stat-pill>
             </div>
 
             @if($bankImport->status === BankImportStatus::Failed && $bankImport->error_summary)
                 <flux:text class="mt-3 text-cib-red-600">{{ $bankImport->error_summary }}</flux:text>
+            @endif
+
+            @if(! empty($bankImport->row_errors))
+                <flux:callout variant="warning" class="mt-3" data-testid="import-bank-result-row-errors">
+                    <flux:callout.heading>{{ count($bankImport->row_errors) }} row(s) failed</flux:callout.heading>
+                    <ul class="mt-2 list-disc pl-5 text-sm">
+                        @foreach($bankImport->row_errors as $rowError)
+                            <li>
+                                Row {{ $rowError['row'] }} —
+                                {{ $rowError['description'] ?? '(unknown)' }}:
+                                {{ $rowError['message'] }}
+                            </li>
+                        @endforeach
+                    </ul>
+                </flux:callout>
             @endif
 
             @if($bankImport->status->isTerminal())
