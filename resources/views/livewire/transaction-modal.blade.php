@@ -158,36 +158,12 @@
                 </flux:select>
             @endif
 
-            {{-- Category chip grid --}}
-            <div>
-                <label class="cib-label">{{ __('Category') }}</label>
-                <div class="grid grid-cols-4 gap-2 max-h-80 overflow-y-auto pr-1">
-                    <button type="button"
-                            class="cat-chip"
-                            aria-pressed="{{ $categoryId === null ? 'true' : 'false' }}"
-                            wire:click="$set('categoryId', null)">
-                        <span class="cat-color inline-grid h-5 w-5 place-items-center rounded-full bg-cib-n-100 font-black">
-                            &nbsp;
-                        </span>
-                        <span class="truncate">{{ __('Uncategorised') }}</span>
-                    </button>
-                    @foreach($categories as $c)
-                        <button type="button"
-                                class="cat-chip"
-                                aria-pressed="{{ $categoryId === $c->id ? 'true' : 'false' }}"
-                                wire:click="$set('categoryId', {{ $c->id }})">
-                            @if($c->icon)
-                                <flux:icon name="{{ $c->icon }}" class="cat-color" />
-                            @else
-                                <span class="cat-color inline-grid h-5 w-5 place-items-center rounded-full bg-cib-n-100 font-black text-xs">
-                                    {{ Str::upper(Str::substr($c->name, 0, 1)) }}
-                                </span>
-                            @endif
-                            <span class="truncate w-full">{{ $c->name }}</span>
-                        </button>
-                    @endforeach
-                </div>
-            </div>
+            <x-category-combobox
+                wire:model="categoryId"
+                :categories="$categories"
+                :label="__('Category')"
+                :placeholder="__('No category')"
+            />
 
             {{-- Plan-mode fields --}}
             @if($mode === 'plan')
