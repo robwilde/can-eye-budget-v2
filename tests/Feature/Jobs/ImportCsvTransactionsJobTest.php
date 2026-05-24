@@ -12,10 +12,12 @@ use App\Jobs\ImportCsvTransactionsJob;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Models\Account;
 use App\Models\BankImport;
+use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\CsvImport\CsvColumnMapper;
 use App\Services\CsvImport\CsvParserService;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Random\RandomException;
@@ -89,6 +91,7 @@ test('re-running the same import is idempotent (dedupe via csv_hash)', function 
         'status' => BankImportStatus::Pending,
         'imported_count' => 0,
         'skipped_count' => 0,
+        'restored_count' => 0,
         'row_count' => 0,
         'completed_at' => null,
     ]);
@@ -98,7 +101,8 @@ test('re-running the same import is idempotent (dedupe via csv_hash)', function 
     $bankImport->refresh();
     expect($bankImport->status)->toBe(BankImportStatus::Completed)
         ->and($bankImport->imported_count)->toBe(0)
-        ->and($bankImport->skipped_count)->toBeGreaterThanOrEqual($firstImported)
+        ->and($bankImport->restored_count)->toBe(0)
+        ->and($bankImport->skipped_count)->toBe(0)
         ->and(Transaction::count())->toBe($totalAfterFirst);
 });
 
@@ -146,6 +150,111 @@ test('failure transitions status to Failed and records error_summary', function 
         ->and($bankImport->completed_at)->not->toBeNull();
 
     Queue::assertNotPushed(RunTransactionAnalysisJob::class);
+});
+
+test('re-importing restores a soft-deleted transaction and preserves its category', function () {
+    Queue::fake([RunTransactionAnalysisJob::class]);
+
+    $bankImport = makeBankImportFromFixture();
+
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService());
+
+    $bankImport->refresh();
+    expect($bankImport->status)->toBe(BankImportStatus::Completed)
+        ->and($bankImport->imported_count)->toBeGreaterThan(0);
+
+    $target = Transaction::query()
+        ->where('account_id', $bankImport->account_id)
+        ->whereNotNull('csv_hash')
+        ->first();
+
+    $category = Category::factory()->create();
+    $target->update(['category_id' => $category->id]);
+    $targetId = $target->id;
+    $targetHash = $target->csv_hash;
+    $target->delete();
+
+    expect(Transaction::query()->find($targetId))->toBeNull()
+        ->and(Transaction::withTrashed()->find($targetId)->trashed())->toBeTrue();
+
+    $bankImport->update([
+        'status' => BankImportStatus::Pending,
+        'imported_count' => 0,
+        'skipped_count' => 0,
+        'restored_count' => 0,
+        'row_count' => 0,
+        'row_errors' => null,
+        'completed_at' => null,
+    ]);
+
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService());
+
+    $bankImport->refresh();
+    $restored = Transaction::query()->find($targetId);
+
+    expect($bankImport->status)->toBe(BankImportStatus::Completed)
+        ->and($bankImport->restored_count)->toBe(1)
+        ->and($bankImport->imported_count)->toBe(0)
+        ->and($restored)->not->toBeNull()
+        ->and($restored->deleted_at)->toBeNull()
+        ->and($restored->csv_hash)->toBe($targetHash)
+        ->and($restored->category_id)->toBe($category->id);
+});
+
+test('per-row failure does not abort the import and is recorded in row_errors', function () {
+    Queue::fake([RunTransactionAnalysisJob::class]);
+
+    $eventKey = 'eloquent.creating: '.Transaction::class;
+
+    Transaction::creating(static function (Transaction $tx): void {
+        if (str_contains($tx->description ?? '', 'INTENTIONAL_FAILURE')) {
+            throw new RuntimeException('Simulated row failure for test');
+        }
+    });
+
+    try {
+        $user = User::factory()->create();
+        $account = Account::factory()->for($user)->csvImport()->create();
+
+        $csv = <<<'CSV'
+        Date,Description,Amount
+        01/01/2026,Good row one,100.00
+        02/01/2026,INTENTIONAL_FAILURE row,200.00
+        03/01/2026,Good row two,-300.00
+        CSV;
+
+        $storedPath = 'bank-imports/'.bin2hex(random_bytes(8)).'.csv';
+        Storage::disk('local')->put($storedPath, $csv);
+
+        $bankImport = BankImport::factory()
+            ->for($user)
+            ->for($account)
+            ->create([
+                'original_filename' => 'inline.csv',
+                'stored_path' => $storedPath,
+                'column_mapping' => [
+                    CsvColumnMapper::FIELD_DATE => 'Date',
+                    CsvColumnMapper::FIELD_DESCRIPTION => 'Description',
+                    CsvColumnMapper::FIELD_AMOUNT => 'Amount',
+                ],
+            ]);
+
+        new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService());
+
+        $bankImport->refresh();
+
+        expect($bankImport->status)->toBe(BankImportStatus::Completed)
+            ->and($bankImport->imported_count)->toBe(2)
+            ->and($bankImport->skipped_count)->toBe(1)
+            ->and($bankImport->row_errors)->toBeArray()
+            ->and($bankImport->row_errors)->toHaveCount(1)
+            ->and($bankImport->row_errors[0]['description'])->toContain('INTENTIONAL_FAILURE')
+            ->and($bankImport->row_errors[0]['message'])->toBe('Could not import this row.');
+
+        expect(Transaction::query()->where('account_id', $account->id)->count())->toBe(2);
+    } finally {
+        Event::forget($eventKey);
+    }
 });
 
 test('uniqueId is the bankImport id', function () {
