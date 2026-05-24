@@ -30,7 +30,7 @@ test('transaction modal renders the neo-brutalist type-toggle three-pill control
         ->assertSee('Transfer');
 });
 
-test('transaction modal renders the category chip grid with aria-pressed state', function () use ($openModal) {
+test('transaction modal renders the category combobox', function () use ($openModal) {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
     Category::factory()->create(['name' => 'Groceries', 'icon' => 'shopping-cart']);
@@ -42,9 +42,8 @@ test('transaction modal renders the category chip grid with aria-pressed state',
 
     $page->script($openModal);
 
-    $page->assertPresent('.cat-chip')
-        ->assertSee('Groceries')
-        ->assertSee('Utilities');
+    $page->assertPresent('[role="combobox"]')
+        ->assertPresent('[role="combobox"] input[placeholder]');
 });
 
 test('plan-mode pill reveals frequency and until-date controls', function () use ($openModal) {
