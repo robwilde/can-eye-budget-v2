@@ -93,13 +93,15 @@ final class PlannedTransaction extends Model
      */
     public function scopeExcludingTransfers(Builder $query): Builder
     {
-        return $query->whereDoesntHave('category', function (Builder $q): void {
-            $q->where('name', 'Transfer')
-                ->orWhereHas(
-                    'parent',
-                    fn (Builder $p): Builder => $p->where('name', 'Transfer'),
-                );
-        });
+        return $query
+            ->whereNull('transfer_to_account_id')
+            ->whereDoesntHave('category', function (Builder $q): void {
+                $q->where('name', 'Transfer')
+                    ->orWhereHas(
+                        'parent',
+                        fn (Builder $p): Builder => $p->where('name', 'Transfer'),
+                    );
+            });
     }
 
     /**
