@@ -469,3 +469,42 @@ test('upcoming scope orders by start_date ascending', function () {
 
     expect($results->pluck('id')->all())->toBe([$earlier->id, $later->id]);
 });
+
+// ── Scope: excludingTransfers ──────────────────────────────────────
+
+test('excludingTransfers excludes plans with transfer_to_account_id set', function () {
+    $user = User::factory()->create();
+    $source = Account::factory()->for($user)->create();
+    $destination = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($source)->create([
+        'transfer_to_account_id' => $destination->id,
+    ]);
+
+    expect(PlannedTransaction::excludingTransfers()->count())->toBe(0);
+});
+
+test('excludingTransfers excludes plans categorised as Transfer', function () {
+    $transferCategory = Category::factory()->create(['name' => 'Transfer']);
+    PlannedTransaction::factory()->create(['category_id' => $transferCategory->id]);
+
+    expect(PlannedTransaction::excludingTransfers()->count())->toBe(0);
+});
+
+test('excludingTransfers excludes plans whose parent category is Transfer', function () {
+    $parent = Category::factory()->create(['name' => 'Transfer']);
+    $child = Category::factory()->create(['name' => 'Optimus to CC', 'parent_id' => $parent->id]);
+    PlannedTransaction::factory()->create(['category_id' => $child->id]);
+
+    expect(PlannedTransaction::excludingTransfers()->count())->toBe(0);
+});
+
+test('excludingTransfers includes plans with no transfer_to_account_id and non-Transfer category', function () {
+    $category = Category::factory()->create(['name' => 'Groceries']);
+    PlannedTransaction::factory()->create([
+        'category_id' => $category->id,
+        'transfer_to_account_id' => null,
+    ]);
+
+    expect(PlannedTransaction::excludingTransfers()->count())->toBe(1);
+});
