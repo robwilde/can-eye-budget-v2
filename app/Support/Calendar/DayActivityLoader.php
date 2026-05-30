@@ -143,6 +143,7 @@ final readonly class DayActivityLoader
                     transactionId: $tx->id,
                     plannedTransactionId: null,
                     occurrenceDate: null,
+                    matched: $linkedPlan !== null,
                 );
             }
 

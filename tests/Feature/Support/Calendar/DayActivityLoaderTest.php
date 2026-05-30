@@ -315,8 +315,32 @@ test('reconciled debit suppresses the planned pip and relabels the posted pip wi
         ->and($day->pips[0]->transactionId)->not->toBeNull()
         ->and($day->pips[0]->name)->toBe('Rent')
         ->and($day->pips[0]->icon)->toBe('home')
+        ->and($day->pips[0]->matched)->toBeTrue()
         ->and($day->postedCents)->toBe(77000)
         ->and($day->plannedCents)->toBe(0);
+});
+
+test('an unmatched posted transaction is not flagged as matched', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -4200,
+        'post_date' => $date,
+        'planned_transaction_id' => null,
+    ]);
+
+    $day = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    )[$date->format('Y-m-d')];
+
+    expect($day->pips)->toHaveCount(1)
+        ->and($day->pips[0]->kind)->toBe('out')
+        ->and($day->pips[0]->matched)->toBeFalse();
 });
 
 test('reconciled income credit suppresses the planned income pip', function () {
