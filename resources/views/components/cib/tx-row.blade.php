@@ -9,6 +9,7 @@
     'amount',
     'tone' => 'out',
     'icon' => null,
+    'matched' => false,
 ])
 
 @php
@@ -30,7 +31,12 @@
             @endif
         </div>
         <div>
-            <div class="tx-name">{{ $name }}</div>
+            <div class="tx-name">
+                {{ $name }}
+                @if ($matched)
+                    <flux:badge size="sm" color="red" class="ml-1.5 align-middle">Planned</flux:badge>
+                @endif
+            </div>
             @isset($meta)
                 <div class="tx-meta">{{ $meta }}</div>
             @endisset
@@ -55,7 +61,12 @@
             @endif
         </div>
         <div>
-            <div class="tx-name">{{ $name }}</div>
+            <div class="tx-name">
+                {{ $name }}
+                @if ($matched)
+                    <flux:badge size="sm" color="red" class="ml-1.5 align-middle">Planned</flux:badge>
+                @endif
+            </div>
             @isset($meta)
                 <div class="tx-meta">{{ $meta }}</div>
             @endisset

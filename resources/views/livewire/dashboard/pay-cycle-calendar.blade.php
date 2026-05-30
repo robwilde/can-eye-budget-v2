@@ -124,6 +124,7 @@
                                 :amount="$pip->amount"
                                 :tone="$rowTone"
                                 :icon="$pip->icon"
+                                :matched="$pip->matched"
                         />
                     @empty
                         <p class="cyc-empty">Nothing on this day.</p>

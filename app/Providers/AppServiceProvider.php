@@ -10,6 +10,7 @@ use App\Services\BasiqService;
 use App\Services\GitHubService;
 use App\Services\PipelineStages\IdentifyPrimaryAccountStage;
 use App\Services\PipelineStages\IdentifyRecurringTransactionsStage;
+use App\Services\PipelineStages\MatchPlannedTransactionsStage;
 use App\Services\PipelineStages\SetPayCycleStage;
 use App\Services\PipelineStages\UserRulesStage;
 use App\Services\TransactionAnalysisPipeline;
@@ -49,6 +50,7 @@ final class AppServiceProvider extends ServiceProvider
                 new SetPayCycleStage,
                 new IdentifyRecurringTransactionsStage,
                 $this->app->make(UserRulesStage::class),
+                $this->app->make(MatchPlannedTransactionsStage::class),
             ],
         ));
 
