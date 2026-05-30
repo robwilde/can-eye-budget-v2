@@ -28,3 +28,5 @@ tests/Basiq/http-client.env.json
 !/CLAUDE.md
 .claude/scheduled_tasks.lock
 /context
+/graphify-out
+/thoughts

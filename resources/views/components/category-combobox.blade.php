@@ -25,19 +25,31 @@
         wireModel: '{{ $wireModel }}',
 
         init() {
-            const currentValue = this.$wire.get(this.wireModel);
-            if (currentValue) {
-                const match = this.items.find(i => i.id == currentValue);
-                if (match) {
-                    this.selectedId = match.id;
-                    this.selectedLabel = match.label;
-                    this.search = match.label;
+            this.syncFromWire();
+
+            this.$wire.$watch(this.wireModel, (value) => {
+                if (value != this.selectedId) {
+                    this.syncFromWire();
                 }
-            }
+            });
 
             this.$watch('selectedId', (value) => {
                 this.$wire.set(this.wireModel, value);
             });
+        },
+
+        syncFromWire() {
+            const currentValue = this.$wire.get(this.wireModel);
+            const match = currentValue ? this.items.find(i => i.id == currentValue) : null;
+            if (match) {
+                this.selectedId = match.id;
+                this.selectedLabel = match.label;
+                this.search = match.label;
+            } else {
+                this.selectedId = null;
+                this.selectedLabel = '';
+                this.search = '';
+            }
         },
 
         get filtered() {
