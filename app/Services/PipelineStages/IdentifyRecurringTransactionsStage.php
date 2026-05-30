@@ -57,6 +57,13 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
         $transactions = $this->loadUnmatchedTransactions($context->user);
 
         if ($transactions->isEmpty()) {
+            PipelineAuditEntry::create([
+                'pipeline_run_id' => $context->pipelineRun->id,
+                'stage' => self::STAGE_KEY,
+                'action' => 'no_transactions_to_analyze',
+                'metadata' => [],
+            ]);
+
             return new StageResult(success: true, stage: self::STAGE_KEY, suggestionIds: []);
         }
 
@@ -105,7 +112,7 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
     {
         return Transaction::query()
             ->where('user_id', $user->id)
-            ->where('source', TransactionSource::Basiq)
+            ->whereIn('source', TransactionSource::forAnalysis())
             ->whereNull('planned_transaction_id')
             ->current()
             ->get();

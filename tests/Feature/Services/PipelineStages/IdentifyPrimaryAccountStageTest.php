@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\DTOs\PipelineContext;
 use App\Enums\PipelineTrigger;
+use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
 use App\Models\Account;
 use App\Models\AnalysisSuggestion;
@@ -72,7 +73,7 @@ function makeContext(User $user, bool $isFirstSync = true): PipelineContext
 }
 
 beforeEach(function () {
-    $this->stage = new IdentifyPrimaryAccountStage;
+    $this->stage = app(IdentifyPrimaryAccountStage::class);
     $this->user = User::factory()->create(['primary_account_id' => null]);
     $this->account = Account::factory()->for($this->user)->create();
 });
@@ -409,6 +410,10 @@ test('matched_transaction_ids contains all group transaction IDs', function () {
 // ──────────────────────────────────────────────
 
 test('creates audit entry when no income pattern detected', function () {
+    // Two eligible accounts so the single-account fallback does not apply,
+    // isolating the "no income pattern" path.
+    Account::factory()->for($this->user)->create();
+
     createIncomeTransaction($this->user, $this->account, [
         'description' => 'RANDOM THING',
         'amount' => 300_000,
@@ -474,4 +479,104 @@ test('stage is skipped in pipeline when not first sync', function () {
         ->first();
 
     expect($suggestion)->toBeNull();
+});
+
+// ──────────────────────────────────────────────
+// CSV Source (issue #249)
+// ──────────────────────────────────────────────
+
+test('detects primary account from CSV-imported transactions', function () {
+    Account::factory()->savings()->for($this->user)->create();
+
+    for ($i = 0; $i < 4; $i++) {
+        Transaction::factory()
+            ->for($this->user)
+            ->for($this->account)
+            ->credit()
+            ->fromCsv()
+            ->create([
+                'description' => 'SALARY DEPOSIT',
+                'amount' => 300_000,
+                'post_date' => CarbonImmutable::parse('2025-06-01')->addDays($i * 14),
+                'transfer_pair_id' => null,
+            ]);
+    }
+
+    $context = makeContext($this->user);
+    $result = $this->stage->execute($context);
+
+    expect($result->suggestionIds)->toHaveCount(1);
+
+    $suggestion = AnalysisSuggestion::find($result->suggestionIds[0]);
+    expect($suggestion->payload['account_id'])->toBe($this->account->id)
+        ->and($suggestion->payload['income_frequency'])->toBe('fortnightly');
+});
+
+// ──────────────────────────────────────────────
+// Auto-apply (issue #249)
+// ──────────────────────────────────────────────
+
+test('auto-applies primary account and accepts the suggestion when confidence is high', function () {
+    Account::factory()->savings()->for($this->user)->create();
+    createSalaryGroup($this->user, $this->account, 'SALARY DEPOSIT', 300_000, 4, 14);
+
+    $context = makeContext($this->user);
+    $result = $this->stage->execute($context);
+
+    expect($result->suggestionIds)->toHaveCount(1)
+        ->and($this->user->fresh()->primary_account_id)->toBe($this->account->id);
+
+    $suggestion = AnalysisSuggestion::find($result->suggestionIds[0]);
+    expect($suggestion->status)->toBe(SuggestionStatus::Accepted);
+
+    $audit = PipelineAuditEntry::where('pipeline_run_id', $context->pipelineRun->id)
+        ->where('stage', 'identify-primary-account')
+        ->where('action', 'auto_applied')
+        ->first();
+
+    expect($audit)->not->toBeNull();
+});
+
+// ──────────────────────────────────────────────
+// Guaranteed Fallback (issue #249)
+// ──────────────────────────────────────────────
+
+test('falls back to the only eligible account when no income is detected', function () {
+    // Single empty account, no income transactions at all.
+    $context = makeContext($this->user);
+    $result = $this->stage->execute($context);
+
+    expect($result->suggestionIds)->toBeEmpty()
+        ->and($this->user->fresh()->primary_account_id)->toBe($this->account->id);
+
+    $audit = PipelineAuditEntry::where('pipeline_run_id', $context->pipelineRun->id)
+        ->where('stage', 'identify-primary-account')
+        ->where('action', 'primary_account_fallback_applied')
+        ->first();
+
+    expect($audit)->not->toBeNull();
+});
+
+test('does not fall back when multiple eligible accounts exist and no income detected', function () {
+    Account::factory()->for($this->user)->create();
+
+    $context = makeContext($this->user);
+    $result = $this->stage->execute($context);
+
+    expect($result->suggestionIds)->toBeEmpty()
+        ->and($this->user->fresh()->primary_account_id)->toBeNull();
+});
+
+test('records no_transactions_to_analyze when accounts have no analysable credits', function () {
+    Account::factory()->for($this->user)->create();
+
+    $context = makeContext($this->user);
+    $this->stage->execute($context);
+
+    $audit = PipelineAuditEntry::where('pipeline_run_id', $context->pipelineRun->id)
+        ->where('stage', 'identify-primary-account')
+        ->where('action', 'no_transactions_to_analyze')
+        ->first();
+
+    expect($audit)->not->toBeNull();
 });
