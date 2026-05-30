@@ -10,6 +10,7 @@ use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\ReconciliationMatcher;
 use App\Support\Calendar\DayActivity;
 use App\Support\Calendar\DayActivityLoader;
 use Carbon\CarbonImmutable;
@@ -277,6 +278,438 @@ test('actual and planned on same day appear together with correct tallies', func
         ->and($day->incomeCents)->toBe(8000)
         ->and($day->postedCents)->toBe(3000)
         ->and($day->plannedCents)->toBe(5000);
+});
+
+// ── reconciled-occurrence suppression ────────────────────────────
+
+test('reconciled debit suppresses the planned pip and relabels the posted pip with the plan category', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Rent', 'icon' => 'home']);
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'category_id' => $category->id,
+        'amount' => 77000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -77000,
+        'post_date' => $date,
+        'description' => 'Ext Tfr - NET#4789778169 Sekisui House',
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $activity = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    );
+    $day = $activity[$date->format('Y-m-d')];
+
+    expect($day->pips)->toHaveCount(1)
+        ->and($day->pips[0]->kind)->toBe('out')
+        ->and($day->pips[0]->transactionId)->not->toBeNull()
+        ->and($day->pips[0]->name)->toBe('Rent')
+        ->and($day->pips[0]->icon)->toBe('home')
+        ->and($day->postedCents)->toBe(77000)
+        ->and($day->plannedCents)->toBe(0);
+});
+
+test('reconciled income credit suppresses the planned income pip', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Salary', 'icon' => 'banknotes']);
+    $date = CarbonImmutable::create(2026, 6, 15);
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'category_id' => $category->id,
+        'amount' => 500000,
+        'direction' => TransactionDirection::Credit,
+        'start_date' => $date,
+    ]);
+
+    Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $account->id,
+        'amount' => 500000,
+        'post_date' => $date,
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $day = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    )[$date->format('Y-m-d')];
+
+    expect($day->pips)->toHaveCount(1)
+        ->and($day->pips[0]->kind)->toBe('inc')
+        ->and($day->pips[0]->name)->toBe('Salary')
+        ->and($day->incomeCents)->toBe(500000)
+        ->and($day->plannedCents)->toBe(0);
+});
+
+test('monthly recurring planned keeps unreconciled occurrences when one is reconciled', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $start = CarbonImmutable::create(2026, 6, 5);
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'amount' => 30000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $start,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -30000,
+        'post_date' => $start,
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $activity = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 8, 31),
+        $user->id,
+    );
+
+    expect($activity['2026-06-05']->pips)->toHaveCount(1)
+        ->and($activity['2026-06-05']->pips[0]->kind)->toBe('out')
+        ->and($activity['2026-06-05']->plannedCents)->toBe(0)
+        ->and($activity['2026-07-05']->pips)->toHaveCount(1)
+        ->and($activity['2026-07-05']->pips[0]->kind)->toBe('plan')
+        ->and($activity['2026-07-05']->plannedCents)->toBe(30000)
+        ->and($activity['2026-08-05']->pips[0]->kind)->toBe('plan');
+});
+
+test('reconciled posting outside the date tolerance does not suppress the planned pip', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Rent']);
+    $occurrence = CarbonImmutable::create(2026, 6, 14);
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'category_id' => $category->id,
+        'amount' => 20000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $occurrence,
+    ]);
+
+    $postDate = $occurrence->addDays(ReconciliationMatcher::DATE_TOLERANCE_DAYS + 1);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -20000,
+        'post_date' => $postDate,
+        'description' => 'Ext Tfr noisy bank text',
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $activity = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    );
+
+    expect($activity['2026-06-14']->pips)->toHaveCount(1)
+        ->and($activity['2026-06-14']->pips[0]->kind)->toBe('plan')
+        ->and($activity['2026-06-14']->pips[0]->name)->toBe('Rent')
+        ->and($activity['2026-06-14']->plannedCents)->toBe(20000)
+        ->and($activity[$postDate->format('Y-m-d')]->pips)->toHaveCount(1)
+        ->and($activity[$postDate->format('Y-m-d')]->pips[0]->kind)->toBe('out')
+        ->and($activity[$postDate->format('Y-m-d')]->pips[0]->name)->toBe('Rent');
+});
+
+test('reconciled posting exactly on the tolerance boundary suppresses the planned pip', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Rent', 'icon' => 'home']);
+    $occurrence = CarbonImmutable::create(2026, 6, 14);
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'category_id' => $category->id,
+        'amount' => 20000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $occurrence,
+    ]);
+
+    $postDate = $occurrence->addDays(ReconciliationMatcher::DATE_TOLERANCE_DAYS);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -20000,
+        'post_date' => $postDate,
+        'description' => 'Ext Tfr noisy bank text',
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $activity = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    );
+
+    expect($activity)->not->toHaveKey('2026-06-14')
+        ->and($activity[$postDate->format('Y-m-d')]->pips)->toHaveCount(1)
+        ->and($activity[$postDate->format('Y-m-d')]->pips[0]->kind)->toBe('out')
+        ->and($activity[$postDate->format('Y-m-d')]->pips[0]->name)->toBe('Rent')
+        ->and($activity[$postDate->format('Y-m-d')]->pips[0]->icon)->toBe('home');
+});
+
+test('two close occurrences with one reconciled posting suppress only the nearest occurrence', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->weekly()->create([
+        'amount' => 10000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => CarbonImmutable::create(2026, 6, 8),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -10000,
+        'post_date' => CarbonImmutable::create(2026, 6, 9),
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $activity = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 20),
+        $user->id,
+    );
+
+    expect($activity)->not->toHaveKey('2026-06-08')
+        ->and($activity['2026-06-09']->pips[0]->kind)->toBe('out')
+        ->and($activity['2026-06-15']->pips)->toHaveCount(1)
+        ->and($activity['2026-06-15']->pips[0]->kind)->toBe('plan')
+        ->and($activity['2026-06-15']->plannedCents)->toBe(10000);
+});
+
+test('superseded child reconciled transaction suppresses the occurrence once', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'amount' => 45000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    $parent = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -45000,
+        'post_date' => $date,
+        'planned_transaction_id' => $planned->id,
+    ]);
+    $child = $parent->createChild(['amount' => -45000]);
+
+    expect(Transaction::query()->current()->where('planned_transaction_id', $planned->id)->pluck('id')->all())
+        ->toBe([$child->id]);
+
+    $day = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    )[$date->format('Y-m-d')];
+
+    expect($day->pips)->toHaveCount(1)
+        ->and($day->pips[0]->kind)->toBe('out')
+        ->and($day->pips[0]->transactionId)->toBe($child->id)
+        ->and($day->postedCents)->toBe(45000)
+        ->and($day->plannedCents)->toBe(0);
+});
+
+test('un-reconciled child shows both the posted and the planned pip', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Rent']);
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'category_id' => $category->id,
+        'amount' => 45000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    $parent = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -45000,
+        'post_date' => $date,
+        'planned_transaction_id' => $planned->id,
+    ]);
+    $parent->createChild(['planned_transaction_id' => null]);
+
+    expect(Transaction::query()->current()->where('user_id', $user->id)->pluck('planned_transaction_id')->all())
+        ->toBe([null]);
+
+    $day = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    )[$date->format('Y-m-d')];
+
+    expect($day->pips)->toHaveCount(2)
+        ->and(collect($day->pips)->pluck('kind')->all())->toContain('plan')
+        ->and(collect($day->pips)->pluck('kind')->all())->toContain('out')
+        ->and($day->plannedCents)->toBe(45000)
+        ->and($day->postedCents)->toBe(45000);
+});
+
+test('planned reconciled then deactivated leaves only the posted pip', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Rent', 'icon' => 'home']);
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'category_id' => $category->id,
+        'amount' => 45000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -45000,
+        'post_date' => $date,
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $planned->update(['is_active' => false]);
+
+    $day = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    )[$date->format('Y-m-d')];
+
+    expect($day->pips)->toHaveCount(1)
+        ->and($day->pips[0]->kind)->toBe('out')
+        ->and($day->pips[0]->name)->toBe('Rent')
+        ->and($day->plannedCents)->toBe(0);
+});
+
+test('two plans on the same day suppress only the reconciled one', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $rent = Category::factory()->create(['name' => 'Rent']);
+    $power = Category::factory()->create(['name' => 'Power']);
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    $reconciledPlan = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'category_id' => $rent->id,
+        'amount' => 45000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'category_id' => $power->id,
+        'amount' => 12000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -45000,
+        'post_date' => $date,
+        'planned_transaction_id' => $reconciledPlan->id,
+    ]);
+
+    $day = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    )[$date->format('Y-m-d')];
+
+    $planPips = collect($day->pips)->where('kind', 'plan')->values();
+
+    expect($day->pips)->toHaveCount(2)
+        ->and($planPips)->toHaveCount(1)
+        ->and($planPips[0]->name)->toBe('Power')
+        ->and($day->plannedCents)->toBe(12000)
+        ->and($day->postedCents)->toBe(45000);
+});
+
+test('a posting linked to a different plan does not suppress an unrelated occurrence', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    $visiblePlan = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'amount' => 30000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    $otherPlan = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'amount' => 9000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -9000,
+        'post_date' => $date,
+        'planned_transaction_id' => $otherPlan->id,
+    ]);
+
+    $day = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    )[$date->format('Y-m-d')];
+
+    $planPips = collect($day->pips)->where('kind', 'plan')->values();
+
+    expect($day->pips)->toHaveCount(2)
+        ->and($planPips)->toHaveCount(1)
+        ->and($planPips[0]->plannedTransactionId)->toBe($visiblePlan->id)
+        ->and($day->plannedCents)->toBe(30000)
+        ->and($day->postedCents)->toBe(9000);
+});
+
+test('plannedCents excludes a suppressed occurrence but keeps unreconciled occurrences', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $reconciledDate = CarbonImmutable::create(2026, 6, 10);
+    $freeDate = CarbonImmutable::create(2026, 6, 20);
+
+    $reconciledPlan = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'amount' => 60000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $reconciledDate,
+    ]);
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'amount' => 15000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $freeDate,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -60000,
+        'post_date' => $reconciledDate,
+        'planned_transaction_id' => $reconciledPlan->id,
+    ]);
+
+    $activity = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    );
+
+    expect($activity['2026-06-10']->plannedCents)->toBe(0)
+        ->and($activity['2026-06-10']->postedCents)->toBe(60000)
+        ->and($activity['2026-06-20']->plannedCents)->toBe(15000)
+        ->and($activity['2026-06-20']->pips[0]->kind)->toBe('plan');
 });
 
 test('DayActivity::empty returns a zero-state instance', function () {
