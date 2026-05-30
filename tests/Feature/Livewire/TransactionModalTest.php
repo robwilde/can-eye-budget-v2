@@ -206,6 +206,24 @@ test('categories are sorted by full path in transaction modal render', function 
         });
 });
 
+test('renders the category combobox wired with visible full-path options', function () {
+    $user = User::factory()->create();
+    $bills = Category::factory()->create(['name' => 'Bills']);
+    Category::factory()->withParent($bills)->create(['name' => 'Internet']);
+    Category::factory()->create(['name' => 'HiddenZebra', 'is_hidden' => true]);
+
+    $html = Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->html();
+
+    expect($html)
+        ->toContain('role="combobox"')
+        ->toContain('Bills')
+        ->toContain('Internet')
+        ->not->toContain('HiddenZebra');
+});
+
 test('dispatches transaction-saved event on save', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
