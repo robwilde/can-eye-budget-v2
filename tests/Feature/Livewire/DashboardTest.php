@@ -158,6 +158,40 @@ test('budgets this cycle section renders when budgets exist', function () {
         ->assertSee('Groceries');
 });
 
+test('budgets this cycle reports zero spent for an uncategorised budget instead of summing every debit', function () {
+    $user = User::factory()->withPayCycle()->create([
+        'next_pay_date' => now()->addDays(7),
+    ]);
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create();
+
+    Transaction::factory()->debit()->for($user)->for($account)->create([
+        'amount' => 447468,
+        'post_date' => now(),
+        'category_id' => $category->id,
+    ]);
+
+    Budget::factory()->for($user)->create([
+        'category_id' => $category->id,
+        'name' => 'Groceries',
+        'limit_amount' => 80000,
+    ]);
+    Budget::factory()->for($user)->create([
+        'category_id' => null,
+        'name' => 'Insurance',
+        'limit_amount' => 30000,
+    ]);
+
+    $rows = Livewire::actingAs($user)
+        ->test(Dashboard::class)
+        ->instance()
+        ->budgetsThisCycle()
+        ->keyBy(fn (array $row): string => $row['budget']->name);
+
+    expect($rows['Groceries']['spent'])->toBe(447468)
+        ->and($rows['Insurance']['spent'])->toBe(0);
+});
+
 test('next three planned section renders upcoming plans', function () {
     $user = User::factory()->withPayCycle()->create();
     $account = Account::factory()->for($user)->create();

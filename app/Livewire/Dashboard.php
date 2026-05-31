@@ -89,14 +89,19 @@ final class Dashboard extends Component
             ->orderBy('name')
             ->get()
             ->map(static function (Budget $budget) use ($bounds): array {
+                if ($budget->category_id === null) {
+                    return [
+                        'budget' => $budget,
+                        'spent' => 0,
+                        'limit' => (int) $budget->limit_amount,
+                    ];
+                }
+
                 $query = Transaction::query()
                     ->where('user_id', $budget->user_id)
                     ->current()
-                    ->where('direction', TransactionDirection::Debit);
-
-                if ($budget->category_id !== null) {
-                    $query->where('category_id', $budget->category_id);
-                }
+                    ->where('direction', TransactionDirection::Debit)
+                    ->where('category_id', $budget->category_id);
 
                 if ($bounds !== null) {
                     $query->whereBetween('post_date', [$bounds['start'], $bounds['end']]);
