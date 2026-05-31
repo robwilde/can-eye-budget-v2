@@ -385,6 +385,31 @@ test('accept pay cycle uses edited form values when user modifies fields', funct
         ->and($user->next_pay_date->format('Y-m-d'))->toBe($editedDate);
 });
 
+test('accept pay cycle creates the recurring income planned transaction when a primary account is set', function () {
+    $this->user->update(['primary_account_id' => $this->account->id]);
+    $nextPayDate = now()->addWeeks(2)->format('Y-m-d');
+
+    $suggestion = createSuggestion($this, 'payCycle', payCyclePayload($this->account->id, $nextPayDate));
+
+    Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->call('acceptPayCycle', $suggestion->id);
+
+    $income = PlannedTransaction::query()
+        ->where('user_id', $this->user->id)
+        ->where('is_pay_cycle_income', true)
+        ->get();
+
+    expect($income)->toHaveCount(1)
+        ->and($income->first()->direction)->toBe(TransactionDirection::Credit)
+        ->and($income->first()->amount)->toBe(300000)
+        ->and($income->first()->frequency)->toBe(RecurrenceFrequency::Every2Weeks)
+        ->and($income->first()->start_date->format('Y-m-d'))->toBe($nextPayDate)
+        ->and($income->first()->account_id)->toBe($this->account->id)
+        ->and($income->first()->description)->toBe('EMPLOYER PTY LTD')
+        ->and($suggestion->fresh()->status)->toBe(SuggestionStatus::Accepted);
+});
+
 test('accept pay cycle validates required fields and rejects invalid input', function () {
     $suggestion = createSuggestion($this, 'payCycle', payCyclePayload($this->account->id));
 

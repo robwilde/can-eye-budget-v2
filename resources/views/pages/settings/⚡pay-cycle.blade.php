@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\PayFrequency;
+use App\Services\PayCycleConfigurator;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Title;
@@ -27,11 +28,12 @@ new #[Title('Pay cycle settings')] class extends Component {
             'next_pay_date' => ['required', 'date', 'after_or_equal:today'],
         ]);
 
-        Auth::user()->update([
-            'pay_amount' => (int) round((float) $validated['pay_amount'] * 100),
-            'pay_frequency' => $validated['pay_frequency'],
-            'next_pay_date' => $validated['next_pay_date'],
-        ]);
+        app(PayCycleConfigurator::class)->apply(
+            Auth::user(),
+            (int) round((float) $validated['pay_amount'] * 100),
+            PayFrequency::from($validated['pay_frequency']),
+            $validated['next_pay_date'],
+        );
 
         $this->dispatch('pay-cycle-updated');
     }

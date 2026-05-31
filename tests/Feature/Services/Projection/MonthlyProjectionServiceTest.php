@@ -4,12 +4,14 @@
 
 declare(strict_types=1);
 
+use App\Enums\PayFrequency;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\User;
+use App\Services\PayCycleConfigurator;
 use App\Services\Projection\BalanceProjection;
 use App\Services\Projection\MonthlyProjectionService;
 use Carbon\CarbonImmutable;
@@ -274,4 +276,28 @@ test('user isolation — another users planned transactions do not leak into thi
 
     expect($projection->points)->toHaveCount(1)
         ->and($projection->points[0]->balanceCents)->toBe(100000);
+});
+
+test('a configured pay cycle feeds the projection so the balance steps up on each payday', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 100000]);
+    $user->update(['primary_account_id' => $account->id]);
+
+    app(PayCycleConfigurator::class)->apply(
+        $user->fresh(),
+        300000,
+        PayFrequency::Fortnightly,
+        CarbonImmutable::today()->addDays(7)->format('Y-m-d'),
+    );
+
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
+
+    expect(count($projection->points))->toBeGreaterThan(1);
+
+    $firstPayday = $projection->points[1];
+
+    expect($firstPayday->eventAmountCents)->toBe(300000)
+        ->and($firstPayday->balanceCents)->toBe(400000)
+        ->and($firstPayday->balanceCents)->toBeGreaterThan($projection->points[0]->balanceCents)
+        ->and($projection->firstNegativeDate)->toBeNull();
 });

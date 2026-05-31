@@ -18,4 +18,13 @@ enum PayFrequency: string
             self::Monthly => 'Monthly',
         };
     }
+
+    public function toRecurrenceFrequency(): RecurrenceFrequency
+    {
+        return match ($this) {
+            self::Weekly => RecurrenceFrequency::EveryWeek,
+            self::Fortnightly => RecurrenceFrequency::Every2Weeks,
+            self::Monthly => RecurrenceFrequency::EveryMonth,
+        };
+    }
 }

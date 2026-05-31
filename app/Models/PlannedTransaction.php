@@ -30,6 +30,7 @@ use Illuminate\Support\Collection;
  * @property RecurrenceFrequency $frequency
  * @property CarbonImmutable|null $until_date
  * @property bool $is_active
+ * @property bool $is_pay_cycle_income
  * @property CarbonImmutable|null $last_generated_date
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
@@ -54,6 +55,7 @@ final class PlannedTransaction extends Model
         'frequency',
         'until_date',
         'is_active',
+        'is_pay_cycle_income',
         'last_generated_date',
     ];
 
@@ -188,6 +190,7 @@ final class PlannedTransaction extends Model
             'until_date' => 'date',
             'last_generated_date' => 'date',
             'is_active' => 'boolean',
+            'is_pay_cycle_income' => 'boolean',
         ];
     }
 }
