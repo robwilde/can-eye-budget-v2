@@ -30,7 +30,7 @@ use Illuminate\Support\Collection;
  * @property RecurrenceFrequency $frequency
  * @property CarbonImmutable|null $until_date
  * @property bool $is_active
- * @property bool $is_pay_cycle_income
+ * @property bool|null $is_pay_cycle_income
  * @property CarbonImmutable|null $last_generated_date
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at

@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Services\PayCycleConfigurator;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\QueryException;
 
 /**
  * @return Collection<int, PlannedTransaction>
@@ -151,4 +152,14 @@ test('leaves the income uncategorised when the category tree is not seeded', fun
     );
 
     expect(incomePlannedTransactions($this->user)->first()->category_id)->toBeNull();
+});
+
+test('the database enforces at most one pay-cycle income row per user', function () {
+    PlannedTransaction::factory()->for($this->user)->for($this->account)->create([
+        'is_pay_cycle_income' => true,
+    ]);
+
+    expect(fn () => PlannedTransaction::factory()->for($this->user)->for($this->account)->create([
+        'is_pay_cycle_income' => true,
+    ]))->toThrow(QueryException::class);
 });
