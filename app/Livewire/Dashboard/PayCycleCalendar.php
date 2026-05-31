@@ -315,22 +315,27 @@ final class PayCycleCalendar extends Component
             return null;
         }
 
-        $candidates = Transaction::query()
-            ->where('user_id', $user->id)
-            ->where('account_id', $income->account_id)
-            ->current()
-            ->where('direction', TransactionDirection::Credit)
-            ->where('amount', $income->amount)
-            ->orderByDesc('post_date')
-            ->get();
-
         $needle = mb_strtoupper($income->description);
+        $fallback = null;
 
-        $match = $candidates->first(
-            fn (Transaction $transaction): bool => str_contains(mb_strtoupper($transaction->description), $needle),
-        ) ?? $candidates->first();
+        foreach (
+            Transaction::query()
+                ->where('user_id', $user->id)
+                ->where('account_id', $income->account_id)
+                ->current()
+                ->where('direction', TransactionDirection::Credit)
+                ->where('amount', $income->amount)
+                ->orderByDesc('post_date')
+                ->cursor() as $transaction
+        ) {
+            $fallback ??= $transaction;
 
-        return $match?->post_date;
+            if (str_contains(mb_strtoupper($transaction->description), $needle)) {
+                return $transaction->post_date;
+            }
+        }
+
+        return $fallback?->post_date;
     }
 
     /**
