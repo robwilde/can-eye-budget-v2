@@ -46,9 +46,9 @@ final class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(TransactionAnalysisPipeline::class, fn (): TransactionAnalysisPipeline => new TransactionAnalysisPipeline(
             stages: [
-                new IdentifyPrimaryAccountStage,
-                new SetPayCycleStage,
-                new IdentifyRecurringTransactionsStage,
+                $this->app->make(IdentifyPrimaryAccountStage::class),
+                $this->app->make(SetPayCycleStage::class),
+                $this->app->make(IdentifyRecurringTransactionsStage::class),
                 $this->app->make(UserRulesStage::class),
                 $this->app->make(MatchPlannedTransactionsStage::class),
             ],

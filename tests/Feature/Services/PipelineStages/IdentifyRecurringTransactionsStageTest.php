@@ -422,7 +422,7 @@ test('PlannedTransaction match uses 5 percent amount tolerance', function () {
 
 // ─── Edge Cases ─────────────────────────────────────────────────────────
 
-test('ignores non-Basiq transactions', function () {
+test('ignores manually-entered transactions', function () {
     $start = CarbonImmutable::parse('2026-01-15');
 
     for ($i = 0; $i < 3; $i++) {
@@ -440,6 +440,43 @@ test('ignores non-Basiq transactions', function () {
 
     expect($result->success)->toBeTrue()
         ->and($result->suggestionIds)->toBeEmpty();
+});
+
+test('detects recurring CSV-imported transactions (issue #249)', function () {
+    $start = CarbonImmutable::parse('2026-01-15');
+
+    for ($i = 0; $i < 3; $i++) {
+        Transaction::factory()
+            ->for($this->user)
+            ->for($this->account)
+            ->fromCsv()
+            ->create([
+                'description' => 'NETFLIX.COM',
+                'amount' => 1699,
+                'direction' => TransactionDirection::Debit,
+                'post_date' => $start->addMonthsNoOverflow($i),
+            ]);
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toHaveCount(1);
+
+    $suggestion = AnalysisSuggestion::find($result->suggestionIds[0]);
+    expect($suggestion->payload['description'])->toBe('NETFLIX.COM')
+        ->and($suggestion->payload['frequency'])->toBe(RecurrenceFrequency::EveryMonth->value);
+});
+
+test('audits no_transactions_to_analyze when there is nothing to scan', function () {
+    $this->stage->execute($this->context);
+
+    $audit = PipelineAuditEntry::query()
+        ->where('pipeline_run_id', $this->pipelineRun->id)
+        ->where('stage', 'identify-recurring-transactions')
+        ->where('action', 'no_transactions_to_analyze')
+        ->first();
+
+    expect($audit)->not->toBeNull();
 });
 
 test('ignores transactions already linked to PlannedTransaction', function () {

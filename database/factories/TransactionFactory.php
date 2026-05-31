@@ -79,6 +79,15 @@ final class TransactionFactory extends Factory
         ]);
     }
 
+    public function fromCsv(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'source' => TransactionSource::Csv,
+            'merchant_name' => null,
+            'clean_description' => null,
+        ]);
+    }
+
     public function pending(): self
     {
         return $this->state(fn (array $attributes) => [

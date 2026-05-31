@@ -11,6 +11,18 @@ enum TransactionSource: string
     case Planned = 'planned';
     case Csv = 'csv';
 
+    /**
+     * Bank-statement sources eligible for pattern analysis (primary account,
+     * pay cycle, recurring detection). Excludes Manual (user-entered one-offs)
+     * and Planned (synthetic), which would add noise or be circular.
+     *
+     * @return list<self>
+     */
+    public static function forAnalysis(): array
+    {
+        return [self::Basiq, self::Csv];
+    }
+
     public function label(): string
     {
         return match ($this) {

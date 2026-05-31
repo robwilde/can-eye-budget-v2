@@ -9,12 +9,12 @@ use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
 use App\Models\AnalysisSuggestion;
 use App\Models\Category;
-use App\Models\PlannedTransaction;
 use App\Models\Transaction;
+use App\Models\User;
 use App\Services\RuleActionExecutor;
+use App\Services\SuggestionApplier;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
-use Illuminate\Support\Facades\DB;
 use Livewire\Component;
 use Throwable;
 
@@ -31,7 +31,7 @@ final class AnalysisSuggestions extends Component
     /** @var array<int, int|string|null> */
     public array $recurringCategories = [];
 
-    public function acceptPrimaryAccount(int $suggestionId): void
+    public function acceptPrimaryAccount(int $suggestionId, SuggestionApplier $applier): void
     {
         $suggestion = $this->findPendingSuggestion($suggestionId, SuggestionType::PrimaryAccount);
 
@@ -39,13 +39,15 @@ final class AnalysisSuggestions extends Component
             return;
         }
 
-        auth()->user()->update(['primary_account_id' => $suggestion->payload['account_id']]);
-        $this->resolveSuggestion($suggestion, SuggestionStatus::Accepted);
+        /** @var User $user */
+        $user = auth()->user();
+
+        $applier->applyPrimaryAccount($suggestion, $user);
 
         Flux::toast(text: 'Primary account set', variant: 'success');
     }
 
-    public function acceptPayCycle(int $suggestionId): void
+    public function acceptPayCycle(int $suggestionId, SuggestionApplier $applier): void
     {
         $this->validate([
             'payAmount' => ['required', 'numeric', 'gt:0'],
@@ -59,15 +61,16 @@ final class AnalysisSuggestions extends Component
             return;
         }
 
-        $cents = (int) round((float) $this->payAmount * 100);
+        /** @var User $user */
+        $user = auth()->user();
 
-        auth()->user()->update([
-            'pay_amount' => $cents,
-            'pay_frequency' => $this->payFrequency,
-            'next_pay_date' => $this->nextPayDate,
-        ]);
-
-        $this->resolveSuggestion($suggestion, SuggestionStatus::Accepted);
+        $applier->applyPayCycle(
+            $suggestion,
+            $user,
+            (int) round((float) $this->payAmount * 100),
+            $this->payFrequency,
+            $this->nextPayDate,
+        );
 
         Flux::toast(text: 'Pay cycle configured', variant: 'success');
     }
@@ -75,7 +78,7 @@ final class AnalysisSuggestions extends Component
     /**
      * @throws Throwable
      */
-    public function acceptRecurringTransaction(int $suggestionId): void
+    public function acceptRecurringTransaction(int $suggestionId, SuggestionApplier $applier): void
     {
         $suggestion = $this->findPendingSuggestion($suggestionId, SuggestionType::RecurringTransaction);
 
@@ -83,44 +86,17 @@ final class AnalysisSuggestions extends Component
             return;
         }
 
-        $payload = $suggestion->payload;
-        $user = auth()->user();
-        $rawCategory = $this->recurringCategories[$suggestionId] ?? $payload['category_id'] ?? null;
+        $rawCategory = $this->recurringCategories[$suggestionId] ?? $suggestion->payload['category_id'] ?? null;
         $categoryId = $rawCategory !== '' && $rawCategory !== null ? (int) $rawCategory : null;
 
         if ($categoryId !== null && ! Category::visible()->where('id', $categoryId)->exists()) {
             $categoryId = null;
         }
 
-        DB::transaction(function () use ($suggestion, $payload, $user, $categoryId): void {
-            $planned = PlannedTransaction::create([
-                'user_id' => $user->id,
-                'account_id' => $payload['account_id'],
-                'amount' => $payload['amount'],
-                'direction' => $payload['direction'],
-                'description' => $payload['clean_description'],
-                'start_date' => $payload['start_date'],
-                'frequency' => $payload['frequency'],
-                'is_active' => true,
-                'category_id' => $categoryId,
-            ]);
+        /** @var User $user */
+        $user = auth()->user();
 
-            $matchedIds = $payload['matched_transaction_ids'] ?? [];
-
-            if ($matchedIds !== []) {
-                $updateData = ['planned_transaction_id' => $planned->id];
-
-                if ($categoryId !== null) {
-                    $updateData['category_id'] = $categoryId;
-                }
-
-                Transaction::whereIn('id', $matchedIds)
-                    ->where('user_id', $user->id)
-                    ->update($updateData);
-            }
-
-            $this->resolveSuggestion($suggestion, SuggestionStatus::Accepted);
-        });
+        $applier->applyRecurringTransaction($suggestion, $user, $categoryId);
 
         Flux::toast(text: 'Recurring transaction created', variant: 'success');
     }

@@ -11,12 +11,18 @@ use App\Enums\PayFrequency;
 use App\Enums\SuggestionType;
 use App\Models\AnalysisSuggestion;
 use App\Models\PipelineAuditEntry;
-use App\Models\Transaction;
+use App\Services\IncomePatternDetector;
+use App\Services\SuggestionApplier;
 use Carbon\CarbonImmutable;
 
 final readonly class SetPayCycleStage implements PipelineStageContract
 {
     private const string STAGE_KEY = 'set-pay-cycle';
+
+    public function __construct(
+        private IncomePatternDetector $detector,
+        private SuggestionApplier $applier,
+    ) {}
 
     public function key(): string
     {
@@ -30,75 +36,77 @@ final readonly class SetPayCycleStage implements PipelineStageContract
 
     public function shouldRun(PipelineContext $context): bool
     {
-        return $context->isFirstSync && ! $context->user->hasPayCycleConfigured();
+        // Requires a primary account to read the salary pattern from. Runs on
+        // every analysis once a primary exists (not just first sync) so a job
+        // change can be re-detected — never overwriting existing settings.
+        return $context->user->primary_account_id !== null;
     }
 
     public function execute(PipelineContext $context): StageResult
     {
-        $primarySuggestion = AnalysisSuggestion::query()
-            ->where('pipeline_run_id', $context->pipelineRun->id)
-            ->ofType(SuggestionType::PrimaryAccount)
-            ->first();
+        $primaryAccount = $context->user->primaryAccount;
 
-        if ($primarySuggestion === null) {
-            PipelineAuditEntry::create([
-                'pipeline_run_id' => $context->pipelineRun->id,
-                'stage' => self::STAGE_KEY,
-                'action' => 'no_primary_account_suggestion',
-                'metadata' => [],
-            ]);
+        if ($primaryAccount === null) {
+            $this->audit($context, 'no_primary_account');
 
             return new StageResult(success: true, stage: self::STAGE_KEY);
         }
 
-        $payload = $primarySuggestion->payload;
-        $incomeAmount = (int) $payload['income_amount'];
-        $incomeFrequency = $payload['income_frequency'];
-        $incomeDescription = (string) $payload['income_description'];
-        $matchedTransactionIds = (array) $payload['matched_transaction_ids'];
-        $accountId = (int) $payload['account_id'];
+        $pattern = $this->detector->detectForAccount($primaryAccount);
 
-        $frequency = PayFrequency::from($incomeFrequency);
-
-        $matchedTransactions = Transaction::query()
-            ->where('user_id', $context->user->id)
-            ->whereIn('id', $matchedTransactionIds)
-            ->orderBy('post_date')
-            ->get();
-
-        if ($matchedTransactions->isEmpty()) {
-            PipelineAuditEntry::create([
-                'pipeline_run_id' => $context->pipelineRun->id,
-                'stage' => self::STAGE_KEY,
-                'action' => 'no_matched_transactions_found',
-                'metadata' => ['expected_ids' => $matchedTransactionIds],
-            ]);
+        if ($pattern === null) {
+            $this->audit($context, 'no_income_pattern_detected', ['account_id' => $primaryAccount->id]);
 
             return new StageResult(success: true, stage: self::STAGE_KEY);
         }
 
-        $detectedDates = $matchedTransactions
-            ->pluck('post_date')
-            ->map(fn (CarbonImmutable $date): string => $date->format('Y-m-d'))
-            ->values()
-            ->all();
+        $alreadyConfigured = $context->user->hasPayCycleConfigured();
 
-        $mostRecentDate = $matchedTransactions->last()->post_date;
-        $nextPayDate = $this->calculateNextPayDate($mostRecentDate, $frequency);
+        // Nothing to do when the detected pattern already matches the user's
+        // current pay cycle — avoids re-suggesting an unchanged value.
+        if ($alreadyConfigured
+            && $context->user->pay_frequency === $pattern->frequency
+            && $context->user->pay_amount === $pattern->amount
+        ) {
+            $this->audit($context, 'pay_cycle_unchanged', ['account_id' => $primaryAccount->id]);
+
+            return new StageResult(success: true, stage: self::STAGE_KEY);
+        }
+
+        $nextPayDate = $this->calculateNextPayDate($pattern->mostRecentDate, $pattern->frequency);
 
         $suggestion = AnalysisSuggestion::create([
             'pipeline_run_id' => $context->pipelineRun->id,
             'user_id' => $context->user->id,
             'type' => SuggestionType::PayCycle,
             'payload' => [
-                'pay_amount' => $incomeAmount,
-                'pay_frequency' => $frequency->value,
+                'pay_amount' => $pattern->amount,
+                'pay_frequency' => $pattern->frequency->value,
                 'next_pay_date' => $nextPayDate->format('Y-m-d'),
-                'source_account_id' => $accountId,
-                'source_description' => $incomeDescription,
-                'detected_dates' => $detectedDates,
+                'source_account_id' => $primaryAccount->id,
+                'source_description' => $pattern->description,
+                'detected_dates' => $pattern->detectedDates,
+                'confidence_score' => $pattern->confidence,
             ],
         ]);
+
+        // Auto-apply only when no pay cycle exists yet. An existing pay cycle is
+        // never overwritten automatically — a changed pattern stays a pending
+        // suggestion for the user to review (protects manual edits / job changes).
+        if (! $alreadyConfigured && $pattern->confidence >= IncomePatternDetector::AUTO_APPLY_CONFIDENCE) {
+            $this->applier->applyPayCycle(
+                $suggestion,
+                $context->user,
+                $pattern->amount,
+                $pattern->frequency->value,
+                $nextPayDate->format('Y-m-d'),
+            );
+
+            $this->audit($context, 'auto_applied', [
+                'account_id' => $primaryAccount->id,
+                'confidence' => $pattern->confidence,
+            ]);
+        }
 
         return new StageResult(
             success: true,
@@ -125,5 +133,18 @@ final readonly class SetPayCycleStage implements PipelineStageContract
             PayFrequency::Fortnightly => $date->addWeeks(2),
             PayFrequency::Monthly => $date->addMonth(),
         };
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
+     */
+    private function audit(PipelineContext $context, string $action, array $metadata = []): void
+    {
+        PipelineAuditEntry::create([
+            'pipeline_run_id' => $context->pipelineRun->id,
+            'stage' => self::STAGE_KEY,
+            'action' => $action,
+            'metadata' => $metadata,
+        ]);
     }
 }
