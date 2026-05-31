@@ -299,11 +299,11 @@ final class PayCycleCalendar extends Component
 
     /**
      * The post date of the most recent transaction matching the configured
-     * pay-cycle income — matched by amount, narrowed to the most recent whose
-     * description contains the income description. The description is compared
-     * with a literal str_contains() (not a SQL LIKE) so any % or _ in the
-     * description can't act as a wildcard and anchor the calendar on the wrong
-     * deposit.
+     * pay-cycle income — scoped to the income's account and amount, then
+     * narrowed to the most recent whose description contains the income
+     * description. The description is compared with a literal str_contains()
+     * (not a SQL LIKE) so any % or _ in the description can't act as a wildcard
+     * and anchor the calendar on the wrong deposit.
      */
     private function latestIncomeDepositDate(User $user): ?CarbonImmutable
     {
@@ -317,6 +317,7 @@ final class PayCycleCalendar extends Component
 
         $candidates = Transaction::query()
             ->where('user_id', $user->id)
+            ->where('account_id', $income->account_id)
             ->current()
             ->where('direction', TransactionDirection::Credit)
             ->where('amount', $income->amount)

@@ -289,6 +289,36 @@ test('matches an income deposit whose description contains a percent sign litera
     expect($days[0]->iso)->toBe('2026-05-21');
 });
 
+test('ignores a same-amount deposit in another account when anchoring', function () {
+    $this->travelTo('2026-05-31');
+    [$user, $account] = fortnightlyThursdayPayUser();
+
+    // The real salary deposit in the income (primary) account.
+    Transaction::factory()->credit()->for($user)->for($account)->create([
+        'amount' => 570660,
+        'description' => 'Direct Credit WINABLE PAYROLL',
+        'post_date' => '2026-05-21',
+    ]);
+
+    // A more recent same-amount, same-description credit in a DIFFERENT account
+    // (e.g. a transfer of the exact pay amount) must not anchor the window.
+    $otherAccount = Account::factory()->for($user)->create();
+    Transaction::factory()->credit()->for($user)->for($otherAccount)->create([
+        'amount' => 570660,
+        'description' => 'Direct Credit WINABLE PAYROLL',
+        'post_date' => '2026-05-27',
+    ]);
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->days();
+
+    // Anchors on the income-account deposit (21 May), not the other account (27 May).
+    expect($days[0]->iso)->toBe('2026-05-21');
+});
+
 test('today modifier set when cycle offset is 0 and today is in the cycle', function () {
     $nextPay = nextMondayAtLeastDaysAhead(3);
 
