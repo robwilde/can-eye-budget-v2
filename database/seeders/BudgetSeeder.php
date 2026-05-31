@@ -13,7 +13,7 @@ final class BudgetSeeder extends Seeder
 {
     public function run(): void
     {
-        $user = User::where('email', 'test@example.com')->firstOrFail();
+        $user = User::firstOrFail();
 
         $groceries = Category::where('name', 'Groceries')->whereNotNull('parent_id')->first();
         $streaming = Category::where('name', 'Streaming')->whereNotNull('parent_id')->first();
