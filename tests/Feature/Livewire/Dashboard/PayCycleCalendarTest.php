@@ -244,6 +244,51 @@ test('falls back to schedule bounds when the income has no matching deposit yet'
         ->and(end($days)->iso)->toBe('2026-06-04');
 });
 
+test('matches an income deposit whose description contains a percent sign literally', function () {
+    $this->travelTo('2026-05-31');
+
+    $user = User::factory()->create([
+        'pay_amount' => 570660,
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => '2026-06-04',
+    ]);
+    $account = Account::factory()->for($user)->create();
+    $user->update(['primary_account_id' => $account->id]);
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'is_pay_cycle_income' => true,
+        'direction' => TransactionDirection::Credit,
+        'amount' => 570660,
+        'description' => 'PAYROLL 100%',
+        'start_date' => '2026-06-04',
+        'frequency' => RecurrenceFrequency::Every2Weeks,
+    ]);
+
+    // Literally contains "PAYROLL 100%".
+    Transaction::factory()->credit()->for($user)->for($account)->create([
+        'amount' => 570660,
+        'description' => 'DIRECT CREDIT PAYROLL 100% BONUS',
+        'post_date' => '2026-05-21',
+    ]);
+
+    // A more recent same-amount credit a "%" wildcard would falsely match
+    // ("PAYROLL 100%" as a LIKE pattern matches "PAYROLL 1004").
+    Transaction::factory()->credit()->for($user)->for($account)->create([
+        'amount' => 570660,
+        'description' => 'DIRECT CREDIT PAYROLL 1004 REFUND',
+        'post_date' => '2026-05-27',
+    ]);
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->days();
+
+    // Anchors on the literal "100%" deposit (21 May), not the "1004" one (27 May).
+    expect($days[0]->iso)->toBe('2026-05-21');
+});
+
 test('today modifier set when cycle offset is 0 and today is in the cycle', function () {
     $nextPay = nextMondayAtLeastDaysAhead(3);
 
