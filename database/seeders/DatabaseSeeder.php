@@ -25,7 +25,6 @@ final class DatabaseSeeder extends Seeder
         ]);
 
         $this->call(CategorySeeder::class);
-        $this->call(BudgetSeeder::class);
 
         $sandboxUsers = [
             ['name' => 'Max Wentworth-Smith', 'email' => 'maxsmith@micr0soft.com', 'password' => 'whislter'],
