@@ -100,7 +100,7 @@
                             <span class="chip-today">Today</span>
                         @endif
                         @if ($this->selectedDay['isCycleEnd'] && $this->isCurrentCycle)
-                            <span class="chip-pay">Payday eve</span>
+                            <span class="chip-pay">Payday</span>
                         @endif
                         <span class="chip-count">
                             {{ count($this->selectedDay['pips']) }} item{{ count($this->selectedDay['pips']) === 1 ? '' : 's' }}

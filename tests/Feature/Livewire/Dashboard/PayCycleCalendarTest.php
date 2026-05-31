@@ -44,6 +44,34 @@ function nextDateOnIsoWeekday(int $isoWeekday, int $minDaysAhead): CarbonImmutab
     return $candidate;
 }
 
+/**
+ * A user paid fortnightly on Thursday 4 Jun 2026, with the recurring income
+ * planned transaction that the pay-cycle calendar anchors its window on.
+ *
+ * @return array{0: User, 1: Account}
+ */
+function fortnightlyThursdayPayUser(string $nextPayDate = '2026-06-04'): array
+{
+    $user = User::factory()->create([
+        'pay_amount' => 570660,
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => $nextPayDate,
+    ]);
+    $account = Account::factory()->for($user)->create();
+    $user->update(['primary_account_id' => $account->id]);
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'is_pay_cycle_income' => true,
+        'direction' => TransactionDirection::Credit,
+        'amount' => 570660,
+        'description' => 'WINABLE PAYROLL',
+        'start_date' => $nextPayDate,
+        'frequency' => RecurrenceFrequency::Every2Weeks,
+    ]);
+
+    return [$user, $account];
+}
+
 test('shows empty-state when pay cycle is not configured', function () {
     $user = User::factory()->create();
 
@@ -53,7 +81,7 @@ test('shows empty-state when pay cycle is not configured', function () {
         ->assertSee(route('pay-cycle.edit'));
 });
 
-test('renders 14 days for fortnightly cycle starting Monday', function () {
+test('renders 15 days for a fortnightly cycle (both paydays inclusive) without a matching deposit', function () {
     $nextPay = nextMondayAtLeastDaysAhead(7);
 
     $user = User::factory()->withPayCycle()->create([
@@ -68,10 +96,10 @@ test('renders 14 days for fortnightly cycle starting Monday', function () {
         ->instance()
         ->days();
 
-    expect($days)->toHaveCount(14);
+    expect($days)->toHaveCount(15);
 });
 
-test('renders 7 days for weekly cycle', function () {
+test('renders 8 days for a weekly cycle (both paydays inclusive) without a matching deposit', function () {
     $nextPay = nextMondayAtLeastDaysAhead(3);
 
     $user = User::factory()->withPayCycle()->create([
@@ -86,7 +114,7 @@ test('renders 7 days for weekly cycle', function () {
         ->instance()
         ->days();
 
-    expect($days)->toHaveCount(7);
+    expect($days)->toHaveCount(8);
 });
 
 test('renders ~30 days for monthly cycle', function () {
@@ -102,8 +130,8 @@ test('renders ~30 days for monthly cycle', function () {
         ->instance()
         ->days();
 
-    expect(count($days))->toBeGreaterThanOrEqual(27)
-        ->and(count($days))->toBeLessThanOrEqual(31);
+    expect(count($days))->toBeGreaterThanOrEqual(28)
+        ->and(count($days))->toBeLessThanOrEqual(32);
 });
 
 test('labels first day as PAID and last as PAYDAY', function () {
@@ -123,6 +151,97 @@ test('labels first day as PAID and last as PAYDAY', function () {
 
     expect($days[0]->isCycleStart)->toBeTrue()
         ->and($days[count($days) - 1]->isCycleEnd)->toBeTrue();
+});
+
+// ── Deposit-anchored window (issue #249) ───────────────────────────
+
+test('anchors the cycle on the latest matching income deposit and ends on the scheduled payday', function () {
+    $this->travelTo('2026-05-31');
+    [$user, $account] = fortnightlyThursdayPayUser();
+
+    // Paid on the scheduled Thursday, one fortnight before the next payday.
+    Transaction::factory()->credit()->for($user)->for($account)->create([
+        'amount' => 570660,
+        'description' => 'Direct Credit WINABLE PAYROLL',
+        'post_date' => '2026-05-21',
+    ]);
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->days();
+
+    expect($days[0]->iso)->toBe('2026-05-21')
+        ->and($days[0]->isCycleStart)->toBeTrue()
+        ->and(end($days)->iso)->toBe('2026-06-04')
+        ->and(end($days)->isCycleEnd)->toBeTrue();
+});
+
+test('a late Friday deposit still ends the cycle on the scheduled Thursday', function () {
+    $this->travelTo('2026-05-31');
+    [$user, $account] = fortnightlyThursdayPayUser();
+
+    // Paid one day late — Friday instead of the scheduled Thursday.
+    Transaction::factory()->credit()->for($user)->for($account)->create([
+        'amount' => 570660,
+        'description' => 'Direct Credit WINABLE PAYROLL',
+        'post_date' => '2026-05-08',
+    ]);
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->days();
+
+    // Window starts on the actual late Friday, but the payday stays on Thursday.
+    expect($days[0]->iso)->toBe('2026-05-08')
+        ->and(end($days)->iso)->toBe('2026-05-21')
+        ->and(end($days)->isCycleEnd)->toBeTrue();
+});
+
+test('matches the income deposit by description, not just amount', function () {
+    $this->travelTo('2026-05-31');
+    [$user, $account] = fortnightlyThursdayPayUser();
+
+    // The real salary deposit.
+    Transaction::factory()->credit()->for($user)->for($account)->create([
+        'amount' => 570660,
+        'description' => 'Direct Credit WINABLE PAYROLL',
+        'post_date' => '2026-05-21',
+    ]);
+
+    // A coincidental same-amount credit on a later date that is not salary.
+    Transaction::factory()->credit()->for($user)->for($account)->create([
+        'amount' => 570660,
+        'description' => 'Refund from a retailer',
+        'post_date' => '2026-05-27',
+    ]);
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->days();
+
+    expect($days[0]->iso)->toBe('2026-05-21');
+});
+
+test('falls back to schedule bounds when the income has no matching deposit yet', function () {
+    $this->travelTo('2026-05-31');
+    [$user] = fortnightlyThursdayPayUser();
+
+    // No matching credit transactions exist.
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->days();
+
+    expect($days[0]->iso)->toBe('2026-05-21')
+        ->and(end($days)->iso)->toBe('2026-06-04');
 });
 
 test('today modifier set when cycle offset is 0 and today is in the cycle', function () {
@@ -431,9 +550,9 @@ test('handles cycles spanning a year boundary', function () {
         ->instance()
         ->days();
 
-    expect($days)->toHaveCount(14)
+    expect($days)->toHaveCount(15)
         ->and($days[0]->iso)->toBe('2026-12-22')
-        ->and(end($days)->iso)->toBe('2027-01-04');
+        ->and(end($days)->iso)->toBe('2027-01-05');
 });
 
 test('isolates current user from other users transactions', function () {

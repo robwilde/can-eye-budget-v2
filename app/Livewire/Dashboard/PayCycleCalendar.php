@@ -6,8 +6,11 @@ namespace App\Livewire\Dashboard;
 
 use App\Casts\MoneyCast;
 use App\Enums\PayFrequency;
+use App\Enums\TransactionDirection;
 use App\Livewire\Dashboard\Data\PayCycleDayData;
 use App\Livewire\Dashboard\Data\PayCyclePip;
+use App\Models\Transaction;
+use App\Models\User;
 use App\Support\Calendar\DayActivity;
 use App\Support\Calendar\DayActivityLoader;
 use Carbon\CarbonImmutable;
@@ -59,13 +62,14 @@ final class PayCycleCalendar extends Component
     #[Computed]
     public function bounds(): ?array
     {
+        /** @var User|null $user */
         $user = auth()->user();
 
         if ($user === null || ! $user->hasPayCycleConfigured()) {
             return null;
         }
 
-        $base = $user->currentPayCycleBounds();
+        $base = $this->currentCycleBounds($user);
 
         if ($base === null) {
             return null;
@@ -109,7 +113,9 @@ final class PayCycleCalendar extends Component
         $today = CarbonImmutable::today();
         $cycleStart = $bounds['start'];
         $cycleEndPayday = $bounds['end'];
-        $lastRenderedDay = $cycleEndPayday->subDay();
+        // Render through to the actual payday so the PAYDAY cell lands on the real
+        // pay date (a Thursday), not the day before it.
+        $lastRenderedDay = $cycleEndPayday;
 
         $userId = (int) auth()->id();
 
@@ -258,6 +264,108 @@ final class PayCycleCalendar extends Component
         return view('livewire.dashboard.pay-cycle-calendar', [
             'formatMoney' => MoneyCast::format(...),
         ]);
+    }
+
+    /**
+     * Resolve the current cycle window. Anchored on the user's most recent actual
+     * pay deposit so a late (e.g. Friday) payment shifts the whole fortnight with
+     * it; falls back to the schedule-only bounds when no matching deposit exists.
+     *
+     * @return array{start: CarbonImmutable, end: CarbonImmutable}|null
+     */
+    private function currentCycleBounds(User $user): ?array
+    {
+        $frequency = $user->pay_frequency;
+
+        if ($frequency === null || $user->next_pay_date === null) {
+            return $user->currentPayCycleBounds();
+        }
+
+        $depositDate = $this->latestIncomeDepositDate($user);
+
+        if ($depositDate === null) {
+            return $user->currentPayCycleBounds();
+        }
+
+        return [
+            'start' => $depositDate,
+            'end' => $this->nextScheduledPaydayAfter(
+                CarbonImmutable::instance($user->next_pay_date),
+                $depositDate,
+                $frequency,
+            ),
+        ];
+    }
+
+    /**
+     * The post date of the most recent transaction matching the configured
+     * pay-cycle income — matched by amount, narrowed by description when that
+     * description is distinctive enough to find a hit.
+     */
+    private function latestIncomeDepositDate(User $user): ?CarbonImmutable
+    {
+        $income = $user->plannedTransactions()
+            ->where('is_pay_cycle_income', true)
+            ->first();
+
+        if ($income === null) {
+            return null;
+        }
+
+        $base = Transaction::query()
+            ->where('user_id', $user->id)
+            ->current()
+            ->where('direction', TransactionDirection::Credit)
+            ->where('amount', $income->amount)
+            ->orderByDesc('post_date');
+
+        $match = (clone $base)
+            ->where('description', 'like', '%'.$income->description.'%')
+            ->first() ?? $base->first();
+
+        return $match?->post_date;
+    }
+
+    /**
+     * Walk the recurring pay schedule (anchored on the user's chosen payday) to
+     * the first payday strictly after the given date. Because the anchor keeps
+     * its weekday, the result stays on the scheduled weekday even when the
+     * deposit it follows landed late.
+     */
+    private function nextScheduledPaydayAfter(
+        CarbonImmutable $anchor,
+        CarbonImmutable $after,
+        PayFrequency $frequency,
+    ): CarbonImmutable {
+        $payday = $anchor;
+
+        while ($payday->lessThanOrEqualTo($after)) {
+            $payday = $this->addInterval($payday, $frequency);
+        }
+
+        while ($this->subInterval($payday, $frequency)->greaterThan($after)) {
+            $payday = $this->subInterval($payday, $frequency);
+        }
+
+        return $payday;
+    }
+
+    private function addInterval(CarbonImmutable $date, PayFrequency $frequency): CarbonImmutable
+    {
+        return match ($frequency) {
+            PayFrequency::Weekly => $date->addWeek(),
+            PayFrequency::Fortnightly => $date->addWeeks(2),
+            PayFrequency::Monthly => $date->addMonthNoOverflow(),
+        };
+    }
+
+    private function subInterval(CarbonImmutable $date, PayFrequency $frequency): CarbonImmutable
+    {
+        return match ($frequency) {
+            PayFrequency::Weekly => $date->subWeek(),
+            PayFrequency::Fortnightly => $date->subWeeks(2),
+            PayFrequency::Monthly => $date->subMonthNoOverflow(),
+        };
     }
 
     private function bustCache(): void

@@ -39,6 +39,25 @@ test('user can save pay cycle settings', function () {
         ->and($user->next_pay_date)->not->toBeNull();
 });
 
+test('next pay date survives the save round-trip without shifting a day under a UTC app timezone', function () {
+    $this->travelTo('2026-06-01');
+
+    $user = User::factory()->create();
+
+    $this->actingAs($user);
+
+    Livewire::test('pages::settings.pay-cycle')
+        ->set('pay_amount', '3000.00')
+        ->set('pay_frequency', 'fortnightly')
+        ->set('next_pay_date', '2026-06-04')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($user->fresh()->next_pay_date->format('Y-m-d'))->toBe('2026-06-04');
+
+    expect(Livewire::test('pages::settings.pay-cycle')->get('next_pay_date'))->toBe('2026-06-04');
+});
+
 test('dollar inputs correctly convert to cents in database', function () {
     $user = User::factory()->create();
 
