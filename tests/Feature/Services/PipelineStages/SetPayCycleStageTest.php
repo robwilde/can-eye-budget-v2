@@ -7,12 +7,15 @@ declare(strict_types=1);
 use App\DTOs\PipelineContext;
 use App\Enums\PayFrequency;
 use App\Enums\PipelineTrigger;
+use App\Enums\RecurrenceFrequency;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
+use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\AnalysisSuggestion;
 use App\Models\PipelineAuditEntry;
 use App\Models\PipelineRun;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\PipelineStages\SetPayCycleStage;
@@ -173,6 +176,20 @@ test('auto-applies pay cycle when not configured and confidence is high', functi
 
     $suggestion = AnalysisSuggestion::find($result->suggestionIds[0]);
     expect($suggestion->status)->toBe(SuggestionStatus::Accepted);
+
+    // Auto-apply also materialises the recurring income planned transaction
+    // (keyed on is_pay_cycle_income) that drives the balance projection.
+    $income = PlannedTransaction::query()
+        ->where('user_id', $this->user->id)
+        ->where('is_pay_cycle_income', true)
+        ->get();
+
+    expect($income)->toHaveCount(1)
+        ->and($income->first()->direction)->toBe(TransactionDirection::Credit)
+        ->and($income->first()->amount)->toBe(300_000)
+        ->and($income->first()->frequency)->toBe(RecurrenceFrequency::Every2Weeks)
+        ->and($income->first()->account_id)->toBe($this->account->id)
+        ->and($income->first()->description)->toBe('SALARY DEPOSIT');
 
     $audit = PipelineAuditEntry::where('pipeline_run_id', $context->pipelineRun->id)
         ->where('stage', 'set-pay-cycle')

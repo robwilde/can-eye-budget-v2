@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\PayFrequency;
 use App\Enums\SuggestionStatus;
 use App\Models\AnalysisSuggestion;
 use App\Models\PlannedTransaction;
@@ -19,8 +20,12 @@ use Throwable;
  * analysis pipeline can apply suggestions through the same code path. Each
  * method takes an explicit User rather than relying on auth() context.
  */
-final class SuggestionApplier
+final readonly class SuggestionApplier
 {
+    public function __construct(
+        private PayCycleConfigurator $payCycleConfigurator,
+    ) {}
+
     public function applyPrimaryAccount(AnalysisSuggestion $suggestion, User $user): void
     {
         $user->update(['primary_account_id' => $suggestion->payload['account_id']]);
@@ -28,6 +33,9 @@ final class SuggestionApplier
         $this->markAccepted($suggestion);
     }
 
+    /**
+     * @throws Throwable
+     */
     public function applyPayCycle(
         AnalysisSuggestion $suggestion,
         User $user,
@@ -35,11 +43,13 @@ final class SuggestionApplier
         string $payFrequency,
         string $nextPayDate,
     ): void {
-        $user->update([
-            'pay_amount' => $payAmount,
-            'pay_frequency' => $payFrequency,
-            'next_pay_date' => $nextPayDate,
-        ]);
+        $this->payCycleConfigurator->apply(
+            $user,
+            $payAmount,
+            PayFrequency::from($payFrequency),
+            $nextPayDate,
+            $suggestion->payload['source_description'] ?? null,
+        );
 
         $this->markAccepted($suggestion);
     }

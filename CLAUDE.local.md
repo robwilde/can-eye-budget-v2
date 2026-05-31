@@ -65,6 +65,35 @@ This is non-negotiable. There are zero exceptions to this rule.
 
 ---
 
+## Pull Request Reviewers & Labels
+
+Every PR opened for this repo MUST, in addition to targeting `develop`:
+
+1. **Request GitHub Copilot as a reviewer.** After creating the PR, run:
+   ```bash
+   gh pr edit <pr-number> --add-reviewer "@copilot"
+   ```
+   (`@copilot` is github.com-only and needs Copilot code review enabled on the
+   repo. If the command errors, surface that — do not silently skip it.)
+
+2. **Apply labels** matching the established convention — one *type* label plus
+   one or more *layer* labels:
+   - Type (exactly one): `bug` for fixes, `enhancement` for new features.
+   - Layer (one or more): `backend` (PHP / Livewire / services / migrations),
+     `frontend` (Blade / Tailwind / JS / UI).
+
+   Add them at creation time:
+   ```bash
+   gh pr create --base develop --label bug --label backend ...
+   ```
+   or afterward: `gh pr edit <pr-number> --add-label bug,backend`.
+
+Pick labels from the change itself: a bug fix touching only services/Livewire is
+`bug` + `backend`; a UI feature is `enhancement` + `frontend` (+ `backend` if it
+also changes server code).
+
+---
+
 ## GitHub Account
 
 The repo belongs to `robwilde`. Before running `gh` commands, ensure the correct account is active:
