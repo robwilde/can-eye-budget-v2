@@ -8,6 +8,7 @@ use App\Enums\PayFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
+use App\Models\Transaction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
@@ -34,6 +35,13 @@ final class PayCycleConfigurator
      * transaction is skipped because `planned_transactions.account_id` is NOT
      * NULL.
      *
+     * The detected source transactions are tagged with the income row's
+     * `planned_transaction_id` so the recurring-transaction detector excludes
+     * them and cannot re-suggest the salary as a second income planned
+     * transaction (which would double-count income in the projection).
+     *
+     * @param  list<int>  $sourceTransactionIds
+     *
      * @throws Throwable
      */
     public function apply(
@@ -42,8 +50,9 @@ final class PayCycleConfigurator
         PayFrequency $frequency,
         CarbonImmutable|string $nextPayDate,
         ?string $description = null,
+        array $sourceTransactionIds = [],
     ): void {
-        DB::transaction(function () use ($user, $payAmountCents, $frequency, $nextPayDate, $description): void {
+        DB::transaction(function () use ($user, $payAmountCents, $frequency, $nextPayDate, $description, $sourceTransactionIds): void {
             $user->update([
                 'pay_amount' => $payAmountCents,
                 'pay_frequency' => $frequency,
@@ -54,7 +63,7 @@ final class PayCycleConfigurator
                 return;
             }
 
-            PlannedTransaction::updateOrCreate(
+            $income = PlannedTransaction::updateOrCreate(
                 ['user_id' => $user->id, 'is_pay_cycle_income' => true],
                 [
                     'account_id' => $user->primary_account_id,
@@ -68,7 +77,29 @@ final class PayCycleConfigurator
                     'is_active' => true,
                 ],
             );
+
+            $this->linkSourceTransactions($user, $income, $sourceTransactionIds);
         });
+    }
+
+    /**
+     * Tag the detected salary transactions with the income row so the recurring
+     * detector's `planned_transaction_id IS NULL` filter excludes them. Only
+     * claims transactions not already linked to another planned item.
+     *
+     * @param  list<int>  $sourceTransactionIds
+     */
+    private function linkSourceTransactions(User $user, PlannedTransaction $income, array $sourceTransactionIds): void
+    {
+        if ($sourceTransactionIds === []) {
+            return;
+        }
+
+        Transaction::query()
+            ->where('user_id', $user->id)
+            ->whereIn('id', $sourceTransactionIds)
+            ->whereNull('planned_transaction_id')
+            ->update(['planned_transaction_id' => $income->id]);
     }
 
     /**

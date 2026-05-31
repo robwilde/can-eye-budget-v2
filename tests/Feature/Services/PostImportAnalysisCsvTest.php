@@ -76,11 +76,17 @@ test('a clean CSV import auto-sets the primary account and pay cycle and surface
         ->and($user->next_pay_date)->not->toBeNull();
 
     // The recurring debit was surfaced as a suggestion for review.
-    $netflix = AnalysisSuggestion::query()
+    $recurring = AnalysisSuggestion::query()
         ->where('user_id', $user->id)
         ->where('type', SuggestionType::RecurringTransaction)
-        ->get()
-        ->first(fn (AnalysisSuggestion $s): bool => $s->payload['description'] === 'NETFLIX.COM');
+        ->get();
 
-    expect($netflix)->not->toBeNull();
+    expect($recurring->first(fn (AnalysisSuggestion $s): bool => $s->payload['description'] === 'NETFLIX.COM'))
+        ->not->toBeNull();
+
+    // The salary is NOT also surfaced as a recurring credit — it is already the
+    // pay-cycle income planned transaction, so re-suggesting it would create a
+    // duplicate income row and double-count income in the projection.
+    expect($recurring->first(fn (AnalysisSuggestion $s): bool => str_contains((string) $s->payload['description'], 'ACME PAYROLL')))
+        ->toBeNull();
 });

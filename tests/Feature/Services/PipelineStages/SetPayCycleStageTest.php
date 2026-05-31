@@ -295,6 +295,7 @@ test('payload contains all required fields with correct types', function () {
             'next_pay_date',
             'source_account_id',
             'source_description',
+            'source_transaction_ids',
             'detected_dates',
             'confidence_score',
         ])
@@ -303,8 +304,33 @@ test('payload contains all required fields with correct types', function () {
         ->and($payload['next_pay_date'])->toBeString()
         ->and($payload['source_account_id'])->toBe($this->account->id)
         ->and($payload['source_description'])->toBeString()
+        ->and($payload['source_transaction_ids'])->toBeArray()
         ->and($payload['detected_dates'])->toBeArray()
         ->and($payload['confidence_score'])->toBeFloat();
+});
+
+test('auto-applying the pay cycle links the detected salary transactions to the income planned transaction', function () {
+    withPrimaryAccount($this->user, $this->account);
+    seedSalary($this->user, $this->account, amount: 300_000, intervalDays: 14);
+
+    $context = makePayCycleContext($this->user);
+    $this->stage->execute($context);
+
+    $income = PlannedTransaction::query()
+        ->where('user_id', $this->user->id)
+        ->where('is_pay_cycle_income', true)
+        ->firstOrFail();
+
+    $salaryCredits = Transaction::query()
+        ->where('user_id', $this->user->id)
+        ->where('direction', TransactionDirection::Credit)
+        ->get();
+
+    expect($salaryCredits)->not->toBeEmpty();
+
+    $salaryCredits->each(
+        fn (Transaction $transaction) => expect($transaction->planned_transaction_id)->toBe($income->id),
+    );
 });
 
 test('detected dates are sorted chronologically', function () {
