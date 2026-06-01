@@ -84,7 +84,7 @@
                             <div class="cyc-pip-more">+{{ $day->hiddenCount }} more</div>
                         @endif
                     </div>
-                    <x-cib.day-net :cents="$day->netCents"/>
+                    <x-cib.day-net :debit="$day->postedCents" :credit="$day->incomeCents"/>
                 </button>
             @endforeach
         </div>
