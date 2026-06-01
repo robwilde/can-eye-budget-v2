@@ -3005,6 +3005,33 @@ test('submit button shows convert text when switching mode during edit', functio
         ->assertSee(__('Convert to entered expense'));
 });
 
+test('copy-transaction prefills a new entry from an existing transaction', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-18'));
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->create([
+        'amount' => 20000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'Direct Debit Spaceship',
+        'category_id' => $category->id,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('copy-transaction', id: $source->id)
+        ->assertSet('showModal', true)
+        ->assertSet('editingTransactionId', null)
+        ->assertSet('editingPlannedTransactionId', null)
+        ->assertSet('transactionType', 'expense')
+        ->assertSet('accountId', $account->id)
+        ->assertSet('categoryId', $category->id)
+        ->assertSet('descriptionInput', '200.00 Direct Debit Spaceship')
+        ->assertSet('date', '2026-03-18');
+});
+
 test('converting an entered transaction to planned keeps a planned occurrence on that date', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();

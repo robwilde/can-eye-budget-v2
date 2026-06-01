@@ -633,3 +633,35 @@ test('component hidden when all suggestions are resolved', function () {
         ->test(AnalysisSuggestions::class)
         ->assertDontSee('Analysis Suggestions');
 });
+
+test('clicking a recurring suggestion dispatches copy-transaction for the most recent match', function () {
+    $older = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'post_date' => '2026-03-15',
+    ]);
+    $newer = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'post_date' => '2026-04-15',
+    ]);
+
+    $suggestion = createSuggestion($this, 'recurring', recurringPayload($this->account->id, [
+        'matched_transaction_ids' => [$older->id, $newer->id],
+    ]));
+
+    Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->call('copyRecurringTransaction', $suggestion->id)
+        ->assertDispatched('copy-transaction', id: $newer->id);
+});
+
+test('recurring suggestion row is clickable to copy the last transaction', function () {
+    $suggestion = createSuggestion($this, 'recurring', recurringPayload($this->account->id, [
+        'matched_transaction_ids' => [1, 2, 3],
+    ]));
+
+    Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->assertSeeHtml('wire:click="copyRecurringTransaction('.$suggestion->id.')"');
+});

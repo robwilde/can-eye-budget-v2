@@ -10,6 +10,7 @@
     'tone' => 'out',
     'icon' => null,
     'matched' => false,
+    'click' => null,
 ])
 
 @php
@@ -25,23 +26,45 @@
 
 @if ($isPassive)
     <div {{ $attributes->class(['tx-row', 'passive']) }}>
-        <div @class(['tx-ico', $tone])>
-            @if ($icon)
-                <flux:icon :name="$icon" variant="mini"/>
-            @endif
-        </div>
-        <div>
-            <div class="tx-name">
-                {{ $name }}
-                @if ($matched)
-                    <flux:badge size="sm" color="red" class="ml-1.5 align-middle">Planned</flux:badge>
+        @if ($click !== null)
+            <button type="button" class="tx-row-hit" wire:click="{{ $click }}">
+                <div @class(['tx-ico', $tone])>
+                    @if ($icon)
+                        <flux:icon :name="$icon" variant="mini"/>
+                    @endif
+                </div>
+                <div>
+                    <div class="tx-name">
+                        {{ $name }}
+                        @if ($matched)
+                            <flux:badge size="sm" color="red" class="ml-1.5 align-middle">Planned</flux:badge>
+                        @endif
+                    </div>
+                    @isset($meta)
+                        <div class="tx-meta">{{ $meta }}</div>
+                    @endisset
+                </div>
+                <div @class(['tx-amt', $tone])>{{ MoneyCast::format((int) $amount) }}</div>
+            </button>
+        @else
+            <div @class(['tx-ico', $tone])>
+                @if ($icon)
+                    <flux:icon :name="$icon" variant="mini"/>
                 @endif
             </div>
-            @isset($meta)
-                <div class="tx-meta">{{ $meta }}</div>
-            @endisset
-        </div>
-        <div @class(['tx-amt', $tone])>{{ MoneyCast::format((int) $amount) }}</div>
+            <div>
+                <div class="tx-name">
+                    {{ $name }}
+                    @if ($matched)
+                        <flux:badge size="sm" color="red" class="ml-1.5 align-middle">Planned</flux:badge>
+                    @endif
+                </div>
+                @isset($meta)
+                    <div class="tx-meta">{{ $meta }}</div>
+                @endisset
+            </div>
+            <div @class(['tx-amt', $tone])>{{ MoneyCast::format((int) $amount) }}</div>
+        @endif
         @isset($actions)
             <div class="tx-actions">{{ $actions }}</div>
         @endisset
