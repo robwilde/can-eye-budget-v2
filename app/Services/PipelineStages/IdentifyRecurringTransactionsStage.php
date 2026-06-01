@@ -333,6 +333,12 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
 
     private function shouldSkip(User $user, string $description, int $accountId, TransactionDirection $direction, RecurrenceFrequency $frequency, int $medianAmount, int $pipelineRunId): bool
     {
+        if ($this->isNoise($description)) {
+            $this->createSkipAudit($pipelineRunId, 'noise', $description, $accountId);
+
+            return true;
+        }
+
         if ($this->hasAcceptedSuggestion($user, $description, $accountId)) {
             $this->createSkipAudit($pipelineRunId, 'existing_accepted_suggestion', $description, $accountId);
 
@@ -352,6 +358,22 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
         }
 
         return false;
+    }
+
+    /**
+     * Round-up sweeps and internal own-account transfers (to savings / credit
+     * card) are regular but are not bills, so they must not be offered as
+     * recurring suggestions even when their amount happens to be constant.
+     */
+    private function isNoise(string $signature): bool
+    {
+        if (str_starts_with($signature, 'ROUND UP')) {
+            return true;
+        }
+
+        return str_starts_with($signature, 'TRANSFER')
+            && str_contains($signature, ' TO ')
+            && (preg_match('/\bSAV\b/', $signature) === 1 || preg_match('/\bCC\b/', $signature) === 1);
     }
 
     private function hasAcceptedSuggestion(User $user, string $description, int $accountId): bool

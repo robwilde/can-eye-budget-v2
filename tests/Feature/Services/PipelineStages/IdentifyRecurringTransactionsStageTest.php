@@ -931,3 +931,29 @@ test('snaps wobbling monthly intervals to every month', function () {
     expect(AnalysisSuggestion::find($result->suggestionIds[0])->payload['frequency'])
         ->toBe(RecurrenceFrequency::EveryMonth->value);
 });
+
+// ─── Noise filtering (#263) ─────────────────────────────────────────────
+
+test('skips round-up transfers as noise even when the amount is constant', function () {
+    $start = CarbonImmutable::parse('2026-01-01');
+
+    for ($i = 0; $i < 5; $i++) {
+        createCsvTransaction($this->user, $this->account, 'Round Up transfer to 03774599: COFFEE SHOP', 101, $start->addMonthsNoOverflow($i)->toDateString());
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toBeEmpty();
+});
+
+test('skips internal account sweeps as noise', function () {
+    $start = CarbonImmutable::parse('2026-01-01');
+
+    for ($i = 0; $i < 4; $i++) {
+        createCsvTransaction($this->user, $this->account, 'Transfer Optimus to CC to SAV 03914373 NET#2422732337', 25000, $start->addWeeks($i)->toDateString());
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toBeEmpty();
+});
