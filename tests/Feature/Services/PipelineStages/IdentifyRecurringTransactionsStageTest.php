@@ -877,3 +877,57 @@ test('groups recurring payees by signature despite varying reference codes', fun
     expect($suggestion->payload['description'])->toBe('DIRECT DEBIT FAIR GO FINANCE FGF')
         ->and($suggestion->payload['frequency'])->toBe(RecurrenceFrequency::EveryWeek->value);
 });
+
+// ─── Cadence gap-filling (#263) ─────────────────────────────────────────
+
+test('maps a 24-day cadence (previously an unmatched gap) to three-weekly', function () {
+    $start = CarbonImmutable::parse('2026-01-01');
+
+    for ($i = 0; $i < 3; $i++) {
+        createBasiqTransaction($this->user, $this->account, [
+            'merchant_name' => 'Gym Membership',
+            'amount' => 5000,
+            'post_date' => $start->addDays(24 * $i),
+        ]);
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toHaveCount(1);
+    expect(AnalysisSuggestion::find($result->suggestionIds[0])->payload['frequency'])
+        ->toBe(RecurrenceFrequency::Every3Weeks->value);
+});
+
+test('maps a 10-day cadence (previously an unmatched gap) to weekly', function () {
+    $start = CarbonImmutable::parse('2026-01-01');
+
+    for ($i = 0; $i < 3; $i++) {
+        createBasiqTransaction($this->user, $this->account, [
+            'merchant_name' => 'Window Cleaner',
+            'amount' => 4000,
+            'post_date' => $start->addDays(10 * $i),
+        ]);
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toHaveCount(1);
+    expect(AnalysisSuggestion::find($result->suggestionIds[0])->payload['frequency'])
+        ->toBe(RecurrenceFrequency::EveryWeek->value);
+});
+
+test('snaps wobbling monthly intervals to every month', function () {
+    foreach (['2026-01-15', '2026-02-12', '2026-03-15'] as $date) {
+        createBasiqTransaction($this->user, $this->account, [
+            'merchant_name' => 'Phone Plan',
+            'amount' => 4999,
+            'post_date' => CarbonImmutable::parse($date),
+        ]);
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toHaveCount(1);
+    expect(AnalysisSuggestion::find($result->suggestionIds[0])->payload['frequency'])
+        ->toBe(RecurrenceFrequency::EveryMonth->value);
+});

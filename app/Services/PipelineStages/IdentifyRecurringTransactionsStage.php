@@ -45,15 +45,22 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
      */
     private const float DESCRIPTION_OVERLAP_THRESHOLD = 0.8;
 
-    /** @var list<array{0: int, 1: int, 2: RecurrenceFrequency}> */
-    private const array FREQUENCY_RANGES = [
-        [5, 9, RecurrenceFrequency::EveryWeek],
-        [12, 16, RecurrenceFrequency::Every2Weeks],
-        [19, 23, RecurrenceFrequency::Every3Weeks],
-        [27, 35, RecurrenceFrequency::EveryMonth],
-        [80, 100, RecurrenceFrequency::Every3Months],
-        [160, 200, RecurrenceFrequency::Every6Months],
-        [340, 395, RecurrenceFrequency::EveryYear],
+    /**
+     * Canonical cadence anchors (days) and their frequency. The median interval
+     * snaps to the nearest anchor within tolerance, so there are no unmatched
+     * gaps (e.g. 10d -> weekly, 24d -> three-weekly) and calendar-month wobble
+     * (28-31d) still resolves to monthly.
+     *
+     * @var list<array{0: int, 1: RecurrenceFrequency}>
+     */
+    private const array FREQUENCY_TARGETS = [
+        [7, RecurrenceFrequency::EveryWeek],
+        [14, RecurrenceFrequency::Every2Weeks],
+        [21, RecurrenceFrequency::Every3Weeks],
+        [30, RecurrenceFrequency::EveryMonth],
+        [91, RecurrenceFrequency::Every3Months],
+        [182, RecurrenceFrequency::Every6Months],
+        [365, RecurrenceFrequency::EveryYear],
     ];
 
     public function key(): string
@@ -274,13 +281,20 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
 
     private function mapIntervalToFrequency(float $medianInterval): ?RecurrenceFrequency
     {
-        foreach (self::FREQUENCY_RANGES as [$min, $max, $frequency]) {
-            if ($medianInterval >= $min && $medianInterval <= $max) {
-                return $frequency;
+        $best = null;
+        $bestDistance = INF;
+
+        foreach (self::FREQUENCY_TARGETS as [$target, $frequency]) {
+            $distance = abs($medianInterval - $target);
+            $tolerance = max(4.0, $target * 0.2);
+
+            if ($distance <= $tolerance && $distance < $bestDistance) {
+                $bestDistance = $distance;
+                $best = $frequency;
             }
         }
 
-        return null;
+        return $best;
     }
 
     /** @param Collection<int, mixed> $values */
