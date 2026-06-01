@@ -44,6 +44,13 @@ final class MerchantSignature
                 continue;
             }
 
+            // Collapse an adjacent duplicate word (e.g. "MCF MCF", "NETFLIX.COM
+            // NETFLIX.COM") which some statement formats emit; non-adjacent
+            // repeats (e.g. "TO ... TO") are preserved so distinct payees stay apart.
+            if ($kept !== [] && end($kept) === $token) {
+                continue;
+            }
+
             $kept[] = $token;
         }
 

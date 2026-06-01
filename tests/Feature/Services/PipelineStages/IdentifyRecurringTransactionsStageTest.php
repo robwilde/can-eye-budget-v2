@@ -248,7 +248,7 @@ test('strips card numbers from raw descriptions for grouping', function () {
     expect($result->suggestionIds)->toHaveCount(1);
 
     $suggestion = AnalysisSuggestion::find($result->suggestionIds[0]);
-    expect($suggestion->payload['description'])->toBe('WOOLWORTHS');
+    expect($suggestion->payload['description'])->toBe('WOOLWORTHS SYDNEY AU');
 });
 
 test('strips date patterns from raw descriptions for grouping', function () {
@@ -807,4 +807,32 @@ test('label returns human-readable string', function () {
 
 test('shouldRun always returns true', function () {
     expect($this->stage->shouldRun($this->context))->toBeTrue();
+});
+
+// ─── Signature grouping (#263) ──────────────────────────────────────────
+
+function createCsvTransaction(User $user, Account $account, string $description, int $amount, string $postDate): Transaction
+{
+    return Transaction::factory()->fromCsv()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'description' => $description,
+        'amount' => $amount,
+        'direction' => TransactionDirection::Debit,
+        'post_date' => $postDate,
+    ]);
+}
+
+test('groups recurring payees by signature despite varying reference codes', function () {
+    createCsvTransaction($this->user, $this->account, 'Direct Debit Fair Go Finance - DT.4y16g4 FGF 2472', 8500, '2026-01-06');
+    createCsvTransaction($this->user, $this->account, 'Direct Debit Fair Go Finance - DT.4yx8ph FGF 2472', 8500, '2026-01-13');
+    createCsvTransaction($this->user, $this->account, 'Direct Debit Fair Go Finance - DT.9zz1aa FGF 2472', 8500, '2026-01-20');
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toHaveCount(1);
+
+    $suggestion = AnalysisSuggestion::find($result->suggestionIds[0]);
+    expect($suggestion->payload['description'])->toBe('DIRECT DEBIT FAIR GO FINANCE FGF')
+        ->and($suggestion->payload['frequency'])->toBe(RecurrenceFrequency::EveryWeek->value);
 });

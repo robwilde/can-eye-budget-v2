@@ -17,6 +17,7 @@ use App\Models\PipelineAuditEntry;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Support\Recurring\MerchantSignature;
 use Illuminate\Support\Collection;
 
 final readonly class IdentifyRecurringTransactionsStage implements PipelineStageContract
@@ -130,37 +131,13 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
 
     private function normalizeDescription(Transaction $transaction): string
     {
-        if ($transaction->merchant_name !== null && $transaction->merchant_name !== '') {
-            return mb_strtoupper(mb_trim($transaction->merchant_name));
-        }
+        $source = match (true) {
+            $transaction->merchant_name !== null && $transaction->merchant_name !== '' => $transaction->merchant_name,
+            $transaction->clean_description !== null && $transaction->clean_description !== '' => $transaction->clean_description,
+            default => $transaction->description,
+        };
 
-        if ($transaction->clean_description !== null && $transaction->clean_description !== '') {
-            return mb_strtoupper(mb_trim($transaction->clean_description));
-        }
-
-        return $this->cleanRawDescription($transaction->description);
-    }
-
-    private function cleanRawDescription(string $description): string
-    {
-        $cleaned = preg_replace('/\s+\d{4,}.*$/', '', $description);
-        $cleaned = preg_replace('/\s+\d{1,2}[\/\-]\d{1,2}$/', '', $cleaned);
-        $cleaned = preg_replace('/\s+[A-Z]{2}$/', '', $cleaned);
-
-        $words = explode(' ', mb_trim($cleaned));
-        $deduped = [];
-        $seen = [];
-
-        foreach ($words as $word) {
-            $upper = mb_strtoupper($word);
-
-            if (! in_array($upper, $seen, true)) {
-                $deduped[] = $word;
-                $seen[] = $upper;
-            }
-        }
-
-        return mb_strtoupper(mb_trim(implode(' ', $deduped)));
+        return MerchantSignature::for($source);
     }
 
     /**

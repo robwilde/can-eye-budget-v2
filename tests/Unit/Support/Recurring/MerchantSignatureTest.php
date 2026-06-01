@@ -57,3 +57,13 @@ it('uppercases an already-clean merchant name unchanged', function () {
 it('returns an empty signature when every token is a code', function () {
     expect(MerchantSignature::for('Ref#884905699 2422732337'))->toBe('');
 });
+
+it('collapses adjacent duplicate words and drops the digit-bearing code token', function () {
+    expect(MerchantSignature::for('Direct Debit MCF - MCF Loa(N11590247)'))
+        ->toBe('DIRECT DEBIT MCF');
+});
+
+it('preserves non-adjacent repeated words so distinct payees stay apart', function () {
+    expect(MerchantSignature::for('Transfer Optimus to CC to SAV 03914373 NET#2422732337'))
+        ->toBe('TRANSFER OPTIMUS TO CC TO SAV');
+});
