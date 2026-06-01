@@ -296,9 +296,9 @@ test('deduplicates repeated names in descriptions', function () {
 
 // ─── Amount Consistency ─────────────────────────────────────────────────
 
-test('rejects group where amounts vary more than 5 percent from median', function () {
+test('rejects a group with genuinely variable amounts', function () {
     $start = CarbonImmutable::parse('2026-01-15');
-    $amounts = [10000, 10000, 15000];
+    $amounts = [10000, 15000, 22000];
 
     for ($i = 0; $i < 3; $i++) {
         createBasiqTransaction($this->user, $this->account, [
@@ -311,6 +311,47 @@ test('rejects group where amounts vary more than 5 percent from median', functio
     $result = $this->stage->execute($this->context);
 
     expect($result->suggestionIds)->toBeEmpty();
+});
+
+test('detects a bill through a premium step-change and suggests the latest amount', function () {
+    $start = CarbonImmutable::parse('2026-01-05');
+    $amounts = [9059, 9059, 9059, 9059, 9581, 9581];
+
+    foreach ($amounts as $i => $amt) {
+        createBasiqTransaction($this->user, $this->account, [
+            'merchant_name' => 'NIB',
+            'amount' => $amt,
+            'direction' => TransactionDirection::Debit,
+            'post_date' => $start->addWeeks(2 * $i),
+        ]);
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toHaveCount(1);
+    $suggestion = AnalysisSuggestion::find($result->suggestionIds[0]);
+    expect($suggestion->payload['amount'])->toBe(9581)
+        ->and($suggestion->payload['frequency'])->toBe(RecurrenceFrequency::Every2Weeks->value);
+});
+
+test('ignores a one-off double debit and suggests the dominant amount', function () {
+    $start = CarbonImmutable::parse('2026-01-05');
+    $amounts = [7017, 7017, 14034, 7017, 7017, 7017];
+
+    foreach ($amounts as $i => $amt) {
+        createBasiqTransaction($this->user, $this->account, [
+            'merchant_name' => 'Golden Insurance',
+            'amount' => $amt,
+            'direction' => TransactionDirection::Debit,
+            'post_date' => $start->addWeeks(2 * $i),
+        ]);
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toHaveCount(1);
+    $suggestion = AnalysisSuggestion::find($result->suggestionIds[0]);
+    expect($suggestion->payload['amount'])->toBe(7017);
 });
 
 test('accepts group with amounts within 5 percent tolerance', function () {
