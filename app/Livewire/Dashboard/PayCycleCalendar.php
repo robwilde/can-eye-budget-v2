@@ -16,6 +16,7 @@ use App\Support\Calendar\DayActivityLoader;
 use Carbon\CarbonImmutable;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 final class PayCycleCalendar extends Component
@@ -54,6 +55,20 @@ final class PayCycleCalendar extends Component
             : null;
 
         unset($this->selectedDay); // @phpstan-ignore property.notFound
+    }
+
+    /**
+     * Refresh the calendar when a transaction is created, edited, converted or
+     * deleted from the globally-mounted TransactionModal. Without this listener
+     * the dashboard's pay-cycle view kept stale pips after an Enter->Plan
+     * conversion (the dedicated CalendarView already does this); the change only
+     * surfaced after a full page reload, so the conversion appeared to do
+     * nothing on the dashboard.
+     */
+    #[On('transaction-saved')]
+    public function refreshCalendar(): void
+    {
+        $this->bustCache();
     }
 
     /**
