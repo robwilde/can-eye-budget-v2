@@ -6,12 +6,15 @@ declare(strict_types=1);
 
 use App\Enums\BankImportStatus;
 use App\Enums\ImportSource;
+use App\Enums\TransactionDirection;
+use App\Enums\TransactionSource;
 use App\Jobs\ImportCsvTransactionsJob;
 use App\Livewire\ImportBank;
 use App\Models\Account;
 use App\Models\BankImport;
 use App\Models\User;
 use App\Services\CsvImport\CsvColumnMapper;
+use App\Services\CsvImport\CsvParserService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
@@ -224,4 +227,42 @@ test('pollStatus does not emit complete event for another users BankImport', fun
         ->set('bankImportId', $foreignImport->id)
         ->call('pollStatus')
         ->assertNotDispatched('csv-import-complete');
+});
+
+test('end-to-end: confirming a Beyond Bank upload imports real transactions into the account', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create();
+
+    // Drive the wizard exactly as a user would: upload, auto-map, confirm.
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'existing')
+        ->set('accountId', $account->id)
+        ->set('file', fixtureUpload('StatementCsv-BeyondBank.csv'))
+        ->call('uploadAndDetectHeaders')
+        ->assertSet('step', 2)
+        ->call('confirmImport')
+        ->assertSet('step', 3);
+
+    // confirmImport queues the import (faked in beforeEach); run it for real to
+    // complete the process and prove the wiring produces transactions.
+    $bankImport = BankImport::query()->where('user_id', $user->id)->latest('id')->firstOrFail();
+
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService());
+
+    $bankImport->refresh();
+
+    expect($bankImport->status)->toBe(BankImportStatus::Completed)
+        ->and($bankImport->imported_count)->toBeGreaterThan(0);
+
+    // Every imported row landed as a CSV-sourced transaction on the account.
+    expect($account->transactions()->where('source', TransactionSource::Csv)->count())
+        ->toBe($bankImport->imported_count);
+
+    // A known credit parsed end-to-end: the Osko salary of +$1,500.00, stored
+    // as 150000 cents with a Credit direction.
+    expect($account->transactions()
+        ->where('direction', TransactionDirection::Credit)
+        ->where('amount', 150_000)
+        ->exists())->toBeTrue();
 });
