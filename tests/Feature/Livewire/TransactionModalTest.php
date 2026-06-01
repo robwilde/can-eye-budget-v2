@@ -15,6 +15,8 @@ use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Support\Calendar\DayActivityLoader;
+use Carbon\CarbonImmutable;
 use Livewire\Livewire;
 
 test('component renders for authenticated user', function () {
@@ -3001,4 +3003,47 @@ test('submit button shows convert text when switching mode during edit', functio
         ->assertSee(__('Update planned expense'))
         ->set('mode', 'enter')
         ->assertSee(__('Convert to entered expense'));
+});
+
+test('converting an entered transaction to planned keeps a planned occurrence on that date', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $date = CarbonImmutable::now()->startOfMonth()->addDays(17);
+
+    $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 20000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'Direct Debit Spaceship',
+        'post_date' => $date,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '200.00 Direct Debit Spaceship')
+        ->set('categoryId', $category->id)
+        ->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    // The planned transaction is created and anchored on the original date.
+    $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
+    expect($planned)->not->toBeNull()
+        ->and($planned->start_date->format('Y-m-d'))->toBe($date->format('Y-m-d'))
+        ->and($planned->direction)->toBe(TransactionDirection::Debit)
+        ->and($planned->frequency)->toBe(RecurrenceFrequency::EveryMonth);
+
+    // The original actual is soft-deleted, and the day still surfaces the
+    // converted plan as a planned occurrence (so the date is not left empty).
+    expect(Transaction::query()->find($transaction->id))->toBeNull();
+
+    $activity = app(DayActivityLoader::class)->load($date->startOfMonth(), $date->endOfMonth(), $user->id);
+    $day = $activity[$date->format('Y-m-d')] ?? null;
+    expect($day)->not->toBeNull()
+        ->and(collect($day->pips)->pluck('kind')->all())->toContain('plan');
 });
