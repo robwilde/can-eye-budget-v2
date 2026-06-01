@@ -228,6 +228,31 @@ test('matches the income deposit by description, not just amount', function () {
     expect($days[0]->iso)->toBe('2026-05-21');
 });
 
+test('anchors on the same-account amount match when the salary description has drifted', function () {
+    $this->travelTo('2026-05-31');
+    [$user, $account] = fortnightlyThursdayPayUser();
+
+    // The salary landed late (Friday 8 May) but the bank description has drifted
+    // and no longer contains the configured "WINABLE PAYROLL". The same-account,
+    // exact-amount, credit transaction is the only candidate, so the window must
+    // anchor on it (deliberate amount-only fallback) rather than silently
+    // reverting to schedule-only bounds (which would start 21 May, end 4 Jun).
+    Transaction::factory()->credit()->for($user)->for($account)->create([
+        'amount' => 570660,
+        'description' => 'ACME PTY LTD 0042',
+        'post_date' => '2026-05-08',
+    ]);
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->days();
+
+    expect($days[0]->iso)->toBe('2026-05-08')
+        ->and(end($days)->iso)->toBe('2026-05-21');
+});
+
 test('falls back to schedule bounds when the income has no matching deposit yet', function () {
     $this->travelTo('2026-05-31');
     [$user] = fortnightlyThursdayPayUser();

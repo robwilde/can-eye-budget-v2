@@ -420,6 +420,71 @@ test('PlannedTransaction match uses 5 percent amount tolerance', function () {
     expect($result->suggestionIds)->toBeEmpty();
 });
 
+test('skips a credit already configured as pay-cycle income despite a differently-normalised description', function () {
+    // The income planned transaction stores the non-deduped description as
+    // IncomePatternDetector produces it; the recurring detector word-dedups the
+    // raw CSV description. The guard must still treat them as the same payee.
+    PlannedTransaction::factory()->for($this->user)->create([
+        'account_id' => $this->account->id,
+        'description' => 'DIRECT CREDIT WINABLE PAYROLL - WINABLE PAYROLL',
+        'direction' => TransactionDirection::Credit,
+        'frequency' => RecurrenceFrequency::Every2Weeks,
+        'amount' => 570660,
+        'is_active' => true,
+        'is_pay_cycle_income' => true,
+    ]);
+
+    $start = CarbonImmutable::parse('2026-01-15');
+
+    for ($i = 0; $i < 3; $i++) {
+        Transaction::factory()->for($this->user)->for($this->account)->fromCsv()->create([
+            'description' => 'DIRECT CREDIT WINABLE PAYROLL - WINABLE PAYROLL',
+            'amount' => 570660,
+            'direction' => TransactionDirection::Credit,
+            'post_date' => $start->addWeeks($i * 2),
+        ]);
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toBeEmpty();
+
+    $audit = PipelineAuditEntry::query()
+        ->where('pipeline_run_id', $this->pipelineRun->id)
+        ->where('stage', 'identify-recurring-transactions')
+        ->where('action', 'skipped')
+        ->first();
+
+    expect($audit?->metadata['reason'])->toBe('existing_planned_transaction');
+});
+
+test('still suggests a different credit that only shares amount and frequency with an existing plan', function () {
+    PlannedTransaction::factory()->for($this->user)->create([
+        'account_id' => $this->account->id,
+        'description' => 'WINABLE PAYROLL',
+        'direction' => TransactionDirection::Credit,
+        'frequency' => RecurrenceFrequency::Every2Weeks,
+        'amount' => 570660,
+        'is_active' => true,
+        'is_pay_cycle_income' => true,
+    ]);
+
+    $start = CarbonImmutable::parse('2026-01-15');
+
+    for ($i = 0; $i < 3; $i++) {
+        createBasiqTransaction($this->user, $this->account, [
+            'merchant_name' => 'ACME REFUND CENTRE',
+            'amount' => 570660,
+            'direction' => TransactionDirection::Credit,
+            'post_date' => $start->addWeeks($i * 2),
+        ]);
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toHaveCount(1);
+});
+
 // ─── Edge Cases ─────────────────────────────────────────────────────────
 
 test('ignores manually-entered transactions', function () {

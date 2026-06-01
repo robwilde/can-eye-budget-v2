@@ -10,6 +10,7 @@ use App\DTOs\StageResult;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
+use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Models\AnalysisSuggestion;
 use App\Models\PipelineAuditEntry;
@@ -25,6 +26,14 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
     private const float AMOUNT_TOLERANCE = 0.05;
 
     private const float MIN_CONFIDENCE = 0.40;
+
+    /**
+     * Minimum share of the smaller description's words that must also appear in
+     * the other for two descriptions to count as the same payee. High enough to
+     * separate unrelated merchants, but tolerant of the different normalisers
+     * used across stages (e.g. a deduped vs non-deduped salary description).
+     */
+    private const float DESCRIPTION_OVERLAP_THRESHOLD = 0.8;
 
     /** @var list<array{0: int, 1: int, 2: RecurrenceFrequency}> */
     private const array FREQUENCY_RANGES = [
@@ -86,8 +95,9 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
 
             $normalizedDescription = $this->normalizeDescription($group->first());
             $accountId = $group->first()->account_id;
+            $direction = $group->first()->direction;
 
-            if ($this->shouldSkip($context->user, $normalizedDescription, $accountId, $analysis['frequency'], $analysis['median_amount'], $context->pipelineRun->id)) {
+            if ($this->shouldSkip($context->user, $normalizedDescription, $accountId, $direction, $analysis['frequency'], $analysis['median_amount'], $context->pipelineRun->id)) {
                 continue;
             }
 
@@ -281,7 +291,7 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
         return round($confidence, 2);
     }
 
-    private function shouldSkip(User $user, string $description, int $accountId, RecurrenceFrequency $frequency, int $medianAmount, int $pipelineRunId): bool
+    private function shouldSkip(User $user, string $description, int $accountId, TransactionDirection $direction, RecurrenceFrequency $frequency, int $medianAmount, int $pipelineRunId): bool
     {
         if ($this->hasAcceptedSuggestion($user, $description, $accountId)) {
             $this->createSkipAudit($pipelineRunId, 'existing_accepted_suggestion', $description, $accountId);
@@ -289,7 +299,7 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
             return true;
         }
 
-        if ($this->hasMatchingPlannedTransaction($user, $description, $accountId, $frequency, $medianAmount)) {
+        if ($this->hasMatchingPlannedTransaction($user, $description, $accountId, $direction, $frequency, $medianAmount)) {
             $this->createSkipAudit($pipelineRunId, 'existing_planned_transaction', $description, $accountId);
 
             return true;
@@ -315,22 +325,55 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
             ->exists();
     }
 
-    private function hasMatchingPlannedTransaction(User $user, string $description, int $accountId, RecurrenceFrequency $frequency, int $medianAmount): bool
+    private function hasMatchingPlannedTransaction(User $user, string $description, int $accountId, TransactionDirection $direction, RecurrenceFrequency $frequency, int $medianAmount): bool
     {
         return PlannedTransaction::query()
             ->where('user_id', $user->id)
             ->where('account_id', $accountId)
+            ->where('direction', $direction)
             ->where('frequency', $frequency)
             ->where('is_active', true)
-            ->whereRaw('UPPER(description) = ?', [$description])
             ->get()
-            ->contains(function (PlannedTransaction $planned) use ($medianAmount): bool {
-                if ($medianAmount === 0) {
-                    return $planned->amount === 0;
-                }
+            ->contains(fn (PlannedTransaction $planned): bool => $this->amountsMatch($planned->amount, $medianAmount)
+                && $this->descriptionsRelated($planned->description, $description));
+    }
 
-                return abs($planned->amount - $medianAmount) / abs($medianAmount) <= self::AMOUNT_TOLERANCE;
-            });
+    private function amountsMatch(int $plannedAmount, int $medianAmount): bool
+    {
+        if ($medianAmount === 0) {
+            return $plannedAmount === 0;
+        }
+
+        return abs($plannedAmount - $medianAmount) / abs($medianAmount) <= self::AMOUNT_TOLERANCE;
+    }
+
+    /**
+     * Two descriptions count as the same payee when most of the smaller one's
+     * words also appear in the other. Tolerant of the different per-stage
+     * normalisers (the pay-cycle income description is not word-deduped, the
+     * recurring detector's is) while still separating unrelated merchants.
+     */
+    private function descriptionsRelated(string $a, string $b): bool
+    {
+        $tokensA = $this->descriptionTokens($a);
+        $tokensB = $this->descriptionTokens($b);
+
+        if ($tokensA === [] || $tokensB === []) {
+            return $tokensA === $tokensB;
+        }
+
+        $shared = count(array_intersect($tokensA, $tokensB));
+        $smaller = min(count($tokensA), count($tokensB));
+
+        return $shared / $smaller >= self::DESCRIPTION_OVERLAP_THRESHOLD;
+    }
+
+    /** @return list<string> */
+    private function descriptionTokens(string $description): array
+    {
+        preg_match_all('/[\p{L}\p{N}]+/u', mb_strtoupper($description), $matches);
+
+        return array_values(array_unique($matches[0]));
     }
 
     private function hasRecentRejection(User $user, string $description, int $accountId): bool

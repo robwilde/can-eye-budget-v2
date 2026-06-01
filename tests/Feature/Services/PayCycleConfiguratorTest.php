@@ -10,6 +10,7 @@ use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
+use App\Models\Transaction;
 use App\Models\User;
 use App\Services\PayCycleConfigurator;
 use Carbon\CarbonImmutable;
@@ -162,4 +163,44 @@ test('the database enforces at most one pay-cycle income row per user', function
     expect(fn () => PlannedTransaction::factory()->for($this->user)->for($this->account)->create([
         'is_pay_cycle_income' => true,
     ]))->toThrow(QueryException::class);
+});
+
+test('links the provided source transactions to the income planned transaction', function () {
+    $salary = Transaction::factory()->credit()->for($this->user)->for($this->account)->count(2)->create([
+        'amount' => 300_000,
+    ]);
+
+    $this->configurator->apply(
+        $this->user,
+        300_000,
+        PayFrequency::Fortnightly,
+        CarbonImmutable::today()->addDays(7)->format('Y-m-d'),
+        'Salary',
+        $salary->pluck('id')->all(),
+    );
+
+    $income = incomePlannedTransactions($this->user)->first();
+
+    $salary->each(function (Transaction $transaction) use ($income): void {
+        expect($transaction->fresh()->planned_transaction_id)->toBe($income->id);
+    });
+});
+
+test('does not steal source transactions already linked to another planned transaction', function () {
+    $other = PlannedTransaction::factory()->for($this->user)->for($this->account)->create();
+    $already = Transaction::factory()->credit()->for($this->user)->for($this->account)->create([
+        'amount' => 300_000,
+        'planned_transaction_id' => $other->id,
+    ]);
+
+    $this->configurator->apply(
+        $this->user,
+        300_000,
+        PayFrequency::Fortnightly,
+        CarbonImmutable::today()->addDays(7)->format('Y-m-d'),
+        'Salary',
+        [$already->id],
+    );
+
+    expect($already->fresh()->planned_transaction_id)->toBe($other->id);
 });

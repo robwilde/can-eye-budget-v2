@@ -43,12 +43,16 @@ final readonly class SuggestionApplier
         string $payFrequency,
         string $nextPayDate,
     ): void {
+        /** @var list<int> $sourceTransactionIds */
+        $sourceTransactionIds = $suggestion->payload['source_transaction_ids'] ?? [];
+
         $this->payCycleConfigurator->apply(
             $user,
             $payAmount,
             PayFrequency::from($payFrequency),
             $nextPayDate,
             $suggestion->payload['source_description'] ?? null,
+            $sourceTransactionIds,
         );
 
         $this->markAccepted($suggestion);

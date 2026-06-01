@@ -85,6 +85,7 @@ final readonly class SetPayCycleStage implements PipelineStageContract
                 'next_pay_date' => $nextPayDate->format('Y-m-d'),
                 'source_account_id' => $primaryAccount->id,
                 'source_description' => $pattern->description,
+                'source_transaction_ids' => $pattern->transactionIds,
                 'detected_dates' => $pattern->detectedDates,
                 'confidence_score' => $pattern->confidence,
             ],
