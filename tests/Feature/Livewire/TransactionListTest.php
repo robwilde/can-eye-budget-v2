@@ -14,6 +14,14 @@ use App\Models\User;
 use Carbon\CarbonImmutable;
 use Livewire\Livewire;
 
+beforeEach(function (): void {
+    // Pin the clock to a stable mid-month date. Several tests below create
+    // transactions at now()->subDays(N) and assert against the default
+    // "this-month" filter; without a fixed clock they break on month
+    // boundaries (e.g. a CI run on the 1st pushes subDays(5) into last month).
+    $this->travelTo(CarbonImmutable::parse('2026-06-15'));
+});
+
 test('component renders for authenticated user', function () {
     $user = User::factory()->create();
 
