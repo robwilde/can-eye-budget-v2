@@ -15,6 +15,7 @@ use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Support\Calendar\DayActivityLoader;
 use Carbon\CarbonImmutable;
 use Livewire\Livewire;
 
@@ -3005,6 +3006,8 @@ test('submit button shows convert text when switching mode during edit', functio
 });
 
 test('copy-transaction prefills a new entry from an existing transaction', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-18'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
@@ -3026,5 +3029,50 @@ test('copy-transaction prefills a new entry from an existing transaction', funct
         ->assertSet('accountId', $account->id)
         ->assertSet('categoryId', $category->id)
         ->assertSet('descriptionInput', '200.00 Direct Debit Spaceship')
-        ->assertSet('date', CarbonImmutable::now()->format('Y-m-d'));
+        ->assertSet('date', '2026-03-18');
+});
+
+test('converting an entered transaction to planned keeps a planned occurrence on that date', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $date = CarbonImmutable::parse('2026-03-18');
+
+    $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 20000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'Direct Debit Spaceship',
+        'post_date' => $date,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '200.00 Direct Debit Spaceship')
+        ->set('categoryId', $category->id)
+        ->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    // The planned transaction is created and anchored on the original date.
+    $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
+    expect($planned)->not->toBeNull()
+        ->and($planned->start_date->format('Y-m-d'))->toBe($date->format('Y-m-d'))
+        ->and($planned->direction)->toBe(TransactionDirection::Debit)
+        ->and($planned->frequency)->toBe(RecurrenceFrequency::EveryMonth);
+
+    // The original actual is soft-deleted (recoverable, not hard-deleted), and
+    // the day still surfaces the converted plan as a planned occurrence (so the
+    // date is not left empty).
+    expect(Transaction::query()->find($transaction->id))->toBeNull()
+        ->and(Transaction::withTrashed()->find($transaction->id)?->trashed())->toBeTrue();
+
+    $activity = app(DayActivityLoader::class)->load($date->startOfMonth(), $date->endOfMonth(), $user->id);
+    $day = $activity[$date->format('Y-m-d')] ?? null;
+    expect($day)->not->toBeNull()
+        ->and(collect($day->pips)->pluck('kind')->all())->toContain('plan');
 });

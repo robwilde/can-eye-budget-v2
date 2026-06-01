@@ -213,6 +213,28 @@ test('computes per-day net of income minus outflow', function () {
         ->and($cell->netCents)->toBe(5000);
 });
 
+test('renders per-day debit and credit separately in the calendar cell', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = CarbonImmutable::now()->startOfMonth()->addDays(7);
+
+    Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $account->id,
+        'amount' => 8000,
+        'post_date' => $date,
+    ]);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -3000,
+        'post_date' => $date,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->assertSeeHtml('<span class="cyc-day-debit">−$30.00</span>')
+        ->assertSeeHtml('<span class="cyc-day-credit">+$80.00</span>');
+});
+
 test('selectDate updates selectedDay computed', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();

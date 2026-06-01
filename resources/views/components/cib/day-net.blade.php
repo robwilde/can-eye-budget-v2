@@ -1,24 +1,22 @@
 @use('App\Casts\MoneyCast')
 
 @props([
-    'cents',
+    'debit' => 0,
+    'credit' => 0,
 ])
 
 @php
-    $value = (int) $cents;
-    $tone = match (true) {
-        $value > 0 => 'pos',
-        $value < 0 => 'neg',
-        default => '',
-    };
-    $sign = match (true) {
-        $value > 0 => '+',
-        $value < 0 => '−',
-        default => '',
-    };
-    $abs = MoneyCast::format(abs($value));
+    $debitCents = (int) $debit;
+    $creditCents = (int) $credit;
 @endphp
 
-@if ($value !== 0)
-    <span {{ $attributes->class(['cyc-day-net', $tone]) }}>{{ $sign }}{{ $abs }}</span>
+@if ($debitCents !== 0 || $creditCents !== 0)
+    <span {{ $attributes->class('cyc-day-net') }}>
+        @if ($debitCents !== 0)
+            <span class="cyc-day-debit">−{{ MoneyCast::format(abs($debitCents)) }}</span>
+        @endif
+        @if ($creditCents !== 0)
+            <span class="cyc-day-credit">+{{ MoneyCast::format(abs($creditCents)) }}</span>
+        @endif
+    </span>
 @endif

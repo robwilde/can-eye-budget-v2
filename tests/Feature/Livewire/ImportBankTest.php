@@ -6,12 +6,15 @@ declare(strict_types=1);
 
 use App\Enums\BankImportStatus;
 use App\Enums\ImportSource;
+use App\Enums\TransactionDirection;
+use App\Enums\TransactionSource;
 use App\Jobs\ImportCsvTransactionsJob;
 use App\Livewire\ImportBank;
 use App\Models\Account;
 use App\Models\BankImport;
 use App\Models\User;
 use App\Services\CsvImport\CsvColumnMapper;
+use App\Services\CsvImport\CsvParserService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
@@ -76,6 +79,7 @@ test('inline account creation registers a new csv account with last 4 digits', f
         ->set('accountChoice', 'new')
         ->set('newAccountName', 'Westpac Choice')
         ->set('newAccountLast4', '4599')
+        ->set('newAccountBalance', '1686.19')
         ->set('file', fixtureUpload())
         ->call('uploadAndDetectHeaders')
         ->assertSet('step', 2);
@@ -85,7 +89,24 @@ test('inline account creation registers a new csv account with last 4 digits', f
     expect($account)->not->toBeNull()
         ->and($account->name)->toBe('Westpac Choice')
         ->and($account->account_last4)->toBe('4599')
-        ->and($account->import_source)->toBe(ImportSource::Csv);
+        ->and($account->import_source)->toBe(ImportSource::Csv)
+        ->and($account->balance)->toBe(168_619);
+});
+
+test('inline account creation defaults balance to zero when left blank', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'new')
+        ->set('newAccountName', 'No Balance Account')
+        ->set('newAccountLast4', '0000')
+        ->set('newAccountBalance', '')
+        ->set('file', fixtureUpload())
+        ->call('uploadAndDetectHeaders')
+        ->assertSet('step', 2);
+
+    expect(Account::query()->where('user_id', $user->id)->first()->balance)->toBe(0);
 });
 
 test('confirmImport dispatches the job and moves to step 3', function () {
@@ -224,4 +245,42 @@ test('pollStatus does not emit complete event for another users BankImport', fun
         ->set('bankImportId', $foreignImport->id)
         ->call('pollStatus')
         ->assertNotDispatched('csv-import-complete');
+});
+
+test('end-to-end: confirming a Beyond Bank upload imports real transactions into the account', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create();
+
+    // Drive the wizard exactly as a user would: upload, auto-map, confirm.
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'existing')
+        ->set('accountId', $account->id)
+        ->set('file', fixtureUpload('StatementCsv-BeyondBank.csv'))
+        ->call('uploadAndDetectHeaders')
+        ->assertSet('step', 2)
+        ->call('confirmImport')
+        ->assertSet('step', 3);
+
+    // confirmImport queues the import (faked in beforeEach); run it for real to
+    // complete the process and prove the wiring produces transactions.
+    $bankImport = BankImport::query()->where('user_id', $user->id)->latest('id')->firstOrFail();
+
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService());
+
+    $bankImport->refresh();
+
+    expect($bankImport->status)->toBe(BankImportStatus::Completed)
+        ->and($bankImport->imported_count)->toBeGreaterThan(0);
+
+    // Every imported row landed as a CSV-sourced transaction on the account.
+    expect($account->transactions()->where('source', TransactionSource::Csv)->count())
+        ->toBe($bankImport->imported_count);
+
+    // A known credit parsed end-to-end: the Osko salary of +$1,500.00, stored
+    // as 150000 cents with a Credit direction.
+    expect($account->transactions()
+        ->where('direction', TransactionDirection::Credit)
+        ->where('amount', 150_000)
+        ->exists())->toBeTrue();
 });

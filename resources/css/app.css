@@ -864,12 +864,15 @@ select:focus[data-flux-control] {
         padding-top: 2px;
     }
     .cyc-day-net {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
         font: 900 12px/1 var(--font-display);
         font-variant-numeric: tabular-nums;
         margin-top: 4px;
     }
-    .cyc-day-net.pos { color: var(--color-cib-green-600); }
-    .cyc-day-net.neg { color: var(--color-money-owed); }
+    .cyc-day-debit { color: var(--color-money-owed); }
+    .cyc-day-credit { color: var(--color-cib-green-600); margin-left: auto; }
 
     .cyc-detail { margin-top: 8px; }
     .cyc-detail-head {
