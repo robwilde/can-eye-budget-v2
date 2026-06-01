@@ -17,6 +17,7 @@ use App\Models\PipelineAuditEntry;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Support\Recurring\MerchantSignature;
 use Illuminate\Support\Collection;
 
 final readonly class IdentifyRecurringTransactionsStage implements PipelineStageContract
@@ -27,6 +28,15 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
 
     private const float MIN_CONFIDENCE = 0.40;
 
+    /** Two amounts belong to the same level when within this many cents, or … */
+    private const int AMOUNT_TOLERANCE_CENTS = 50;
+
+    /** … this fraction of the amount, whichever is larger (covers big bills). */
+    private const float AMOUNT_TOLERANCE_PCT = 0.02;
+
+    /** Share of occurrences that must sit in the dominant amount cluster. */
+    private const float DOMINANT_SHARE = 0.60;
+
     /**
      * Minimum share of the smaller description's words that must also appear in
      * the other for two descriptions to count as the same payee. High enough to
@@ -35,15 +45,22 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
      */
     private const float DESCRIPTION_OVERLAP_THRESHOLD = 0.8;
 
-    /** @var list<array{0: int, 1: int, 2: RecurrenceFrequency}> */
-    private const array FREQUENCY_RANGES = [
-        [5, 9, RecurrenceFrequency::EveryWeek],
-        [12, 16, RecurrenceFrequency::Every2Weeks],
-        [19, 23, RecurrenceFrequency::Every3Weeks],
-        [27, 35, RecurrenceFrequency::EveryMonth],
-        [80, 100, RecurrenceFrequency::Every3Months],
-        [160, 200, RecurrenceFrequency::Every6Months],
-        [340, 395, RecurrenceFrequency::EveryYear],
+    /**
+     * Canonical cadence anchors (days) and their frequency. The median interval
+     * snaps to the nearest anchor within tolerance, so there are no unmatched
+     * gaps (e.g. 10d -> weekly, 24d -> three-weekly) and calendar-month wobble
+     * (28-31d) still resolves to monthly.
+     *
+     * @var list<array{0: int, 1: RecurrenceFrequency}>
+     */
+    private const array FREQUENCY_TARGETS = [
+        [7, RecurrenceFrequency::EveryWeek],
+        [14, RecurrenceFrequency::Every2Weeks],
+        [21, RecurrenceFrequency::Every3Weeks],
+        [30, RecurrenceFrequency::EveryMonth],
+        [91, RecurrenceFrequency::Every3Months],
+        [182, RecurrenceFrequency::Every6Months],
+        [365, RecurrenceFrequency::EveryYear],
     ];
 
     public function key(): string
@@ -130,37 +147,13 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
 
     private function normalizeDescription(Transaction $transaction): string
     {
-        if ($transaction->merchant_name !== null && $transaction->merchant_name !== '') {
-            return mb_strtoupper(mb_trim($transaction->merchant_name));
-        }
+        $source = match (true) {
+            $transaction->merchant_name !== null && $transaction->merchant_name !== '' => $transaction->merchant_name,
+            $transaction->clean_description !== null && $transaction->clean_description !== '' => $transaction->clean_description,
+            default => $transaction->description,
+        };
 
-        if ($transaction->clean_description !== null && $transaction->clean_description !== '') {
-            return mb_strtoupper(mb_trim($transaction->clean_description));
-        }
-
-        return $this->cleanRawDescription($transaction->description);
-    }
-
-    private function cleanRawDescription(string $description): string
-    {
-        $cleaned = preg_replace('/\s+\d{4,}.*$/', '', $description);
-        $cleaned = preg_replace('/\s+\d{1,2}[\/\-]\d{1,2}$/', '', $cleaned);
-        $cleaned = preg_replace('/\s+[A-Z]{2}$/', '', $cleaned);
-
-        $words = explode(' ', mb_trim($cleaned));
-        $deduped = [];
-        $seen = [];
-
-        foreach ($words as $word) {
-            $upper = mb_strtoupper($word);
-
-            if (! in_array($upper, $seen, true)) {
-                $deduped[] = $word;
-                $seen[] = $upper;
-            }
-        }
-
-        return mb_strtoupper(mb_trim(implode(' ', $deduped)));
+        return MerchantSignature::for($source);
     }
 
     /**
@@ -170,9 +163,9 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
     private function analyzeGroup(Collection $group): ?array
     {
         $amounts = $group->pluck('amount');
-        $medianAmount = $this->calculateMedian($amounts);
+        $cluster = $this->dominantCluster($amounts);
 
-        if (! $this->checkAmountConsistency($amounts, $medianAmount)) {
+        if ($cluster->count() / $group->count() < self::DOMINANT_SHARE) {
             return null;
         }
 
@@ -182,14 +175,13 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
             return null;
         }
 
-        $medianInterval = $this->calculateMedian($intervals);
-        $frequency = $this->mapIntervalToFrequency($medianInterval);
+        $frequency = $this->mapIntervalToFrequency($this->calculateMedian($intervals));
 
         if ($frequency === null) {
             return null;
         }
 
-        $amountCV = $this->coefficientOfVariation($amounts);
+        $amountCV = $this->coefficientOfVariation($cluster);
         $intervalCV = $this->coefficientOfVariation($intervals);
         $confidence = $this->calculateConfidence($group->count(), $amountCV, $intervalCV);
 
@@ -199,7 +191,7 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
 
         return [
             'frequency' => $frequency,
-            'median_amount' => (int) round($medianAmount),
+            'median_amount' => $this->recurringAmount($group),
             'confidence' => $confidence,
         ];
     }
@@ -217,16 +209,57 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
         return (float) $sorted[intdiv($count, 2)];
     }
 
-    /** @param Collection<int, mixed> $amounts */
-    private function checkAmountConsistency(Collection $amounts, float $median): bool
+    private function amountTolerance(int $amount): float
     {
-        if ($median === 0.0) {
-            return $amounts->every(fn (int|float $amount): bool => $amount === 0);
+        return max((float) self::AMOUNT_TOLERANCE_CENTS, abs($amount) * self::AMOUNT_TOLERANCE_PCT);
+    }
+
+    /**
+     * The largest set of amounts that sit within tolerance of a common level.
+     * Survives one-off outliers (a double-debit) and premium step-changes,
+     * unlike requiring every amount to match a single median.
+     *
+     * @param  Collection<int, int>  $amounts
+     * @return Collection<int, int>
+     */
+    private function dominantCluster(Collection $amounts): Collection
+    {
+        $best = collect();
+
+        foreach ($amounts->unique() as $anchor) {
+            $tolerance = $this->amountTolerance((int) $anchor);
+            $members = $amounts->filter(
+                fn (int $amount): bool => abs($amount - $anchor) <= $tolerance,
+            )->values();
+
+            if ($members->count() > $best->count()) {
+                $best = $members;
+            }
         }
 
-        return $amounts->every(
-            fn (int|float $amount): bool => abs($amount - $median) / abs($median) <= self::AMOUNT_TOLERANCE,
-        );
+        return $best;
+    }
+
+    /**
+     * Amount to suggest: the current/most-recent stable level. A steady series
+     * returns its amount; a sustained step-change returns the latest level; a
+     * single trailing outlier falls back to the dominant cluster.
+     *
+     * @param  Collection<int, Transaction>  $group
+     */
+    private function recurringAmount(Collection $group): int
+    {
+        $amounts = $group->pluck('amount');
+        $latest = (int) $group->sortByDesc('post_date')->first()->amount;
+        $tolerance = $this->amountTolerance($latest);
+
+        $recent = $amounts->filter(fn (int $amount): bool => abs($amount - $latest) <= $tolerance)->values();
+
+        if ($recent->count() >= 2) {
+            return (int) round($this->calculateMedian($recent));
+        }
+
+        return (int) round($this->calculateMedian($this->dominantCluster($amounts)));
     }
 
     /**
@@ -248,13 +281,20 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
 
     private function mapIntervalToFrequency(float $medianInterval): ?RecurrenceFrequency
     {
-        foreach (self::FREQUENCY_RANGES as [$min, $max, $frequency]) {
-            if ($medianInterval >= $min && $medianInterval <= $max) {
-                return $frequency;
+        $best = null;
+        $bestDistance = INF;
+
+        foreach (self::FREQUENCY_TARGETS as [$target, $frequency]) {
+            $distance = abs($medianInterval - $target);
+            $tolerance = max(4.0, $target * 0.2);
+
+            if ($distance <= $tolerance && $distance < $bestDistance) {
+                $bestDistance = $distance;
+                $best = $frequency;
             }
         }
 
-        return null;
+        return $best;
     }
 
     /** @param Collection<int, mixed> $values */
@@ -293,6 +333,12 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
 
     private function shouldSkip(User $user, string $description, int $accountId, TransactionDirection $direction, RecurrenceFrequency $frequency, int $medianAmount, int $pipelineRunId): bool
     {
+        if ($this->isNoise($description)) {
+            $this->createSkipAudit($pipelineRunId, 'noise', $description, $accountId);
+
+            return true;
+        }
+
         if ($this->hasAcceptedSuggestion($user, $description, $accountId)) {
             $this->createSkipAudit($pipelineRunId, 'existing_accepted_suggestion', $description, $accountId);
 
@@ -312,6 +358,22 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
         }
 
         return false;
+    }
+
+    /**
+     * Round-up sweeps and internal own-account transfers (to savings / credit
+     * card) are regular but are not bills, so they must not be offered as
+     * recurring suggestions even when their amount happens to be constant.
+     */
+    private function isNoise(string $signature): bool
+    {
+        if (str_starts_with($signature, 'ROUND UP')) {
+            return true;
+        }
+
+        return str_starts_with($signature, 'TRANSFER')
+            && str_contains($signature, ' TO ')
+            && (preg_match('/\bSAV\b/', $signature) === 1 || preg_match('/\bCC\b/', $signature) === 1);
     }
 
     private function hasAcceptedSuggestion(User $user, string $description, int $accountId): bool

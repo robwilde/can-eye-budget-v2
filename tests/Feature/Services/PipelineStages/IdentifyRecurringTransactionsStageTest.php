@@ -248,7 +248,7 @@ test('strips card numbers from raw descriptions for grouping', function () {
     expect($result->suggestionIds)->toHaveCount(1);
 
     $suggestion = AnalysisSuggestion::find($result->suggestionIds[0]);
-    expect($suggestion->payload['description'])->toBe('WOOLWORTHS');
+    expect($suggestion->payload['description'])->toBe('WOOLWORTHS SYDNEY AU');
 });
 
 test('strips date patterns from raw descriptions for grouping', function () {
@@ -296,9 +296,9 @@ test('deduplicates repeated names in descriptions', function () {
 
 // ─── Amount Consistency ─────────────────────────────────────────────────
 
-test('rejects group where amounts vary more than 5 percent from median', function () {
+test('rejects a group with genuinely variable amounts', function () {
     $start = CarbonImmutable::parse('2026-01-15');
-    $amounts = [10000, 10000, 15000];
+    $amounts = [10000, 15000, 22000];
 
     for ($i = 0; $i < 3; $i++) {
         createBasiqTransaction($this->user, $this->account, [
@@ -311,6 +311,47 @@ test('rejects group where amounts vary more than 5 percent from median', functio
     $result = $this->stage->execute($this->context);
 
     expect($result->suggestionIds)->toBeEmpty();
+});
+
+test('detects a bill through a premium step-change and suggests the latest amount', function () {
+    $start = CarbonImmutable::parse('2026-01-05');
+    $amounts = [9059, 9059, 9059, 9059, 9581, 9581];
+
+    foreach ($amounts as $i => $amt) {
+        createBasiqTransaction($this->user, $this->account, [
+            'merchant_name' => 'NIB',
+            'amount' => $amt,
+            'direction' => TransactionDirection::Debit,
+            'post_date' => $start->addWeeks(2 * $i),
+        ]);
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toHaveCount(1);
+    $suggestion = AnalysisSuggestion::find($result->suggestionIds[0]);
+    expect($suggestion->payload['amount'])->toBe(9581)
+        ->and($suggestion->payload['frequency'])->toBe(RecurrenceFrequency::Every2Weeks->value);
+});
+
+test('ignores a one-off double debit and suggests the dominant amount', function () {
+    $start = CarbonImmutable::parse('2026-01-05');
+    $amounts = [7017, 7017, 14034, 7017, 7017, 7017];
+
+    foreach ($amounts as $i => $amt) {
+        createBasiqTransaction($this->user, $this->account, [
+            'merchant_name' => 'Golden Insurance',
+            'amount' => $amt,
+            'direction' => TransactionDirection::Debit,
+            'post_date' => $start->addWeeks(2 * $i),
+        ]);
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toHaveCount(1);
+    $suggestion = AnalysisSuggestion::find($result->suggestionIds[0]);
+    expect($suggestion->payload['amount'])->toBe(7017);
 });
 
 test('accepts group with amounts within 5 percent tolerance', function () {
@@ -807,4 +848,166 @@ test('label returns human-readable string', function () {
 
 test('shouldRun always returns true', function () {
     expect($this->stage->shouldRun($this->context))->toBeTrue();
+});
+
+// ─── Signature grouping (#263) ──────────────────────────────────────────
+
+function createCsvTransaction(User $user, Account $account, string $description, int $amount, string $postDate): Transaction
+{
+    return Transaction::factory()->fromCsv()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'description' => $description,
+        'amount' => $amount,
+        'direction' => TransactionDirection::Debit,
+        'post_date' => $postDate,
+    ]);
+}
+
+test('groups recurring payees by signature despite varying reference codes', function () {
+    createCsvTransaction($this->user, $this->account, 'Direct Debit Fair Go Finance - DT.4y16g4 FGF 2472', 8500, '2026-01-06');
+    createCsvTransaction($this->user, $this->account, 'Direct Debit Fair Go Finance - DT.4yx8ph FGF 2472', 8500, '2026-01-13');
+    createCsvTransaction($this->user, $this->account, 'Direct Debit Fair Go Finance - DT.9zz1aa FGF 2472', 8500, '2026-01-20');
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toHaveCount(1);
+
+    $suggestion = AnalysisSuggestion::find($result->suggestionIds[0]);
+    expect($suggestion->payload['description'])->toBe('DIRECT DEBIT FAIR GO FINANCE FGF')
+        ->and($suggestion->payload['frequency'])->toBe(RecurrenceFrequency::EveryWeek->value);
+});
+
+// ─── Cadence gap-filling (#263) ─────────────────────────────────────────
+
+test('maps a 24-day cadence (previously an unmatched gap) to three-weekly', function () {
+    $start = CarbonImmutable::parse('2026-01-01');
+
+    for ($i = 0; $i < 3; $i++) {
+        createBasiqTransaction($this->user, $this->account, [
+            'merchant_name' => 'Gym Membership',
+            'amount' => 5000,
+            'post_date' => $start->addDays(24 * $i),
+        ]);
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toHaveCount(1);
+    expect(AnalysisSuggestion::find($result->suggestionIds[0])->payload['frequency'])
+        ->toBe(RecurrenceFrequency::Every3Weeks->value);
+});
+
+test('maps a 10-day cadence (previously an unmatched gap) to weekly', function () {
+    $start = CarbonImmutable::parse('2026-01-01');
+
+    for ($i = 0; $i < 3; $i++) {
+        createBasiqTransaction($this->user, $this->account, [
+            'merchant_name' => 'Window Cleaner',
+            'amount' => 4000,
+            'post_date' => $start->addDays(10 * $i),
+        ]);
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toHaveCount(1);
+    expect(AnalysisSuggestion::find($result->suggestionIds[0])->payload['frequency'])
+        ->toBe(RecurrenceFrequency::EveryWeek->value);
+});
+
+test('snaps wobbling monthly intervals to every month', function () {
+    foreach (['2026-01-15', '2026-02-12', '2026-03-15'] as $date) {
+        createBasiqTransaction($this->user, $this->account, [
+            'merchant_name' => 'Phone Plan',
+            'amount' => 4999,
+            'post_date' => CarbonImmutable::parse($date),
+        ]);
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toHaveCount(1);
+    expect(AnalysisSuggestion::find($result->suggestionIds[0])->payload['frequency'])
+        ->toBe(RecurrenceFrequency::EveryMonth->value);
+});
+
+// ─── Noise filtering (#263) ─────────────────────────────────────────────
+
+test('skips round-up transfers as noise even when the amount is constant', function () {
+    $start = CarbonImmutable::parse('2026-01-01');
+
+    for ($i = 0; $i < 5; $i++) {
+        createCsvTransaction($this->user, $this->account, 'Round Up transfer to 03774599: COFFEE SHOP', 101, $start->addMonthsNoOverflow($i)->toDateString());
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toBeEmpty();
+});
+
+test('skips internal account sweeps as noise', function () {
+    $start = CarbonImmutable::parse('2026-01-01');
+
+    for ($i = 0; $i < 4; $i++) {
+        createCsvTransaction($this->user, $this->account, 'Transfer Optimus to CC to SAV 03914373 NET#2422732337', 25000, $start->addWeeks($i)->toDateString());
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    expect($result->suggestionIds)->toBeEmpty();
+});
+
+// ─── Representative statement (acceptance, #263) ─────────────────────────
+
+test('detects the real bill patterns in a mixed statement and ignores noise', function () {
+    $jan = CarbonImmutable::parse('2026-01-02');
+
+    // Fair Go Finance: $85 weekly, varying DT.xxxx code each time.
+    foreach (range(0, 7) as $i) {
+        createCsvTransaction($this->user, $this->account, "Direct Debit Fair Go Finance - DT.4y16g{$i} FGF 2472", 8500, $jan->addWeeks($i)->toDateString());
+    }
+
+    // QBE Insurance: $60.58 monthly, varying bcx:int code each time.
+    foreach (range(0, 3) as $i) {
+        createCsvTransaction($this->user, $this->account, 'Direct Debit QBE Insurance - bcx:int '.(4000 + $i), 6058, $jan->addMonthsNoOverflow($i)->toDateString());
+    }
+
+    // NIB: fortnightly health insurance with a mid-series premium step-change.
+    foreach ([9059, 9059, 9059, 9059, 9581, 9581] as $i => $amt) {
+        createCsvTransaction($this->user, $this->account, 'Direct Debit NIB - '.(64699390 + $i), $amt, $jan->addWeeks(2 * $i)->toDateString());
+    }
+
+    // Golden Insurance: $70.17 fortnightly with a one-off double-debit.
+    foreach ([7017, 7017, 14034, 7017, 7017, 7017] as $i => $amt) {
+        createCsvTransaction($this->user, $this->account, 'Direct Debit Golden Insurance - PLCY 0822124'.(10 + $i), $amt, $jan->addWeeks(2 * $i)->toDateString());
+    }
+
+    // Noise: constant round-up + internal account sweep.
+    foreach (range(0, 4) as $i) {
+        createCsvTransaction($this->user, $this->account, 'Round Up transfer to 03774599: NETFLIX', 101, $jan->addMonthsNoOverflow($i)->toDateString());
+    }
+    foreach (range(0, 3) as $i) {
+        createCsvTransaction($this->user, $this->account, 'Transfer Optimus to CC to SAV 03914373 NET#'.(2000 + $i), 25000, $jan->addWeeks($i)->toDateString());
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    $suggestions = AnalysisSuggestion::query()->whereIn('id', $result->suggestionIds)->get();
+    $signatures = $suggestions->pluck('payload.description')->all();
+
+    expect($signatures)
+        ->toContain('DIRECT DEBIT FAIR GO FINANCE FGF')
+        ->toContain('DIRECT DEBIT QBE INSURANCE')
+        ->toContain('DIRECT DEBIT NIB')
+        ->toContain('DIRECT DEBIT GOLDEN INSURANCE PLCY')
+        ->not->toContain('ROUND UP TRANSFER TO NETFLIX')
+        ->not->toContain('TRANSFER OPTIMUS TO CC TO SAV');
+
+    $nib = $suggestions->firstWhere('payload.description', 'DIRECT DEBIT NIB');
+    expect($nib->payload['amount'])->toBe(9581)
+        ->and($nib->payload['frequency'])->toBe(RecurrenceFrequency::Every2Weeks->value);
+
+    $golden = $suggestions->firstWhere('payload.description', 'DIRECT DEBIT GOLDEN INSURANCE PLCY');
+    expect($golden->payload['amount'])->toBe(7017);
 });
