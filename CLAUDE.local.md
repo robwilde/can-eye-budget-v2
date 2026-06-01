@@ -39,16 +39,28 @@ Run `cat op.conf` or read the file if you need to check available aliases.
 
 ---
 
-## Git Commands
+## Commit Messages
 
-**NEVER run any git commands (add, commit, push, checkout, branch, etc.) unless the user explicitly asks you to.** This includes:
-- Creating or switching branches
-- Staging files
-- Making commits
-- Pushing to remote
-- Any other git operations
+Process (issue first): create the GitHub issue, then branch from it. The issue
+number then exists up front and gets reused everywhere — branch name, commit
+scope, PR, and the `Closes #NNN` footer. This keeps one number threaded through
+the whole change.
 
-Wait for explicit instructions before touching git.
+Format: `type(scope): subject`
+
+- type: feat | fix | test | refactor | docs | chore | perf | ci | build
+- scope: the issue number when the commit is genuinely part of that issue's work (e.g. `#249`); otherwise a module name (e.g. `pay-cycle`).
+  Do NOT tag an unrelated change with an issue number just because it rides on the same branch.
+- subject: imperative mood, lowercase, no trailing period, <= 72 chars.
+
+Body (optional, wrap at 72): explain WHY, not what. Note what was verified (test/command run). Separate from subject with a blank line.
+
+Footer (optional): `Refs #249`, `Closes #249`.
+
+Rules:
+
+- One logical change per commit (atomic). No "misc fixes".
+- Never invent verification you didn't run.
 
 ---
 
