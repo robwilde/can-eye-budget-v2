@@ -1,6 +1,6 @@
 # Recurring Transaction Detection — Improvement Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> Implement incrementally, test-first: write the failing test for each task, make it pass, then commit before moving on.
 
 **Goal:** Make import-time recurring-transaction detection actually find the recurring bills in a statement by matching on the *stable payee text* (ignoring per-transaction reference codes), tolerating small amount drift / step-changes, and accepting a ±2-day cadence — without over-merging unrelated payees.
 

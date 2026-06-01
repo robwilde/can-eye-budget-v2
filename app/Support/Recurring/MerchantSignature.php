@@ -11,18 +11,24 @@ namespace App\Support\Recurring;
  * the meaningful payee words and discard the per-transaction noise that
  * otherwise splits one payee into many singletons: reference numbers, account
  * numbers, direct-debit codes (DT.xxxx), Ref#/NET#/MOBILE#/BPAY# markers,
- * bcx:int codes, card masks (#1234) and dates.
+ * bcx:int codes, card masks (#1234), dates, and random alphanumeric references.
  *
- * Rule of thumb: keep a whitespace token only when it reads like a word — no
- * digits, no '#'/':' reference markers, at least two characters after trimming
- * edge punctuation.
+ * A token is kept when it reads like a payee word. It is dropped as a code when
+ * it carries a '#'/':' marker, or contains a digit without being a plain
+ * "number-word" — a single digit run at one boundary adjacent to a letter body,
+ * e.g. "7-ELEVEN" or "4WD". This preserves merchant names that contain digits
+ * while still discarding interspersed/multi-run codes (DT.4Y16G4, E5MRRQ7T) and
+ * pure numbers (86400, 64699390).
+ *
+ * If every token is filtered out, the raw normalized string is returned rather
+ * than an empty signature, so unrelated all-code descriptions are not merged.
  */
 final class MerchantSignature
 {
     public static function for(string $raw): string
     {
-        $upper = mb_strtoupper(mb_trim($raw));
-        $tokens = preg_split('/\s+/', $upper) ?: [];
+        $normalized = self::normalize($raw);
+        $tokens = preg_split('/\s+/', $normalized) ?: [];
 
         $kept = [];
 
@@ -33,14 +39,7 @@ final class MerchantSignature
                 continue;
             }
 
-            // Reference markers (Ref#, NET#, bcx:int, …) and any token carrying a
-            // digit (account/policy/transaction codes such as DT.4Y16G4) are the
-            // parts that vary between occurrences of the same payee.
-            if (str_contains($token, '#') || str_contains($token, ':')) {
-                continue;
-            }
-
-            if (preg_match('/\d/', $token) === 1) {
+            if (self::isCodeToken($token)) {
                 continue;
             }
 
@@ -54,7 +53,35 @@ final class MerchantSignature
             $kept[] = $token;
         }
 
-        return implode(' ', $kept);
+        return $kept === [] ? $normalized : implode(' ', $kept);
+    }
+
+    private static function normalize(string $raw): string
+    {
+        return mb_strtoupper(mb_trim((string) preg_replace('/\s+/', ' ', $raw)));
+    }
+
+    /**
+     * A token is a reference/account code (drop it) when it carries a '#'/':'
+     * marker, or it contains a digit and is not a plain number-word.
+     */
+    private static function isCodeToken(string $token): bool
+    {
+        if (str_contains($token, '#') || str_contains($token, ':')) {
+            return true;
+        }
+
+        if (preg_match('/\d/', $token) !== 1) {
+            return false;
+        }
+
+        // Number-word: a single digit run at one boundary next to a letter body,
+        // e.g. "7-ELEVEN", "4WD", "LEVEL5". Anything else with a digit (pure
+        // numbers, DT.4Y16G4, E5MRRQ7T) is a code.
+        $leadingDigits = preg_match('/^\d+-?\p{L}[\p{L}.&\'\/-]*$/u', $token) === 1;
+        $trailingDigits = preg_match('/^\p{L}[\p{L}.&\'\/-]*-?\d+$/u', $token) === 1;
+
+        return ! ($leadingDigits || $trailingDigits);
     }
 
     /**

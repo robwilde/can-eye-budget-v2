@@ -54,8 +54,13 @@ it('uppercases an already-clean merchant name unchanged', function () {
     expect(MerchantSignature::for('Netflix'))->toBe('NETFLIX');
 });
 
-it('returns an empty signature when every token is a code', function () {
-    expect(MerchantSignature::for('Ref#884905699 2422732337'))->toBe('');
+it('keeps a merchant word that contains a boundary digit, e.g. 7-Eleven', function () {
+    expect(MerchantSignature::for('VISA -7-Eleven 1234 Clayton VI AUS'))
+        ->toBe('VISA 7-ELEVEN CLAYTON VI AUS');
+});
+
+it('falls back to the raw normalized string when every token is a code', function () {
+    expect(MerchantSignature::for('Ref#884905699   2422732337'))->toBe('REF#884905699 2422732337');
 });
 
 it('collapses adjacent duplicate words and drops the digit-bearing code token', function () {
