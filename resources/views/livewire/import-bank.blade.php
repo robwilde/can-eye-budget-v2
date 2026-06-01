@@ -76,6 +76,15 @@
                             maxlength="4"
                             data-testid="import-bank-new-last4"
                         />
+                        <flux:input
+                            wire:model="newAccountBalance"
+                            label="Current balance"
+                            type="number"
+                            step="0.01"
+                            placeholder="1686.19"
+                            data-testid="import-bank-new-balance"
+                        />
+                        <flux:text size="sm" class="text-fg-3">Optional — the account's balance right now. Leave blank for 0.</flux:text>
                     @endif
                 </div>
 
