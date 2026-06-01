@@ -132,6 +132,36 @@ final class TransactionModal extends Component
         $this->showModal = true;
     }
 
+    #[On('copy-transaction')]
+    public function openForCopy(int $id): void
+    {
+        $transaction = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->find($id);
+
+        if (! $transaction) {
+            return;
+        }
+
+        $this->resetForm();
+
+        // Pre-fill a brand-new entry from an existing transaction. editingTransactionId
+        // stays null so save() creates a fresh transaction rather than editing the source.
+        $this->transactionType = $transaction->direction === TransactionDirection::Debit
+            ? 'expense'
+            : 'income';
+        $this->accountId = $transaction->account_id;
+
+        $dollars = number_format(abs($transaction->amount) / 100, 2, '.', '');
+        $description = $transaction->description ?? '';
+        $this->descriptionInput = $description !== '' ? "{$dollars} {$description}" : $dollars;
+
+        $this->categoryId = $transaction->category_id;
+        $this->date = CarbonImmutable::now()->format('Y-m-d');
+
+        $this->showModal = true;
+    }
+
     #[On('edit-planned-transaction')]
     public function openForEditPlanned(int $id): void
     {

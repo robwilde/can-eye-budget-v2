@@ -15,6 +15,7 @@ use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Livewire\Livewire;
 
 test('component renders for authenticated user', function () {
@@ -3001,4 +3002,29 @@ test('submit button shows convert text when switching mode during edit', functio
         ->assertSee(__('Update planned expense'))
         ->set('mode', 'enter')
         ->assertSee(__('Convert to entered expense'));
+});
+
+test('copy-transaction prefills a new entry from an existing transaction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->create([
+        'amount' => 20000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'Direct Debit Spaceship',
+        'category_id' => $category->id,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('copy-transaction', id: $source->id)
+        ->assertSet('showModal', true)
+        ->assertSet('editingTransactionId', null)
+        ->assertSet('editingPlannedTransactionId', null)
+        ->assertSet('transactionType', 'expense')
+        ->assertSet('accountId', $account->id)
+        ->assertSet('categoryId', $category->id)
+        ->assertSet('descriptionInput', '200.00 Direct Debit Spaceship')
+        ->assertSet('date', CarbonImmutable::now()->format('Y-m-d'));
 });

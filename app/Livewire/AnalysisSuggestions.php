@@ -101,6 +101,31 @@ final class AnalysisSuggestions extends Component
         Flux::toast(text: 'Recurring transaction created', variant: 'success');
     }
 
+    public function copyRecurringTransaction(int $suggestionId): void
+    {
+        $suggestion = $this->findPendingSuggestion($suggestionId, SuggestionType::RecurringTransaction);
+
+        if (! $suggestion) {
+            return;
+        }
+
+        /** @var list<int> $matchedIds */
+        $matchedIds = $suggestion->payload['matched_transaction_ids'] ?? [];
+
+        $lastTransaction = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->whereIn('id', $matchedIds)
+            ->orderByDesc('post_date')
+            ->orderByDesc('id')
+            ->first();
+
+        if ($lastTransaction === null) {
+            return;
+        }
+
+        $this->dispatch('copy-transaction', id: $lastTransaction->id);
+    }
+
     public function acceptUserRule(int $suggestionId, RuleActionExecutor $executor): void
     {
         $suggestion = $this->findPendingSuggestion($suggestionId, SuggestionType::UserRule);

@@ -235,6 +235,21 @@ select:focus[data-flux-control] {
     }
     .tx-row:last-child { border-bottom: 0; }
     .tx-row.passive { cursor: default; }
+    .tx-row-hit {
+        appearance: none;
+        background: transparent;
+        border: 0;
+        font: inherit;
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+        padding: 0;
+        grid-column: 1 / 4;
+        display: grid;
+        grid-template-columns: 36px 1fr auto;
+        gap: 12px;
+        align-items: center;
+    }
     .tx-ico {
         width: 36px; height: 36px; border-radius: 10px;
         display: grid; place-items: center;

@@ -91,6 +91,7 @@
                                     :name="$suggestion->payload['clean_description']"
                                     :amount="abs($suggestion->payload['amount'])"
                                     :tone="$suggestion->payload['direction'] === 'debit' ? 'out' : 'inc'"
+                                    :click="'copyRecurringTransaction(' . $suggestion->id . ')'"
                                 >
                                     <x-slot:meta>
                                         {{ RecurrenceFrequency::from($suggestion->payload['frequency'])->label() }}
