@@ -231,10 +231,8 @@ test('renders per-day debit and credit separately in the calendar cell', functio
 
     Livewire::actingAs($user)
         ->test(CalendarView::class)
-        ->assertSeeHtml('cyc-day-debit')
-        ->assertSeeHtml('cyc-day-credit')
-        ->assertSee('$30.00')
-        ->assertSee('$80.00');
+        ->assertSeeHtml('<span class="cyc-day-debit">−$30.00</span>')
+        ->assertSeeHtml('<span class="cyc-day-credit">+$80.00</span>');
 });
 
 test('selectDate updates selectedDay computed', function () {
