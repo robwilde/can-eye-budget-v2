@@ -3010,7 +3010,7 @@ test('converting an entered transaction to planned keeps a planned occurrence on
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
 
-    $date = CarbonImmutable::now()->startOfMonth()->addDays(17);
+    $date = CarbonImmutable::parse('2026-03-18');
 
     $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
         'amount' => 20000,
@@ -3038,9 +3038,11 @@ test('converting an entered transaction to planned keeps a planned occurrence on
         ->and($planned->direction)->toBe(TransactionDirection::Debit)
         ->and($planned->frequency)->toBe(RecurrenceFrequency::EveryMonth);
 
-    // The original actual is soft-deleted, and the day still surfaces the
-    // converted plan as a planned occurrence (so the date is not left empty).
-    expect(Transaction::query()->find($transaction->id))->toBeNull();
+    // The original actual is soft-deleted (recoverable, not hard-deleted), and
+    // the day still surfaces the converted plan as a planned occurrence (so the
+    // date is not left empty).
+    expect(Transaction::query()->find($transaction->id))->toBeNull()
+        ->and(Transaction::withTrashed()->find($transaction->id)?->trashed())->toBeTrue();
 
     $activity = app(DayActivityLoader::class)->load($date->startOfMonth(), $date->endOfMonth(), $user->id);
     $day = $activity[$date->format('Y-m-d')] ?? null;
