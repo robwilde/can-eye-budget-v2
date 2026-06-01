@@ -76,6 +76,7 @@ test('inline account creation registers a new csv account with last 4 digits', f
         ->set('accountChoice', 'new')
         ->set('newAccountName', 'Westpac Choice')
         ->set('newAccountLast4', '4599')
+        ->set('newAccountBalance', '1686.19')
         ->set('file', fixtureUpload())
         ->call('uploadAndDetectHeaders')
         ->assertSet('step', 2);
@@ -85,7 +86,24 @@ test('inline account creation registers a new csv account with last 4 digits', f
     expect($account)->not->toBeNull()
         ->and($account->name)->toBe('Westpac Choice')
         ->and($account->account_last4)->toBe('4599')
-        ->and($account->import_source)->toBe(ImportSource::Csv);
+        ->and($account->import_source)->toBe(ImportSource::Csv)
+        ->and($account->balance)->toBe(168_619);
+});
+
+test('inline account creation defaults balance to zero when left blank', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'new')
+        ->set('newAccountName', 'No Balance Account')
+        ->set('newAccountLast4', '0000')
+        ->set('newAccountBalance', '')
+        ->set('file', fixtureUpload())
+        ->call('uploadAndDetectHeaders')
+        ->assertSet('step', 2);
+
+    expect(Account::query()->where('user_id', $user->id)->first()->balance)->toBe(0);
 });
 
 test('confirmImport dispatches the job and moves to step 3', function () {

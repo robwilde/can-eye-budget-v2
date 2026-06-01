@@ -40,6 +40,9 @@ final class ImportBank extends Component
     #[Validate('nullable|string|size:4')]
     public string $newAccountLast4 = '';
 
+    #[Validate('nullable|numeric')]
+    public string $newAccountBalance = '';
+
     /** @var list<string> */
     public array $headers = [];
 
@@ -177,6 +180,7 @@ final class ImportBank extends Component
             'accountId',
             'newAccountName',
             'newAccountLast4',
+            'newAccountBalance',
             'headers',
             'mapping',
             'bankImportId',
@@ -254,6 +258,7 @@ final class ImportBank extends Component
         $this->validate([
             'newAccountName' => ['required', 'string', 'max:255'],
             'newAccountLast4' => ['required', 'string', 'size:4'],
+            'newAccountBalance' => ['nullable', 'numeric'],
         ]);
 
         return Account::query()->create([
@@ -263,7 +268,7 @@ final class ImportBank extends Component
             'type' => 'transaction',
             'institution' => 'CSV import',
             'currency' => 'AUD',
-            'balance' => 0,
+            'balance' => (int) round(((float) $this->newAccountBalance) * 100),
             'group' => 'day-to-day',
             'status' => 'active',
             'import_source' => ImportSource::Csv,
