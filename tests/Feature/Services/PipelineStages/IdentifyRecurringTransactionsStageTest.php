@@ -957,3 +957,57 @@ test('skips internal account sweeps as noise', function () {
 
     expect($result->suggestionIds)->toBeEmpty();
 });
+
+// ─── Representative statement (acceptance, #263) ─────────────────────────
+
+test('detects the real bill patterns in a mixed statement and ignores noise', function () {
+    $jan = CarbonImmutable::parse('2026-01-02');
+
+    // Fair Go Finance: $85 weekly, varying DT.xxxx code each time.
+    foreach (range(0, 7) as $i) {
+        createCsvTransaction($this->user, $this->account, "Direct Debit Fair Go Finance - DT.4y16g{$i} FGF 2472", 8500, $jan->addWeeks($i)->toDateString());
+    }
+
+    // QBE Insurance: $60.58 monthly, varying bcx:int code each time.
+    foreach (range(0, 3) as $i) {
+        createCsvTransaction($this->user, $this->account, 'Direct Debit QBE Insurance - bcx:int '.(4000 + $i), 6058, $jan->addMonthsNoOverflow($i)->toDateString());
+    }
+
+    // NIB: fortnightly health insurance with a mid-series premium step-change.
+    foreach ([9059, 9059, 9059, 9059, 9581, 9581] as $i => $amt) {
+        createCsvTransaction($this->user, $this->account, 'Direct Debit NIB - '.(64699390 + $i), $amt, $jan->addWeeks(2 * $i)->toDateString());
+    }
+
+    // Golden Insurance: $70.17 fortnightly with a one-off double-debit.
+    foreach ([7017, 7017, 14034, 7017, 7017, 7017] as $i => $amt) {
+        createCsvTransaction($this->user, $this->account, 'Direct Debit Golden Insurance - PLCY 0822124'.(10 + $i), $amt, $jan->addWeeks(2 * $i)->toDateString());
+    }
+
+    // Noise: constant round-up + internal account sweep.
+    foreach (range(0, 4) as $i) {
+        createCsvTransaction($this->user, $this->account, 'Round Up transfer to 03774599: NETFLIX', 101, $jan->addMonthsNoOverflow($i)->toDateString());
+    }
+    foreach (range(0, 3) as $i) {
+        createCsvTransaction($this->user, $this->account, 'Transfer Optimus to CC to SAV 03914373 NET#'.(2000 + $i), 25000, $jan->addWeeks($i)->toDateString());
+    }
+
+    $result = $this->stage->execute($this->context);
+
+    $suggestions = AnalysisSuggestion::query()->whereIn('id', $result->suggestionIds)->get();
+    $signatures = $suggestions->pluck('payload.description')->all();
+
+    expect($signatures)
+        ->toContain('DIRECT DEBIT FAIR GO FINANCE FGF')
+        ->toContain('DIRECT DEBIT QBE INSURANCE')
+        ->toContain('DIRECT DEBIT NIB')
+        ->toContain('DIRECT DEBIT GOLDEN INSURANCE PLCY')
+        ->not->toContain('ROUND UP TRANSFER TO NETFLIX')
+        ->not->toContain('TRANSFER OPTIMUS TO CC TO SAV');
+
+    $nib = $suggestions->firstWhere('payload.description', 'DIRECT DEBIT NIB');
+    expect($nib->payload['amount'])->toBe(9581)
+        ->and($nib->payload['frequency'])->toBe(RecurrenceFrequency::Every2Weeks->value);
+
+    $golden = $suggestions->firstWhere('payload.description', 'DIRECT DEBIT GOLDEN INSURANCE PLCY');
+    expect($golden->payload['amount'])->toBe(7017);
+});
