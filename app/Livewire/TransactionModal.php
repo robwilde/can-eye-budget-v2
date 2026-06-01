@@ -135,9 +135,7 @@ final class TransactionModal extends Component
     #[On('copy-transaction')]
     public function openForCopy(int $id): void
     {
-        $transaction = Transaction::query()
-            ->where('user_id', auth()->id())
-            ->find($id);
+        $transaction = Transaction::findCurrentVersion($id, auth()->id());
 
         if (! $transaction) {
             return;

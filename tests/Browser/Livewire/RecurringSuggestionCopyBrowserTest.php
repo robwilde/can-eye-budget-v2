@@ -16,7 +16,7 @@ test('clicking a recurring suggestion opens the prefilled transaction modal', fu
     $account = Account::factory()->for($user)->create();
     $pipelineRun = PipelineRun::factory()->for($user)->create();
 
-    Transaction::factory()->create([
+    $transaction = Transaction::factory()->create([
         'user_id' => $user->id,
         'account_id' => $account->id,
         'amount' => 20000,
@@ -36,7 +36,7 @@ test('clicking a recurring suggestion opens the prefilled transaction modal', fu
             'frequency' => 'every-month',
             'account_id' => $account->id,
             'category_id' => null,
-            'matched_transaction_ids' => [Transaction::query()->value('id')],
+            'matched_transaction_ids' => [$transaction->id],
             'start_date' => '2026-04-15',
             'confidence_score' => 0.9,
         ],
