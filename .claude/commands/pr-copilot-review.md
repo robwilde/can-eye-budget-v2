@@ -69,13 +69,15 @@ Capture the returned PR URL + number — you'll need the number for Steps 4 and 
 
 ## Step 4 — Request Copilot review
 
-**Critical:** the only working handle is literally `@copilot` (with the @). Plain `Copilot`, `copilot-pull-request-reviewer`, and GraphQL `requestReviews` with the bot node ID all fail — gh CLI translates `@copilot` into the internal bot-reviewer API call.
+Copilot is a **Bot**, not a User, so request it through the REST `requested_reviewers`
+endpoint using its full login `copilot-pull-request-reviewer[bot]`:
 
 ```bash
-gh pr edit <pr_number> --add-reviewer "@copilot"
+gh api -X POST repos/robwilde/can-eye-budget-v2/pulls/<pr_number>/requested_reviewers \
+  -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
 ```
 
-Expected success output: the PR URL is echoed back. If you see "Could not resolve user with login 'copilot'" you forgot the `@` prefix.
+This is the canonical method (matches `CLAUDE.local.md`). `gh pr edit <pr_number> --add-reviewer "@copilot"` resolves the login via GraphQL and only works when the active token carries the `read:org` scope, so prefer the scope-independent REST call above. Copilot starts reviewing immediately and then drops out of `requested_reviewers` (which reads empty) — confirm it engaged via the `/reviews` endpoint, where it appears as `copilot-pull-request-reviewer[bot]`.
 
 ## Step 5 — Poll for Copilot's review
 
@@ -127,8 +129,8 @@ Do **not** commit automatically — per `CLAUDE.local.md` the user must explicit
 
 ## Common gotchas (from the session that spawned this command)
 
-- `gh pr edit --add-reviewer Copilot` (no `@`) → `GraphQL: Could not resolve user with login 'copilot'`. Use `"@copilot"`.
-- `gh api ... requested_reviewers -f 'reviewers[]=copilot-pull-request-reviewer'` → 422 "not a collaborator". Copilot is a Bot, not a User; standard reviewer endpoints reject it.
+- `gh pr edit <pr_number> --add-reviewer "@copilot"` resolves the login via GraphQL and only succeeds when the token has the `read:org` scope; without it you get `Could not resolve user with login 'copilot'`. The REST call in Step 4 is scope-independent and is the canonical method.
+- `gh api ... requested_reviewers -f 'reviewers[]=copilot-pull-request-reviewer'` (missing the `[bot]` suffix) → 422 "not a collaborator". The login MUST be the full `copilot-pull-request-reviewer[bot]`, which the REST endpoint accepts.
 - GraphQL `requestReviews` mutation with the Copilot bot node ID (`BOT_kgDOCnlnWA`) → `NOT_FOUND Could not resolve to User node`. The mutation's `userIds` is strictly User-typed.
 - Blade `{{ "It's payday" }}` escapes the apostrophe to `&#039;s`. For static UI copy, put the literal inside the Blade markup (`<span>It's payday</span>`), not inside an interpolated expression, so test assertions match.
 - Pest forbids `it('…', static function () { })` — the framework rebinds each closure to the TestCase at runtime, and static closures can't be rebound. Use a file-level `/** @noinspection StaticClosureCanBeUsedInspection */` to silence the PhpStorm hint instead.
