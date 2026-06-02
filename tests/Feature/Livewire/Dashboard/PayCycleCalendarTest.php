@@ -813,3 +813,24 @@ test('blade renders grid-column-start matching the real weekday for the first da
 
     expect($html)->toMatch($expectedPattern);
 })->with([1, 2, 3, 4, 5, 6, 7]);
+
+test('marks the local Australian day as today across the UTC date boundary', function () {
+    // Mon 1 Jun 23:00 UTC is already Tue 2 Jun 09:00 in QLD (UTC+10). The
+    // dashboard must highlight the local civil day, not the UTC one — guards
+    // against the app reverting to a UTC timezone (issue #265), which made the
+    // calendar show "yesterday" every morning before ~10:00 local.
+    CarbonImmutable::setTestNow(CarbonImmutable::create(2026, 6, 1, 23, 0, 0, 'UTC'));
+
+    [$user] = fortnightlyThursdayPayUser('2026-06-04');
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->days();
+
+    $byIso = collect($days)->keyBy(fn (PayCycleDayData $day) => $day->iso);
+
+    expect($byIso->get('2026-06-02')?->isToday)->toBeTrue()
+        ->and($byIso->get('2026-06-01')?->isToday)->toBeFalse();
+});
