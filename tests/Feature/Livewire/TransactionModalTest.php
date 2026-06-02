@@ -3155,3 +3155,49 @@ test('a future planned occurrence still updates the plan rather than entering it
     expect(Transaction::query()->where('planned_transaction_id', $planned->id)->count())->toBe(0)
         ->and($planned->fresh()->amount)->toBe(7500);
 });
+
+test('a malformed occurrence date does not break render and is not realizable', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-06-15'));
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 5000,
+        'description' => 'gym',
+        'start_date' => '2026-05-01',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id, occurrenceDate: 'garbage')
+        ->assertOk()
+        ->assertSee(__('Update planned expense'))
+        ->assertDontSee(__('Enter expense'));
+});
+
+test('entering a past planned transfer occurrence links both legs to the plan', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-06-15'));
+
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $planned = PlannedTransaction::factory()->for($user)->for($from)->monthly()->create([
+        'direction' => TransactionDirection::Debit,
+        'transfer_to_account_id' => $to->id,
+        'amount' => 5000,
+        'description' => 'savings',
+        'start_date' => '2026-05-01',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id, occurrenceDate: '2026-06-01')
+        ->assertSet('transactionType', 'transfer')
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    expect(PlannedTransaction::query()->find($planned->id))->not->toBeNull()
+        ->and(Transaction::query()->where('planned_transaction_id', $planned->id)->count())->toBe(2);
+});

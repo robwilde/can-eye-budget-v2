@@ -308,10 +308,20 @@ final class TransactionModal extends Component
      */
     public function isRealizableOccurrence(): bool
     {
-        return $this->editingPlannedTransactionId !== null
-            && $this->mode === 'plan'
-            && $this->occurrenceDate !== null
-            && CarbonImmutable::parse($this->occurrenceDate)->lessThanOrEqualTo(CarbonImmutable::today());
+        if ($this->editingPlannedTransactionId === null
+            || $this->mode !== 'plan'
+            || $this->occurrenceDate === null) {
+            return false;
+        }
+
+        try {
+            $occurrence = CarbonImmutable::createFromFormat('!Y-m-d', $this->occurrenceDate);
+        } catch (Throwable) {
+            return false;
+        }
+
+        return $occurrence instanceof CarbonImmutable
+            && $occurrence->lessThanOrEqualTo(CarbonImmutable::today());
     }
 
     /**
@@ -636,7 +646,7 @@ final class TransactionModal extends Component
         [$planned, $parsed] = $resolved;
 
         if ($this->transactionType === 'transfer') {
-            DB::transaction(fn () => $this->createTransferPair($parsed));
+            DB::transaction(fn () => $this->createTransferPair($parsed, $planned->id));
 
             return true;
         }
@@ -742,9 +752,10 @@ final class TransactionModal extends Component
         ]);
     }
 
-    private function createTransferPair(AmountParseResult $parsed): void
+    private function createTransferPair(AmountParseResult $parsed, ?int $plannedTransactionId = null): void
     {
         $shared = [
+            'planned_transaction_id' => $plannedTransactionId,
             'user_id' => auth()->id(),
             'category_id' => $this->categoryId,
             'amount' => $parsed->amount,
