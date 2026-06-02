@@ -81,12 +81,18 @@ This is non-negotiable. There are zero exceptions to this rule.
 
 Every PR opened for this repo MUST, in addition to targeting `develop`:
 
-1. **Request GitHub Copilot as a reviewer.** After creating the PR, run:
+1. **Request GitHub Copilot as a reviewer** (not automated on Free accounts — you
+   MUST request it explicitly). After creating the PR, run:
    ```bash
-   gh pr edit <pr-number> --add-reviewer "@copilot"
+   gh api -X POST repos/<owner>/<repo>/pulls/<pr-number>/requested_reviewers \
+     -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
    ```
-   (`@copilot` is github.com-only and needs Copilot code review enabled on the
-   repo. If the command errors, surface that — do not silently skip it.)
+   Use the REST call above, **not** `gh pr edit <pr-number> --add-reviewer "@copilot"`:
+   the latter resolves the login via GraphQL and fails unless the token carries the
+   `read:org` scope (it currently does not). Copilot starts reviewing immediately
+   and drops out of `requested_reviewers` (which then reads empty) — confirm via the
+   `/reviews` endpoint, where it appears as `copilot-pull-request-reviewer[bot]`. If
+   the command errors, surface that — do not silently skip it.
 
 2. **Apply labels** matching the established convention — one *type* label plus
    one or more *layer* labels:
