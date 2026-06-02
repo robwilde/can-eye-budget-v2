@@ -43,10 +43,11 @@ final class CalendarView extends Component
         unset($this->selectedDay); // @phpstan-ignore property.notFound
     }
 
-    public function openDay(string $date): void
+    public function addTransaction(): void
     {
-        $this->selectDate($date);
-        $this->dispatch('open-transaction-modal', date: $this->selectedDate);
+        if ($this->selectedDate !== '') {
+            $this->dispatch('open-transaction-modal', date: $this->selectedDate);
+        }
     }
 
     public function previousMonth(): void

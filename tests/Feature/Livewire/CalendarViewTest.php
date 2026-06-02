@@ -642,13 +642,25 @@ test('transfer-pair transactions are excluded from pips', function () {
     expect($cell->pips)->toBeEmpty();
 });
 
-test('clicking a day opens the add-transaction modal pre-dated to that day', function () {
+test('selecting a day shows its detail panel with an add-transaction button and does not open the modal', function () {
     $user = User::factory()->create();
     $iso = CarbonImmutable::now()->startOfMonth()->addDays(9)->format('Y-m-d');
 
     Livewire::actingAs($user)
         ->test(CalendarView::class)
-        ->call('openDay', $iso)
-        ->assertDispatched('open-transaction-modal', date: $iso)
-        ->assertSet('selectedDate', $iso);
+        ->call('selectDate', $iso)
+        ->assertSet('selectedDate', $iso)
+        ->assertNotDispatched('open-transaction-modal')
+        ->assertSee('Add transaction');
+});
+
+test('the add-transaction button opens the modal pre-dated to the selected day', function () {
+    $user = User::factory()->create();
+    $iso = CarbonImmutable::now()->startOfMonth()->addDays(9)->format('Y-m-d');
+
+    Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->call('selectDate', $iso)
+        ->call('addTransaction')
+        ->assertDispatched('open-transaction-modal', date: $iso);
 });

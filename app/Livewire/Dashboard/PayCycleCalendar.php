@@ -57,10 +57,8 @@ final class PayCycleCalendar extends Component
         unset($this->selectedDay); // @phpstan-ignore property.notFound
     }
 
-    public function openDay(string $iso): void
+    public function addTransaction(): void
     {
-        $this->selectDay($iso);
-
         if ($this->selectedDate !== null) {
             $this->dispatch('open-transaction-modal', date: $this->selectedDate);
         }

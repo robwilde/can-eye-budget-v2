@@ -48,7 +48,7 @@
             @foreach ($this->days as $day)
                 <button
                         type="button"
-                        wire:click="openDay('{{ $day->iso }}')"
+                        wire:click="selectDate('{{ $day->iso }}')"
                         wire:key="cal-day-{{ $day->iso }}"
                         style="grid-column-start: {{ $day->isoWeekday }}"
                         @class([
@@ -134,6 +134,12 @@
                 @empty
                     <p class="cyc-empty">Nothing on this day.</p>
                 @endforelse
+            </div>
+            <div class="cyc-detail-foot">
+                <button type="button" class="cib-yellow-pill" wire:click="addTransaction">
+                    <flux:icon.plus variant="micro"/>
+                    {{ __('Add transaction') }}
+                </button>
             </div>
         </div>
     @endif

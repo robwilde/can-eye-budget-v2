@@ -835,7 +835,7 @@ test('marks the local Australian day as today across the UTC date boundary', fun
         ->and($byIso->get('2026-06-01')?->isToday)->toBeFalse();
 });
 
-test('clicking a day opens the add-transaction modal pre-dated to that day', function () {
+test('the add-transaction button opens the modal pre-dated to the selected day', function () {
     $nextPay = nextMondayAtLeastDaysAhead(7);
 
     $user = User::factory()->withPayCycle()->create([
@@ -848,7 +848,10 @@ test('clicking a day opens the add-transaction modal pre-dated to that day', fun
 
     Livewire::actingAs($user)
         ->test(PayCycleCalendar::class)
-        ->call('openDay', $iso)
-        ->assertDispatched('open-transaction-modal', date: $iso)
-        ->assertSet('selectedDate', $iso);
+        ->call('selectDay', $iso)
+        ->assertSet('selectedDate', $iso)
+        ->assertNotDispatched('open-transaction-modal')
+        ->assertSee('Add transaction')
+        ->call('addTransaction')
+        ->assertDispatched('open-transaction-modal', date: $iso);
 });
