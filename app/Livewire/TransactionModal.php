@@ -595,22 +595,25 @@ final class TransactionModal extends Component
 
         [$transaction, $parsed] = $resolved;
 
-        DB::transaction(function () use ($transaction, $parsed): void {
-            $planned = PlannedTransaction::query()->create($this->buildPlannedTransactionData($parsed));
+        // Keep the source transaction. When it is a plain (non-transfer) posting,
+        // reconcile it to the new plan so its occurrence on the start date is not
+        // double-counted on the calendar; its own fields are left untouched.
+        $isPlainSource = $this->transactionType !== 'transfer' && $transaction->transfer_pair_id === null;
 
-            // Keep the source transaction. When it is a plain (non-transfer) posting,
-            // reconcile it to the new plan so its occurrence on the start date is not
-            // double-counted on the calendar; its own fields are left untouched.
-            $isPlainSource = $this->transactionType !== 'transfer' && $transaction->transfer_pair_id === null;
+        DB::transaction(function () use ($transaction, $parsed, $isPlainSource): void {
+            $planned = PlannedTransaction::query()->create($this->buildPlannedTransactionData($parsed));
 
             if ($isPlainSource) {
                 $transaction->update(['planned_transaction_id' => $planned->id]);
             }
-
-            if ($isPlainSource && $this->categoriseMatching && $this->categoryId !== null) {
-                app(CategoryRuleGenerator::class)->generateAndApply($transaction, $this->categoryId);
-            }
         });
+
+        // Generate and apply the categorisation rule after the plan transaction
+        // commits: it can touch many transactions, so keeping it outside avoids
+        // holding row locks for the length of an interactive modal save.
+        if ($isPlainSource && $this->categoriseMatching && $this->categoryId !== null) {
+            app(CategoryRuleGenerator::class)->generateAndApply($transaction, $this->categoryId);
+        }
 
         return true;
     }

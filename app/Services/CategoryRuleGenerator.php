@@ -53,10 +53,12 @@ final readonly class CategoryRuleGenerator
 
     private function applyToExisting(int $userId, UserRule $rule): void
     {
+        // Stream by id rather than loading the whole history into memory. Keying
+        // on the (unchanging) id keeps paging stable even though we mutate rows.
         Transaction::query()
             ->where('user_id', $userId)
             ->current()
-            ->get()
+            ->lazyById()
             ->each(function (Transaction $transaction) use ($rule): void {
                 if ($this->evaluator->matches($transaction, $rule)) {
                     $this->executor->execute($transaction, $rule->actions);
