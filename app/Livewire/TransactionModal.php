@@ -12,6 +12,7 @@ use App\Enums\TransactionStatus;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
+use App\Services\CategoryRuleGenerator;
 use App\Support\AmountParser;
 use App\Support\AmountParseResult;
 use Carbon\CarbonImmutable;
@@ -59,6 +60,8 @@ final class TransactionModal extends Component
     public ?string $untilDate = null;
 
     public ?string $occurrenceDate = null;
+
+    public bool $categoriseMatching = false;
 
     #[Locked]
     public bool $originalWasTransfer = false;
@@ -593,9 +596,20 @@ final class TransactionModal extends Component
         [$transaction, $parsed] = $resolved;
 
         DB::transaction(function () use ($transaction, $parsed): void {
-            PlannedTransaction::query()->create($this->buildPlannedTransactionData($parsed));
+            $planned = PlannedTransaction::query()->create($this->buildPlannedTransactionData($parsed));
 
-            $this->softDeleteWithAncestors($transaction);
+            // Keep the source transaction. When it is a plain (non-transfer) posting,
+            // reconcile it to the new plan so its occurrence on the start date is not
+            // double-counted on the calendar; its own fields are left untouched.
+            $isPlainSource = $this->transactionType !== 'transfer' && $transaction->transfer_pair_id === null;
+
+            if ($isPlainSource) {
+                $transaction->update(['planned_transaction_id' => $planned->id]);
+            }
+
+            if ($isPlainSource && $this->categoriseMatching && $this->categoryId !== null) {
+                app(CategoryRuleGenerator::class)->generateAndApply($transaction, $this->categoryId);
+            }
         });
 
         return true;
@@ -810,34 +824,12 @@ final class TransactionModal extends Component
         return $this->transactionType === 'transfer';
     }
 
-    private function softDeleteWithAncestors(Transaction $transaction): void
-    {
-        $current = $transaction;
-
-        while ($current) {
-            if ($current->transfer_pair_id) {
-                Transaction::query()
-                    ->where('id', $current->transfer_pair_id)
-                    ->where('user_id', auth()->id())
-                    ->delete();
-            }
-
-            $parentId = $current->parent_transaction_id;
-            $current->delete();
-
-            $current = $parentId
-                ? Transaction::withTrashed()
-                    ->where('user_id', auth()->id())
-                    ->find($parentId)
-                : null;
-        }
-    }
-
     private function resetForm(): void
     {
         $this->editingTransactionId = null;
         $this->editingPlannedTransactionId = null;
         $this->occurrenceDate = null;
+        $this->categoriseMatching = false;
         $this->isBasiqTransaction = false;
         $this->transactionType = 'expense';
         $this->descriptionInput = '';
