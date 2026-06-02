@@ -48,7 +48,7 @@
             @foreach ($this->days as $day)
                 <button
                         type="button"
-                        wire:click="selectDate('{{ $day->iso }}')"
+                        wire:click="openDay('{{ $day->iso }}')"
                         wire:key="cal-day-{{ $day->iso }}"
                         style="grid-column-start: {{ $day->isoWeekday }}"
                         @class([
