@@ -23,6 +23,16 @@ it('renders the TransactionModal exactly once on the calendar page', function ()
         ->toBe(1);
 });
 
+it('renders the ReconciliationModal exactly once on the calendar page', function () {
+    $response = $this->get(route('calendar'));
+
+    $response->assertOk();
+    $response->assertSeeLivewire('reconciliation-modal');
+
+    expect(countLivewireMounts($response->getContent(), 'reconciliation-modal'))
+        ->toBe(1);
+});
+
 /**
  * Count how many times a Livewire component is mounted in rendered HTML by
  * parsing each `wire:snapshot` attribute, decoding HTML entities, and inspecting
