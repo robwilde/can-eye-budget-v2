@@ -80,13 +80,13 @@ it('omits the icon svg when no icon prop is provided', function () {
         ->not->toMatch('/<svg[^>]*data-flux-icon/i');
 });
 
-it('dispatches open-reconciliation-modal when plannedTransactionId is set', function () {
+it('dispatches edit-planned-transaction when plannedTransactionId is set', function () {
     $html = Blade::render(
         '<x-cib.tx-row :planned-transaction-id="7" occurrence-date="2026-04-19" name="Rent" :amount="150000" tone="plan" />'
     );
 
     expect($html)
-        ->toContain("wire:click=\"\$dispatch('open-reconciliation-modal', { plannedId: 7, occurrenceDate: '2026-04-19' })\"")
+        ->toContain("wire:click=\"\$dispatch('edit-planned-transaction', { id: 7, occurrenceDate: '2026-04-19' })\"")
         ->toContain('tx-row planned');
 });
 
