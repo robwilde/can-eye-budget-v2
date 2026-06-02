@@ -15,6 +15,7 @@ use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Models\UserRule;
 use App\Support\Calendar\DayActivityLoader;
 use Carbon\CarbonImmutable;
 use Livewire\Livewire;
@@ -2301,7 +2302,7 @@ test('basiq transaction cannot be converted to income via tampered transactionTy
 
 // ── Enter/Plan Mode Conversion (#136) ─────────────────────────────
 
-test('converting entered expense to planned expense soft-deletes transaction and creates planned', function () {
+test('converting an entered expense to a plan keeps and reconciles the source', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
@@ -2327,10 +2328,6 @@ test('converting entered expense to planned expense soft-deletes transaction and
         ->assertHasNoErrors()
         ->assertDispatched('transaction-saved');
 
-    expect(Transaction::query()->find($transaction->id))
-        ->toBeNull()
-        ->and(Transaction::withTrashed()->find($transaction->id))->not->toBeNull();
-
     $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
 
     expect($planned)
@@ -2342,6 +2339,10 @@ test('converting entered expense to planned expense soft-deletes transaction and
         ->description->toBe('gym membership')
         ->frequency->toBe(RecurrenceFrequency::EveryMonth)
         ->is_active->toBeTrue();
+
+    // The source transaction is kept and reconciled to the new plan (not deleted).
+    expect(Transaction::query()->find($transaction->id))->not->toBeNull()
+        ->and($transaction->fresh()->planned_transaction_id)->toBe($planned->id);
 });
 
 test('converting entered income to planned income preserves credit direction', function () {
@@ -2374,7 +2375,7 @@ test('converting entered income to planned income preserves credit direction', f
         ->amount->toBe(200000);
 });
 
-test('converting entered transfer to planned transfer soft-deletes both sides', function () {
+test('converting an entered transfer to a plan keeps both sides', function () {
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
     $toAccount = Account::factory()->for($user)->create();
@@ -2412,12 +2413,10 @@ test('converting entered transfer to planned transfer soft-deletes both sides', 
         ->assertSet('showModal', false)
         ->assertHasNoErrors();
 
-    expect(Transaction::query()->find($debit->id))
-        ->toBeNull()
-        ->and(Transaction::query()->find($credit->id))->toBeNull()
-        ->and(Transaction::withTrashed()->find($debit->id))->not
-        ->toBeNull()
-        ->and(Transaction::withTrashed()->find($credit->id))->not->toBeNull();
+    expect(Transaction::query()->find($debit->id))->not->toBeNull()
+        ->and(Transaction::query()->find($credit->id))->not->toBeNull()
+        ->and($debit->fresh()->planned_transaction_id)->toBeNull()
+        ->and($credit->fresh()->planned_transaction_id)->toBeNull();
 
     $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
 
@@ -2584,7 +2583,8 @@ test('converting entered expense to planned transfer with mode and type change',
         ->assertSet('showModal', false)
         ->assertHasNoErrors();
 
-    expect(Transaction::query()->find($expense->id))->toBeNull();
+    expect(Transaction::query()->find($expense->id))->not->toBeNull()
+        ->and($expense->fresh()->planned_transaction_id)->toBeNull();
 
     $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
 
@@ -2632,9 +2632,9 @@ test('converting entered transfer to planned expense with mode and type change',
         ->assertSet('showModal', false)
         ->assertHasNoErrors();
 
-    expect(Transaction::query()->find($debit->id))
-        ->toBeNull()
-        ->and(Transaction::query()->find($credit->id))->toBeNull();
+    expect(Transaction::query()->find($debit->id))->not->toBeNull()
+        ->and(Transaction::query()->find($credit->id))->not->toBeNull()
+        ->and($debit->fresh()->planned_transaction_id)->toBeNull();
 
     $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
 
@@ -2725,7 +2725,7 @@ test('converting planned transfer to entered expense with mode and type change',
         ->transfer_pair_id->toBeNull();
 });
 
-test('converting edited transaction to planned soft-deletes entire ancestor chain', function () {
+test('converting an edited transaction to a plan keeps and reconciles the current version', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
@@ -2753,16 +2753,17 @@ test('converting edited transaction to planned soft-deletes entire ancestor chai
         ->assertSet('showModal', false)
         ->assertHasNoErrors();
 
-    expect(Transaction::withTrashed()->find($child->id)->deleted_at)->not
-        ->toBeNull()
-        ->and(Transaction::withTrashed()->find($parent->id)->deleted_at)->not
-        ->toBeNull()
-        ->and(Transaction::query()->current()->where('user_id', $user->id)->count())->toBe(0);
+    $planned = PlannedTransaction::query()->where('user_id', $user->id)->first();
 
-    expect(PlannedTransaction::query()->where('user_id', $user->id)->first())->not->toBeNull();
+    // The current version is kept and reconciled; the superseded parent stays trashed.
+    expect($planned)->not->toBeNull()
+        ->and(Transaction::query()->find($child->id))->not->toBeNull()
+        ->and($child->fresh()->planned_transaction_id)->toBe($planned->id)
+        ->and(Transaction::withTrashed()->find($parent->id)->deleted_at)->not->toBeNull()
+        ->and(Transaction::query()->current()->where('user_id', $user->id)->count())->toBe(1);
 });
 
-test('converting edited transfer to planned soft-deletes entire ancestor chain including pairs', function () {
+test('converting an edited transfer to a plan keeps the current versions', function () {
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
     $toAccount = Account::factory()->for($user)->create();
@@ -2809,13 +2810,11 @@ test('converting edited transfer to planned soft-deletes entire ancestor chain i
         ->assertSet('showModal', false)
         ->assertHasNoErrors();
 
-    expect(Transaction::query()->where('user_id', $user->id)->count())->toBe(0);
-
-    $allTrashed = Transaction::withTrashed()->where('user_id', $user->id)->get();
-
-    expect($allTrashed)
-        ->toHaveCount(4)
-        ->each(fn ($t) => $t->deleted_at->not->toBeNull());
+    // The two current transfer legs are kept; only the superseded parents stay trashed.
+    expect(Transaction::query()->current()->where('user_id', $user->id)->count())->toBe(2)
+        ->and(Transaction::onlyTrashed()->where('user_id', $user->id)->count())->toBe(2)
+        ->and($debitChild->fresh()->planned_transaction_id)->toBeNull()
+        ->and($creditChild->fresh()->planned_transaction_id)->toBeNull();
 
     expect(PlannedTransaction::query()->where('user_id', $user->id)->first())->not->toBeNull();
 });
@@ -3032,7 +3031,7 @@ test('copy-transaction prefills a new entry from an existing transaction', funct
         ->assertSet('date', '2026-03-18');
 });
 
-test('converting an entered transaction to planned keeps a planned occurrence on that date', function () {
+test('converting an entered transaction to a plan reconciles the source on that date', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
@@ -3065,16 +3064,17 @@ test('converting an entered transaction to planned keeps a planned occurrence on
         ->and($planned->direction)->toBe(TransactionDirection::Debit)
         ->and($planned->frequency)->toBe(RecurrenceFrequency::EveryMonth);
 
-    // The original actual is soft-deleted (recoverable, not hard-deleted), and
-    // the day still surfaces the converted plan as a planned occurrence (so the
-    // date is not left empty).
-    expect(Transaction::query()->find($transaction->id))->toBeNull()
-        ->and(Transaction::withTrashed()->find($transaction->id)?->trashed())->toBeTrue();
+    // The source is kept and reconciled to the plan, so the day surfaces the posted
+    // transaction (matched) rather than double-counting it as a separate plan pip.
+    expect(Transaction::query()->find($transaction->id))->not->toBeNull()
+        ->and($transaction->fresh()->planned_transaction_id)->toBe($planned->id);
 
     $activity = app(DayActivityLoader::class)->load($date->startOfMonth(), $date->endOfMonth(), $user->id);
     $day = $activity[$date->format('Y-m-d')] ?? null;
+    $kinds = collect($day->pips)->pluck('kind')->all();
     expect($day)->not->toBeNull()
-        ->and(collect($day->pips)->pluck('kind')->all())->toContain('plan');
+        ->and($kinds)->toContain('out')
+        ->and($kinds)->not->toContain('plan');
 });
 
 test('opening a past planned occurrence shows the Enter expense action', function () {
@@ -3200,4 +3200,85 @@ test('entering a past planned transfer occurrence links both legs to the plan', 
 
     expect(PlannedTransaction::query()->find($planned->id))->not->toBeNull()
         ->and(Transaction::query()->where('planned_transaction_id', $planned->id)->count())->toBe(2);
+});
+
+test('converting to a plan with categorise-matching ticked creates a rule and categorises matching transactions', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => 'Netflix',
+        'amount' => 1599,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'NETFLIX',
+        'post_date' => '2026-03-15',
+        'category_id' => null,
+    ]);
+    $sibling = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => 'Netflix',
+        'amount' => 1599,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'NETFLIX',
+        'post_date' => '2026-02-15',
+        'category_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '15.99 NETFLIX')
+        ->set('categoryId', $category->id)
+        ->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->set('categoriseMatching', true)
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    $rule = UserRule::query()->where('user_id', $user->id)->first();
+
+    expect($rule)->not->toBeNull()
+        ->and($rule->is_auto_apply)->toBeTrue()
+        ->and($rule->actions)->toBe([['type' => 'set_category', 'value' => (string) $category->id]]);
+
+    expect($source->fresh()->category_id)->toBe($category->id)
+        ->and($sibling->fresh()->category_id)->toBe($category->id);
+});
+
+test('converting to a plan without ticking categorise-matching creates no rule and leaves siblings untouched', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => 'Netflix',
+        'amount' => 1599,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'NETFLIX',
+        'post_date' => '2026-03-15',
+        'category_id' => null,
+    ]);
+    $sibling = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => 'Netflix',
+        'amount' => 1599,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'NETFLIX',
+        'category_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '15.99 NETFLIX')
+        ->set('categoryId', $category->id)
+        ->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(UserRule::query()->where('user_id', $user->id)->count())->toBe(0)
+        ->and($sibling->fresh()->category_id)->toBeNull();
 });
