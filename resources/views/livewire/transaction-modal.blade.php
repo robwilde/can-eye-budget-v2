@@ -281,6 +281,14 @@
                         @else
                             {{ __('Convert to entered income') }}
                         @endif
+                    @elseif($this->isRealizableOccurrence())
+                        @if($transactionType === 'transfer')
+                            {{ __('Enter transfer') }}
+                        @elseif($transactionType === 'expense')
+                            {{ __('Enter expense') }}
+                        @else
+                            {{ __('Enter income') }}
+                        @endif
                     @elseif($editingPlannedTransactionId)
                         @if($transactionType === 'transfer')
                             {{ __('Update planned transfer') }}

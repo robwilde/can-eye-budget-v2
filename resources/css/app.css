@@ -913,6 +913,8 @@ select:focus[data-flux-control] {
         color: var(--color-fg-3);
         font: 700 13px/1.5 var(--font-sans);
     }
+    .cyc-detail-foot { margin-top: 10px; display: flex; }
+    .cyc-detail-foot .cib-yellow-pill { width: 100%; justify-content: center; }
 
     /* ---------- 12-month projection widget (Ticket #233 — running-balance redesign) ---------- */
 

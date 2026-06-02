@@ -57,6 +57,13 @@ final class PayCycleCalendar extends Component
         unset($this->selectedDay); // @phpstan-ignore property.notFound
     }
 
+    public function addTransaction(): void
+    {
+        if ($this->selectedDate !== null) {
+            $this->dispatch('open-transaction-modal', date: $this->selectedDate);
+        }
+    }
+
     /**
      * Refresh the calendar when a transaction is created, edited, converted or
      * deleted from the globally-mounted TransactionModal. Without this listener

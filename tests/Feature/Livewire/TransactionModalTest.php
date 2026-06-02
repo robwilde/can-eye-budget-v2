@@ -3076,3 +3076,128 @@ test('converting an entered transaction to planned keeps a planned occurrence on
     expect($day)->not->toBeNull()
         ->and(collect($day->pips)->pluck('kind')->all())->toContain('plan');
 });
+
+test('opening a past planned occurrence shows the Enter expense action', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-06-15'));
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 5000,
+        'description' => 'gym',
+        'start_date' => '2026-05-01',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id, occurrenceDate: '2026-06-01')
+        ->assertSet('mode', 'plan')
+        ->assertSet('date', '2026-06-01')
+        ->assertSee(__('Enter expense'))
+        ->assertDontSee(__('Update planned expense'));
+});
+
+test('entering a past planned occurrence creates a linked posted transaction and keeps the plan', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-06-15'));
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 5000,
+        'description' => 'gym',
+        'start_date' => '2026-05-01',
+        'category_id' => $category->id,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id, occurrenceDate: '2026-06-01')
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false)
+        ->assertDispatched('transaction-saved');
+
+    expect(PlannedTransaction::query()->find($planned->id))->not->toBeNull();
+
+    $txn = Transaction::query()->where('planned_transaction_id', $planned->id)->first();
+
+    expect($txn)->not->toBeNull()
+        ->and($txn->status)->toBe(TransactionStatus::Posted)
+        ->and($txn->source)->toBe(TransactionSource::Manual)
+        ->and($txn->direction)->toBe(TransactionDirection::Debit)
+        ->and($txn->amount)->toBe(5000)
+        ->and($txn->post_date->format('Y-m-d'))->toBe('2026-06-01')
+        ->and($txn->category_id)->toBe($category->id);
+});
+
+test('a future planned occurrence still updates the plan rather than entering it', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-06-15'));
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 5000,
+        'description' => 'gym',
+        'start_date' => '2026-05-01',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id, occurrenceDate: '2026-07-01')
+        ->set('descriptionInput', '75 updated gym')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(Transaction::query()->where('planned_transaction_id', $planned->id)->count())->toBe(0)
+        ->and($planned->fresh()->amount)->toBe(7500);
+});
+
+test('a malformed occurrence date does not break render and is not realizable', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-06-15'));
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 5000,
+        'description' => 'gym',
+        'start_date' => '2026-05-01',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id, occurrenceDate: 'garbage')
+        ->assertOk()
+        ->assertSee(__('Update planned expense'))
+        ->assertDontSee(__('Enter expense'));
+});
+
+test('entering a past planned transfer occurrence links both legs to the plan', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-06-15'));
+
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $planned = PlannedTransaction::factory()->for($user)->for($from)->monthly()->create([
+        'direction' => TransactionDirection::Debit,
+        'transfer_to_account_id' => $to->id,
+        'amount' => 5000,
+        'description' => 'savings',
+        'start_date' => '2026-05-01',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-planned-transaction', id: $planned->id, occurrenceDate: '2026-06-01')
+        ->assertSet('transactionType', 'transfer')
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    expect(PlannedTransaction::query()->find($planned->id))->not->toBeNull()
+        ->and(Transaction::query()->where('planned_transaction_id', $planned->id)->count())->toBe(2);
+});

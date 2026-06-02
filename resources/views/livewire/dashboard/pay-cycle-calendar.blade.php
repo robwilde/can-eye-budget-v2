@@ -130,6 +130,12 @@
                         <p class="cyc-empty">Nothing on this day.</p>
                     @endforelse
                 </div>
+                <div class="cyc-detail-foot">
+                    <button type="button" class="cib-yellow-pill" wire:click="addTransaction">
+                        <flux:icon.plus variant="micro"/>
+                        {{ __('Add transaction') }}
+                    </button>
+                </div>
             </div>
         @endif
     @endif
