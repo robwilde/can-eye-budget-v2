@@ -58,6 +58,8 @@ final class TransactionModal extends Component
 
     public ?string $untilDate = null;
 
+    public ?string $occurrenceDate = null;
+
     #[Locked]
     public bool $originalWasTransfer = false;
 
@@ -161,7 +163,7 @@ final class TransactionModal extends Component
     }
 
     #[On('edit-planned-transaction')]
-    public function openForEditPlanned(int $id): void
+    public function openForEditPlanned(int $id, ?string $occurrenceDate = null): void
     {
         $planned = PlannedTransaction::query()
             ->where('user_id', auth()->id())
@@ -174,6 +176,7 @@ final class TransactionModal extends Component
         $this->resetForm();
 
         $this->editingPlannedTransactionId = $planned->id;
+        $this->occurrenceDate = $occurrenceDate;
         $this->mode = 'plan';
         $this->originalWasTransfer = $planned->transfer_to_account_id !== null;
 
@@ -192,7 +195,7 @@ final class TransactionModal extends Component
 
         $this->accountId = $planned->account_id;
         $this->categoryId = $planned->category_id;
-        $this->date = $planned->start_date->format('Y-m-d');
+        $this->date = $occurrenceDate ?? $planned->start_date->format('Y-m-d');
         $this->frequency = $planned->frequency->value;
 
         if ($planned->until_date !== null) {
@@ -299,6 +302,19 @@ final class TransactionModal extends Component
     }
 
     /**
+     * A planned occurrence opened from the calendar (carrying its occurrence
+     * date) whose date is today or earlier — the user is entering/reconciling a
+     * forecast that has now passed, rather than editing the plan definition.
+     */
+    public function isRealizableOccurrence(): bool
+    {
+        return $this->editingPlannedTransactionId !== null
+            && $this->mode === 'plan'
+            && $this->occurrenceDate !== null
+            && CarbonImmutable::parse($this->occurrenceDate)->lessThanOrEqualTo(CarbonImmutable::today());
+    }
+
+    /**
      * @throws Throwable
      */
     private function resolveSave(): bool
@@ -309,6 +325,10 @@ final class TransactionModal extends Component
 
         if ($this->editingPlannedTransactionId && $this->mode === 'enter') {
             return $this->convertPlannedToEntered();
+        }
+
+        if ($this->isRealizableOccurrence()) {
+            return $this->realizePlannedOccurrence();
         }
 
         if ($this->editingPlannedTransactionId) {
@@ -597,6 +617,35 @@ final class TransactionModal extends Component
         return true;
     }
 
+    /**
+     * Realize a past planned occurrence: record the posted transaction it
+     * forecast and link it to the plan, leaving the recurring plan active so
+     * future occurrences keep forecasting. Triggered when a planned occurrence
+     * whose date is today-or-earlier is opened from the calendar.
+     *
+     * @throws Throwable
+     */
+    private function realizePlannedOccurrence(): bool
+    {
+        $resolved = $this->resolvePlannedTransactionWithParsedAmount();
+
+        if ($resolved === false) {
+            return false;
+        }
+
+        [$planned, $parsed] = $resolved;
+
+        if ($this->transactionType === 'transfer') {
+            DB::transaction(fn () => $this->createTransferPair($parsed));
+
+            return true;
+        }
+
+        $this->createSingleTransaction($parsed, $planned->id);
+
+        return true;
+    }
+
     /** @return array{Transaction, AmountParseResult}|false */
     private function resolveTransactionWithParsedAmount(): array|false
     {
@@ -674,7 +723,7 @@ final class TransactionModal extends Component
         return [$debitSide, $creditSide, $parsed];
     }
 
-    private function createSingleTransaction(AmountParseResult $parsed): void
+    private function createSingleTransaction(AmountParseResult $parsed, ?int $plannedTransactionId = null): void
     {
         Transaction::query()->create([
             'user_id' => auth()->id(),
@@ -689,6 +738,7 @@ final class TransactionModal extends Component
             'status' => TransactionStatus::Posted,
             'source' => TransactionSource::Manual,
             'notes' => $this->notes !== '' ? $this->notes : null,
+            'planned_transaction_id' => $plannedTransactionId,
         ]);
     }
 
@@ -776,6 +826,7 @@ final class TransactionModal extends Component
     {
         $this->editingTransactionId = null;
         $this->editingPlannedTransactionId = null;
+        $this->occurrenceDate = null;
         $this->isBasiqTransaction = false;
         $this->transactionType = 'expense';
         $this->descriptionInput = '';

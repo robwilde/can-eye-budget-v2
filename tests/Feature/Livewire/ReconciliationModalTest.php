@@ -288,3 +288,20 @@ test('after linking suggestions are cleared and linked transaction is shown', fu
         ->and($component->get('linkedTransaction.id'))->toBe($transaction->id)
         ->and($component->get('suggestions'))->toBeEmpty();
 });
+
+test('editPlanned forwards the occurrence date to the transaction modal', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'description' => 'Monthly Rent',
+        'amount' => 150000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => '2026-03-15',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(ReconciliationModal::class)
+        ->dispatch('open-reconciliation-modal', plannedId: $planned->id, occurrenceDate: '2026-03-15')
+        ->call('editPlanned')
+        ->assertDispatched('edit-planned-transaction', id: $planned->id, occurrenceDate: '2026-03-15');
+});

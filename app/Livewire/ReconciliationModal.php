@@ -113,7 +113,7 @@ final class ReconciliationModal extends Component
     public function editPlanned(): void
     {
         $this->showModal = false;
-        $this->dispatch('edit-planned-transaction', id: $this->plannedTransactionId);
+        $this->dispatch('edit-planned-transaction', id: $this->plannedTransactionId, occurrenceDate: $this->occurrenceDate);
     }
 
     public function render(): View
