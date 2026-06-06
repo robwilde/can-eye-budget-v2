@@ -12,6 +12,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 final class Dashboard extends Component
@@ -30,6 +31,27 @@ final class Dashboard extends Component
             </div>
         </div>
         HTML;
+    }
+
+    /**
+     * Re-render when a transaction or plan is saved elsewhere on the page (e.g. the global
+     * transaction modal converting a transaction to a plan) so the pay-cycle figures —
+     * Needed, buffer, Available, Owed, planned — stay current without a page reload.
+     */
+    #[On('transaction-saved')]
+    public function refreshFigures(): void
+    {
+        unset(
+            $this->buffer,
+            $this->daysUntilPay,
+            $this->totalOwed,
+            $this->totalAvailable,
+            $this->totalNeeded,
+            $this->numbers,
+            $this->budgetsThisCycle,
+            $this->nextThreePlanned,
+            $this->spendLast7Days,
+        );
     }
 
     #[Computed]

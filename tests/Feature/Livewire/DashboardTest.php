@@ -477,3 +477,29 @@ test('uses two-column layout class on lg breakpoint', function () {
         ->test(Dashboard::class)
         ->assertSeeHtml('lg:grid-cols-[1fr_300px]');
 });
+
+// ── Live refresh ───────────────────────────────────────────────────
+
+test('refreshes pay-cycle figures when a transaction is saved elsewhere on the page', function () {
+    $user = User::factory()->withPayCycle()->create(['next_pay_date' => now()->addDays(7)]);
+    $account = Account::factory()->for($user)->create(['balance' => 242000]);
+
+    $component = Livewire::actingAs($user)->test(Dashboard::class)
+        ->assertDontSee('Spotify Premium');
+
+    expect($component->instance()->totalNeeded())->toBe(0);
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'description' => 'Spotify Premium',
+        'direction' => TransactionDirection::Debit,
+        'amount' => 50000,
+        'is_active' => true,
+        'start_date' => now()->addDay(),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+
+    $component->dispatch('transaction-saved')
+        ->assertSee('Spotify Premium');
+
+    expect($component->instance()->totalNeeded())->toBe(50000);
+});
