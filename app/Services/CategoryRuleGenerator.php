@@ -25,8 +25,9 @@ final readonly class CategoryRuleGenerator
     /**
      * Payment-network / method tokens that lead many card descriptions
      * ("VISA -NETFLIX.COM", "EFTPOS WOOLWORTHS"). They are not the payee, so
-     * they must never become the merchant token — otherwise the generated rule
-     * matches every card transaction instead of the merchant.
+     * merchantToken() skips them whenever a more distinctive token is available
+     * — otherwise the rule would match every card transaction. A generic token
+     * is used only as a last resort, when the signature contains nothing else.
      *
      * @var list<string>
      */
