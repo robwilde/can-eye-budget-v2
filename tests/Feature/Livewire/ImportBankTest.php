@@ -328,3 +328,45 @@ test('a manually entered current balance overrides the prefilled closing balance
 
     expect($account->refresh()->balance)->toBe(123456);
 });
+
+test('changing the balance column re-derives the prefilled current balance', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create(['balance' => 0]);
+
+    $csv = "Date,Description,Amount,Balance,RunningTotal\n01/06/2026,Coffee,-5.00,1000.00,2000.00\n03/06/2026,Pay,2000.00,3000.00,5000.00\n";
+    $file = UploadedFile::fake()->createWithContent('statement.csv', $csv);
+
+    $component = Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'existing')
+        ->set('accountId', $account->id)
+        ->set('file', $file)
+        ->call('uploadAndDetectHeaders')
+        ->set('mapping.'.CsvColumnMapper::FIELD_BALANCE, 'Balance');
+
+    expect($component->get('currentBalance'))->toBe('3000.00');
+
+    $component->set('mapping.'.CsvColumnMapper::FIELD_BALANCE, 'RunningTotal');
+
+    expect($component->get('currentBalance'))->toBe('5000.00');
+});
+
+test('a manually entered balance is preserved when the mapping changes', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create(['balance' => 0]);
+
+    $csv = "Date,Description,Amount,Balance,RunningTotal\n01/06/2026,Coffee,-5.00,1000.00,2000.00\n03/06/2026,Pay,2000.00,3000.00,5000.00\n";
+    $file = UploadedFile::fake()->createWithContent('statement.csv', $csv);
+
+    $component = Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'existing')
+        ->set('accountId', $account->id)
+        ->set('file', $file)
+        ->call('uploadAndDetectHeaders')
+        ->set('mapping.'.CsvColumnMapper::FIELD_BALANCE, 'Balance')
+        ->set('currentBalance', '99.99')
+        ->set('mapping.'.CsvColumnMapper::FIELD_BALANCE, 'RunningTotal');
+
+    expect($component->get('currentBalance'))->toBe('99.99');
+});
