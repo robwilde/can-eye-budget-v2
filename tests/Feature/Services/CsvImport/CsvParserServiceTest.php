@@ -197,3 +197,30 @@ test('eachRow is a generator that streams rows lazily', function () {
     $rows = iterator_to_array($generator, preserve_keys: false);
     expect($rows)->toHaveCount(2);
 });
+
+test('summarize returns the closing balance from the latest-dated row', function () {
+    $path = tmpCsv("Date,Description,Amount,Balance\n01/06/2026,Coffee,-5.00,1000.00\n03/06/2026,Pay,2000.00,3000.00\n02/06/2026,Snack,-2.00,998.00\n");
+
+    $parser = new CsvParserService();
+    $summary = $parser->summarize($path, [
+        CsvColumnMapper::FIELD_DATE => 'Date',
+        CsvColumnMapper::FIELD_DESCRIPTION => 'Description',
+        CsvColumnMapper::FIELD_AMOUNT => 'Amount',
+        CsvColumnMapper::FIELD_BALANCE => 'Balance',
+    ]);
+
+    expect($summary->closingBalance)->toBe(300000);
+});
+
+test('summarize closing balance is null when no balance column is mapped', function () {
+    $path = tmpCsv("Date,Description,Amount\n01/06/2026,Coffee,-5.00\n");
+
+    $parser = new CsvParserService();
+    $summary = $parser->summarize($path, [
+        CsvColumnMapper::FIELD_DATE => 'Date',
+        CsvColumnMapper::FIELD_DESCRIPTION => 'Description',
+        CsvColumnMapper::FIELD_AMOUNT => 'Amount',
+    ]);
+
+    expect($summary->closingBalance)->toBeNull();
+});

@@ -150,6 +150,26 @@
             </x-cib.card>
         @endif
 
+        @if($accountChoice === 'existing')
+            <x-cib.card>
+                <flux:heading size="lg">Account balance</flux:heading>
+                <flux:text size="sm" class="mt-1">
+                    The account's balance right now. Pre-filled from the statement's closing balance when available.
+                </flux:text>
+                <div class="mt-3 max-w-xs">
+                    <flux:input
+                        wire:model="currentBalance"
+                        label="Current balance"
+                        type="number"
+                        step="0.01"
+                        placeholder="1686.19"
+                        data-testid="import-bank-current-balance"
+                    />
+                    @error('currentBalance') <flux:text class="text-cib-red-600 mt-1 text-sm">{{ $message }}</flux:text> @enderror
+                </div>
+            </x-cib.card>
+        @endif
+
         @if(! empty($previewRows))
             <x-cib.card>
                 <flux:heading size="lg">First 10 rows</flux:heading>
