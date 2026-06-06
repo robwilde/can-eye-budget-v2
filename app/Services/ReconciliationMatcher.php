@@ -49,30 +49,55 @@ final readonly class ReconciliationMatcher
      */
     public function findPlanForTransaction(Transaction $transaction): ?PlannedTransaction
     {
-        $windowStart = $transaction->post_date->subDays(ReconciliationPolicy::DATE_TOLERANCE_DAYS);
-        $windowEnd = $transaction->post_date->addDays(ReconciliationPolicy::DATE_TOLERANCE_DAYS);
+        $tolerance = ReconciliationPolicy::DATE_TOLERANCE_DAYS;
+        $windowStart = $transaction->post_date->subDays($tolerance);
+        $windowEnd = $transaction->post_date->addDays($tolerance);
 
         $plans = PlannedTransaction::query()
             ->where('user_id', $transaction->user_id)
             ->where('account_id', $transaction->account_id)
             ->where('direction', $transaction->direction)
             ->where('is_active', true)
+            ->where('start_date', '<=', $windowEnd)
+            ->where(static function ($query) use ($windowStart): void {
+                $query->whereNull('until_date')->orWhere('until_date', '>=', $windowStart);
+            })
             ->excludingTransfers()
             ->get()
             ->filter(fn (PlannedTransaction $plan): bool => ReconciliationPolicy::amountMatches((int) $transaction->amount, (int) $plan->amount));
+
+        if ($plans->isEmpty()) {
+            return null;
+        }
+
+        // Occurrences already reconciled by another transaction, fetched once and matched
+        // in-memory so the ingress path doesn't issue a query per candidate occurrence.
+        $claimedByPlan = Transaction::query()
+            ->where('user_id', $transaction->user_id)
+            ->current()
+            ->whereIn('planned_transaction_id', $plans->pluck('id'))
+            ->whereBetween('post_date', [$windowStart->subDays($tolerance), $windowEnd->addDays($tolerance)])
+            ->get(['planned_transaction_id', 'post_date'])
+            ->groupBy('planned_transaction_id');
 
         $bestPlan = null;
         $bestDiff = null;
 
         foreach ($plans as $plan) {
+            $claimed = $claimedByPlan->get($plan->id) ?? collect();
+
             foreach ($plan->occurrencesBetween($windowStart, $windowEnd) as $occurrence) {
                 $diff = ReconciliationPolicy::dayDiff($transaction->post_date, $occurrence);
 
-                if ($diff > ReconciliationPolicy::DATE_TOLERANCE_DAYS) {
+                if ($diff > $tolerance) {
                     continue;
                 }
 
-                if ($this->findLinkedForOccurrence($plan, $occurrence) !== null) {
+                $alreadyClaimed = $claimed->contains(
+                    fn (Transaction $linked): bool => ReconciliationPolicy::dayDiff($linked->post_date, $occurrence) <= $tolerance,
+                );
+
+                if ($alreadyClaimed) {
                     continue;
                 }
 

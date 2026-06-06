@@ -27,35 +27,23 @@ final readonly class TransactionIngestor
             $transaction->save();
         }
 
-        if ($this->reconcile($transaction)) {
-            event(new TransactionReconciled($transaction, (int) $transaction->planned_transaction_id));
-
-            return $transaction;
-        }
-
-        event(new TransactionEntered($transaction));
-
-        return $transaction;
-    }
-
-    /**
-     * Link the transaction to the planned occurrence it fulfils, if any. Returns true when
-     * a new link was made. Already-linked transactions are left untouched.
-     */
-    private function reconcile(Transaction $transaction): bool
-    {
+        // Already reconciled (e.g. a re-imported or re-processed row): emit nothing so
+        // downstream listeners aren't told it just "entered" or was freshly reconciled.
         if ($transaction->planned_transaction_id !== null) {
-            return false;
+            return $transaction;
         }
 
         $plan = $this->matcher->findPlanForTransaction($transaction);
 
         if ($plan === null) {
-            return false;
+            event(new TransactionEntered($transaction));
+
+            return $transaction;
         }
 
         $this->matcher->link($transaction, $plan);
+        event(new TransactionReconciled($transaction, $plan->id));
 
-        return true;
+        return $transaction;
     }
 }

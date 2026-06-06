@@ -93,7 +93,7 @@ test('persists an unsaved transaction passed to ingest', function () {
         ->and(Transaction::query()->whereKey($tx->id)->exists())->toBeTrue();
 });
 
-test('does not relink a transaction already reconciled to a plan', function () {
+test('does not relink or emit lifecycle events for a transaction already reconciled to a plan', function () {
     Event::fake([TransactionReconciled::class, TransactionEntered::class]);
     $plan = ingestorRentPlan($this->user, $this->account);
 
@@ -109,5 +109,5 @@ test('does not relink a transaction already reconciled to a plan', function () {
     expect($tx->fresh()->planned_transaction_id)->toBe($plan->id);
 
     Event::assertNotDispatched(TransactionReconciled::class);
-    Event::assertDispatched(TransactionEntered::class);
+    Event::assertNotDispatched(TransactionEntered::class);
 });
