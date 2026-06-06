@@ -43,6 +43,11 @@ final class ImportBank extends Component
     #[Validate('nullable|numeric')]
     public string $newAccountBalance = '';
 
+    #[Validate('nullable|numeric')]
+    public string $currentBalance = '';
+
+    public bool $balanceTouched = false;
+
     /** @var list<string> */
     public array $headers = [];
 
@@ -127,6 +132,7 @@ final class ImportBank extends Component
             'mapping.amount' => ['nullable', 'string', 'required_without_all:mapping.debit,mapping.credit'],
             'mapping.debit' => ['nullable', 'string'],
             'mapping.credit' => ['nullable', 'string'],
+            'currentBalance' => ['nullable', 'numeric'],
         ]);
 
         if (! empty($this->mapping['amount']) && (! empty($this->mapping['debit']) || ! empty($this->mapping['credit']))) {
@@ -147,6 +153,10 @@ final class ImportBank extends Component
         Account::query()
             ->whereKey($this->accountId)
             ->update(['column_mapping' => $this->mapping]);
+
+        if ($this->currentBalance !== '') {
+            $account->update(['balance' => (int) round(((float) $this->currentBalance) * 100)]);
+        }
 
         ImportCsvTransactionsJob::dispatch($bankImport);
 
@@ -181,6 +191,8 @@ final class ImportBank extends Component
             'newAccountName',
             'newAccountLast4',
             'newAccountBalance',
+            'currentBalance',
+            'balanceTouched',
             'headers',
             'mapping',
             'bankImportId',
@@ -188,6 +200,11 @@ final class ImportBank extends Component
         ]);
 
         $this->step = 1;
+    }
+
+    public function updatedCurrentBalance(): void
+    {
+        $this->balanceTouched = true;
     }
 
     public function render(CsvParserService $parser): View
@@ -209,6 +226,12 @@ final class ImportBank extends Component
             } catch (Throwable) {
                 // ignore preview failures — user is still adjusting the mapping
             }
+        }
+
+        if ($this->accountChoice === 'existing' && ! $this->balanceTouched) {
+            $this->currentBalance = $summary?->closingBalance !== null
+                ? number_format($summary->closingBalance / 100, 2, '.', '')
+                : '';
         }
 
         return view('livewire.import-bank', [
