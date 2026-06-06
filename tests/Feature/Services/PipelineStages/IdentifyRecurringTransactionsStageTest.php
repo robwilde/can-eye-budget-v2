@@ -838,6 +838,25 @@ test('stage is registered in pipeline and full run produces suggestions', functi
     expect($suggestions)->toHaveCount(1);
 });
 
+test('stage is skipped in a full run when recurring detection is disabled', function () {
+    config(['budget.recurring_detection' => false]);
+
+    createMonthlyGroup($this->user, $this->account, 'Netflix', 1699, 3);
+
+    $pipeline = app(App\Services\TransactionAnalysisPipeline::class);
+    $run = $pipeline->run($this->user, App\Enums\PipelineTrigger::Sync);
+
+    expect($run->stages_skipped)->toContain('identify-recurring-transactions')
+        ->and($run->stages_completed)->not->toContain('identify-recurring-transactions');
+
+    $suggestions = AnalysisSuggestion::query()
+        ->where('pipeline_run_id', $run->id)
+        ->where('type', SuggestionType::RecurringTransaction)
+        ->get();
+
+    expect($suggestions)->toBeEmpty();
+});
+
 // ─── Contract ───────────────────────────────────────────────────────────
 
 test('key returns expected string', function () {
