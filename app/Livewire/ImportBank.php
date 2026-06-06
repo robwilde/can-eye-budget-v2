@@ -46,6 +46,8 @@ final class ImportBank extends Component
     #[Validate('nullable|numeric')]
     public string $currentBalance = '';
 
+    public bool $balanceTouched = false;
+
     /** @var list<string> */
     public array $headers = [];
 
@@ -190,6 +192,7 @@ final class ImportBank extends Component
             'newAccountLast4',
             'newAccountBalance',
             'currentBalance',
+            'balanceTouched',
             'headers',
             'mapping',
             'bankImportId',
@@ -197,6 +200,11 @@ final class ImportBank extends Component
         ]);
 
         $this->step = 1;
+    }
+
+    public function updatedCurrentBalance(): void
+    {
+        $this->balanceTouched = true;
     }
 
     public function render(CsvParserService $parser): View
@@ -220,8 +228,10 @@ final class ImportBank extends Component
             }
         }
 
-        if ($summary !== null && $this->currentBalance === '' && $this->accountChoice === 'existing' && $summary->closingBalance !== null) {
-            $this->currentBalance = number_format($summary->closingBalance / 100, 2, '.', '');
+        if ($this->accountChoice === 'existing' && ! $this->balanceTouched) {
+            $this->currentBalance = $summary?->closingBalance !== null
+                ? number_format($summary->closingBalance / 100, 2, '.', '')
+                : '';
         }
 
         return view('livewire.import-bank', [
