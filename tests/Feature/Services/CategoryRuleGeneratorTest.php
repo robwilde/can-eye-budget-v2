@@ -139,3 +139,64 @@ test('it reuses a single auto-categorisation group across generated rules', func
     expect($second->user_rule_group_id)->toBe($first->user_rule_group_id)
         ->and(UserRule::query()->where('user_id', $user->id)->count())->toBe(2);
 });
+
+test('an explicit match value builds a description-contains rule and categorises only those matches', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $wooliesCashout = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'description' => '110.53 VISA -Including Cash OutWOOLWORTHS/111 BOUNDARY SWESTEND',
+        'direction' => TransactionDirection::Debit,
+        'category_id' => null,
+    ]);
+    $wooliesPurchase = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'description' => '54.20 VISA -WOOLWORTHS/111 BOUNDARY SWESTEND',
+        'direction' => TransactionDirection::Debit,
+        'category_id' => null,
+    ]);
+    $netflix = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'description' => '28.99 VISA -NETFLIX.COM Melbourne AU',
+        'direction' => TransactionDirection::Debit,
+        'category_id' => null,
+    ]);
+
+    $rule = app(CategoryRuleGenerator::class)
+        ->generateAndApply($wooliesCashout, $category->id, 'WOOLWORTHS/111 BOUNDARY');
+
+    expect($rule->triggers[0])->toBe([
+        'field' => 'description',
+        'operator' => 'contains',
+        'value' => 'WOOLWORTHS/111 BOUNDARY',
+    ]);
+
+    expect($wooliesCashout->fresh()->category_id)->toBe($category->id)
+        ->and($wooliesPurchase->fresh()->category_id)->toBe($category->id)
+        ->and($netflix->fresh()->category_id)->toBeNull();
+});
+
+test('suggestMatchValue prefers the merchant name, else the longest description token', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $generator = app(CategoryRuleGenerator::class);
+
+    $withMerchant = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => 'Netflix',
+        'clean_description' => null,
+        'description' => '28.99 VISA -NETFLIX.COM Melbourne AU 619459 #2892',
+    ]);
+    $csvOnly = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'description' => '28.99 VISA -NETFLIX.COM Melbourne AU 619459 #2892',
+    ]);
+
+    expect($generator->suggestMatchValue($withMerchant))->toBe('Netflix')
+        ->and($generator->suggestMatchValue($csvOnly))->toBe('NETFLIX.COM');
+});

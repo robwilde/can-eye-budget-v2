@@ -3283,6 +3283,51 @@ test('converting to a plan without ticking categorise-matching creates no rule a
         ->and($sibling->fresh()->category_id)->toBeNull();
 });
 
+test('the categorise-matching value prefills the suggested merchant token and applies an edited value', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'amount' => 11053,
+        'direction' => TransactionDirection::Debit,
+        'description' => '110.53 VISA -Including Cash OutWOOLWORTHS/111 BOUNDARY SWESTEND',
+        'post_date' => '2026-03-15',
+        'category_id' => null,
+    ]);
+    $wooliesPurchase = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'amount' => 5420,
+        'direction' => TransactionDirection::Debit,
+        'description' => '54.20 VISA -WOOLWORTHS/111 BOUNDARY SWESTEND',
+        'category_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->assertSet('categoriseMatchValue', 'OUTWOOLWORTHS/111')
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '110.53 Woolworths')
+        ->set('categoryId', $category->id)
+        ->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->set('categoriseMatching', true)
+        ->set('categoriseMatchValue', 'WOOLWORTHS/111 BOUNDARY')
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    $rule = UserRule::query()->where('user_id', $user->id)->first();
+
+    expect($rule->triggers[0]['value'])->toBe('WOOLWORTHS/111 BOUNDARY')
+        ->and($source->fresh()->category_id)->toBe($category->id)
+        ->and($wooliesPurchase->fresh()->category_id)->toBe($category->id);
+});
+
 test('a manual entry on a plan occurrence day reconciles to the plan', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
