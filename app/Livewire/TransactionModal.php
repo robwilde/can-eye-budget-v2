@@ -64,6 +64,8 @@ final class TransactionModal extends Component
 
     public bool $categoriseMatching = false;
 
+    public string $categoriseMatchValue = '';
+
     #[Locked]
     public bool $originalWasTransfer = false;
 
@@ -134,6 +136,7 @@ final class TransactionModal extends Component
         $this->categoryId = $transaction->category_id;
         $this->date = $transaction->post_date->format('Y-m-d');
         $this->notes = $transaction->notes ?? '';
+        $this->categoriseMatchValue = app(CategoryRuleGenerator::class)->suggestMatchValue($transaction);
 
         $this->showModal = true;
     }
@@ -615,7 +618,7 @@ final class TransactionModal extends Component
         // commits: it can touch many transactions, so keeping it outside avoids
         // holding row locks for the length of an interactive modal save.
         if ($isPlainSource && $this->categoriseMatching && $this->categoryId !== null) {
-            app(CategoryRuleGenerator::class)->generateAndApply($transaction, $this->categoryId);
+            app(CategoryRuleGenerator::class)->generateAndApply($transaction, $this->categoryId, $this->categoriseMatchValue);
         }
 
         return true;
@@ -844,6 +847,7 @@ final class TransactionModal extends Component
         $this->editingPlannedTransactionId = null;
         $this->occurrenceDate = null;
         $this->categoriseMatching = false;
+        $this->categoriseMatchValue = '';
         $this->isBasiqTransaction = false;
         $this->transactionType = 'expense';
         $this->descriptionInput = '';

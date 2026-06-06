@@ -22,12 +22,27 @@ final readonly class CategoryRuleGenerator
 {
     private const string GROUP_NAME = 'Auto-categorisation';
 
+    /**
+     * Payment-network / method tokens that lead many card descriptions
+     * ("VISA -NETFLIX.COM", "EFTPOS WOOLWORTHS"). They are not the payee, so
+     * merchantToken() skips them whenever a more distinctive token is available
+     * — otherwise the rule would match every card transaction. A generic token
+     * is used only as a last resort, when the signature contains nothing else.
+     *
+     * @var list<string>
+     */
+    private const array GENERIC_TOKENS = [
+        'VISA', 'MASTERCARD', 'MC', 'AMEX', 'EFTPOS', 'PAYPAL', 'SQ', 'SQUARE',
+        'POS', 'PURCHASE', 'PAYMENT', 'DEBIT', 'CREDIT', 'PAYWAVE', 'PAYPASS',
+        'CONTACTLESS', 'TAP', 'WITHDRAWAL', 'DEPOSIT', 'TRANSFER',
+    ];
+
     public function __construct(
         private RuleEvaluator $evaluator,
         private RuleActionExecutor $executor,
     ) {}
 
-    public function generateAndApply(Transaction $source, int $categoryId): UserRule
+    public function generateAndApply(Transaction $source, int $categoryId, ?string $matchValue = null): UserRule
     {
         $group = $this->group($source->user_id);
 
@@ -35,7 +50,7 @@ final readonly class CategoryRuleGenerator
             'user_id' => $source->user_id,
             'user_rule_group_id' => $group->id,
             'name' => $this->ruleName($source),
-            'triggers' => [$this->buildTrigger($source)],
+            'triggers' => [$this->buildTrigger($source, $matchValue)],
             'actions' => [[
                 'type' => RuleActionType::SetCategory->value,
                 'value' => (string) $categoryId,
@@ -49,6 +64,25 @@ final readonly class CategoryRuleGenerator
         $this->applyToExisting($source->user_id, $rule);
 
         return $rule;
+    }
+
+    /**
+     * The default "description contains" value offered in the UI when the user
+     * opts into categorising matching transactions. Prefers a clean merchant
+     * name (Basiq), otherwise the most distinctive payee token of the
+     * description. The user can edit it before the rule is applied.
+     */
+    public function suggestMatchValue(Transaction $source): string
+    {
+        if ($source->merchant_name !== null && $source->merchant_name !== '') {
+            return $source->merchant_name;
+        }
+
+        if ($source->clean_description !== null && $source->clean_description !== '') {
+            return $this->merchantToken($source->clean_description);
+        }
+
+        return $this->merchantToken($source->description);
     }
 
     private function applyToExisting(int $userId, UserRule $rule): void
@@ -67,8 +101,18 @@ final readonly class CategoryRuleGenerator
     }
 
     /** @return array<string, string> */
-    private function buildTrigger(Transaction $source): array
+    private function buildTrigger(Transaction $source, ?string $matchValue = null): array
     {
+        $value = $matchValue !== null ? mb_trim($matchValue) : '';
+
+        if ($value !== '') {
+            return [
+                'field' => RuleTriggerField::Description->value,
+                'operator' => RuleTriggerOperator::Contains->value,
+                'value' => $value,
+            ];
+        }
+
         if ($source->merchant_name !== null && $source->merchant_name !== '') {
             return [
                 'field' => RuleTriggerField::MerchantName->value,
@@ -93,17 +137,35 @@ final readonly class CategoryRuleGenerator
     }
 
     /**
-     * The first stable payee token of the merchant signature. A single token is
-     * a case-insensitive substring of the raw description, so a `contains`
-     * trigger matches the source and its siblings even when reference numbers
-     * vary between them.
+     * The longest non-generic payee token of the merchant signature, used as a
+     * case-insensitive `contains` value so the trigger matches the source and
+     * its siblings even when reference numbers vary. Leading payment-network /
+     * method tokens (VISA, EFTPOS, …) are skipped and the longest remaining
+     * token is the most distinctive payee word ("NETFLIX.COM"), so the rule
+     * keys on the merchant rather than the card network or a short noise word.
      */
     private function merchantToken(string $raw): string
     {
-        $signature = MerchantSignature::for($raw);
-        $first = strtok($signature, ' ');
+        $tokens = explode(' ', MerchantSignature::for($raw));
 
-        return $first === false ? $signature : $first;
+        $candidates = array_values(array_filter(
+            $tokens,
+            static fn (string $token): bool => ! in_array($token, self::GENERIC_TOKENS, true),
+        ));
+
+        if ($candidates === []) {
+            return $tokens[0];
+        }
+
+        $best = $candidates[0];
+
+        foreach ($candidates as $candidate) {
+            if (mb_strlen($candidate) > mb_strlen($best)) {
+                $best = $candidate;
+            }
+        }
+
+        return $best;
     }
 
     private function ruleName(Transaction $source): string

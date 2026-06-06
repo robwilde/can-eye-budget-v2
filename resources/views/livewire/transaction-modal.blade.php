@@ -167,10 +167,19 @@
 
             @if($editingTransactionId && $mode === 'plan' && $transactionType !== 'transfer')
                 <flux:field variant="inline">
-                    <flux:checkbox wire:model="categoriseMatching"/>
+                    <flux:checkbox wire:model.live="categoriseMatching"/>
                     <flux:label>{{ __('Also categorise matching transactions') }}</flux:label>
                     <flux:description>{{ __('Creates a rule that applies this category to past and future transactions from the same merchant.') }}</flux:description>
                 </flux:field>
+
+                @if($categoriseMatching)
+                    <flux:input
+                        wire:model="categoriseMatchValue"
+                        :label="__('Match when description contains')"
+                        :description="__('Edit to control which transactions are categorised — keep it specific to this merchant.')"
+                        data-testid="transaction-categorise-match-value"
+                    />
+                @endif
             @endif
 
             {{-- Plan-mode fields --}}
