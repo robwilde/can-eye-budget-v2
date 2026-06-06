@@ -11,13 +11,16 @@ use App\DTOs\BasiqAccount;
 use App\DTOs\BasiqJob;
 use App\DTOs\BasiqTransaction;
 use App\Enums\AccountClass;
+use App\Enums\RecurrenceFrequency;
 use App\Enums\RefreshStatus;
 use App\Enums\RefreshTrigger;
+use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Jobs\SyncTransactionsJob;
 use App\Models\Account;
 use App\Models\BasiqRefreshLog;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Support\Collection;
@@ -774,4 +777,41 @@ test('does not dispatch RunTransactionAnalysisJob when basiq job fails', functio
     new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
 
     Queue::assertNotPushed(RunTransactionAnalysisJob::class);
+});
+
+test('a synced basiq transaction matching an active plan is reconciled', function () {
+    Queue::fake([RunTransactionAnalysisJob::class]);
+
+    $user = User::factory()->withBasiq()->create();
+    $account = Account::factory()->for($user)->create([
+        'basiq_account_id' => 'basiq-acc-1',
+    ]);
+
+    $plan = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'start_date' => '2026-03-15',
+        'is_active' => true,
+    ]);
+
+    fakeBasiqJobService('success', function (MockInterface $mock) {
+        $mock->shouldReceive('getAccounts')
+            ->andReturn(new Collection([makeBasiqAccount('basiq-acc-1')]));
+        $mock->shouldReceive('paginateTransactions')
+            ->andReturn(LazyCollection::make([
+                makeBasiqTransaction('txn-1', 'basiq-acc-1', [
+                    'amount' => '-50.00',
+                    'direction' => 'debit',
+                    'postDate' => '2026-03-15',
+                ]),
+            ]));
+    });
+
+    new SyncTransactionsJob($user, 'job-1')->handle(app(BasiqServiceContract::class));
+
+    $txn = Transaction::where('basiq_id', 'txn-1')->first();
+    expect($txn)->not->toBeNull()
+        ->and($txn->planned_transaction_id)->toBe($plan->id);
 });
