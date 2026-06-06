@@ -23,8 +23,7 @@ beforeEach(function () {
 
 function ingestorRentPlan(User $user, Account $account, string $startDate = '2026-06-10'): PlannedTransaction
 {
-    return PlannedTransaction::factory()->for($user)->create([
-        'account_id' => $account->id,
+    return PlannedTransaction::factory()->for($user)->for($account)->create([
         'amount' => 50000,
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::DontRepeat,
@@ -37,8 +36,7 @@ test('reconciles a transaction that fulfils an active plan occurrence', function
     Event::fake([TransactionReconciled::class, TransactionEntered::class]);
     $plan = ingestorRentPlan($this->user, $this->account);
 
-    $tx = Transaction::factory()->for($this->user)->debit()->make([
-        'account_id' => $this->account->id,
+    $tx = Transaction::factory()->for($this->user)->for($this->account)->debit()->make([
         'amount' => -49000,
         'post_date' => '2026-06-11',
         'planned_transaction_id' => null,
@@ -59,8 +57,7 @@ test('leaves a transaction with no matching plan entered', function () {
     Event::fake([TransactionReconciled::class, TransactionEntered::class]);
     ingestorRentPlan($this->user, $this->account);
 
-    $tx = Transaction::factory()->for($this->user)->debit()->make([
-        'account_id' => $this->account->id,
+    $tx = Transaction::factory()->for($this->user)->for($this->account)->debit()->make([
         'amount' => -49000,
         'post_date' => '2026-06-30',
         'planned_transaction_id' => null,
@@ -78,8 +75,7 @@ test('leaves a transaction with no matching plan entered', function () {
 });
 
 test('persists an unsaved transaction passed to ingest', function () {
-    $tx = Transaction::factory()->for($this->user)->debit()->make([
-        'account_id' => $this->account->id,
+    $tx = Transaction::factory()->for($this->user)->for($this->account)->debit()->make([
         'amount' => -1200,
         'post_date' => '2026-06-11',
         'planned_transaction_id' => null,
@@ -97,8 +93,7 @@ test('does not relink or emit lifecycle events for a transaction already reconci
     Event::fake([TransactionReconciled::class, TransactionEntered::class]);
     $plan = ingestorRentPlan($this->user, $this->account);
 
-    $tx = Transaction::factory()->for($this->user)->debit()->create([
-        'account_id' => $this->account->id,
+    $tx = Transaction::factory()->for($this->user)->for($this->account)->debit()->create([
         'amount' => -50000,
         'post_date' => '2026-06-10',
         'planned_transaction_id' => $plan->id,

@@ -63,6 +63,8 @@ final readonly class ReconciliationMatcher
                 $query->whereNull('until_date')->orWhere('until_date', '>=', $windowStart);
             })
             ->excludingTransfers()
+            ->orderBy('start_date')
+            ->orderBy('id')
             ->get()
             ->filter(fn (PlannedTransaction $plan): bool => ReconciliationPolicy::amountMatches((int) $transaction->amount, (int) $plan->amount));
 
