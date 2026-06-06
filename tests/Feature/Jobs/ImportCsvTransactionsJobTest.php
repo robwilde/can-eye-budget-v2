@@ -7,16 +7,22 @@
 declare(strict_types=1);
 
 use App\Enums\BankImportStatus;
+use App\Enums\RecurrenceFrequency;
+use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Jobs\ImportCsvTransactionsJob;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Models\Account;
 use App\Models\BankImport;
 use App\Models\Category;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\CsvImport\CsvColumnMapper;
 use App\Services\CsvImport\CsvParserService;
+use App\Services\TransactionIngestor;
+use App\Support\Calendar\DayActivityLoader;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -58,7 +64,7 @@ test('imports rows into transactions with source=csv', function () {
 
     $bankImport = makeBankImportFromFixture();
 
-    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService());
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class));
 
     $bankImport->refresh();
     expect($bankImport->status)->toBe(BankImportStatus::Completed)
@@ -79,7 +85,7 @@ test('re-running the same import is idempotent (dedupe via csv_hash)', function 
 
     $bankImport = makeBankImportFromFixture();
 
-    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService());
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class));
 
     $bankImport->refresh();
     $firstImported = $bankImport->imported_count;
@@ -96,7 +102,7 @@ test('re-running the same import is idempotent (dedupe via csv_hash)', function 
         'completed_at' => null,
     ]);
 
-    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService());
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class));
 
     $bankImport->refresh();
     expect($bankImport->status)->toBe(BankImportStatus::Completed)
@@ -114,7 +120,7 @@ test('status transitions through importing then completed', function () {
     expect($bankImport->status)->toBe(BankImportStatus::Pending)
         ->and($bankImport->started_at)->toBeNull();
 
-    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService());
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class));
 
     $bankImport->refresh();
     expect($bankImport->status)->toBe(BankImportStatus::Completed)
@@ -127,7 +133,7 @@ test('dispatches RunTransactionAnalysisJob after successful import', function ()
 
     $bankImport = makeBankImportFromFixture();
 
-    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService());
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class));
 
     Queue::assertPushed(
         RunTransactionAnalysisJob::class,
@@ -141,8 +147,7 @@ test('failure transitions status to Failed and records error_summary', function 
     $bankImport = makeBankImportFromFixture();
     $bankImport->update(['stored_path' => 'bank-imports/does-not-exist.csv']);
 
-    expect(fn () => new ImportCsvTransactionsJob($bankImport)
-        ->handle(new CsvParserService()))->toThrow(Exception::class);
+    expect(fn () => new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class)))->toThrow(Exception::class);
 
     $bankImport->refresh();
     expect($bankImport->status)->toBe(BankImportStatus::Failed)
@@ -157,7 +162,7 @@ test('re-importing restores a soft-deleted transaction and preserves its categor
 
     $bankImport = makeBankImportFromFixture();
 
-    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService());
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class));
 
     $bankImport->refresh();
     expect($bankImport->status)->toBe(BankImportStatus::Completed)
@@ -187,7 +192,7 @@ test('re-importing restores a soft-deleted transaction and preserves its categor
         'completed_at' => null,
     ]);
 
-    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService());
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class));
 
     $bankImport->refresh();
     $restored = Transaction::query()->find($targetId);
@@ -239,7 +244,7 @@ test('per-row failure does not abort the import and is recorded in row_errors', 
                 ],
             ]);
 
-        new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService());
+        new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class));
 
         $bankImport->refresh();
 
@@ -273,4 +278,92 @@ test('has WithoutOverlapping middleware keyed on bank import', function () {
 
     expect($middleware)->toHaveCount(1)
         ->and($middleware[0])->toBeInstanceOf(Illuminate\Queue\Middleware\WithoutOverlapping::class);
+});
+
+test('a csv row matching an active plan is reconciled at import and renders a single calendar pip', function () {
+    Queue::fake([RunTransactionAnalysisJob::class]);
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create();
+
+    $plan = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'amount' => 50000,
+        'direction' => TransactionDirection::Debit,
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'start_date' => '2026-06-05',
+        'is_active' => true,
+    ]);
+
+    $csv = <<<'CSV'
+        Date,Description,Amount
+        05/06/2026,RENT PAYMENT,-500.00
+        CSV;
+
+    $storedPath = 'bank-imports/'.bin2hex(random_bytes(8)).'.csv';
+    Storage::disk('local')->put($storedPath, $csv);
+
+    $bankImport = BankImport::factory()->for($user)->for($account)->create([
+        'original_filename' => 'rent.csv',
+        'stored_path' => $storedPath,
+        'column_mapping' => [
+            CsvColumnMapper::FIELD_DATE => 'Date',
+            CsvColumnMapper::FIELD_DESCRIPTION => 'Description',
+            CsvColumnMapper::FIELD_AMOUNT => 'Amount',
+        ],
+    ]);
+
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class));
+
+    $tx = Transaction::query()->where('account_id', $account->id)->first();
+    expect($tx->planned_transaction_id)->toBe($plan->id);
+
+    $activity = new DayActivityLoader()->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    );
+
+    expect($activity['2026-06-05'] ?? null)->not->toBeNull()
+        ->and($activity['2026-06-05']->pips)->toHaveCount(1)
+        ->and($activity['2026-06-05']->pips[0]->matched)->toBeTrue();
+});
+
+test('a csv row with no matching plan is left entered (unlinked)', function () {
+    Queue::fake([RunTransactionAnalysisJob::class]);
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create();
+
+    PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'amount' => 50000,
+        'direction' => TransactionDirection::Debit,
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'start_date' => '2026-06-05',
+        'is_active' => true,
+    ]);
+
+    $csv = <<<'CSV'
+        Date,Description,Amount
+        05/06/2026,GROCERIES,-120.00
+        CSV;
+
+    $storedPath = 'bank-imports/'.bin2hex(random_bytes(8)).'.csv';
+    Storage::disk('local')->put($storedPath, $csv);
+
+    $bankImport = BankImport::factory()->for($user)->for($account)->create([
+        'original_filename' => 'groceries.csv',
+        'stored_path' => $storedPath,
+        'column_mapping' => [
+            CsvColumnMapper::FIELD_DATE => 'Date',
+            CsvColumnMapper::FIELD_DESCRIPTION => 'Description',
+            CsvColumnMapper::FIELD_AMOUNT => 'Amount',
+        ],
+    ]);
+
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class));
+
+    $tx = Transaction::query()->where('account_id', $account->id)->first();
+    expect($tx->planned_transaction_id)->toBeNull();
 });
