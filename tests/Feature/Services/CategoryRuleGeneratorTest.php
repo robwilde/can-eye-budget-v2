@@ -81,6 +81,44 @@ test('it falls back to a description token trigger when there is no merchant nam
         ->and($sibling->fresh()->category_id)->toBe($category->id);
 });
 
+test('it skips a leading payment-network token and keys the rule on the merchant', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'description' => '28.99 VISA -NETFLIX.COM Melbourne AU 619459 #2892',
+        'direction' => TransactionDirection::Debit,
+        'category_id' => null,
+    ]);
+    $sibling = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'description' => '28.99 VISA -NETFLIX.COM Sydney AU 778812 #4410',
+        'direction' => TransactionDirection::Debit,
+        'category_id' => null,
+    ]);
+    $unrelatedVisa = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'description' => '12.50 VISA -WOOLWORTHS Brisbane AU 100200 #3050',
+        'direction' => TransactionDirection::Debit,
+        'category_id' => null,
+    ]);
+
+    $rule = app(CategoryRuleGenerator::class)->generateAndApply($source, $category->id);
+
+    expect($rule->triggers[0]['field'])->toBe('description')
+        ->and($rule->triggers[0]['operator'])->toBe('contains')
+        ->and($rule->triggers[0]['value'])->toBe('NETFLIX.COM');
+
+    expect($source->fresh()->category_id)->toBe($category->id)
+        ->and($sibling->fresh()->category_id)->toBe($category->id)
+        ->and($unrelatedVisa->fresh()->category_id)->toBeNull();
+});
+
 test('it reuses a single auto-categorisation group across generated rules', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();

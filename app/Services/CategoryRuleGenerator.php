@@ -22,6 +22,20 @@ final readonly class CategoryRuleGenerator
 {
     private const string GROUP_NAME = 'Auto-categorisation';
 
+    /**
+     * Payment-network / method tokens that lead many card descriptions
+     * ("VISA -NETFLIX.COM", "EFTPOS WOOLWORTHS"). They are not the payee, so
+     * they must never become the merchant token — otherwise the generated rule
+     * matches every card transaction instead of the merchant.
+     *
+     * @var list<string>
+     */
+    private const array GENERIC_TOKENS = [
+        'VISA', 'MASTERCARD', 'MC', 'AMEX', 'EFTPOS', 'PAYPAL', 'SQ', 'SQUARE',
+        'POS', 'PURCHASE', 'PAYMENT', 'DEBIT', 'CREDIT', 'PAYWAVE', 'PAYPASS',
+        'CONTACTLESS', 'TAP', 'WITHDRAWAL', 'DEPOSIT', 'TRANSFER',
+    ];
+
     public function __construct(
         private RuleEvaluator $evaluator,
         private RuleActionExecutor $executor,
@@ -93,17 +107,23 @@ final readonly class CategoryRuleGenerator
     }
 
     /**
-     * The first stable payee token of the merchant signature. A single token is
-     * a case-insensitive substring of the raw description, so a `contains`
-     * trigger matches the source and its siblings even when reference numbers
-     * vary between them.
+     * The first non-generic payee token of the merchant signature, used as a
+     * case-insensitive `contains` value so the trigger matches the source and
+     * its siblings even when reference numbers vary. Leading payment-network /
+     * method tokens (VISA, EFTPOS, PAYPAL, …) are skipped so the rule keys on
+     * the merchant ("NETFLIX.COM") instead of matching every card transaction.
      */
     private function merchantToken(string $raw): string
     {
-        $signature = MerchantSignature::for($raw);
-        $first = strtok($signature, ' ');
+        $tokens = explode(' ', MerchantSignature::for($raw));
 
-        return $first === false ? $signature : $first;
+        foreach ($tokens as $token) {
+            if (! in_array($token, self::GENERIC_TOKENS, true)) {
+                return $token;
+            }
+        }
+
+        return $tokens[0];
     }
 
     private function ruleName(Transaction $source): string
