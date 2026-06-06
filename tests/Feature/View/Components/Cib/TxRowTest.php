@@ -90,6 +90,16 @@ it('dispatches edit-planned-transaction when plannedTransactionId is set', funct
         ->toContain('tx-row planned');
 });
 
+it('encodes a null occurrenceDate as null so the modal can fall back to the plan start date', function () {
+    $html = Blade::render(
+        '<x-cib.tx-row :planned-transaction-id="7" name="Rent" :amount="150000" tone="plan" />'
+    );
+
+    expect($html)->toContain(
+        "wire:click=\"\$dispatch('edit-planned-transaction', { id: 7, occurrenceDate: null })\""
+    );
+});
+
 it('JS-encodes occurrenceDate to neutralise apostrophe injection', function () {
     $html = Blade::render(
         '<x-cib.tx-row :planned-transaction-id="1" :occurrence-date="$date" name="Rent" :amount="100" />',

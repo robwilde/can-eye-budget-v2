@@ -73,7 +73,7 @@
     <button type="button"
             {{ $attributes->class(['tx-row', 'planned' => $isPlanned]) }}
             @if ($isPlanned)
-                wire:click="$dispatch('edit-planned-transaction', { id: {{ (int) $plannedTransactionId }}, occurrenceDate: {{ Js::from((string) $occurrenceDate) }} })"
+                wire:click="$dispatch('edit-planned-transaction', { id: {{ (int) $plannedTransactionId }}, occurrenceDate: {{ Js::from($occurrenceDate !== null ? (string) $occurrenceDate : null) }} })"
             @else
                 wire:click="$dispatch('edit-transaction', { id: {{ (int) $transactionId }} })"
             @endif
