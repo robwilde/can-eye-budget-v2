@@ -487,7 +487,7 @@ test('refreshes pay-cycle figures when a transaction is saved elsewhere on the p
     $component = Livewire::actingAs($user)->test(Dashboard::class)
         ->assertDontSee('Spotify Premium');
 
-    expect($component->instance()->totalNeeded())->toBe(0);
+    expect($component->get('totalNeeded'))->toBe(0);
 
     PlannedTransaction::factory()->for($user)->for($account)->create([
         'description' => 'Spotify Premium',
@@ -501,5 +501,5 @@ test('refreshes pay-cycle figures when a transaction is saved elsewhere on the p
     $component->dispatch('transaction-saved')
         ->assertSee('Spotify Premium');
 
-    expect($component->instance()->totalNeeded())->toBe(50000);
+    expect($component->get('totalNeeded'))->toBe(50000);
 });
