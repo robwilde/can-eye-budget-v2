@@ -13,6 +13,7 @@ use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Services\CategoryRuleGenerator;
+use App\Services\TransactionIngestor;
 use App\Support\AmountParser;
 use App\Support\AmountParseResult;
 use Carbon\CarbonImmutable;
@@ -382,7 +383,9 @@ final class TransactionModal extends Component
             return false;
         }
 
-        $this->createSingleTransaction($parsed);
+        app(TransactionIngestor::class)->ingest(
+            new Transaction($this->manualSingleAttributes($parsed, null)),
+        );
 
         return true;
     }
@@ -752,7 +755,15 @@ final class TransactionModal extends Component
 
     private function createSingleTransaction(AmountParseResult $parsed, ?int $plannedTransactionId = null): void
     {
-        Transaction::query()->create([
+        Transaction::query()->create($this->manualSingleAttributes($parsed, $plannedTransactionId));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function manualSingleAttributes(AmountParseResult $parsed, ?int $plannedTransactionId): array
+    {
+        return [
             'user_id' => auth()->id(),
             'account_id' => $this->accountId,
             'category_id' => $this->categoryId,
@@ -766,7 +777,7 @@ final class TransactionModal extends Component
             'source' => TransactionSource::Manual,
             'notes' => $this->notes !== '' ? $this->notes : null,
             'planned_transaction_id' => $plannedTransactionId,
-        ]);
+        ];
     }
 
     private function createTransferPair(AmountParseResult $parsed, ?int $plannedTransactionId = null): void

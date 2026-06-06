@@ -3282,3 +3282,65 @@ test('converting to a plan without ticking categorise-matching creates no rule a
     expect(UserRule::query()->where('user_id', $user->id)->count())->toBe(0)
         ->and($sibling->fresh()->category_id)->toBeNull();
 });
+
+test('a manual entry on a plan occurrence day reconciles to the plan', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $plan = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'start_date' => '2026-03-15',
+        'is_active' => true,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '50 gym')
+        ->set('accountId', $account->id)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $tx = Transaction::query()
+        ->where('user_id', $user->id)
+        ->where('source', TransactionSource::Manual)
+        ->first();
+
+    expect($tx)->not->toBeNull()
+        ->and($tx->planned_transaction_id)->toBe($plan->id);
+});
+
+test('a manual entry with no matching plan is left entered (unlinked)', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'start_date' => '2026-03-15',
+        'is_active' => true,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '120 groceries')
+        ->set('accountId', $account->id)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $tx = Transaction::query()
+        ->where('user_id', $user->id)
+        ->where('source', TransactionSource::Manual)
+        ->first();
+
+    expect($tx)->not->toBeNull()
+        ->and($tx->planned_transaction_id)->toBeNull();
+});

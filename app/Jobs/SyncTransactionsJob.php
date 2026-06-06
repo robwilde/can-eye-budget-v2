@@ -11,6 +11,7 @@ use App\Models\Account;
 use App\Models\BasiqRefreshLog;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\TransactionIngestor;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -191,6 +192,7 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
         $transactions = $basiqService->paginateTransactions($this->user->basiq_user_id, $filter);
         $created = 0;
         $updated = 0;
+        $ingestor = app(TransactionIngestor::class);
 
         foreach ($transactions as $dto) {
             $accountId = $accountMap->get($dto->account);
@@ -203,26 +205,33 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
                 continue;
             }
 
-            $wasRecentlyCreated = Transaction::updateOrCreate(
-                ['basiq_id' => $dto->id],
-                [
-                    'user_id' => $this->user->id,
-                    'account_id' => $accountId,
-                    'amount' => self::toCents($dto->amount),
-                    'direction' => $dto->direction,
-                    'description' => $dto->description ?? '',
-                    'post_date' => $dto->postDate,
-                    'transaction_date' => $dto->transactionDate,
-                    'status' => $dto->status ?? 'posted',
-                    'source' => TransactionSource::Basiq,
-                    'basiq_account_id' => $dto->account,
-                    'merchant_name' => $dto->merchant,
-                    'anzsic_code' => $dto->anzsic,
-                    'enrich_data' => $dto->enrichData,
-                ],
-            )->wasRecentlyCreated;
+            $values = [
+                'user_id' => $this->user->id,
+                'account_id' => $accountId,
+                'amount' => self::toCents($dto->amount),
+                'direction' => $dto->direction,
+                'description' => $dto->description ?? '',
+                'post_date' => $dto->postDate,
+                'transaction_date' => $dto->transactionDate,
+                'status' => $dto->status ?? 'posted',
+                'source' => TransactionSource::Basiq,
+                'basiq_account_id' => $dto->account,
+                'merchant_name' => $dto->merchant,
+                'anzsic_code' => $dto->anzsic,
+                'enrich_data' => $dto->enrichData,
+            ];
 
-            $wasRecentlyCreated ? $created++ : $updated++;
+            $existing = Transaction::query()->where('basiq_id', $dto->id)->first();
+
+            if ($existing === null) {
+                $ingestor->ingest(new Transaction(['basiq_id' => $dto->id, ...$values]));
+                $created++;
+
+                continue;
+            }
+
+            $existing->fill($values)->save();
+            $updated++;
         }
 
         $this->user->update(['last_synced_at' => now()]);
