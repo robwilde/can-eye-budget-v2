@@ -286,8 +286,7 @@ test('a csv row matching an active plan is reconciled at import and renders a si
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->csvImport()->create();
 
-    $plan = PlannedTransaction::factory()->for($user)->create([
-        'account_id' => $account->id,
+    $plan = PlannedTransaction::factory()->for($user)->for($account)->create([
         'amount' => 50000,
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::DontRepeat,
@@ -335,8 +334,7 @@ test('a csv row with no matching plan is left entered (unlinked)', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->csvImport()->create();
 
-    PlannedTransaction::factory()->for($user)->create([
-        'account_id' => $account->id,
+    PlannedTransaction::factory()->for($user)->for($account)->create([
         'amount' => 50000,
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::DontRepeat,
