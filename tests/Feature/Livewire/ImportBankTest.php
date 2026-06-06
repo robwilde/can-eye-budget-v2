@@ -15,6 +15,7 @@ use App\Models\BankImport;
 use App\Models\User;
 use App\Services\CsvImport\CsvColumnMapper;
 use App\Services\CsvImport\CsvParserService;
+use App\Services\TransactionIngestor;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
@@ -266,7 +267,7 @@ test('end-to-end: confirming a Beyond Bank upload imports real transactions into
     // complete the process and prove the wiring produces transactions.
     $bankImport = BankImport::query()->where('user_id', $user->id)->latest('id')->firstOrFail();
 
-    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService());
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class));
 
     $bankImport->refresh();
 

@@ -10,6 +10,7 @@ use App\Enums\TransactionStatus;
 use App\Models\BankImport;
 use App\Models\Transaction;
 use App\Services\CsvImport\CsvParserService;
+use App\Services\TransactionIngestor;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\QueryException;
@@ -50,7 +51,7 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
     /**
      * @throws Throwable
      */
-    public function handle(CsvParserService $parser): void
+    public function handle(CsvParserService $parser, TransactionIngestor $ingestor): void
     {
         $bankImport = $this->bankImport->fresh();
 
@@ -94,11 +95,11 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
                     ];
 
                     if ($existing === null) {
-                        Transaction::query()->create([
+                        $ingestor->ingest(new Transaction([
                             'account_id' => $bankImport->account_id,
                             'csv_hash' => $row->csvHash,
                             ...$values,
-                        ]);
+                        ]));
                         $imported++;
 
                         continue;
