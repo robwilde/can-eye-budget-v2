@@ -15,10 +15,11 @@ use Illuminate\Support\Collection;
  * planned_transaction_id. Runs during sync/import so an occurred payment is recognised as
  * "that planned item" instead of showing as a separate forecast on the calendar.
  *
- * A match needs the same account + direction, an EXACT amount, and a post_date within
- * ReconciliationMatcher::DATE_TOLERANCE_DAYS of a plan occurrence. Matching is one-to-one and
- * uses the same integer day-diff + greedy-nearest claim as the calendar loader, so a match and
- * the calendar agree on which occurrence owns which transaction.
+ * A match needs the same account + direction, an amount within ReconciliationPolicy's
+ * tolerance, and a post_date within ReconciliationPolicy::DATE_TOLERANCE_DAYS of a plan
+ * occurrence. Matching is one-to-one and uses the same integer day-diff + greedy-nearest
+ * claim as the calendar loader, so a match and the calendar agree on which occurrence owns
+ * which transaction.
  */
 final readonly class PlannedTransactionMatcher
 {
@@ -26,7 +27,7 @@ final readonly class PlannedTransactionMatcher
 
     public function matchForUser(User $user): int
     {
-        $tolerance = ReconciliationMatcher::DATE_TOLERANCE_DAYS;
+        $tolerance = ReconciliationPolicy::DATE_TOLERANCE_DAYS;
         $today = CarbonImmutable::today();
         $windowStart = $today->subDays(self::LOOKBACK_DAYS);
         $windowEnd = $today->addDays($tolerance);
@@ -71,7 +72,7 @@ final readonly class PlannedTransactionMatcher
 
         foreach ($plans as $plan) {
             $candidates = ($unmatchedByGroup->get($plan->account_id.'|'.$plan->direction->value) ?? collect())
-                ->filter(fn (Transaction $t): bool => abs((int) $t->amount) === (int) $plan->amount)
+                ->filter(fn (Transaction $t): bool => ReconciliationPolicy::amountMatches((int) $t->amount, (int) $plan->amount))
                 ->values();
 
             $existing = ($matchedByPlan->get($plan->id) ?? collect())->values();

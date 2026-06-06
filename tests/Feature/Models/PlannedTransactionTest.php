@@ -6,12 +6,14 @@ declare(strict_types=1);
 
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Events\PlannedTransactionCreated;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Event;
 
 // ── Factory & Basics ──────────────────────────────────────────────
 
@@ -20,6 +22,17 @@ test('factory creates a valid planned transaction', function () {
 
     expect($planned)->toBeInstanceOf(PlannedTransaction::class)
         ->and($planned->exists)->toBeTrue();
+});
+
+test('creating a planned transaction fires PlannedTransactionCreated', function () {
+    Event::fake([PlannedTransactionCreated::class]);
+
+    $planned = PlannedTransaction::factory()->create();
+
+    Event::assertDispatched(
+        PlannedTransactionCreated::class,
+        fn (PlannedTransactionCreated $event): bool => $event->plannedTransaction->is($planned),
+    );
 });
 
 test('default factory creates monthly frequency', function () {
