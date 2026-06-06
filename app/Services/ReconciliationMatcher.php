@@ -113,20 +113,6 @@ final readonly class ReconciliationMatcher
         return $bestPlan;
     }
 
-    public function findLinkedForOccurrence(PlannedTransaction $planned, CarbonImmutable $occurrenceDate): ?Transaction
-    {
-        $dateFrom = $occurrenceDate->subDays(self::DATE_TOLERANCE_DAYS);
-        $dateTo = $occurrenceDate->addDays(self::DATE_TOLERANCE_DAYS);
-
-        return Transaction::query()
-            ->where('user_id', $planned->user_id)
-            ->current()
-            ->where('planned_transaction_id', $planned->id)
-            ->whereBetween('post_date', [$dateFrom, $dateTo])
-            ->with('account:id,name')
-            ->first();
-    }
-
     public function link(Transaction $transaction, PlannedTransaction $planned): void
     {
         $transaction->update(['planned_transaction_id' => $planned->id]);
