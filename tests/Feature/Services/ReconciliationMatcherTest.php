@@ -295,38 +295,3 @@ test('unlink on already unlinked transaction does nothing', function () {
 
     expect($transaction->fresh()->planned_transaction_id)->toBeNull();
 });
-
-// ── findLinkedForOccurrence ──────────────────────────────────────
-
-test('findLinkedForOccurrence returns linked transaction near occurrence date', function () {
-    $planned = PlannedTransaction::factory()->for($this->user)->for($this->account)->noRepeat()->create([
-        'start_date' => '2026-03-15',
-    ]);
-
-    $linked = Transaction::factory()->for($this->user)->debit()->create([
-        'account_id' => $this->account->id,
-        'post_date' => '2026-03-15',
-        'planned_transaction_id' => $planned->id,
-    ]);
-
-    $result = $this->matcher->findLinkedForOccurrence($planned, CarbonImmutable::parse('2026-03-15'));
-
-    expect($result)->not->toBeNull()
-        ->and($result->id)->toBe($linked->id);
-});
-
-test('findLinkedForOccurrence returns null when linked transaction is outside date tolerance', function () {
-    $planned = PlannedTransaction::factory()->for($this->user)->for($this->account)->noRepeat()->create([
-        'start_date' => '2026-03-15',
-    ]);
-
-    Transaction::factory()->for($this->user)->debit()->create([
-        'account_id' => $this->account->id,
-        'post_date' => '2026-04-15',
-        'planned_transaction_id' => $planned->id,
-    ]);
-
-    $result = $this->matcher->findLinkedForOccurrence($planned, CarbonImmutable::parse('2026-03-15'));
-
-    expect($result)->toBeNull();
-});

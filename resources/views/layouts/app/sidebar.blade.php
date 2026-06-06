@@ -64,7 +64,6 @@
 
 <livewire:feedback-widget/>
 <livewire:transaction-modal/>
-<livewire:reconciliation-modal/>
 
 @fluxScripts
 </body>

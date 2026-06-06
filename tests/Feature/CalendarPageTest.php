@@ -23,14 +23,13 @@ it('renders the TransactionModal exactly once on the calendar page', function ()
         ->toBe(1);
 });
 
-it('renders the ReconciliationModal exactly once on the calendar page', function () {
+it('does not mount the ReconciliationModal on the calendar page', function () {
     $response = $this->get(route('calendar'));
 
     $response->assertOk();
-    $response->assertSeeLivewire('reconciliation-modal');
 
     expect(countLivewireMounts($response->getContent(), 'reconciliation-modal'))
-        ->toBe(1);
+        ->toBe(0);
 });
 
 /**

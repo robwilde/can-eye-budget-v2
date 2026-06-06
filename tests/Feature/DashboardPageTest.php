@@ -11,9 +11,9 @@ beforeEach(function () {
     $this->actingAs($this->user);
 });
 
-it('mounts the reconciliation modal on the dashboard page', function () {
+it('renders the dashboard with the transaction modal mounted', function () {
     $response = $this->get(route('dashboard'));
 
     $response->assertOk();
-    $response->assertSeeLivewire('reconciliation-modal');
+    $response->assertSeeLivewire('transaction-modal');
 });
