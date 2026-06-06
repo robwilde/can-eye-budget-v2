@@ -75,7 +75,7 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
 
     public function shouldRun(PipelineContext $context): bool
     {
-        return true;
+        return (bool) config('budget.recurring_detection');
     }
 
     public function execute(PipelineContext $context): StageResult

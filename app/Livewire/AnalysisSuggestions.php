@@ -171,6 +171,7 @@ final class AnalysisSuggestions extends Component
         $suggestions = AnalysisSuggestion::query()
             ->where('user_id', auth()->id())
             ->pending()
+            ->unless((bool) config('budget.recurring_detection'), fn ($q) => $q->whereNot('type', SuggestionType::RecurringTransaction))
             ->get()
             ->groupBy(fn (AnalysisSuggestion $s) => $s->type->value);
 

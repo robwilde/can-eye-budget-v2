@@ -821,6 +821,8 @@ test('creates audit entries for skipped candidates with reason in metadata', fun
 // ─── Integration ────────────────────────────────────────────────────────
 
 test('stage is registered in pipeline and full run produces suggestions', function () {
+    config(['budget.recurring_detection' => true]);
+
     createMonthlyGroup($this->user, $this->account, 'Netflix', 1699, 3);
 
     $pipeline = app(App\Services\TransactionAnalysisPipeline::class);
@@ -846,7 +848,11 @@ test('label returns human-readable string', function () {
     expect($this->stage->label())->toBe('Identify Recurring Transactions');
 });
 
-test('shouldRun always returns true', function () {
+test('shouldRun reflects the recurring detection config flag', function () {
+    config(['budget.recurring_detection' => false]);
+    expect($this->stage->shouldRun($this->context))->toBeFalse();
+
+    config(['budget.recurring_detection' => true]);
     expect($this->stage->shouldRun($this->context))->toBeTrue();
 });
 

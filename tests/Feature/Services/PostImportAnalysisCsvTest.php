@@ -33,6 +33,8 @@ function importedCsvTransaction(User $user, Account $account, array $overrides):
 }
 
 test('a clean CSV import auto-sets the primary account and pay cycle and surfaces recurring suggestions', function () {
+    config(['budget.recurring_detection' => true]);
+
     $user = User::factory()->create([
         'primary_account_id' => null,
         'pay_amount' => null,

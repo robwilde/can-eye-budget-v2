@@ -24,6 +24,7 @@ beforeEach(function () {
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
     $this->pipelineRun = PipelineRun::factory()->for($this->user)->create();
+    config(['budget.recurring_detection' => true]);
 });
 
 function primaryAccountPayload(int $accountId, string $accountName = 'Everyday Account'): array
@@ -204,6 +205,15 @@ test('recurring-transaction accept button uses yellow-pill markup, not flux prim
         ->assertSee('Accept');
 
     expect($component->html())->toMatch('/wire:click="acceptRecurringTransaction\(\d+\)"[^>]*?bg-cib-yellow-400/s');
+});
+test('recurring-transaction suggestions are hidden when auto-detection is disabled', function () {
+    config(['budget.recurring_detection' => false]);
+
+    $suggestion = createSuggestion($this, 'recurring', recurringPayload($this->account->id));
+
+    Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->assertDontSeeHtml('wire:click="acceptRecurringTransaction('.$suggestion->id.')"');
 });
 
 test('user-rule accept button uses yellow-pill markup, not flux primary', function () {
