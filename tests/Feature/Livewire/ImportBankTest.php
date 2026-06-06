@@ -284,3 +284,46 @@ test('end-to-end: confirming a Beyond Bank upload imports real transactions into
         ->where('amount', 150_000)
         ->exists())->toBeTrue();
 });
+
+test('confirmImport prefills and applies the statement closing balance for an existing account', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create(['balance' => 0]);
+
+    $csv = "Date,Description,Amount,Balance\n01/06/2026,Coffee,-5.00,1000.00\n03/06/2026,Pay,2000.00,3000.00\n";
+    $file = UploadedFile::fake()->createWithContent('statement.csv', $csv);
+
+    $component = Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'existing')
+        ->set('accountId', $account->id)
+        ->set('file', $file)
+        ->call('uploadAndDetectHeaders')
+        ->set('mapping.'.CsvColumnMapper::FIELD_BALANCE, 'Balance');
+
+    expect($component->get('currentBalance'))->toBe('3000.00');
+
+    $component->call('confirmImport')->assertSet('step', 3);
+
+    expect($account->refresh()->balance)->toBe(300000);
+});
+
+test('a manually entered current balance overrides the prefilled closing balance', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create(['balance' => 0]);
+
+    $csv = "Date,Description,Amount,Balance\n01/06/2026,Coffee,-5.00,1000.00\n03/06/2026,Pay,2000.00,3000.00\n";
+    $file = UploadedFile::fake()->createWithContent('statement.csv', $csv);
+
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'existing')
+        ->set('accountId', $account->id)
+        ->set('file', $file)
+        ->call('uploadAndDetectHeaders')
+        ->set('mapping.'.CsvColumnMapper::FIELD_BALANCE, 'Balance')
+        ->set('currentBalance', '1234.56')
+        ->call('confirmImport')
+        ->assertSet('step', 3);
+
+    expect($account->refresh()->balance)->toBe(123456);
+});

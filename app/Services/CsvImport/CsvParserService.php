@@ -90,6 +90,8 @@ final class CsvParserService
         $errors = [];
         $seen = [];
         $duplicateCount = 0;
+        $closingBalance = null;
+        $closingDate = null;
 
         $reader = $this->reader($path);
 
@@ -119,6 +121,11 @@ final class CsvParserService
                 $latest = $parsed->postDate;
             }
 
+            if ($parsed->balance !== null && ($closingDate === null || $parsed->postDate->greaterThanOrEqualTo($closingDate))) {
+                $closingDate = $parsed->postDate;
+                $closingBalance = $parsed->balance;
+            }
+
             if ($parsed->direction === TransactionDirection::Debit) {
                 $debitTotal += abs($parsed->amount);
             } else {
@@ -140,6 +147,7 @@ final class CsvParserService
             totalCredits: $creditTotal,
             duplicateCount: $duplicateCount,
             errorRows: $errors,
+            closingBalance: $closingBalance,
         );
     }
 

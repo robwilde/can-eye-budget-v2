@@ -19,6 +19,7 @@ final readonly class PreviewSummary
         public int $totalCredits,
         public int $duplicateCount,
         public array $errorRows,
+        public ?int $closingBalance = null,
     ) {}
 
     public function dateRange(): ?string
