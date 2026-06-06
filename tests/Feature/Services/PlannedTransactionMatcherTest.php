@@ -75,12 +75,26 @@ test('does not match outside the date tolerance', function () {
         ->and($tx->fresh()->planned_transaction_id)->toBeNull();
 });
 
-test('requires an exact amount (stricter than the human ±10% matcher)', function () {
-    activeRentPlan($this->user, $this->account);
+test('matches within the amount tolerance (±10%)', function () {
+    $plan = activeRentPlan($this->user, $this->account);
 
     $tx = Transaction::factory()->for($this->user)->debit()->create([
         'account_id' => $this->account->id,
         'amount' => -47500,
+        'post_date' => '2026-06-10',
+        'planned_transaction_id' => null,
+    ]);
+
+    expect($this->matcher->matchForUser($this->user))->toBe(1)
+        ->and($tx->fresh()->planned_transaction_id)->toBe($plan->id);
+});
+
+test('does not match outside the amount tolerance', function () {
+    activeRentPlan($this->user, $this->account);
+
+    $tx = Transaction::factory()->for($this->user)->debit()->create([
+        'account_id' => $this->account->id,
+        'amount' => -40000,
         'post_date' => '2026-06-10',
         'planned_transaction_id' => null,
     ]);

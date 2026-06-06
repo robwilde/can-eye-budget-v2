@@ -8,7 +8,7 @@ use App\Enums\TransactionDirection;
 use App\Livewire\Dashboard\Data\PayCyclePip;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
-use App\Services\ReconciliationMatcher;
+use App\Services\ReconciliationPolicy;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
@@ -32,7 +32,7 @@ final readonly class DayActivityLoader
      * grouped by ISO date. Transfers are excluded. Pips per day are sorted by amount desc.
      *
      * A planned occurrence that has been reconciled to a posted transaction (matched within
-     * ReconciliationMatcher::DATE_TOLERANCE_DAYS) is suppressed: only the posted pip renders,
+     * ReconciliationPolicy::DATE_TOLERANCE_DAYS) is suppressed: only the posted pip renders,
      * relabelled with the reconciled plan's category name and icon.
      *
      * @return array<string, DayActivity>
@@ -188,7 +188,7 @@ final readonly class DayActivityLoader
 
             $diff = (int) abs($candidate->post_date->diffInDays($occurrence));
 
-            if ($diff > ReconciliationMatcher::DATE_TOLERANCE_DAYS) {
+            if ($diff > ReconciliationPolicy::DATE_TOLERANCE_DAYS) {
                 continue;
             }
 

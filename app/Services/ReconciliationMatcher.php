@@ -11,9 +11,9 @@ use Illuminate\Support\Collection;
 
 final readonly class ReconciliationMatcher
 {
-    public const float AMOUNT_TOLERANCE = 0.10;
+    public const float AMOUNT_TOLERANCE = ReconciliationPolicy::AMOUNT_TOLERANCE;
 
-    public const int DATE_TOLERANCE_DAYS = 3;
+    public const int DATE_TOLERANCE_DAYS = ReconciliationPolicy::DATE_TOLERANCE_DAYS;
 
     /**
      * @return Collection<int, Transaction>
@@ -22,8 +22,7 @@ final readonly class ReconciliationMatcher
     {
         $dateFrom = $occurrenceDate->subDays(self::DATE_TOLERANCE_DAYS);
         $dateTo = $occurrenceDate->addDays(self::DATE_TOLERANCE_DAYS);
-        $minAmount = (int) floor($planned->amount * (1 - self::AMOUNT_TOLERANCE));
-        $maxAmount = (int) ceil($planned->amount * (1 + self::AMOUNT_TOLERANCE));
+        [$minAmount, $maxAmount] = ReconciliationPolicy::amountRange((int) $planned->amount);
 
         return Transaction::query()
             ->where('user_id', $planned->user_id)
@@ -40,6 +39,51 @@ final readonly class ReconciliationMatcher
                 fn (Transaction $a, Transaction $b) => abs(abs($a->amount) - abs($planned->amount)) <=> abs(abs($b->amount) - abs($planned->amount)),
             ])
             ->values();
+    }
+
+    /**
+     * The active planned transaction this posting fulfils, or null. Mirrors findSuggestions
+     * in reverse: same account + direction, amount within tolerance, and an occurrence within
+     * the date tolerance that no other transaction has already reconciled. When several plans
+     * qualify, the one whose nearest unclaimed occurrence sits closest to the post date wins.
+     */
+    public function findPlanForTransaction(Transaction $transaction): ?PlannedTransaction
+    {
+        $windowStart = $transaction->post_date->subDays(ReconciliationPolicy::DATE_TOLERANCE_DAYS);
+        $windowEnd = $transaction->post_date->addDays(ReconciliationPolicy::DATE_TOLERANCE_DAYS);
+
+        $plans = PlannedTransaction::query()
+            ->where('user_id', $transaction->user_id)
+            ->where('account_id', $transaction->account_id)
+            ->where('direction', $transaction->direction)
+            ->where('is_active', true)
+            ->excludingTransfers()
+            ->get()
+            ->filter(fn (PlannedTransaction $plan): bool => ReconciliationPolicy::amountMatches((int) $transaction->amount, (int) $plan->amount));
+
+        $bestPlan = null;
+        $bestDiff = null;
+
+        foreach ($plans as $plan) {
+            foreach ($plan->occurrencesBetween($windowStart, $windowEnd) as $occurrence) {
+                $diff = ReconciliationPolicy::dayDiff($transaction->post_date, $occurrence);
+
+                if ($diff > ReconciliationPolicy::DATE_TOLERANCE_DAYS) {
+                    continue;
+                }
+
+                if ($this->findLinkedForOccurrence($plan, $occurrence) !== null) {
+                    continue;
+                }
+
+                if ($bestDiff === null || $diff < $bestDiff) {
+                    $bestDiff = $diff;
+                    $bestPlan = $plan;
+                }
+            }
+        }
+
+        return $bestPlan;
     }
 
     public function findLinkedForOccurrence(PlannedTransaction $planned, CarbonImmutable $occurrenceDate): ?Transaction
