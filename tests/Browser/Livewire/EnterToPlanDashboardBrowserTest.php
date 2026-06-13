@@ -12,11 +12,14 @@ use App\Models\User;
 
 /**
  * Reproduction for #257: converting an entered transaction to a plan from the
- * dashboard. The conversion always worked at the data layer, but the dashboard
- * pay-cycle calendar never refreshed (it lacked the `transaction-saved`
- * listener the dedicated /calendar page has), so the converted day kept showing
- * the stale "out" pip until a full page reload — the conversion appeared to do
- * nothing. This drives the real browser flow and asserts the live refresh.
+ * dashboard never refreshed the pay-cycle calendar (it lacked the
+ * `transaction-saved` listener the dedicated /calendar page has), so the
+ * converted day kept stale pips until a full page reload.
+ *
+ * Since the reconciliation-lifecycle change a converted posting is linked to
+ * the new plan, so its day keeps the (now reconciled) "out" pip instead of
+ * flipping to a bare "plan" pip; the live refresh is proven by the plan's next
+ * weekly occurrence surfacing as a "plan" pip later in the cycle, no reload.
  */
 test('enter to plan conversion live-refreshes the dashboard pay-cycle calendar', function () {
     $user = User::factory()->withPayCycle()->create();
@@ -40,16 +43,19 @@ test('enter to plan conversion live-refreshes the dashboard pay-cycle calendar',
         ->assertNotPresent('.cyc-pip.plan');
 
     // Open the transaction in the globally-mounted modal exactly as a pip click
-    // does (tx-row dispatches `edit-transaction`), switch Enter -> Plan, save.
+    // does (tx-row dispatches `edit-transaction`), switch Enter -> Plan, pick a
+    // weekly cadence so the next occurrence lands inside the fortnightly window.
     $page->script("Livewire.dispatch('edit-transaction', { id: {$transaction->id} })");
 
     $page->assertPresent('.type-toggle')
         ->click('Plan')
         ->assertSee('Frequency')
+        ->select('[wire\\:model="frequency"]', 'every-week')
         ->click('Convert to planned expense');
 
-    // Without the fix the grid keeps the stale "out" pip; with it the day now
-    // surfaces the converted plan as a "plan" pip — no reload performed.
+    // The converted posting reconciles to the new plan, so today keeps its
+    // "out" pip; the plan's next weekly occurrence now surfaces as a "plan" pip
+    // later in the cycle — proving the grid refreshed live, with no page reload.
     $page->assertPresent('.cyc-pip.plan')
-        ->assertNotPresent('.cyc-pip.out');
+        ->assertPresent('.cyc-pip.out');
 });
