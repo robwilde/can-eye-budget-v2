@@ -1,0 +1,20 @@
+<!doctype html>
+<!-- @dsCard group="Components" name="Buttons" subtitle="Primary, pop, ghost, subtle, danger" viewport="700x120" -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>body{margin:0;padding:22px;background:var(--bg-page);display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+.btn{font:600 14px/1 var(--font-sans);padding:10px 18px;border-radius:var(--r-sm);border:1px solid transparent;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.primary{background:var(--cib-teal-500);color:#fff}
+.primary:hover{background:var(--cib-teal-600)}
+.pop{background:var(--cib-yellow-400);color:var(--cib-ink);border:2px solid var(--cib-black);box-shadow:var(--shadow-pop);font-family:var(--font-display);font-weight:700;letter-spacing:.01em}
+.pop:active{box-shadow:0 0 0 0 var(--cib-black);transform:translate(3px,3px)}
+.ghost{background:transparent;color:var(--fg-1);border:1px solid var(--border-2)}
+.ghost:hover{background:var(--bg-sunken)}
+.subtle{background:var(--bg-sunken);color:var(--fg-1)}
+.danger{background:var(--money-owed);color:#fff}
+</style></head><body>
+<button class="btn primary">Connect Bank</button>
+<button class="btn pop">Can I spend?</button>
+<button class="btn ghost">Refresh</button>
+<button class="btn subtle">Cancel</button>
+<button class="btn danger">Disconnect</button>
+</body></html>

@@ -1,0 +1,17 @@
+<!doctype html>
+<!-- @dsCard group="Components" name="Money cards" subtitle="Owed / Available / Needed triad" viewport="700x200" -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>body{margin:0;padding:18px;background:var(--bg-page);font-family:var(--font-sans);display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.card{background:#fff;border:1px solid var(--border-1);border-radius:var(--r-md);padding:14px}
+.label{font:600 11px/1 var(--font-sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-3);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.badge{width:22px;height:22px;border-radius:var(--r-xs);display:inline-flex;align-items:center;justify-content:center}
+.hero{font:var(--t-money-hero);font-variant-numeric:tabular-nums;line-height:1}
+.sub{font:var(--t-caption);color:var(--fg-3);margin-top:8px}
+.owed .badge{background:var(--money-owed-soft);color:var(--money-owed)}
+.avail .badge{background:var(--money-available-soft);color:var(--money-available)}
+.need .badge{background:var(--money-needed-soft);color:var(--money-needed)}
+</style></head><body>
+<div class="card owed"><div class="label">Owed<span class="badge">↓</span></div><div class="hero" style="color:var(--money-owed)">$1,240.00</div><div class="sub">Across 2 cards</div></div>
+<div class="card avail"><div class="label">Available<span class="badge">✓</span></div><div class="hero" style="color:var(--money-available)">$3,420.50</div><div class="sub">+$420 above what you need</div></div>
+<div class="card need"><div class="label">Needed<span class="badge">→</span></div><div class="hero" style="color:var(--money-needed)">$1,980.00</div><div class="sub">5 days until payday</div></div>
+</body></html>

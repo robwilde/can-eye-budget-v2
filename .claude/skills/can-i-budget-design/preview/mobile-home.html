@@ -1,0 +1,75 @@
+<!-- @dsCard group="Mobile" viewport="390x844" name="Mobile home" subtitle="The instant answer — verdict, triad, bills before payday" -->
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+body{margin:0;background:var(--cib-teal-400);font-family:var(--font-sans);display:flex;flex-direction:column;min-height:100vh}
+/* Verdict panel — the brand moment */
+.verdict{padding:max(20px, env(safe-area-inset-top)) 20px 28px;color:#fff}
+.v-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:22px}
+.v-logo{height:44px;width:auto;display:block}
+.v-avatar{width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.18);color:#fff;display:grid;place-items:center;font:900 16px/1 var(--font-display);border:0}
+.v-eyebrow{font:700 12px/1 var(--font-sans);letter-spacing:.12em;text-transform:uppercase;color:var(--cib-cream-50);opacity:.85}
+.v-answer{font:900 40px/1.05 var(--font-display);letter-spacing:-.015em;margin:8px 0 6px}
+.v-buffer{font:700 17px/1.3 var(--font-sans);color:var(--cib-yellow-400)}
+.v-meta{font:400 13px/1.4 var(--font-sans);opacity:.85;margin-top:4px}
+/* Sheet */
+.sheet{background:var(--bg-page);border-radius:24px 24px 0 0;flex:1;padding:20px 16px calc(76px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:16px;box-shadow:0 -8px 24px rgba(6,51,46,.18)}
+/* Triad — stacked compact rows on mobile */
+.triad{display:flex;flex-direction:column;gap:8px}
+.t-row{display:flex;align-items:center;gap:12px;background:var(--bg-surface);border:1px solid var(--border-1);border-radius:var(--r-md);padding:14px 16px;min-height:56px}
+.t-dot{width:10px;height:10px;border-radius:50%;flex:none}
+.t-label{font:700 13px/1 var(--font-sans);color:var(--fg-2);flex:1}
+.t-amt{font:900 22px/1 var(--font-display);font-variant-numeric:tabular-nums}
+/* Bills */
+.card{background:var(--bg-surface);border:1px solid var(--border-1);border-radius:var(--r-md)}
+.card-h{display:flex;justify-content:space-between;align-items:baseline;padding:14px 16px 0}
+.card-h h3{margin:0;font:700 16px/1.2 var(--font-sans)}
+.card-h .when{font:400 12px/1 var(--font-sans);color:var(--fg-3)}
+.bill{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px dashed var(--border-1);min-height:48px}
+.bill:last-of-type{border-bottom:0}
+.b-date{font:700 11px/1.2 var(--font-sans);color:var(--fg-3);width:44px;text-transform:uppercase;text-align:center}
+.b-name{flex:1;font:400 15px/1.3 var(--font-sans);color:var(--fg-1)}
+.b-amt{font:700 15px/1 var(--font-sans);font-variant-numeric:tabular-nums;color:var(--fg-1)}
+.total{display:flex;justify-content:space-between;padding:13px 16px;background:var(--bg-sunken);border-radius:0 0 var(--r-md) var(--r-md);font:700 14px/1 var(--font-sans)}
+.total .amt{font-variant-numeric:tabular-nums}
+/* Bottom nav */
+.nav{position:fixed;left:0;right:0;bottom:0;background:var(--bg-surface);border-top:1px solid var(--border-1);display:grid;grid-template-columns:repeat(4,1fr);padding:6px 8px calc(6px + env(safe-area-inset-bottom))}
+.nav button{display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px;min-height:52px;background:transparent;border:0;font:700 11px/1 var(--font-sans);color:var(--fg-3);border-radius:var(--r-sm);cursor:pointer}
+.nav button.on{color:var(--cib-teal-600)}
+.nav svg{width:22px;height:22px}
+</style></head>
+<body>
+<div class="verdict" data-screen-label="Mobile home">
+  <div class="v-top">
+    <img class="v-logo" src="../assets/logo.png" alt="Can-I-Budget">
+    <button class="v-avatar">R</button>
+  </div>
+  <div class="v-eyebrow">Can I spend?</div>
+  <div class="v-answer">Yes — you're clear.</div>
+  <div class="v-buffer">+$420 above what you need</div>
+  <div class="v-meta">Payday Thu 25 Jun · 5 days away · synced 3 min ago</div>
+</div>
+<div class="sheet">
+  <div class="triad">
+    <div class="t-row"><span class="t-dot" style="background:var(--money-owed)"></span><span class="t-label">Owed</span><span class="t-amt" style="color:var(--money-owed)">$1,240.00</span></div>
+    <div class="t-row"><span class="t-dot" style="background:var(--money-available)"></span><span class="t-label">Available — incl. credit</span><span class="t-amt" style="color:var(--money-available)">$3,420.50</span></div>
+    <div class="t-row"><span class="t-dot" style="background:var(--money-needed)"></span><span class="t-label">Needed before payday</span><span class="t-amt" style="color:var(--money-needed)">$1,980.00</span></div>
+  </div>
+  <div class="card">
+    <div class="card-h"><h3>Bills before payday</h3><span class="when">next 5 days</span></div>
+    <div class="bill"><span class="b-date">Fri<br>20</span><span class="b-name">Rent — direct debit</span><span class="b-amt">$680.00</span></div>
+    <div class="bill"><span class="b-date">Sat<br>21</span><span class="b-name">AGL electricity</span><span class="b-amt">$214.30</span></div>
+    <div class="bill"><span class="b-date">Mon<br>23</span><span class="b-name">Optus mobile</span><span class="b-amt">$49.00</span></div>
+    <div class="bill"><span class="b-date">Wed<br>25</span><span class="b-name">Car rego — BPAY</span><span class="b-amt">$436.70</span></div>
+    <div class="bill"><span class="b-date">Wed<br>25</span><span class="b-name">Groceries (planned)</span><span class="b-amt">$600.00</span></div>
+    <div class="total"><span>Needed</span><span class="amt">$1,980.00</span></div>
+  </div>
+</div>
+<nav class="nav">
+  <button class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9a2 2 0 01-2 2h-3v-6H8v6H5a2 2 0 01-2-2z"/></svg>Home</button>
+  <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/></svg>Activity</button>
+  <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4M16 3v4"/></svg>Calendar</button>
+  <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>Settings</button>
+</nav>
+</body></html>

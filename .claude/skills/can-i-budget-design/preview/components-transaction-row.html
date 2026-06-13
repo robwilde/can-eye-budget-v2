@@ -1,0 +1,23 @@
+<!doctype html>
+<!-- @dsCard group="Components" name="Transaction table" subtitle="Row anatomy, category chip, tabular nums" viewport="700x240" -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>body{margin:0;padding:16px;background:var(--bg-page);font-family:var(--font-sans)}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--border-1);border-radius:var(--r-md);overflow:hidden}
+th{font:600 11px/1 var(--font-sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-3);text-align:left;padding:10px 14px;background:var(--bg-sunken);border-bottom:1px solid var(--border-1)}
+td{padding:12px 14px;font:var(--t-body-sm);border-bottom:1px solid var(--border-1)}
+tr:last-child td{border-bottom:0}
+tr:hover td{background:var(--cib-n-50)}
+.amt{font-variant-numeric:tabular-nums;text-align:right}
+.out{color:var(--money-owed)}
+.in{color:var(--money-available)}
+.cat{display:inline-block;padding:2px 8px;border-radius:var(--r-pill);background:var(--cib-teal-100);color:var(--cib-teal-700);font:500 11px/1.2 var(--font-sans)}
+</style></head><body>
+<table>
+<thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
+<tbody>
+<tr><td>18 Apr</td><td>Coles Supermarkets</td><td><span class="cat">Groceries</span></td><td class="amt out">−$82.40</td></tr>
+<tr><td>17 Apr</td><td>Salary — ACME Pty Ltd</td><td><span class="cat" style="background:var(--money-available-soft);color:var(--money-available)">Income</span></td><td class="amt in">+$2,140.00</td></tr>
+<tr><td>17 Apr</td><td>Spotify AU</td><td><span class="cat">Subscription</span></td><td class="amt out">−$13.99</td></tr>
+<tr><td>16 Apr</td><td>BP Service Station</td><td><span class="cat">Transport</span></td><td class="amt out">−$64.12</td></tr>
+</tbody></table>
+</body></html>

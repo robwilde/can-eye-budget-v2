@@ -1,0 +1,73 @@
+<!-- @dsCard group="Mobile" viewport="390x420" name="Quick check" subtitle="Type a price, get the verdict — the core interaction" -->
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+body{margin:0;background:var(--bg-page);font-family:var(--font-sans);padding:20px 16px;display:flex;flex-direction:column;gap:14px}
+h3{margin:0;font:700 16px/1.2 var(--font-sans)}
+.sub{font:400 13px/1.4 var(--font-sans);color:var(--fg-3);margin:2px 0 0}
+.row{display:flex;gap:10px}
+.amount{flex:1;display:flex;align-items:center;gap:6px;background:var(--bg-surface);border:1px solid var(--border-2);border-radius:var(--r-md);padding:0 16px;min-height:56px}
+.amount .sym{font:900 22px/1 var(--font-display);color:var(--fg-3)}
+.amount input{flex:1;border:0;background:transparent;outline:none;font:900 26px/1 var(--font-display);color:var(--fg-1);min-width:0;font-variant-numeric:tabular-nums}
+.amount:focus-within{border-color:var(--cib-teal-400);outline:2px solid var(--cib-teal-400);outline-offset:1px}
+.go{min-height:56px;min-width:110px;padding:0 18px;border-radius:var(--r-md);background:var(--cib-yellow-400);color:var(--cib-ink);border:2px solid var(--cib-black);box-shadow:var(--shadow-pop);font:900 16px/1 var(--font-display);cursor:pointer;transition:transform var(--dur-fast) var(--ease-snap),box-shadow var(--dur-fast)}
+.go:active{box-shadow:0 0 0 0 var(--cib-black);transform:translate(3px,3px)}
+.result{border-radius:var(--r-md);padding:16px;display:none;align-items:center;gap:12px}
+.result.show{display:flex}
+.result .big{font:900 22px/1.1 var(--font-display)}
+.result .why{font:400 13px/1.4 var(--font-sans);margin-top:2px}
+.result.yes{background:var(--money-available-soft);color:var(--money-available)}
+.result.no{background:var(--money-owed-soft);color:var(--money-owed)}
+.result .why{color:var(--fg-2)}
+.mark{width:40px;height:40px;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff;font:900 20px/1 var(--font-display)}
+.yes .mark{background:var(--money-available)}
+.no .mark{background:var(--money-owed)}
+.presets{display:flex;gap:8px}
+.presets button{flex:1;min-height:44px;border-radius:var(--r-pill);border:1px solid var(--border-2);background:var(--bg-surface);font:700 14px/1 var(--font-sans);color:var(--fg-1);cursor:pointer;font-variant-numeric:tabular-nums}
+.presets button:active{background:var(--bg-sunken)}
+</style></head>
+<body>
+<div>
+  <h3>Can I buy this?</h3>
+  <p class="sub">You have $420 spare after bills until payday.</p>
+</div>
+<div class="row">
+  <label class="amount"><span class="sym">$</span><input id="amt" inputmode="decimal" placeholder="0.00" autocomplete="off"></label>
+  <button class="go" id="go">Check</button>
+</div>
+<div class="presets">
+  <button data-v="20">$20</button>
+  <button data-v="50">$50</button>
+  <button data-v="150">$150</button>
+  <button data-v="500">$500</button>
+</div>
+<div class="result" id="res">
+  <span class="mark" id="mark">✓</span>
+  <div><div class="big" id="big"></div><div class="why" id="why"></div></div>
+</div>
+<script>
+(function(){
+  var SPARE = 420;
+  var res = document.getElementById('res'), big = document.getElementById('big'),
+      why = document.getElementById('why'), mark = document.getElementById('mark'),
+      amt = document.getElementById('amt');
+  function fmt(n){ return '$' + n.toLocaleString('en-AU', {minimumFractionDigits:0, maximumFractionDigits:2}); }
+  function check(v){
+    if (!v || isNaN(v)) { res.className = 'result'; return; }
+    var ok = v <= SPARE;
+    res.className = 'result show ' + (ok ? 'yes' : 'no');
+    mark.textContent = ok ? '✓' : '✕';
+    big.textContent = ok ? 'Yes — go for it.' : 'Not this time.';
+    why.textContent = ok
+      ? 'You\u2019d still have ' + fmt(SPARE - v) + ' spare before payday.'
+      : 'That\u2019s ' + fmt(v - SPARE) + ' more than you have spare before payday.';
+  }
+  document.getElementById('go').addEventListener('click', function(){ check(parseFloat(amt.value)); });
+  amt.addEventListener('keydown', function(e){ if (e.key === 'Enter') check(parseFloat(amt.value)); });
+  document.querySelectorAll('.presets button').forEach(function(b){
+    b.addEventListener('click', function(){ amt.value = b.dataset.v; check(parseFloat(b.dataset.v)); });
+  });
+})();
+</script>
+</body></html>
