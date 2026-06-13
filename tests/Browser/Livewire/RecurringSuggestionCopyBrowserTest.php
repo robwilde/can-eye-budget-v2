@@ -42,6 +42,8 @@ test('clicking a recurring suggestion opens the prefilled transaction modal', fu
         ],
     ]);
 
+    config(['budget.recurring_detection' => true]);
+
     $this->actingAs($user);
 
     $page = visit('/connect-bank');
