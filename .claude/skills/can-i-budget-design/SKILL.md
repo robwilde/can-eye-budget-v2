@@ -7,7 +7,7 @@ user-invocable: true
 Read `README.md` in this skill for the full brand + product context, then explore the other files as needed:
 
 - `colors_and_type.css` — raw palette, semantic tokens, radii, shadows, spacing, motion, type scale. Import directly in standalone HTML artifacts.
-- `assets/` — favicons. The full brand mark ships in the app at `public/images/cib-logo.png`; copy that out when you need the logo. Never redraw the mark.
+- `assets/` — favicons + the hi-res brand master `logo.png` (1024×1536). The app serves small optimised web copies from `public/images/` (~8 KB shell PNG, ~52 KB welcome WebP — see #296); use `assets/logo.png` here as the source. Never redraw the mark.
 - `preview/` — design-system cards. Read these as living references for colours, type, components.
 - `ui_kits/app/` — React + CSS recreation of the web app shell (sidebar, topbar, dashboard, transactions, connect-bank). Reference-only — copy patterns out and adapt; never commit React into the app.
 - `README.md` — the brand bible.
@@ -23,7 +23,7 @@ This skill lives inside the real repo (Laravel 12 + Livewire 4 + Flux UI Free v2
 
 ## When to use what
 
-- **Visual artifacts** (slides, throwaway prototypes, landing pages, marketing mocks) — import `colors_and_type.css`, copy `fonts/` + the mark from `public/images/cib-logo.png` alongside, and compose from the patterns in `ui_kits/app/` and `preview/`. Output static HTML files the user can open.
+- **Visual artifacts** (slides, throwaway prototypes, landing pages, marketing mocks) — import `colors_and_type.css`, copy `fonts/` + the brand master `assets/logo.png` alongside, and compose from the patterns in `ui_kits/app/` and `preview/`. Output static HTML files the user can open.
 - **Production code** — edit Blade/Livewire views and reuse the tokens/components already in `resources/css/app.css`. Stay on-brand using the rules in `README.md`. Never output React into the repo.
 
 ## Non-negotiables
