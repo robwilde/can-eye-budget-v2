@@ -1,285 +1,99 @@
-<laravel-boost-guidelines>
-=== foundation rules ===
+# Repository Guidelines
 
-# Laravel Boost Guidelines
+CanEye Budget v2 (`mrwilde/can-eye-budget`) — an Australian personal-budgeting app. This file orients an AI assistant; it complements `CLAUDE.md` / `CLAUDE.local.md` (the workflow bible) and `docs/plans/*`.
 
-The Laravel Boost guidelines are specifically curated by Laravel maintainers for this application. These guidelines should be followed closely to ensure the best experience when building Laravel applications.
+## Project Overview
 
-## Foundational Context
+Personal budgeting around a **pay-cycle**. Users feed bank transactions in via three paths — CSV statement import (`league/csv`), Basiq open-banking sync (`au-api.basiq.io`), and manual entry — then the app **reconciles** posted transactions against **planned/recurring** transactions and renders a calendar + 12-month balance forecast + pay-cycle dashboard. Server-rendered Laravel 12 monolith (no SPA): Livewire 4 full-page components + Flux 2 UI + Tailwind v4. Money is stored as **integer cents** everywhere.
 
-This application is a Laravel application and its main Laravel ecosystems package & versions are below. You are an expert with them all. Ensure you abide by these specific packages & versions.
+## Architecture & Data Flow
 
-- php - 8.4.18
-- laravel/boost (BOOST) - v2
-- laravel/fortify (FORTIFY) - v1
-- laravel/framework (LARAVEL) - v12
-- laravel/mcp (MCP) - v0
-- laravel/prompts (PROMPTS) - v0
-- livewire/flux (FLUXUI_FREE) - v2
-- livewire/livewire (LIVEWIRE) - v4
-- larastan/larastan (LARASTAN) - v3
-- laravel/pail (PAIL) - v1
-- laravel/pint (PINT) - v1
-- laravel/sail (SAIL) - v1
-- pestphp/pest (PEST) - v3
-- phpunit/phpunit (PHPUNIT) - v11
-- rector/rector (RECTOR) - v2
-- tailwindcss (TAILWINDCSS) - v4
+**Ingress → Ingestor → Reconcile → Event → (queue) Pipeline → Calendar/Projection.**
 
-## Skills Activation
+1. **Unified ingress** — every posted transaction funnels through `App\Services\TransactionIngestor::ingest(Transaction)` (`app/Services/TransactionIngestor.php`). Callers: `ImportCsvTransactionsJob`, `SyncTransactionsJob`, `Livewire/TransactionModal`. It saves the row, returns early if already linked (`planned_transaction_id !== null`), else reverse-matches a plan → `link()` + `event(TransactionReconciled)` or `event(TransactionEntered)`.
+2. **Reconciliation** — `App\Services\ReconciliationPolicy` is the single source of truth (static helpers, `AMOUNT_TOLERANCE = 0.10`, `DATE_TOLERANCE_DAYS = 3`). Three consumers share it so they never disagree: ingress (`ReconciliationMatcher::findPlanForTransaction`), async backstop (`PlannedTransactionMatcher::matchForUser`, `LOOKBACK_DAYS = 45`, greedy 1:1, ties→null), and calendar dedup (`DayActivityLoader`). Reconciling synchronously at ingress is what prevents a planned pip and an entered pip on the same calendar day.
+3. **Lifecycle events** (`app/Events/`): `TransactionEntered`, `TransactionReconciled`, `PlannedTransactionCreated` are emitted but have **no listeners** — deliberate seams. The events that DO have auto-discovered listeners are `TransactionCategoryUpdated` → `PropagateTransactionCategory` and `PlannedTransactionCategoryUpdated` → `PropagatePlannedTransactionCategory` (fired from model `booted()` hooks; no `EventServiceProvider` — Laravel listener auto-discovery).
+4. **Analysis pipeline** — import/sync jobs end with `RunTransactionAnalysisJob::dispatch($user)` → `App\Services\TransactionAnalysisPipeline::run()`. Ordered stages (wired in `AppServiceProvider::register`): `IdentifyPrimaryAccountStage` → `SetPayCycleStage` → `IdentifyRecurringTransactionsStage` (feature-flagged off) → `UserRulesStage` → `MatchPlannedTransactionsStage`. Each stage writes a `PipelineAuditEntry`; suggestions land in `AnalysisSuggestion`.
+5. **Read side** — `App\Support\Calendar\DayActivityLoader::load()` (calendar pips, suppresses a planned pip when a posting reconciles it) and `App\Services\Projection\MonthlyProjectionService::forUser()` (running balance from `primaryAccount->balance`, records `firstNegativeDate`).
 
-This project has domain-specific skills available. You MUST activate the relevant skill whenever you work in that domain—don't wait until you're stuck.
+## Key Directories (`app/`)
 
-- `fluxui-development` — Use this skill for Flux UI development in Livewire applications only. Trigger when working with <flux:*> components, building or customizing Livewire component UIs, creating forms, modals, tables, or other interactive elements. Covers: flux: components (buttons, inputs, modals, forms, tables, date-pickers, kanban, badges, tooltips, etc.), component composition, Tailwind CSS styling, Heroicons/Lucide icon integration, validation patterns, responsive design, and theming. Do not use for non-Livewire frameworks or non-component styling.
-- `livewire-development` — Develops reactive Livewire 4 components. Activates when creating, updating, or modifying Livewire components; working with wire:model, wire:click, wire:loading, or any wire: directives; adding real-time updates, loading states, or reactivity; debugging component behavior; writing Livewire tests; or when the user mentions Livewire, component, counter, or reactive UI.
-- `pest-testing` — Tests applications using the Pest 3 PHP framework. Activates when writing tests, creating unit or feature tests, adding assertions, testing Livewire components, architecture testing, debugging test failures, working with datasets or mocking; or when the user mentions test, spec, TDD, expects, assertion, coverage, or needs to verify functionality works.
-- `tailwindcss-development` — Styles applications using Tailwind CSS v4 utilities. Activates when adding styles, restyling components, working with gradients, spacing, layout, flex, grid, responsive design, dark mode, colors, typography, or borders; or when the user mentions CSS, styling, classes, Tailwind, restyle, hero section, cards, buttons, or any visual/UI changes.
-- `fortify-development` — Laravel Fortify headless authentication backend development. Activate when implementing authentication features including login, registration, password reset, email verification, two-factor authentication (2FA/TOTP), profile updates, headless auth, authentication scaffolding, or auth guards in Laravel applications.
-- `debugging-output-and-previewing-html-using-ray` — Use when user says "send to Ray," "show in Ray," "debug in Ray," "log to Ray," "display in Ray," or wants to visualize data, debug output, or show diagrams in the Ray desktop application.
-- `spatie-laravel-php-standards` — Apply Spatie's Laravel and PHP coding standards for any task that creates, edits, reviews, refactors, or formats Laravel/PHP code or Blade templates; use for controllers, Eloquent models, routes, config, validation, migrations, tests, and related files to align with Laravel conventions and PSR-12.
+| Dir | Purpose | Reps |
+|---|---|---|
+| `Services/` | Stateless `final readonly` business logic (the engine) | `TransactionIngestor`, `ReconciliationMatcher`, `IncomePatternDetector` |
+| `Services/PipelineStages/` | 5 `PipelineStageContract` impls | `SetPayCycleStage` |
+| `Services/CsvImport/` | CSV parse/map | `CsvParserService`, `CsvColumnMapper` |
+| `Services/Projection/` | Balance forecast | `MonthlyProjectionService`, `BalanceProjection` |
+| `Livewire/` | UI components (full-page + modal) | `TransactionModal` (~907 lines, most-tested), `CalendarView`, `Dashboard/` |
+| `Models/` | 13 Eloquent models | `Transaction`, `PlannedTransaction`, `User` |
+| `Enums/` | ~24 backed enums carrying behaviour | `RecurrenceFrequency`, `TransactionSource` |
+| `Support/` | Framework-agnostic helpers | `Calendar/DayActivityLoader`, `Recurring/MerchantSignature`, `AmountParser` |
+| `DTOs/` | Spatie LaravelData `Dto`s | `PipelineContext`, `StageResult`, `IncomePattern` |
+| `Jobs/` | Queued (`ShouldQueue`+`ShouldBeUnique`+`WithoutOverlapping`) | `SyncTransactionsJob`, `ImportCsvTransactionsJob` |
+| `Events/` · `Listeners/` | Decoupling seams + category propagation | `TransactionReconciled` · `PropagateTransactionCategory` |
+| `Casts/` | `MoneyCast` (int cents ↔ value, `format()`) | — |
+| `Actions/`, `Contracts/`, `Providers/`, `Http/`, `Console/Commands/` | Invokables, DI interfaces, providers, controllers/middleware, artisan | `CreateNewUser`, `BasiqServiceContract` |
 
-## Conventions
+## Development Commands
 
-- You must follow all existing code conventions used in this application. When creating or editing a file, check sibling files for the correct structure, approach, and naming.
-- Use descriptive names for variables and methods. For example, `isRegisteredForDiscounts`, not `discount()`.
-- Check for existing components to reuse before writing a new one.
+**All tooling runs inside DDEV. NEVER run `php`/`artisan`/`composer`/`npm`/`vendor/bin/*` directly.** Use `op` (OpCode) aliases from `op.conf` (they wrap `ddev exec`); `ddev exec …` is the fallback.
 
-## Verification Scripts
-
-- Do not create verification scripts or tinker when tests cover that functionality and prove they work. Unit and feature tests are more important.
-
-## Application Structure & Architecture
-
-- Stick to existing directory structure; don't create new base folders without approval.
-- Do not change the application's dependencies without approval.
-
-## Frontend Bundling
-
-- If the user doesn't see a frontend change reflected in the UI, it could mean they need to run `npm run build`, `npm run dev`, or `composer run dev`. Ask them.
-
-## Documentation Files
-
-- You must only create documentation files if explicitly requested by the user.
-
-## Replies
-
-- Be concise in your explanations - focus on what's important rather than explaining obvious details.
-
-=== boost rules ===
-
-# Laravel Boost
-
-- Laravel Boost is an MCP server that comes with powerful tools designed specifically for this application. Use them.
-
-## Artisan Commands
-
-- Run Artisan commands directly via the command line (e.g., `php artisan route:list`, `php artisan tinker --execute "..."`).
-- Use `php artisan list` to discover available commands and `php artisan [command] --help` to check parameters.
-
-## URLs
-
-- Whenever you share a project URL with the user, you should use the `get-absolute-url` tool to ensure you're using the correct scheme, domain/IP, and port.
-
-## Debugging
-
-- Use the `database-query` tool when you only need to read from the database.
-- Use the `database-schema` tool to inspect table structure before writing migrations or models.
-- To execute PHP code for debugging, run `php artisan tinker --execute "your code here"` directly.
-- To read configuration values, read the config files directly or run `php artisan config:show [key]`.
-- To inspect routes, run `php artisan route:list` directly.
-- To check environment variables, read the `.env` file directly.
-
-## Reading Browser Logs With the `browser-logs` Tool
-
-- You can read browser logs, errors, and exceptions using the `browser-logs` tool from Boost.
-- Only recent browser logs will be useful - ignore old logs.
-
-## Searching Documentation (Critically Important)
-
-- Boost comes with a powerful `search-docs` tool you should use before trying other approaches when working with Laravel or Laravel ecosystem packages. This tool automatically passes a list of installed packages and their versions to the remote Boost API, so it returns only version-specific documentation for the user's circumstance. You should pass an array of packages to filter on if you know you need docs for particular packages.
-- Search the documentation before making code changes to ensure we are taking the correct approach.
-- Use multiple, broad, simple, topic-based queries at once. For example: `['rate limiting', 'routing rate limiting', 'routing']`. The most relevant results will be returned first.
-- Do not add package names to queries; package information is already shared. For example, use `test resource table`, not `filament 4 test resource table`.
-
-### Available Search Syntax
-
-1. Simple Word Searches with auto-stemming - query=authentication - finds 'authenticate' and 'auth'.
-2. Multiple Words (AND Logic) - query=rate limit - finds knowledge containing both "rate" AND "limit".
-3. Quoted Phrases (Exact Position) - query="infinite scroll" - words must be adjacent and in that order.
-4. Mixed Queries - query=middleware "rate limit" - "middleware" AND exact phrase "rate limit".
-5. Multiple Queries - queries=["authentication", "middleware"] - ANY of these terms.
-
-=== php rules ===
-
-# PHP
-
-- Always use curly braces for control structures, even for single-line bodies.
-
-## Constructors
-
-- Use PHP 8 constructor property promotion in `__construct()`.
-    - `public function __construct(public GitHub $github) { }`
-- Do not allow empty `__construct()` methods with zero parameters unless the constructor is private.
-
-## Type Declarations
-
-- Always use explicit return type declarations for methods and functions.
-- Use appropriate PHP type hints for method parameters.
-
-<!-- Explicit Return Types and Method Params -->
-```php
-protected function isAccessible(User $user, ?string $path = null): bool
-{
-    ...
-}
+```bash
+op test                       # full suite  → ddev exec php artisan test --compact
+op test.filter <name>         # single test → ... --filter="<name>"
+op test.unit | test.feature | test.browser    # one suite (--testsuite=…)
+op test.coverage | test.parallel | test.mutate # coverage / --parallel / --mutate --min=85
+op lint                       # pint --parallel (write)   ;  op lint.dirty = pint --dirty
+op check.dirty                # pint + phpstan on changed PHP
+op analyse                    # phpstan (memory 512M)
+op ci                         # lint.check + mago.lint + analyse + test
+op migrate[.fresh|.rollback|.status]   # DB
+op seed | seed.basiq | seed.sandbox    # seeders
+op build                      # ddev exec npm run build (Vite)
+op horizon | op logs          # queues / pail tail
 ```
+`op test*` are **flock-guarded single-flight** (`/tmp/op-test.lock`) — never background or stack them. First-run bootstrap: `ddev composer setup`. Host-level composer scripts also exist (`composer dev/test/lint`) but `op`/`ddev exec` is the project convention.
 
-## Enums
+## Code Conventions & Common Patterns
 
-- Typically, keys in an Enum should be TitleCase. For example: `FavoritePerson`, `BestLake`, `Monthly`.
+Enforced by `pint.json` (preset `laravel` + strict ruleset) and `tests/Arch.php`:
 
-## Comments
+- **Always** `declare(strict_types=1)`, `final` classes, explicit return types, constructor property promotion, curly braces, `strict_comparison`, `date_time_immutable`, `global_namespace_import`, `mb_str_functions`. Class element order: traits → cases → constants → properties → constructor → magic → methods.
+- **Service objects**: `final readonly class` with promoted private deps. Stateless policy/util → static helpers (`ReconciliationPolicy`, `MerchantSignature::for()`, `MoneyCast::format()`). Arch rule: `App\Services` must be `final`.
+- **DI**: constructor injection for services/jobs; **method injection** in Livewire actions/`render()`, controllers, and job `handle()` — e.g. `acceptPrimaryAccount(int $id, SuggestionApplier $applier)`. Pass explicit `User`, not `auth()`, into shared appliers.
+- **Money = integer cents** (Arch rule: `App\Models` must not use `floatval`). `MoneyCast` coerces get/set; arithmetic in cents; Basiq strings via `(int) bcmul($amount, '100', 0)`; Blade gets `'formatMoney' => MoneyCast::format(...)`.
+- **Enums carry behaviour** (Arch rule: string-backed): `RecurrenceFrequency::nextOccurrence()`, `TransactionSource::forAnalysis()` (`[Basiq, Csv]`), `PayFrequency::toRecurrenceFrequency()`, `BankImportStatus::isTerminal()`. Rule engine drives off `RuleTriggerField`/`Operator`/`RuleActionType` via `match`.
+- **DTOs**: Spatie `LaravelData\Dto` (Arch rule: `App\DTOs` extend `Dto` + `final`) for transport; plain `final readonly` value objects (`PayCyclePip`, `BalancePoint`, `ParsedTransactionDto`) for views.
+- **Livewire**: `#[Computed]` derived props, `#[On('event')]` listeners, `#[Locked]` tamper-proof props, `#[Validate]` inline rules; bust computed cache with `unset($this->prop)` (annotate `@phpstan-ignore property.notFound`); `placeholder()` skeleton for `lazy`; cross-component `$this->dispatch('transaction-saved')`; `Flux::toast(...)`.
+- **Queries**: composable scopes (`Transaction::query()->current()->excludingTransfers()`); memory-safe back-application via `->lazyById()->each(...)`. Prefer `Model::query()` over `DB::`; `config()` not `env()`.
+- All dates are `CarbonImmutable` (`Date::use(CarbonImmutable::class)` in `AppServiceProvider`). Timezone `Australia/Brisbane`.
 
-- Prefer PHPDoc blocks over inline comments. Never use comments within the code itself unless the logic is exceptionally complex.
+## Important Files
 
-## PHPDoc Blocks
+- Entry points: `routes/web.php` (`Route::view` full-page Livewire: dashboard/calendar/transactions/accounts/rules; `POST webhooks/basiq` → `BasiqWebhookController`; `GET basiq/callback`), `routes/settings.php` (`Route::livewire(..., 'pages::settings.*')`), `routes/console.php` (scheduled `basiq:fail-stuck-refresh-logs` every 5 min).
+- Wiring: `app/Providers/AppServiceProvider.php` (singletons/aliases, **pipeline stage order**, view composers), `app/Providers/FortifyServiceProvider.php` (auth views `pages::auth.*`, 5/min limiters).
+- Layout: `resources/views/layouts/app/sidebar.blade.php` — Flux sidebar + **globally mounts `<livewire:transaction-modal/>` and `<livewire:feedback-widget/>`** (open modal anywhere via `dispatch('open-transaction-modal', date)`).
+- Frontend: `resources/css/app.css` (Tailwind v4 CSS-first + hand-rolled **CIB** design system: `cib-teal/yellow/black` tokens, `.cib-card`, signature `.cib-yellow-pill` "Add …" button), `resources/js/app.js` (only exposes ApexCharts + FeedbackPlus), `vite.config.js`.
+- Config: `config/budget.php` (single flag `recurring_detection`, default **false**), `config/services.php` (Basiq + GitHub feedback), `config/horizon.php`.
+- Docs of record (no README): `CLAUDE.md`, `CLAUDE.local.md`, `docs/plans/2026-06-05-transaction-reconciliation-lifecycle-design.md`, `docs/basiq-sandbox-setup.md`.
 
-- Add useful array shape type definitions when appropriate.
+## Runtime/Tooling Preferences
 
-=== tests rules ===
+- **PHP ^8.4** (DDEV `8.4`), `ext-bcmath`. **Laravel 12.56**, Livewire 4.2 + Flux 2.13, Fortify 1.36, Horizon 5.45, Spatie LaravelData 4.21, `league/csv` 9.28.
+- **Package manager: npm** (`package-lock.json`; no pnpm/bun). Frontend: Vite 7 + Tailwind v4 (`@tailwindcss/vite`, no `tailwind.config.js`).
+- **DDEV** dev env: nginx-fpm, MariaDB 11.8, Redis 7 addon (queues/cache/Horizon), web `mem_limit 4g`. Playwright Chromium auto-installed on `ddev start`.
+- Quality gates: **Pint** (strict), **PHPStan/larastan level 6** (`paths: app, bootstrap, config, database/{factories,seeders}, routes` — **`tests/` not analysed**), **GrumPHP pre-commit** runs Pint `--test` then PHPStan. Rector is installed but unconfigured.
 
-# Test Enforcement
+## Testing & QA
 
-- Every change must be programmatically tested. Write a new test or update an existing test, then run the affected tests to make sure they pass.
-- Run the minimum number of tests needed to ensure code quality and speed. Use `php artisan test --compact` with a specific filename or filter.
+- **Pest 4** (`pestphp/pest` v4.4.6) over PHPUnit. (Note: the Boost block in `CLAUDE.md` says Pest 3 — stale; lockfile is authoritative.) Suites in `phpunit.xml`: `Unit`, `Feature`, `Browser`, `Arch` (`tests/Arch.php`).
+- **Test DB** = SQLite `:memory:` (set inline in `phpunit.xml`; queue `sync`, cache/session/mail `array`, `BCRYPT_ROUNDS=4`). No `.env.testing` needed. `RefreshDatabase` applied to **Feature + Browser only** (via `tests/Pest.php`) — **Unit tests are pure, no DB**.
+- **Factories**: relationships via `->for()` + named states — `User::factory()->withPayCycle()`, `Account::factory()->for($user)->creditCard()/csvImport()`, `Transaction::factory()->for($user)->for($account)->manual()->debit()`.
+- **Date-sensitive tests**: freeze the clock — `$this->travelTo(CarbonImmutable::create(2026, 6, 15))` (usually in `beforeEach`) or `CarbonImmutable::setTestNow(...)` with explicit reset. Guards month-boundary flakiness.
+- **Assertions are strict**: `expect()->toBe()` (identity) chained with `->and()`; money asserted as exact int cents (`->toBe(300000)`); enums `->toBe(TransactionDirection::Debit)`; Livewire `->assertSet()/assertHasErrors()/assertDispatched()`; artisan `->expectsOutputToContain()->assertSuccessful()`.
+- **Browser** = Pest 4 browser plugin on **Playwright** (not Dusk): `visit('/path')->assertSee()->click(...)`, drive Livewire via `->script("Livewire.dispatch(...)")`, assert on stable hooks (`.cyc-pip.plan`, `[role="combobox"] input`). Files end `*BrowserTest.php`.
+- **Run gates**: `op test` (or `op test.filter <name>` while iterating); CI gate `op ci`; mutation min score 85% (`op test.mutate`). When changing a method signature, grep all of `tests/` for callers.
 
-=== laravel/core rules ===
+## Workflow (must follow)
 
-# Do Things the Laravel Way
-
-- Use `php artisan make:` commands to create new files (i.e. migrations, controllers, models, etc.). You can list available Artisan commands using `php artisan list` and check their parameters with `php artisan [command] --help`.
-- If you're creating a generic PHP class, use `php artisan make:class`.
-- Pass `--no-interaction` to all Artisan commands to ensure they work without user input. You should also pass the correct `--options` to ensure correct behavior.
-
-## Database
-
-- Always use proper Eloquent relationship methods with return type hints. Prefer relationship methods over raw queries or manual joins.
-- Use Eloquent models and relationships before suggesting raw database queries.
-- Avoid `DB::`; prefer `Model::query()`. Generate code that leverages Laravel's ORM capabilities rather than bypassing them.
-- Generate code that prevents N+1 query problems by using eager loading.
-- Use Laravel's query builder for very complex database operations.
-
-### Model Creation
-
-- When creating new models, create useful factories and seeders for them too. Ask the user if they need any other things, using `php artisan make:model --help` to check the available options.
-
-### APIs & Eloquent Resources
-
-- For APIs, default to using Eloquent API Resources and API versioning unless existing API routes do not, then you should follow existing application convention.
-
-## Controllers & Validation
-
-- Always create Form Request classes for validation rather than inline validation in controllers. Include both validation rules and custom error messages.
-- Check sibling Form Requests to see if the application uses array or string based validation rules.
-
-## Authentication & Authorization
-
-- Use Laravel's built-in authentication and authorization features (gates, policies, Sanctum, etc.).
-
-## URL Generation
-
-- When generating links to other pages, prefer named routes and the `route()` function.
-
-## Queues
-
-- Use queued jobs for time-consuming operations with the `ShouldQueue` interface.
-
-## Configuration
-
-- Use environment variables only in configuration files - never use the `env()` function directly outside of config files. Always use `config('app.name')`, not `env('APP_NAME')`.
-
-## Testing
-
-- When creating models for tests, use the factories for the models. Check if the factory has custom states that can be used before manually setting up the model.
-- Faker: Use methods such as `$this->faker->word()` or `fake()->randomDigit()`. Follow existing conventions whether to use `$this->faker` or `fake()`.
-- When creating tests, make use of `php artisan make:test [options] {name}` to create a feature test, and pass `--unit` to create a unit test. Most tests should be feature tests.
-
-## Vite Error
-
-- If you receive an "Illuminate\Foundation\ViteException: Unable to locate file in Vite manifest" error, you can run `npm run build` or ask the user to run `npm run dev` or `composer run dev`.
-
-=== laravel/v12 rules ===
-
-# Laravel 12
-
-- CRITICAL: ALWAYS use `search-docs` tool for version-specific Laravel documentation and updated code examples.
-- Since Laravel 11, Laravel has a new streamlined file structure which this project uses.
-
-## Laravel 12 Structure
-
-- In Laravel 12, middleware are no longer registered in `app/Http/Kernel.php`.
-- Middleware are configured declaratively in `bootstrap/app.php` using `Application::configure()->withMiddleware()`.
-- `bootstrap/app.php` is the file to register middleware, exceptions, and routing files.
-- `bootstrap/providers.php` contains application specific service providers.
-- The `app\Console\Kernel.php` file no longer exists; use `bootstrap/app.php` or `routes/console.php` for console configuration.
-- Console commands in `app/Console/Commands/` are automatically available and do not require manual registration.
-
-## Database
-
-- When modifying a column, the migration must include all of the attributes that were previously defined on the column. Otherwise, they will be dropped and lost.
-- Laravel 12 allows limiting eagerly loaded records natively, without external packages: `$query->latest()->limit(10);`.
-
-### Models
-
-- Casts can and likely should be set in a `casts()` method on a model rather than the `$casts` property. Follow existing conventions from other models.
-
-=== livewire/core rules ===
-
-# Livewire
-
-- Livewire allows you to build dynamic, reactive interfaces using only PHP — no JavaScript required.
-- Instead of writing frontend code in JavaScript frameworks, you use Alpine.js to build the UI when client-side interactions are required.
-- State lives on the server; the UI reflects it. Validate and authorize in actions (they're like HTTP requests).
-- IMPORTANT: Activate `livewire-development` every time you're working with Livewire-related tasks.
-
-=== pint/core rules ===
-
-# Laravel Pint Code Formatter
-
-- If you have modified any PHP files, you must run `vendor/bin/pint --dirty --format agent` before finalizing changes to ensure your code matches the project's expected style.
-- Do not run `vendor/bin/pint --test --format agent`, simply run `vendor/bin/pint --format agent` to fix any formatting issues.
-
-=== pest/core rules ===
-
-## Pest
-
-- This project uses Pest for testing. Create tests: `php artisan make:test --pest {name}`.
-- Run tests: `php artisan test --compact` or filter: `php artisan test --compact --filter=testName`.
-- Do NOT delete tests without approval.
-- CRITICAL: ALWAYS use `search-docs` tool for version-specific Pest documentation and updated code examples.
-- IMPORTANT: Activate `pest-testing` every time you're working with a Pest or testing-related task.
-
-=== tailwindcss/core rules ===
-
-# Tailwind CSS
-
-- Always use existing Tailwind conventions; check project patterns before adding new ones.
-- IMPORTANT: Always use `search-docs` tool for version-specific Tailwind CSS documentation and updated code examples. Never rely on training data.
-- IMPORTANT: Activate `tailwindcss-development` every time you're working with a Tailwind CSS or styling-related task.
-
-=== laravel/fortify rules ===
-
-# Laravel Fortify
-
-- Fortify is a headless authentication backend that provides authentication routes and controllers for Laravel applications.
-- IMPORTANT: Always use the `search-docs` tool for detailed Laravel Fortify patterns and documentation.
-- IMPORTANT: Activate `developing-with-fortify` skill when working with Fortify authentication features.
-
-=== spatie/boost-spatie-guidelines rules ===
-
-# Project Coding Guidelines
-
-- This codebase follows Spatie's Laravel & PHP guidelines.
-- Always activate the `spatie-laravel-php-standards` skill whenever writing, editing, reviewing, or formatting Laravel or PHP code.
-
-</laravel-boost-guidelines>
+Issue-first: create a GitHub issue → branch `type/<issue>-slug` → commits `type(#issue): subject` (body explains *why* + verification, footer `Refs #<issue>` / `Closes #<issue>`) → **PR targets `develop`, never `main`** → request Copilot reviewer + apply one type label (`bug`|`enhancement`) + ≥1 layer label (`backend`|`frontend`), squash-merge into `develop`. `gh` account `robwilde`. Refute false-positive review suggestions with evidence rather than applying them. Write an Obsidian devlog after code changes. Infra/docs (`CLAUDE.md`, `.ddev/*`) commit directly to `develop`.
