@@ -1,0 +1,20 @@
+<!doctype html>
+<!-- @dsCard group="Spacing" name="Spacing scale" subtitle="4 · 8 · 12 · 16 · 24 · 32 · 48 · 64" viewport="700x160" -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>body{margin:0;padding:16px;background:var(--bg-page);font-family:var(--font-sans)}
+.row{display:grid;grid-template-columns:repeat(8,1fr);gap:8px;align-items:end}
+.bar{background:var(--cib-teal-300);border-radius:3px;position:relative}
+.bar::after{content:attr(data-l);position:absolute;top:-16px;left:0;font:500 10px/1 var(--font-mono);color:var(--fg-3)}
+.tok{font:500 10px/1 var(--font-mono);color:var(--fg-2);margin-top:8px;text-align:center}
+</style></head><body>
+<div class="row">
+  <div><div class="bar" style="height:4px" data-l="4"></div><div class="tok">--s-1</div></div>
+  <div><div class="bar" style="height:8px" data-l="8"></div><div class="tok">--s-2</div></div>
+  <div><div class="bar" style="height:12px" data-l="12"></div><div class="tok">--s-3</div></div>
+  <div><div class="bar" style="height:16px" data-l="16"></div><div class="tok">--s-4</div></div>
+  <div><div class="bar" style="height:24px" data-l="24"></div><div class="tok">--s-6</div></div>
+  <div><div class="bar" style="height:32px" data-l="32"></div><div class="tok">--s-8</div></div>
+  <div><div class="bar" style="height:48px" data-l="48"></div><div class="tok">--s-12</div></div>
+  <div><div class="bar" style="height:64px" data-l="64"></div><div class="tok">--s-16</div></div>
+</div>
+</body></html>

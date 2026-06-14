@@ -1,0 +1,23 @@
+<!doctype html>
+<!-- @dsCard group="Components" name="Toasts / alerts" subtitle="Ok · warn · err · info" viewport="700x310" -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>body{margin:0;padding:18px;background:var(--bg-page);font-family:var(--font-sans);display:flex;flex-direction:column;gap:10px}
+.toast{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:var(--r-sm);border:1px solid var(--border-1);background:#fff}
+.toast .dot{width:8px;height:8px;border-radius:50%;margin-top:7px;flex:none}
+.toast .body{flex:1}
+.t-title{font:600 13px/1.3 var(--font-sans);color:var(--fg-1)}
+.t-sub{font:var(--t-caption);color:var(--fg-3);margin-top:2px}
+.t-action{font:600 12px/1 var(--font-sans);color:var(--cib-teal-600);background:transparent;border:0;cursor:pointer;padding:4px 6px}
+.ok{background:var(--money-available-soft);border-color:var(--money-available)}
+.ok .dot{background:var(--money-available)}
+.warn{background:var(--money-planned-soft);border-color:var(--money-planned)}
+.warn .dot{background:var(--money-planned)}
+.err{background:var(--money-owed-soft);border-color:var(--money-owed)}
+.err .dot{background:var(--money-owed)}
+.info .dot{background:var(--cib-teal-500)}
+</style></head><body>
+<div class="toast ok"><div class="dot"></div><div class="body"><div class="t-title">Bank synced</div><div class="t-sub">Last synced just now · 14 of 20 refreshes used today</div></div><button class="t-action">Dismiss</button></div>
+<div class="toast warn"><div class="dot"></div><div class="body"><div class="t-title">Payday in 2 days</div><div class="t-sub">$80 below what you need — review planned spend</div></div><button class="t-action">Review</button></div>
+<div class="toast err"><div class="dot"></div><div class="body"><div class="t-title">Bank connection expired</div><div class="t-sub">Reconnect to keep balances up to date</div></div><button class="t-action">Reconnect</button></div>
+<div class="toast info"><div class="dot"></div><div class="body"><div class="t-title">New category suggested</div><div class="t-sub">"Spotify AU" → Subscription</div></div><button class="t-action">Apply</button></div>
+</body></html>

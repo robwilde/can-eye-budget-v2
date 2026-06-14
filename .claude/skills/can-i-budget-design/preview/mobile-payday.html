@@ -1,0 +1,38 @@
+<!-- @dsCard group="Mobile" viewport="390x300" name="Payday countdown" subtitle="Fortnightly cycle progress + spend pace" -->
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+body{margin:0;background:var(--bg-page);font-family:var(--font-sans);padding:16px}
+.card{background:var(--bg-surface);border:1px solid var(--border-1);border-radius:var(--r-md);padding:16px}
+.head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px}
+.head h3{margin:0;font:700 16px/1.2 var(--font-sans)}
+.head .cycle{font:400 12px/1 var(--font-sans);color:var(--fg-3)}
+.days{display:flex;gap:4px;margin-bottom:10px}
+.day{flex:1;height:34px;border-radius:6px;background:var(--cib-n-100);position:relative}
+.day.spent{background:var(--cib-teal-200)}
+.day.today{background:var(--cib-teal-500);outline:2px solid var(--cib-teal-500);outline-offset:2px}
+.day.pay{background:var(--cib-yellow-400);border:2px solid var(--cib-black);box-shadow:var(--shadow-pop-sm)}
+.legend{display:flex;justify-content:space-between;font:400 12px/1 var(--font-sans);color:var(--fg-3);margin-bottom:16px}
+.pace{display:flex;justify-content:space-between;gap:12px;border-top:1px dashed var(--border-1);padding-top:14px}
+.p{flex:1}
+.p .l{font:700 11px/1 var(--font-sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-3);margin-bottom:6px}
+.p .v{font:900 20px/1 var(--font-display);font-variant-numeric:tabular-nums}
+</style></head>
+<body>
+<div class="card">
+  <div class="head"><h3>Payday Thu 25 Jun</h3><span class="cycle">fortnightly · day 9 of 14</span></div>
+  <div class="days">
+    <div class="day spent"></div><div class="day spent"></div><div class="day spent"></div><div class="day spent"></div>
+    <div class="day spent"></div><div class="day spent"></div><div class="day spent"></div><div class="day spent"></div>
+    <div class="day today"></div><div class="day"></div><div class="day"></div><div class="day"></div>
+    <div class="day"></div><div class="day pay"></div>
+  </div>
+  <div class="legend"><span>Cycle started 12 Jun</span><span>5 days to go</span></div>
+  <div class="pace">
+    <div class="p"><div class="l">Spare / day</div><div class="v" style="color:var(--money-available)">$84</div></div>
+    <div class="p"><div class="l">Spend pace</div><div class="v">$61/day</div></div>
+    <div class="p"><div class="l">Bills left</div><div class="v">$1,980</div></div>
+  </div>
+</div>
+</body></html>

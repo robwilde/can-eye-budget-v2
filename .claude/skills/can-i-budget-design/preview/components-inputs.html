@@ -1,0 +1,19 @@
+<!doctype html>
+<!-- @dsCard group="Components" name="Inputs" subtitle="Text, select, money, error" viewport="700x260" -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>body{margin:0;padding:18px;background:var(--bg-page);font-family:var(--font-sans);display:grid;gap:10px;grid-template-columns:1fr 1fr}
+label{display:block;font:600 12px/1 var(--font-sans);color:var(--fg-2);margin-bottom:6px}
+input,select{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--border-2);border-radius:var(--r-sm);font:var(--t-body);background:#fff;color:var(--fg-1)}
+input:focus{outline:2px solid var(--cib-teal-400);outline-offset:2px;border-color:var(--cib-teal-400)}
+.group{position:relative}
+.prefix{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--fg-3);font:500 14px/1 var(--font-mono)}
+.prefix+input{padding-left:28px}
+.help{font:var(--t-caption);color:var(--fg-3);margin-top:6px}
+.err input{border-color:var(--money-owed)}
+.err .help{color:var(--money-owed)}
+</style></head><body>
+<div><label>Account nickname</label><input value="Everyday" /></div>
+<div><label>Pay cycle length</label><select><option>Fortnightly</option><option>Weekly</option><option>Monthly</option></select></div>
+<div><label>Target savings</label><div class="group"><span class="prefix">$</span><input value="500.00"/></div><div class="help">Per pay cycle</div></div>
+<div class="err"><label>Amount</label><div class="group"><span class="prefix">$</span><input value="abc"/></div><div class="help">Must be a number</div></div>
+</body></html>

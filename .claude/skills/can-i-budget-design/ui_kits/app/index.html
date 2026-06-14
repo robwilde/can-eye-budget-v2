@@ -1,0 +1,87 @@
+<!doctype html>
+<!-- @dsCard group="UI Kit — App" name="App UI kit" subtitle="Dashboard + sidebar + triad, interactive" viewport="1280x900" -->
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Can-I-Budget — UI Kit</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link rel="icon" href="../../assets/favicon.svg"/>
+<link rel="stylesheet" href="../../colors_and_type.css"/>
+<link rel="stylesheet" href="kit.css"/>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" src="primitives.jsx"></script>
+<script type="text/babel" src="shell.jsx"></script>
+<script type="text/babel" src="screens.jsx"></script>
+<script type="text/babel" data-presets="env,react">
+const { useState } = React;
+
+const SEED = {
+  owed: 1240,
+  available: 3420.5,
+  needed: 1980,
+  paydayDays: 5,
+  categories: [
+    { name: 'Groceries', icon: 'cart', spent: 312, budget: 400 },
+    { name: 'Transport', icon: 'car', spent: 168, budget: 200 },
+    { name: 'Coffee & food', icon: 'coffee', spent: 94, budget: 80 },
+    { name: 'Subscriptions', icon: 'music', spent: 62, budget: 70 },
+  ],
+  transactions: [
+    { id: 1, date: '18 Apr', name: 'Coles Supermarkets', cat: 'Groceries', icon: 'cart', amount: -82.40 },
+    { id: 2, date: '17 Apr', name: 'Salary — ACME Pty Ltd', cat: 'Income', icon: 'trend', amount: 2140 },
+    { id: 3, date: '17 Apr', name: 'Spotify AU', cat: 'Subscription', icon: 'music', amount: -13.99 },
+    { id: 4, date: '16 Apr', name: 'BP Service Station', cat: 'Transport', icon: 'car', amount: -64.12 },
+    { id: 5, date: '15 Apr', name: 'Pablo & Rusty\'s', cat: 'Coffee', icon: 'coffee', amount: -5.80 },
+    { id: 6, date: '14 Apr', name: 'Woolworths Metro', cat: 'Groceries', icon: 'cart', amount: -28.10 },
+  ],
+};
+
+function App() {
+  const [route, setRoute] = useState('dashboard');
+  const [collapsed, setCollapsed] = useState(false);
+  const [connected, setConnected] = useState(true);
+  const [dark, setDark] = useState(false);
+  const [refreshes, setRefreshes] = useState(6);
+  const [state, setState] = useState(SEED);
+  const [lastSynced, setLastSynced] = useState('3 minutes ago');
+
+  React.useEffect(() => {
+    document.documentElement.classList.toggle('dark', dark);
+  }, [dark]);
+
+  if (!connected) {
+    return <ConnectBank onConnect={() => setConnected(true)} />;
+  }
+
+  const body = route === 'dashboard' ? <Dashboard state={state} />
+    : route === 'transactions' ? <Transactions state={state} onAdd={() => {}} />
+    : route === 'categories' ? <EmptyCategories />
+    : <EmptyCategories />;
+
+  return (
+    <div className={'app ' + (collapsed ? 'collapsed' : '')}>
+      <Sidebar current={route} onNav={setRoute} collapsed={collapsed} onToggle={() => setCollapsed(c => !c)} />
+      <div className="main">
+        <Topbar
+          onMenu={() => setCollapsed(c => !c)}
+          lastSynced={lastSynced}
+          refreshesLeft={20 - refreshes}
+          onRefresh={() => { setRefreshes(r => r + 1); setLastSynced('just now'); }}
+          onToggleTheme={() => setDark(d => !d)}
+          dark={dark}
+        />
+        {body}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
