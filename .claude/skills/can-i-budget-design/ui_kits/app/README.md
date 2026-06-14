@@ -12,8 +12,8 @@ Pixel-approximate recreation of the Can-I-Budget web app (Laravel 12 + Livewire 
 
 ## Screens included
 
-1. **Connect Bank** — onboarding screen; primary Basiq entry point (`app/Livewire/Settings/ConnectBank.php` in the codebase)
-2. **Dashboard** — the "can I spend?" answer + Owed/Available/Needed triad + budgets + recent activity (`resources/views/livewire/account-overview.blade.php`)
+1. **Connect Bank** — onboarding screen; primary Basiq entry point (`app/Livewire/ConnectBank.php` in the codebase)
+2. **Dashboard** — the "can I spend?" answer + Owed/Available/Needed triad + budgets + recent activity (`resources/views/livewire/dashboard.blade.php`)
 3. **Transactions** — filtered table (`resources/views/livewire/transaction-list.blade.php`)
 4. **Categories empty state** — mirrors `spending-by-category.blade.php`'s zero-data branch
 

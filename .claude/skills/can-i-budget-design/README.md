@@ -25,10 +25,10 @@ Everything else (transaction list, calendar, categories, rules, bank connection)
   - Roadmap: `agent-os/product/roadmap.md`
   - Tech stack: `agent-os/product/tech-stack.md`
   - Core Livewire views: `resources/views/livewire/*.blade.php`
-    (account-overview, spending-over-time, spending-by-category, transaction-list, calendar-view, connect-bank, …)
+    (dashboard, transaction-list, spending-by-category, calendar-view, connect-bank, account-manager, …)
   - Layouts: `resources/views/layouts/app/{sidebar,header}.blade.php`
   - Tailwind theme: `resources/css/app.css`
-- **Logo** — `uploads/can-eye-bugget-logo.png` → copied to `assets/logo.png`.
+- **Logo** — hi-res master `assets/logo.png` (1024×1536); the app serves optimised web copies from `public/images/` (see #296).
 - **GitHub repo** — `robwilde/can-eye-budget-v2` (not pulled; codebase was mounted locally).
 
 ## Index — what's in this folder
@@ -37,8 +37,8 @@ Everything else (transaction list, calendar, categories, rules, bank connection)
 README.md                   ← you are here
 SKILL.md                    ← Claude Code–compatible skill manifest
 colors_and_type.css         ← CSS custom properties: palette, semantic, type
-assets/                     ← logo, favicons
-fonts/                      ← (Google Fonts references; see Typography)
+assets/                     ← logo (master) + favicons
+fonts/                      ← Lato family (TTF: Thin–Black + italics)
 preview/                    ← Design System tab cards (colors, type, components, mobile)
 ui_kits/app/                ← Can-I-Budget web app UI kit (React JSX + index.html)
 ```
@@ -216,7 +216,7 @@ Mobile rules:
 ## Iconography
 
 - **System: Heroicons** (outline + mini solid) — this is what Flux UI ships with and what every product view uses today (`flux:icon.credit-card`, `flux:icon.banknotes`, `flux:icon.chart-pie`, `flux:icon.calendar-days`, etc.). We keep Heroicons as the canonical product icon set.
-- **Loaded via CDN** in this design system's HTML previews: [Heroicons UMD CDN](https://unpkg.com/heroicons@2.1.5/). Individual SVGs are pulled via a tiny helper in `ui_kits/app/Icon.jsx`.
+- **Previews:** the HTML preview cards use [lucide](https://lucide.dev) for incidental glyphs; the `ui_kits/app/` reference uses an inline `Icon` component in `primitives.jsx`. In the **product**, icons come from Flux's bundled Heroicons (`flux:icon.*`) — that is the canonical set; the preview/kit choice is reference-only.
 - **Weight:** 1.5px stroke, 24×24 canvas. Use the 20×20 `mini` solid variant inside coloured badge squares; outline 24×24 in lists and buttons.
 - **Brand mark** (the can + eye + dollar) is **not an icon** — it lives in `assets/logo.png` and is only used whole. Do not extract the eye or the can as standalone pictograms in-app.
 - **Emoji:** never in product UI. Acceptable in marketing copy and social (sparingly).
