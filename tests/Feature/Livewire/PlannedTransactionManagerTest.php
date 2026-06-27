@@ -186,7 +186,9 @@ test('pay cycle income plans cannot be saved through a forced edit', function ()
         ->set('amount', '12.34')
         ->set('frequency', RecurrenceFrequency::EveryWeek->value)
         ->set('direction', TransactionDirection::Debit->value)
-        ->call('save');
+        ->call('save')
+        ->assertSet('showEditModal', false)
+        ->assertSet('editingId', null);
 
     $fresh = $incomePlan->fresh();
 
@@ -205,6 +207,21 @@ test('rejects a sub-cent amount on save', function () {
         ->test(PlannedTransactionManager::class)
         ->call('openEdit', $plan->id)
         ->set('amount', '0.004')
+        ->call('save')
+        ->assertHasErrors(['amount']);
+
+    expect($plan->fresh()->amount)->toBe(2500);
+});
+
+test('rejects an amount with more than two decimal places', function () {
+    $plan = PlannedTransaction::factory()->for($this->user)->for($this->primaryAccount)->create([
+        'amount' => 2500,
+    ]);
+
+    Livewire::actingAs($this->user)
+        ->test(PlannedTransactionManager::class)
+        ->call('openEdit', $plan->id)
+        ->set('amount', '10.005')
         ->call('save')
         ->assertHasErrors(['amount']);
 

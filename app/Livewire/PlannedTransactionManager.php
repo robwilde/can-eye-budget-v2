@@ -185,6 +185,7 @@ final class PlannedTransactionManager extends Component
             return true;
         }
 
+        $this->resetModals();
         Flux::toast(text: 'Pay cycle income is managed elsewhere', variant: 'warning');
 
         return false;
@@ -245,7 +246,7 @@ final class PlannedTransactionManager extends Component
     private function formRules(): array
     {
         return [
-            'amount' => ['required', 'numeric', 'min:0.01'],
+            'amount' => ['required', 'numeric', 'decimal:0,2', 'min:0.01'],
             'frequency' => ['required', 'string', Rule::in($this->frequencyValues())],
             'direction' => ['required', 'string', Rule::in($this->directionValues())],
             'untilDate' => ['nullable', 'date'],
@@ -301,5 +302,13 @@ final class PlannedTransactionManager extends Component
     {
         $this->deletingId = null;
         $this->deletingDescription = '';
+    }
+
+    private function resetModals(): void
+    {
+        $this->showEditModal = false;
+        $this->showDeleteModal = false;
+        $this->resetEditForm();
+        $this->resetDeleteForm();
     }
 }
