@@ -7,23 +7,24 @@ namespace App\DTOs;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use Carbon\CarbonImmutable;
+use Spatie\LaravelData\Dto;
 
-final readonly class RecurringCandidate
+final class RecurringCandidate extends Dto
 {
     /**
      * @param  list<int>  $matchedTransactionIds
      */
     public function __construct(
-        public string $description,
-        public string $cleanDescription,
-        public int $amount,
-        public TransactionDirection $direction,
-        public RecurrenceFrequency $frequency,
-        public int $accountId,
-        public ?int $categoryId,
-        public array $matchedTransactionIds,
-        public CarbonImmutable $startDate,
-        public float $confidenceScore,
+        public readonly string $description,
+        public readonly string $cleanDescription,
+        public readonly int $amount,
+        public readonly TransactionDirection $direction,
+        public readonly RecurrenceFrequency $frequency,
+        public readonly int $accountId,
+        public readonly ?int $categoryId,
+        public readonly array $matchedTransactionIds,
+        public readonly CarbonImmutable $startDate,
+        public readonly float $confidenceScore,
     ) {}
 
     /**
