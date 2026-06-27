@@ -134,6 +134,11 @@ final class RecurringTransactionReview extends Component
         $accounts = $this->accountsForUser();
         $suggestions = $this->pendingSuggestionsForSelectedAccount();
 
+        $this->recurringCategories = array_intersect_key(
+            $this->recurringCategories,
+            $suggestions->pluck('id')->flip()->all(),
+        );
+
         foreach ($suggestions as $suggestion) {
             if (! array_key_exists($suggestion->id, $this->recurringCategories)) {
                 $this->recurringCategories[$suggestion->id] = $suggestion->payload['category_id'] ?? null;

@@ -170,7 +170,7 @@ final readonly class RecurringTransactionDetector
         $count = $sorted->count();
 
         if ($count % 2 === 0) {
-            return ($sorted[$count / 2 - 1] + $sorted[$count / 2]) / 2.0;
+            return ($sorted[intdiv($count, 2) - 1] + $sorted[intdiv($count, 2)]) / 2.0;
         }
 
         return (float) $sorted[intdiv($count, 2)];

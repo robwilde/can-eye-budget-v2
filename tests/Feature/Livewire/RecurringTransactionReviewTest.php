@@ -238,3 +238,24 @@ test('rescanning without resolving supersedes the prior pending suggestion inste
             ->where('status', SuggestionStatus::Superseded)
             ->count())->toBe(1);
 });
+
+test('recurringCategories does not retain superseded suggestion keys across scans', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $user->update(['primary_account_id' => $account->id]);
+
+    createRecurringReviewMonthlyGroup($user, $account, 'Netflix', 1699, 3);
+
+    $component = Livewire::actingAs($user)
+        ->test(RecurringTransactionReview::class)
+        ->call('findRecurring');
+
+    $firstKeys = array_keys($component->get('recurringCategories'));
+
+    $component->call('findRecurring');
+
+    $secondKeys = array_keys($component->get('recurringCategories'));
+
+    expect($secondKeys)->toHaveCount(1)
+        ->and(array_intersect($firstKeys, $secondKeys))->toBeEmpty();
+});
