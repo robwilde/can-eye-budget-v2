@@ -40,7 +40,20 @@ final readonly class RecurringTransactionDetector
     /** @return Collection<int, RecurringCandidate> */
     public function detect(User $user, ?int $accountId = null): Collection
     {
-        $transactions = $this->loadUnmatchedTransactions($user, $accountId);
+        return $this->detectFrom($this->loadAnalyzable($user, $accountId));
+    }
+
+    /**
+     * Detect recurring candidates from an already-loaded transaction set. Lets a
+     * caller that has already queried the analyzable transactions (e.g. the
+     * pipeline stage deciding the no-transactions audit) reuse them instead of
+     * issuing a second query.
+     *
+     * @param  Collection<int, Transaction>  $transactions
+     * @return Collection<int, RecurringCandidate>
+     */
+    public function detectFrom(Collection $transactions): Collection
+    {
         /** @var Collection<int, RecurringCandidate> $candidates */
         $candidates = collect();
 
@@ -74,13 +87,13 @@ final readonly class RecurringTransactionDetector
         return $candidates;
     }
 
-    public function hasAnalyzableTransactions(User $user, ?int $accountId = null): bool
-    {
-        return $this->unmatchedTransactionsQuery($user, $accountId)->exists();
-    }
-
-    /** @return Collection<int, Transaction> */
-    private function loadUnmatchedTransactions(User $user, ?int $accountId = null): Collection
+    /**
+     * The unmatched, analysis-eligible transactions for the user (optionally a
+     * single account). Public so a caller can load once and reuse the set.
+     *
+     * @return Collection<int, Transaction>
+     */
+    public function loadAnalyzable(User $user, ?int $accountId = null): Collection
     {
         return $this->unmatchedTransactionsQuery($user, $accountId)->get();
     }

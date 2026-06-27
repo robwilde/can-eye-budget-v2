@@ -37,9 +37,9 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
 
     public function execute(PipelineContext $context): StageResult
     {
-        $candidates = $this->detector->detect($context->user);
+        $transactions = $this->detector->loadAnalyzable($context->user);
 
-        if ($candidates->isEmpty() && ! $this->detector->hasAnalyzableTransactions($context->user)) {
+        if ($transactions->isEmpty()) {
             PipelineAuditEntry::create([
                 'pipeline_run_id' => $context->pipelineRun->id,
                 'stage' => self::STAGE_KEY,
@@ -50,6 +50,7 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
             return new StageResult(success: true, stage: self::STAGE_KEY, suggestionIds: []);
         }
 
+        $candidates = $this->detector->detectFrom($transactions);
         $suggestionIds = $this->writer->writeForRun($context->user, $context->pipelineRun, $candidates);
 
         return new StageResult(success: true, stage: self::STAGE_KEY, suggestionIds: $suggestionIds);

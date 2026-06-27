@@ -3,7 +3,7 @@
 - **Date:** 2026-06-27
 - **Status:** Approved (design phase)
 - **Author:** brainstorming session (robwilde + assistant)
-- **Tech stack:** PHP 8.4, Laravel 12, Livewire 3 + Flux, Pest 4. Runs in DDEV (`op test*`). No new packages. **No schema migration.**
+- **Tech stack:** PHP 8.4, Laravel 12, Livewire 4 + Flux, Pest 4. Runs in DDEV (`op test*`). No new packages. **No schema migration.**
 
 ## Goal
 
