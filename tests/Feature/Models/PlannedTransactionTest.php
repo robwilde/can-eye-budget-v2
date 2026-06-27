@@ -521,3 +521,26 @@ test('excludingTransfers includes plans with no transfer_to_account_id and non-T
 
     expect(PlannedTransaction::excludingTransfers()->count())->toBe(1);
 });
+
+test('nextOccurrenceOnOrAfter resolves for a long-running daily plan with an old start date', function () {
+    $plan = PlannedTransaction::factory()->create([
+        'frequency' => RecurrenceFrequency::Everyday,
+        'start_date' => CarbonImmutable::parse('2018-01-01'),
+        'until_date' => null,
+        'is_active' => true,
+    ]);
+
+    $next = $plan->nextOccurrenceOnOrAfter(CarbonImmutable::parse('2026-06-27'));
+
+    expect($next)->not->toBeNull()
+        ->and($next->toDateString())->toBe('2026-06-27');
+});
+
+test('nextOccurrenceOnOrAfter returns null for an inactive plan', function () {
+    $plan = PlannedTransaction::factory()->inactive()->create([
+        'frequency' => RecurrenceFrequency::EveryMonth,
+        'start_date' => CarbonImmutable::parse('2026-01-01'),
+    ]);
+
+    expect($plan->nextOccurrenceOnOrAfter(CarbonImmutable::parse('2026-06-27')))->toBeNull();
+});

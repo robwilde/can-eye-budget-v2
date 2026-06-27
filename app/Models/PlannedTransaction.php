@@ -191,7 +191,9 @@ final class PlannedTransaction extends Model
             return $current->greaterThanOrEqualTo($from) ? $current : null;
         }
 
-        for ($i = 0; $i < 100000; $i++) {
+        $maxIterations = (int) abs($this->start_date->diffInDays($from)) + 367;
+
+        for ($i = 0; $i < $maxIterations; $i++) {
             if ($this->until_date !== null && $current->greaterThan($this->until_date)) {
                 return null;
             }
