@@ -10,6 +10,7 @@ use App\Models\User;
 
 beforeEach(function () {
     $this->user = User::factory()->withPayCycle()->create([
+        'name' => 'Sidebar Test User',
         'next_pay_date' => now()->addDays(5),
     ]);
     $this->actingAs($this->user);
