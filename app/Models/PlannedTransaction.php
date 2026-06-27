@@ -168,6 +168,50 @@ final class PlannedTransaction extends Model
         return $dates;
     }
 
+    /**
+     * The first occurrence on or after $from, respecting until_date, advancing
+     * from start_date so the cadence anchor (e.g. day-of-month) is preserved.
+     * Unlike occurrencesBetween() this is not bound to a fixed window, so a
+     * long-running daily plan still resolves its next date. Null when inactive
+     * or ended.
+     */
+    public function nextOccurrenceOnOrAfter(CarbonImmutable $from): ?CarbonImmutable
+    {
+        if (! $this->is_active) {
+            return null;
+        }
+
+        $current = $this->start_date;
+
+        if ($this->frequency === RecurrenceFrequency::DontRepeat) {
+            if ($this->until_date !== null && $current->greaterThan($this->until_date)) {
+                return null;
+            }
+
+            return $current->greaterThanOrEqualTo($from) ? $current : null;
+        }
+
+        for ($i = 0; $i < 100000; $i++) {
+            if ($this->until_date !== null && $current->greaterThan($this->until_date)) {
+                return null;
+            }
+
+            if ($current->greaterThanOrEqualTo($from)) {
+                return $current;
+            }
+
+            $next = $this->frequency->nextOccurrence($current);
+
+            if ($next === null) {
+                return null;
+            }
+
+            $current = $next;
+        }
+
+        return null;
+    }
+
     protected static function booted(): void
     {
         self::created(static function (PlannedTransaction $plannedTransaction): void {
