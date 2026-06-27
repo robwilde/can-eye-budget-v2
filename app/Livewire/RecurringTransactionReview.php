@@ -49,8 +49,10 @@ final class RecurringTransactionReview extends Component
             return;
         }
 
+        $candidates = $detector->detect($user, $this->accountId);
+
         /** @var list<int> $suggestionIds */
-        $suggestionIds = DB::transaction(function () use ($detector, $writer, $user): array {
+        $suggestionIds = DB::transaction(function () use ($writer, $user, $candidates): array {
             $run = PipelineRun::create([
                 'user_id' => $user->id,
                 'trigger' => PipelineTrigger::Manual,
@@ -68,7 +70,6 @@ final class RecurringTransactionReview extends Component
                     'resolved_at' => CarbonImmutable::now(),
                 ]);
 
-            $candidates = $detector->detect($user, $this->accountId);
             $ids = $writer->writeForRun($user, $run, $candidates);
 
             $run->update([

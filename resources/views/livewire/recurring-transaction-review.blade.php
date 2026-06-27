@@ -76,6 +76,8 @@
                                 size="sm"
                                 wire:key="accept-recurring-{{ $suggestion->id }}"
                                 wire:click="accept({{ $suggestion->id }})"
+                                wire:loading.attr="disabled"
+                                wire:target="accept({{ $suggestion->id }})"
                             >
                                 Accept
                             </flux:button>
@@ -84,6 +86,8 @@
                                 size="sm"
                                 wire:key="dismiss-recurring-{{ $suggestion->id }}"
                                 wire:click="dismiss({{ $suggestion->id }})"
+                                wire:loading.attr="disabled"
+                                wire:target="dismiss({{ $suggestion->id }})"
                             >
                                 Dismiss
                             </flux:button>
