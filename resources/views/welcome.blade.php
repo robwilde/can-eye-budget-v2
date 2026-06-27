@@ -132,7 +132,7 @@
 <nav class="max-w-6xl mx-auto px-6 lg:px-10 pt-8 flex items-center justify-between">
     <a href="{{ route('home') }}" class="flex items-center gap-3 focus-ring">
         <img
-                src="{{ asset('images/can-eye-bugget-logo.png') }}"
+                src="{{ asset('images/can-eye-bugget-logo.webp') }}"
                 alt="Can Eye Budget"
                 width="40"
                 height="40"
@@ -243,7 +243,7 @@
 
                 <div class="rounded-3xl overflow-hidden bg-teal-soft" style="box-shadow: 12px 12px 0 var(--ce-ink);">
                     <img
-                            src="{{ asset('images/can-eye-bugget-logo.png') }}"
+                            src="{{ asset('images/can-eye-bugget-logo.webp') }}"
                             alt="Can Eye Budget — a playful tin can, eyeball, and dollar sign mascot"
                             class="w-full h-auto"
                             loading="eager"
