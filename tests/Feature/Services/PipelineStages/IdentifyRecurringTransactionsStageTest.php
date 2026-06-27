@@ -30,7 +30,7 @@ beforeEach(function () {
         pipelineRun: $this->pipelineRun,
         isFirstSync: false,
     );
-    $this->stage = new IdentifyRecurringTransactionsStage;
+    $this->stage = app(IdentifyRecurringTransactionsStage::class);
 });
 
 function createBasiqTransaction(User $user, Account $account, array $overrides = []): Transaction
