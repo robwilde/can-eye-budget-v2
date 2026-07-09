@@ -130,8 +130,8 @@ final class Account extends Model
 
     public function availableBalance(): int
     {
-        if ($this->type === AccountClass::CreditCard) {
-            return ($this->credit_limit ?? 0) + $this->balance;
+        if ($this->credit_limit !== null) {
+            return $this->credit_limit + $this->balance;
         }
 
         return $this->balance;
@@ -139,8 +139,12 @@ final class Account extends Model
 
     public function amountOwed(): int
     {
-        if ($this->type === AccountClass::CreditCard || $this->type === AccountClass::Loan) {
-            return abs($this->balance);
+        $isDebtAccount = $this->credit_limit !== null
+            || $this->type === AccountClass::CreditCard
+            || $this->type === AccountClass::Loan;
+
+        if ($isDebtAccount) {
+            return abs(min(0, $this->balance));
         }
 
         return 0;
