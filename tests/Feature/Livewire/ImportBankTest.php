@@ -12,6 +12,7 @@ use App\Jobs\ImportCsvTransactionsJob;
 use App\Livewire\ImportBank;
 use App\Models\Account;
 use App\Models\BankImport;
+use App\Models\Transaction;
 use App\Models\User;
 use App\Services\CsvImport\CsvColumnMapper;
 use App\Services\CsvImport\CsvParserService;
@@ -369,4 +370,30 @@ test('a manually entered balance is preserved when the mapping changes', functio
         ->set('mapping.'.CsvColumnMapper::FIELD_BALANCE, 'RunningTotal');
 
     expect($component->get('currentBalance'))->toBe('99.99');
+});
+
+// ── lastImportedDate computed property (#313) ─────────────────────────────────
+
+test('selecting an existing account with a prior csv transaction shows last-imported hint', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create();
+    Transaction::factory()->for($user)->for($account)->fromCsv()->create(['post_date' => '2026-07-09']);
+
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'existing')
+        ->set('accountId', $account->id)
+        ->assertSeeHtml('data-testid="import-bank-last-imported"')
+        ->assertSeeHtml('09/07/2026');
+});
+
+test('selecting an existing account with no imported transactions shows no last-imported hint', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create();
+
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'existing')
+        ->set('accountId', $account->id)
+        ->assertDontSeeHtml('data-testid="import-bank-last-imported"');
 });

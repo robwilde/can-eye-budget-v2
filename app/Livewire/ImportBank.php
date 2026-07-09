@@ -9,12 +9,15 @@ use App\Enums\ImportSource;
 use App\Jobs\ImportCsvTransactionsJob;
 use App\Models\Account;
 use App\Models\BankImport;
+use App\Models\Transaction;
 use App\Services\CsvImport\CsvColumnMapper;
 use App\Services\CsvImport\CsvParserService;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 use League\Csv\Exception;
 use League\Csv\SyntaxError;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
@@ -205,6 +208,16 @@ final class ImportBank extends Component
     public function updatedCurrentBalance(): void
     {
         $this->balanceTouched = true;
+    }
+
+    #[Computed]
+    public function lastImportedDate(): ?CarbonImmutable
+    {
+        if ($this->accountId === null || $this->accountChoice !== 'existing') {
+            return null;
+        }
+
+        return Transaction::lastImportedPostDate((int) auth()->id(), $this->accountId);
     }
 
     public function render(CsvParserService $parser): View
