@@ -397,3 +397,54 @@ test('selecting an existing account with no imported transactions shows no last-
         ->set('accountId', $account->id)
         ->assertDontSeeHtml('data-testid="import-bank-last-imported"');
 });
+
+// ── date continuity gap check (#316) ─────────────────────────────────────────
+
+test('uploading a csv whose earliest date is after the last import shows a gap warning', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create();
+
+    // Last imported transaction is 5 days before the CSV's earliest row (01/01/2026)
+    Transaction::factory()->for($user)->for($account)->fromCsv()->create(['post_date' => '2025-12-27']);
+
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'existing')
+        ->set('accountId', $account->id)
+        ->set('file', fixtureUpload())
+        ->call('uploadAndDetectHeaders')
+        ->assertSeeHtml('data-testid="import-bank-continuity-gap"')
+        ->assertSeeHtml('01/01/2026')
+        ->assertSeeHtml('27/12/2025');
+});
+
+test('uploading a csv that overlaps the last import shows a continuous confirmation', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create();
+
+    // Last imported transaction is inside the CSV range (CSV starts 01/01/2026)
+    Transaction::factory()->for($user)->for($account)->fromCsv()->create(['post_date' => '2026-01-02']);
+
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'existing')
+        ->set('accountId', $account->id)
+        ->set('file', fixtureUpload())
+        ->call('uploadAndDetectHeaders')
+        ->assertSeeHtml('data-testid="import-bank-continuity-ok"')
+        ->assertDontSeeHtml('data-testid="import-bank-continuity-gap"');
+});
+
+test('uploading a csv for an account with no prior imports shows no continuity message', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create();
+
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'existing')
+        ->set('accountId', $account->id)
+        ->set('file', fixtureUpload())
+        ->call('uploadAndDetectHeaders')
+        ->assertDontSeeHtml('data-testid="import-bank-continuity-gap"')
+        ->assertDontSeeHtml('data-testid="import-bank-continuity-ok"');
+});

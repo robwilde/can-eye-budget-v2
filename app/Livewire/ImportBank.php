@@ -241,6 +241,20 @@ final class ImportBank extends Component
             }
         }
 
+        $continuity = null;
+
+        if ($summary?->earliestDate !== null && $this->accountChoice === 'existing' && $this->accountId !== null) {
+            $lastImported = Transaction::lastImportedPostDate((int) auth()->id(), $this->accountId);
+
+            if ($lastImported !== null) {
+                $continuity = [
+                    'status' => $summary->earliestDate->greaterThan($lastImported) ? 'gap' : 'continuous',
+                    'lastImportedDate' => $lastImported,
+                    'fileEarliest' => $summary->earliestDate,
+                ];
+            }
+        }
+
         if ($this->accountChoice === 'existing' && ! $this->balanceTouched) {
             $this->currentBalance = $summary?->closingBalance !== null
                 ? number_format($summary->closingBalance / 100, 2, '.', '')
@@ -252,6 +266,7 @@ final class ImportBank extends Component
             'bankImport' => $bankImport,
             'previewRows' => $previewRows,
             'summary' => $summary,
+            'continuity' => $continuity,
             'fields' => [
                 CsvColumnMapper::FIELD_DATE => 'Date',
                 CsvColumnMapper::FIELD_DESCRIPTION => 'Description',
