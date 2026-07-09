@@ -200,12 +200,4 @@
             </div>
         </div>
     </flux:modal>
-
-    <x-cib.card>
-        <flux:modal.trigger name="category-editor">
-            <flux:button variant="ghost" icon="tag" class="w-full">
-                {{ __('Manage Categories') }}
-            </flux:button>
-        </flux:modal.trigger>
-    </x-cib.card>
 </div>
