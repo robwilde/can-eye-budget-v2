@@ -736,6 +736,142 @@ test('plannedCents excludes a suppressed occurrence but keeps unreconciled occur
         ->and($activity['2026-06-20']->pips[0]->kind)->toBe('plan');
 });
 
+// ── Pip tooltip ───────────────────────────────────────────────────
+
+test('categorised planned pip tooltip equals the plan description', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Electricity']);
+    $date = CarbonImmutable::create(2026, 6, 10);
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'category_id' => $category->id,
+        'description' => 'AGL Bill - June',
+        'amount' => 18000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    $day = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    )[$date->format('Y-m-d')];
+
+    expect($day->pips)->toHaveCount(1)
+        ->and($day->pips[0]->kind)->toBe('plan')
+        ->and($day->pips[0]->name)->toBe('Electricity')
+        ->and($day->pips[0]->tooltip)->toBe('AGL Bill - June');
+});
+
+test('uncategorised planned pip has null tooltip because name equals description', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = CarbonImmutable::create(2026, 6, 10);
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'category_id' => null,
+        'description' => 'Gym Membership',
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    $day = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    )[$date->format('Y-m-d')];
+
+    expect($day->pips)->toHaveCount(1)
+        ->and($day->pips[0]->name)->toBe('Gym Membership')
+        ->and($day->pips[0]->tooltip)->toBeNull();
+});
+
+test('reconciled posted pip tooltip equals the bank transaction description', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Rent']);
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'category_id' => $category->id,
+        'amount' => 77000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -77000,
+        'post_date' => $date,
+        'description' => 'Ext Tfr - NET#4789778169 Sekisui House',
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $day = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    )[$date->format('Y-m-d')];
+
+    expect($day->pips)->toHaveCount(1)
+        ->and($day->pips[0]->kind)->toBe('out')
+        ->and($day->pips[0]->name)->toBe('Rent')
+        ->and($day->pips[0]->tooltip)->toBe('Ext Tfr - NET#4789778169 Sekisui House');
+});
+
+test('categorised posted pip tooltip equals the transaction description', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Groceries']);
+    $date = CarbonImmutable::create(2026, 6, 20);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $category->id,
+        'amount' => -8500,
+        'post_date' => $date,
+        'description' => 'WOOLWORTHS 4232 BRISBANE',
+        'planned_transaction_id' => null,
+    ]);
+
+    $day = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    )[$date->format('Y-m-d')];
+
+    expect($day->pips)->toHaveCount(1)
+        ->and($day->pips[0]->name)->toBe('Groceries')
+        ->and($day->pips[0]->tooltip)->toBe('WOOLWORTHS 4232 BRISBANE');
+});
+
+test('uncategorised posted pip whose name equals its description has null tooltip', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = CarbonImmutable::create(2026, 6, 22);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => null,
+        'amount' => -3000,
+        'post_date' => $date,
+        'description' => 'PARKING FEE CBD',
+        'planned_transaction_id' => null,
+    ]);
+
+    $day = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    )[$date->format('Y-m-d')];
+
+    expect($day->pips)->toHaveCount(1)
+        ->and($day->pips[0]->name)->toBe('PARKING FEE CBD')
+        ->and($day->pips[0]->tooltip)->toBeNull();
+});
+
 test('DayActivity::empty returns a zero-state instance', function () {
     $empty = DayActivity::empty();
 

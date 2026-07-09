@@ -15,5 +15,6 @@ final readonly class PayCyclePip
         public ?int $plannedTransactionId,
         public ?string $occurrenceDate,
         public bool $matched = false,
+        public ?string $tooltip = null,
     ) {}
 }

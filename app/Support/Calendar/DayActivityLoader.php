@@ -93,6 +93,7 @@ final readonly class DayActivityLoader
                     transactionId: null,
                     plannedTransactionId: $planned->id,
                     occurrenceDate: $key,
+                    tooltip: $planned->category !== null ? $planned->description : null,
                 );
             }
         }
@@ -144,6 +145,7 @@ final readonly class DayActivityLoader
                     plannedTransactionId: null,
                     occurrenceDate: null,
                     matched: $linkedPlan !== null,
+                    tooltip: ($tx->description !== '' && $tx->description !== $name) ? $tx->description : null,
                 );
             }
 
