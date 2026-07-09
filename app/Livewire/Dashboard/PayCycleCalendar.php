@@ -241,7 +241,7 @@ final class PayCycleCalendar extends Component
     }
 
     /**
-     * @return array{rangeLabel: string, daysUntilPay: int|null}
+     * @return array{rangeLabel: string, daysUntilPay: int|null, monthLabel: string}
      */
     #[Computed]
     public function header(): array
@@ -249,21 +249,31 @@ final class PayCycleCalendar extends Component
         $bounds = $this->bounds; // @phpstan-ignore property.notFound
 
         if ($bounds === null) {
-            return ['rangeLabel' => '', 'daysUntilPay' => null];
+            return ['rangeLabel' => '', 'daysUntilPay' => null, 'monthLabel' => ''];
         }
 
-        $today = CarbonImmutable::today();
+        $start = $bounds['start'];
         $end = $bounds['end'];
+        $today = CarbonImmutable::today();
+
+        if ($start->format('Y-m') === $end->format('Y-m')) {
+            $monthLabel = $start->format('F Y');
+        } elseif ($start->year === $end->year) {
+            $monthLabel = $start->format('M').' – '.$end->format('M Y');
+        } else {
+            $monthLabel = $start->format('M Y').' – '.$end->format('M Y');
+        }
 
         return [
             'rangeLabel' => sprintf(
                 '%s → %s',
-                $bounds['start']->format('j M'),
+                $start->format('j M'),
                 $end->format('j M'),
             ),
             'daysUntilPay' => $this->cycleOffset === 0
                 ? max(0, (int) $today->diffInDays($end, false))
                 : null,
+            'monthLabel' => $monthLabel,
         ];
     }
 

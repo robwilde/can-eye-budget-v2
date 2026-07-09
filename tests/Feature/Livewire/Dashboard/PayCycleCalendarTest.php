@@ -855,3 +855,75 @@ test('the add-transaction button opens the modal pre-dated to the selected day',
         ->call('addTransaction')
         ->assertDispatched('open-transaction-modal', date: $iso);
 });
+
+// ── Month heading (issue #312) ────────────────────────────────────
+
+test('header monthLabel shows full month name when cycle is within one month', function () {
+    // Freeze to 2026-07-01; next pay 2026-07-16 → cycle 2026-07-02 – 2026-07-16 (July only).
+    $this->travelTo('2026-07-01');
+    [$user] = fortnightlyThursdayPayUser('2026-07-16');
+
+    $header = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->header();
+
+    expect($header['monthLabel'])->toBe('July 2026');
+});
+
+test('blade renders month heading in h2 with data-testid for same-month cycle', function () {
+    $this->travelTo('2026-07-01');
+    [$user] = fortnightlyThursdayPayUser('2026-07-16');
+
+    Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->assertSeeHtml('data-testid="pay-cycle-month"')
+        ->assertSeeHtml('<h2')
+        ->assertSee('July 2026');
+});
+
+test('header monthLabel spans two months when cycle crosses a month boundary', function () {
+    // Freeze to 2026-06-26; next pay 2026-07-09 → cycle 2026-06-25 – 2026-07-09 (Jun → Jul).
+    $this->travelTo('2026-06-26');
+    [$user] = fortnightlyThursdayPayUser('2026-07-09');
+
+    $header = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->header();
+
+    expect($header['monthLabel'])->toBe('Jun – Jul 2026');
+});
+
+test('header monthLabel spans two years when cycle crosses a year boundary', function () {
+    // Freeze to 2025-12-28; next pay 2026-01-08 → cycle 2025-12-25 – 2026-01-08 (Dec 2025 → Jan 2026).
+    $this->travelTo('2025-12-28');
+    [$user] = fortnightlyThursdayPayUser('2026-01-08');
+
+    $header = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->header();
+
+    expect($header['monthLabel'])->toBe('Dec 2025 – Jan 2026');
+});
+
+test('header monthLabel is empty string when pay cycle is not configured', function () {
+    $user = User::factory()->create();
+
+    $header = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->header();
+
+    expect($header['monthLabel'])->toBe('');
+});
+
+test('cyc-sub paragraph is prefixed with Pay cycle middle dot', function () {
+    $this->travelTo('2026-07-01');
+    [$user] = fortnightlyThursdayPayUser('2026-07-16');
+
+    Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->assertSee('Pay cycle ·');
+});
