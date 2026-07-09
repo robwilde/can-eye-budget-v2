@@ -38,22 +38,24 @@
 
             <div class="overflow-hidden rounded-lg border-2 border-[var(--color-border-strong)]">
                 @forelse($categories as $category)
-                    <div
+                    <button
+                        type="button"
                         wire:key="cat-{{ $category['id'] }}"
+                        wire:click="selectCategory({{ $category['id'] }})"
                         @class([
-                            'cat-list-row',
+                            'cat-list-row w-full',
                             'is-active' => $selectedCategoryId === $category['id'],
                             'is-hidden' => $category['is_hidden'],
                             'cat-group-head' => ! $isSearching && $category['depth'] === 0,
                         ])
                         style="{{ $isSearching ? '' : 'padding-left: '.(0.875 + $category['depth'] * 1.25).'rem' }}"
                     >
-                        <button type="button" wire:click="selectCategory({{ $category['id'] }})" class="flex min-w-0 items-center gap-2">
+                        <span class="flex min-w-0 items-center gap-2">
                             <flux:icon.chevron-right @class(['size-4 shrink-0 transition-transform', 'rotate-90' => $selectedCategoryId === $category['id']])/>
                             <span class="cat-name">{{ $isSearching ? $category['full_path'] : $category['name'] }}</span>
-                        </button>
+                        </span>
                         <span class="cat-count">{{ $category['transactions_count'] }}</span>
-                    </div>
+                    </button>
 
                     @if($selectedCategoryId === $category['id'])
                         <div wire:key="cat-detail-{{ $category['id'] }}" class="space-y-3 border-b-2 border-[var(--color-border-strong)] bg-[var(--color-cib-n-50)] px-4 py-3">
