@@ -30,14 +30,50 @@ test('displays categories with transaction counts', function () {
         ->assertSee('5');
 });
 
-test('displays full path for nested categories', function () {
+test('displays full path for nested categories when searching', function () {
     $user = User::factory()->create();
     $parent = Category::factory()->create(['name' => 'Office']);
     Category::factory()->withParent($parent)->create(['name' => 'Software']);
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
+        ->set('search', 'Software')
         ->assertSee('Office / Software');
+});
+
+test('browse mode shows own segment grouped under parent', function () {
+    $user = User::factory()->create();
+    $parent = Category::factory()->create(['name' => 'Office']);
+    Category::factory()->withParent($parent)->create(['name' => 'Software']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->assertSee('Office')
+        ->assertSee('Software')
+        ->assertDontSee('Office / Software');
+});
+
+test('selecting an already-expanded category collapses it', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['name' => 'Groceries']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $category->id)
+        ->assertSet('selectedCategoryId', $category->id)
+        ->call('selectCategory', $category->id)
+        ->assertSet('selectedCategoryId', null);
+});
+
+test('categories render inline without the modal', function () {
+    $user = User::factory()->create();
+    Category::factory()->create(['name' => 'Groceries']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->assertSeeHtml('cib-card')
+        ->assertSee('Groceries')
+        ->assertDontSeeHtml('max-h-[80vh]');
 });
 
 test('search filters categories by full path', function () {
@@ -252,19 +288,40 @@ test('transaction counts and list are scoped to authenticated user', function ()
         ->assertDontSee('Other User Transaction');
 });
 
-test('categories sorted by transaction count descending', function () {
+test('categories are ordered alphabetically grouped by full path', function () {
     $user = User::factory()->create();
-    $few = Category::factory()->create(['name' => 'Few']);
-    $many = Category::factory()->create(['name' => 'Many']);
-    Transaction::factory()->for($user)->count(2)->create(['category_id' => $few->id]);
-    Transaction::factory()->for($user)->count(10)->create(['category_id' => $many->id]);
+    Category::factory()->create(['name' => 'Zoo']);
+    $apple = Category::factory()->create(['name' => 'Apple']);
+    Category::factory()->withParent($apple)->create(['name' => 'Banana']);
+    Category::factory()->withParent($apple)->create(['name' => 'Ant']);
 
-    $component = Livewire::actingAs($user)
-        ->test(CategoryEditor::class);
+    $component = Livewire::actingAs($user)->test(CategoryEditor::class);
+    $paths = collect($component->viewData('categories'))->pluck('full_path')->all();
 
-    $categories = $component->viewData('categories');
-    expect($categories->first()['name'])->toBe('Many')
-        ->and($categories->last()['name'])->toBe('Few');
+    expect($paths)->toBe(['Apple', 'Apple / Ant', 'Apple / Banana', 'Zoo']);
+});
+
+test('view data carries depth for each category', function () {
+    $user = User::factory()->create();
+    $office = Category::factory()->create(['name' => 'Office']);
+    $training = Category::factory()->withParent($office)->create(['name' => 'Training']);
+    Category::factory()->withParent($training)->create(['name' => 'Course']);
+
+    $component = Livewire::actingAs($user)->test(CategoryEditor::class);
+    $byName = collect($component->viewData('categories'))->keyBy('name');
+
+    expect($byName['Office']['depth'])->toBe(0)
+        ->and($byName['Training']['depth'])->toBe(1)
+        ->and($byName['Course']['depth'])->toBe(2);
+});
+
+test('isSearching view flag reflects the search term', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)->test(CategoryEditor::class)
+        ->assertViewHas('isSearching', false)
+        ->set('search', 'Off')
+        ->assertViewHas('isSearching', true);
 });
 
 /* ------------------------------------------------------------------ */
@@ -302,4 +359,16 @@ test('cib: rename field label renders as cib-label span', function () {
         ->call('selectCategory', $category->id);
 
     $component->assertSeeHtml('class="cib-label');
+});
+
+test('cib: nested rows indent by depth and top-level rows are group headers', function () {
+    $user = User::factory()->create();
+    $office = Category::factory()->create(['name' => 'Office']);
+    Category::factory()->withParent($office)->create(['name' => 'Software']);
+
+    $html = Livewire::actingAs($user)->test(CategoryEditor::class)->html();
+
+    expect($html)->toContain('cat-group-head')
+        ->and($html)->toContain('padding-left: 0.875rem')
+        ->and($html)->toContain('padding-left: 2.125rem');
 });

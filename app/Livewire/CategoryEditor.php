@@ -7,6 +7,7 @@ namespace App\Livewire;
 use App\Casts\MoneyCast;
 use App\Models\Category;
 use App\Models\Transaction;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 use Livewire\Component;
 
@@ -36,6 +37,14 @@ final class CategoryEditor extends Component
 
     public function selectCategory(int $id): void
     {
+        if ($this->selectedCategoryId === $id) {
+            $this->selectedCategoryId = null;
+            $this->editingName = '';
+            $this->showDeleteConfirm = false;
+
+            return;
+        }
+
         $category = Category::find($id);
 
         if (! $category) {
@@ -136,22 +145,25 @@ final class CategoryEditor extends Component
     public function render(): View
     {
         $search = $this->search;
+        $isSearching = $search !== '';
 
         $categories = Category::query()
             ->with(['parent.parent'])
             ->withCount(['transactions' => fn ($q) => $q->where('user_id', auth()->id())->current()])
             ->when(! $this->showHidden, fn ($q) => $q->visible())
-            ->when($search !== '', fn ($q) => $q->where(function ($q) use ($search) {
+            ->when($isSearching, fn ($q) => $q->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
                     ->orWhereHas('parent', fn ($pq) => $pq->where('name', 'like', "%{$search}%"))
                     ->orWhereHas('parent.parent', fn ($pq) => $pq->where('name', 'like', "%{$search}%"));
             }))
-            ->orderByDesc('transactions_count')
             ->get()
+            ->sortBy(fn (Category $category): string => Str::lower($category->fullPath()), SORT_NATURAL)
+            ->values()
             ->map(fn (Category $category) => [
                 'id' => $category->id,
                 'name' => $category->name,
                 'full_path' => $category->fullPath(),
+                'depth' => $category->depth(),
                 'transactions_count' => $category->transactions_count,
                 'is_hidden' => $category->is_hidden,
                 'parent_id' => $category->parent_id,
@@ -177,6 +189,7 @@ final class CategoryEditor extends Component
             'categories' => $categories,
             'transactions' => $transactions,
             'parentOptions' => $parentOptions,
+            'isSearching' => $isSearching,
             'formatMoney' => MoneyCast::format(...),
         ]);
     }

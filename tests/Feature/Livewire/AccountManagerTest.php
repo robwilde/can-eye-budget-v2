@@ -373,15 +373,6 @@ test('cib: primary add account cta uses yellow-on-black pill not flux primary', 
     expect($html)->not->toMatch('/variant="primary"[^>]*wire:click="openAddModal"/');
 });
 
-test('cib: manage categories trigger sits inside a cib-card', function () {
-    $user = User::factory()->create();
-
-    Livewire::actingAs($user)
-        ->test(AccountManager::class)
-        ->assertSeeHtml('class="cib-card')
-        ->assertSee('Manage Categories');
-});
-
 test('cib: add account modal labels render as cib-label spans', function () {
     $user = User::factory()->create();
 
