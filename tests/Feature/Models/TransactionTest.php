@@ -11,6 +11,7 @@ use App\Models\Account;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
@@ -154,7 +155,7 @@ test('post_date is cast to date', function () {
     $transaction = Transaction::factory()->create(['post_date' => '2026-03-14']);
 
     expect($transaction->post_date)
-        ->toBeInstanceOf(Carbon\CarbonImmutable::class)
+        ->toBeInstanceOf(CarbonImmutable::class)
         ->and($transaction->post_date->toDateString())->toBe('2026-03-14');
 });
 
@@ -484,4 +485,84 @@ test('backfill sets source to basiq for transactions with basiq_id', function ()
 
     expect($basiqTransaction->fresh()->source)->toBe(TransactionSource::Basiq)
         ->and($manualTransaction->fresh()->source)->toBe(TransactionSource::Manual);
+});
+
+// ── Transaction::lastImportedPostDate (#313) ──────────────────────────────────
+
+test('lastImportedPostDate returns the maximum post_date across csv and basiq transactions', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->for($account)->fromCsv()->create(['post_date' => '2026-06-01']);
+    Transaction::factory()->for($user)->for($account)->fromBasiq()->create(['post_date' => '2026-07-09']);
+    Transaction::factory()->for($user)->for($account)->fromCsv()->create(['post_date' => '2026-05-15']);
+
+    $result = Transaction::lastImportedPostDate($user->id);
+
+    expect($result)->toBeInstanceOf(CarbonImmutable::class)
+        ->and($result->format('Y-m-d'))->toBe('2026-07-09');
+});
+
+test('lastImportedPostDate ignores manual and planned transactions', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->for($account)->create([
+        'source' => TransactionSource::Manual,
+        'post_date' => '2026-07-09',
+    ]);
+    Transaction::factory()->for($user)->for($account)->create([
+        'source' => TransactionSource::Planned,
+        'post_date' => '2026-07-10',
+    ]);
+
+    $result = Transaction::lastImportedPostDate($user->id);
+
+    expect($result)->toBeNull();
+});
+
+test('lastImportedPostDate ignores transactions belonging to other users', function () {
+    $user = User::factory()->create();
+    $otherUser = User::factory()->create();
+
+    Transaction::factory()->for($otherUser)->fromCsv()->create(['post_date' => '2026-07-09']);
+
+    $result = Transaction::lastImportedPostDate($user->id);
+
+    expect($result)->toBeNull();
+});
+
+test('lastImportedPostDate scopes to account when accountId is provided', function () {
+    $user = User::factory()->create();
+    $accountA = Account::factory()->for($user)->create();
+    $accountB = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->for($accountA)->fromCsv()->create(['post_date' => '2026-07-09']);
+    Transaction::factory()->for($user)->for($accountB)->fromCsv()->create(['post_date' => '2026-06-01']);
+
+    $result = Transaction::lastImportedPostDate($user->id, $accountB->id);
+
+    expect($result)->toBeInstanceOf(CarbonImmutable::class)
+        ->and($result->format('Y-m-d'))->toBe('2026-06-01');
+});
+
+test('lastImportedPostDate returns null when no imported transactions exist', function () {
+    $user = User::factory()->create();
+
+    $result = Transaction::lastImportedPostDate($user->id);
+
+    expect($result)->toBeNull();
+});
+
+test('lastImportedPostDate ignores soft-deleted transactions', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->for($account)->fromCsv()->softDeleted()->create(['post_date' => '2026-07-09']);
+    Transaction::factory()->for($user)->for($account)->fromCsv()->create(['post_date' => '2026-06-01']);
+
+    $result = Transaction::lastImportedPostDate($user->id);
+
+    expect($result)->toBeInstanceOf(CarbonImmutable::class)
+        ->and($result->format('Y-m-d'))->toBe('2026-06-01');
 });

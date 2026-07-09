@@ -48,7 +48,7 @@
                     </flux:radio.group>
 
                     @if($accountChoice === 'existing')
-                        <flux:select wire:model="accountId" data-testid="import-bank-account-select">
+                        <flux:select wire:model.live="accountId" data-testid="import-bank-account-select">
                             <option value="">— pick an account —</option>
                             @foreach($accounts as $account)
                                 <option
@@ -62,6 +62,11 @@
                                 </option>
                             @endforeach
                         </flux:select>
+                    @if($this->lastImportedDate !== null)
+                        <flux:text size="sm" class="mt-2" data-testid="import-bank-last-imported">
+                            Last imported transaction: {{ $this->lastImportedDate->format('d/m/Y') }} — export your next statement from this date.
+                        </flux:text>
+                    @endif
                     @else
                         <flux:input
                             wire:model="newAccountName"

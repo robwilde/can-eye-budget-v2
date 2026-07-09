@@ -104,6 +104,22 @@ final class Transaction extends Model
         }
     }
 
+    /**
+     * Latest post_date among bank-fed (csv/basiq) transactions for a user,
+     * optionally scoped to one account. Null when no imported transactions exist.
+     * SoftDeletes are excluded automatically by the default builder.
+     */
+    public static function lastImportedPostDate(int $userId, ?int $accountId = null): ?CarbonImmutable
+    {
+        $max = self::query()
+            ->where('user_id', $userId)
+            ->whereIn('source', TransactionSource::forAnalysis())
+            ->when($accountId !== null, fn ($q) => $q->where('account_id', $accountId))
+            ->max('post_date');
+
+        return $max === null ? null : CarbonImmutable::parse((string) $max);
+    }
+
     /** @return BelongsTo<User, $this> */
     public function user(): BelongsTo
     {
