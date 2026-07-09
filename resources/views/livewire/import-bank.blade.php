@@ -155,6 +155,19 @@
             </x-cib.card>
         @endif
 
+        @if($continuity !== null)
+            @if($continuity['status'] === 'gap')
+                <flux:callout variant="warning" data-testid="import-bank-continuity-gap">
+                    <flux:callout.heading>Possible missing records</flux:callout.heading>
+                    This file starts {{ $continuity['fileEarliest']->format('d/m/Y') }}, but your last import covered up to {{ $continuity['lastImportedDate']->format('d/m/Y') }}. Transactions between those dates may be missing.
+                </flux:callout>
+            @else
+                <flux:text size="sm" data-testid="import-bank-continuity-ok">
+                    Continuous with your last import (covered up to {{ $continuity['lastImportedDate']->format('d/m/Y') }}).
+                </flux:text>
+            @endif
+        @endif
+
         @if($accountChoice === 'existing')
             <x-cib.card>
                 <flux:heading size="lg">Account balance</flux:heading>
