@@ -252,19 +252,40 @@ test('transaction counts and list are scoped to authenticated user', function ()
         ->assertDontSee('Other User Transaction');
 });
 
-test('categories sorted by transaction count descending', function () {
+test('categories are ordered alphabetically grouped by full path', function () {
     $user = User::factory()->create();
-    $few = Category::factory()->create(['name' => 'Few']);
-    $many = Category::factory()->create(['name' => 'Many']);
-    Transaction::factory()->for($user)->count(2)->create(['category_id' => $few->id]);
-    Transaction::factory()->for($user)->count(10)->create(['category_id' => $many->id]);
+    Category::factory()->create(['name' => 'Zoo']);
+    $apple = Category::factory()->create(['name' => 'Apple']);
+    Category::factory()->withParent($apple)->create(['name' => 'Banana']);
+    Category::factory()->withParent($apple)->create(['name' => 'Ant']);
 
-    $component = Livewire::actingAs($user)
-        ->test(CategoryEditor::class);
+    $component = Livewire::actingAs($user)->test(CategoryEditor::class);
+    $paths = collect($component->viewData('categories'))->pluck('full_path')->all();
 
-    $categories = $component->viewData('categories');
-    expect($categories->first()['name'])->toBe('Many')
-        ->and($categories->last()['name'])->toBe('Few');
+    expect($paths)->toBe(['Apple', 'Apple / Ant', 'Apple / Banana', 'Zoo']);
+});
+
+test('view data carries depth for each category', function () {
+    $user = User::factory()->create();
+    $office = Category::factory()->create(['name' => 'Office']);
+    $training = Category::factory()->withParent($office)->create(['name' => 'Training']);
+    Category::factory()->withParent($training)->create(['name' => 'Course']);
+
+    $component = Livewire::actingAs($user)->test(CategoryEditor::class);
+    $byName = collect($component->viewData('categories'))->keyBy('name');
+
+    expect($byName['Office']['depth'])->toBe(0)
+        ->and($byName['Training']['depth'])->toBe(1)
+        ->and($byName['Course']['depth'])->toBe(2);
+});
+
+test('isSearching view flag reflects the search term', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)->test(CategoryEditor::class)
+        ->assertViewHas('isSearching', false)
+        ->set('search', 'Off')
+        ->assertViewHas('isSearching', true);
 });
 
 /* ------------------------------------------------------------------ */
