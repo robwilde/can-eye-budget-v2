@@ -107,6 +107,19 @@ final class Category extends Model
         return implode(' / ', $segments);
     }
 
+    public function depth(): int
+    {
+        $depth = 0;
+        $ancestor = $this->parent;
+
+        while ($ancestor) {
+            $depth++;
+            $ancestor = $ancestor->parent;
+        }
+
+        return $depth;
+    }
+
     public function resolveIcon(): ?string
     {
         return $this->icon ?? $this->parent?->resolveIcon();

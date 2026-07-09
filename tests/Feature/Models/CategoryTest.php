@@ -169,6 +169,21 @@ test('fullPath returns three levels for deeply nested category', function () {
     expect($child->fullPath())->toBe('Office / Training / Subscription');
 });
 
+test('depth returns 0 for a top-level category', function () {
+    $category = Category::factory()->create();
+
+    expect($category->depth())->toBe(0);
+});
+
+test('depth returns 1 for a child and 2 for a grandchild', function () {
+    $grandparent = Category::factory()->create();
+    $parent = Category::factory()->withParent($grandparent)->create();
+    $child = Category::factory()->withParent($parent)->create();
+
+    expect($parent->load('parent')->depth())->toBe(1)
+        ->and($child->load('parent.parent')->depth())->toBe(2);
+});
+
 test('visibleSortedByFullPath sorts by full path not leaf name', function () {
     $bills = Category::factory()->create(['name' => 'Bills']);
     Category::factory()->withParent($bills)->create(['name' => 'Zebra']);
