@@ -30,14 +30,50 @@ test('displays categories with transaction counts', function () {
         ->assertSee('5');
 });
 
-test('displays full path for nested categories', function () {
+test('displays full path for nested categories when searching', function () {
     $user = User::factory()->create();
     $parent = Category::factory()->create(['name' => 'Office']);
     Category::factory()->withParent($parent)->create(['name' => 'Software']);
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
+        ->set('search', 'Software')
         ->assertSee('Office / Software');
+});
+
+test('browse mode shows own segment grouped under parent', function () {
+    $user = User::factory()->create();
+    $parent = Category::factory()->create(['name' => 'Office']);
+    Category::factory()->withParent($parent)->create(['name' => 'Software']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->assertSee('Office')
+        ->assertSee('Software')
+        ->assertDontSee('Office / Software');
+});
+
+test('selecting an already-expanded category collapses it', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['name' => 'Groceries']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $category->id)
+        ->assertSet('selectedCategoryId', $category->id)
+        ->call('selectCategory', $category->id)
+        ->assertSet('selectedCategoryId', null);
+});
+
+test('categories render inline without the modal', function () {
+    $user = User::factory()->create();
+    Category::factory()->create(['name' => 'Groceries']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->assertSeeHtml('cib-card')
+        ->assertSee('Groceries')
+        ->assertDontSeeHtml('max-h-[80vh]');
 });
 
 test('search filters categories by full path', function () {

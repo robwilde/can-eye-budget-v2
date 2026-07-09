@@ -37,6 +37,14 @@ final class CategoryEditor extends Component
 
     public function selectCategory(int $id): void
     {
+        if ($this->selectedCategoryId === $id) {
+            $this->selectedCategoryId = null;
+            $this->editingName = '';
+            $this->showDeleteConfirm = false;
+
+            return;
+        }
+
         $category = Category::find($id);
 
         if (! $category) {
