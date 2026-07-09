@@ -57,7 +57,7 @@ final readonly class MonthlyProjectionService
 
         ksort($dailyBuckets);
 
-        $startingBalanceCents = (int) $primaryAccount->balance;
+        $startingBalanceCents = $primaryAccount->availableBalance();
         $runningBalance = $startingBalanceCents;
         $points = [
             new BalancePoint(
