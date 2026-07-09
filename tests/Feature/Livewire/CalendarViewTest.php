@@ -709,3 +709,61 @@ test('categorised transaction renders title tooltip in selected-day detail panel
 
     expect(mb_substr_count($html, 'title="BP CONNECT FORTITUDE VALLEY"'))->toBeGreaterThanOrEqual(2);
 });
+
+// ── Import boundary marker (issue #315) ──────────────────────────────────────
+
+test('last-imported csv transaction day is flagged isImportEdge and all other days are false', function () {
+    $this->travelTo('2026-07-10');
+    $user = User::factory()->create();
+
+    Transaction::factory()->for($user)->fromCsv()->create([
+        'post_date' => '2026-07-07',
+    ]);
+
+    /** @var list<CalendarDayData> $days */
+    $days = Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->instance()
+        ->days();
+
+    $edgeDays = collect($days)->filter(fn (CalendarDayData $d) => $d->isImportEdge);
+
+    expect($edgeDays)->toHaveCount(1)
+        ->and($edgeDays->first()?->iso)->toBe('2026-07-07')
+        ->and(collect($days)->every(fn (CalendarDayData $d) => $d->isImportEdge === ($d->iso === '2026-07-07')))->toBeTrue();
+});
+
+test('blade renders import-edge class on the last-imported csv transaction day', function () {
+    $this->travelTo('2026-07-10');
+    $user = User::factory()->create();
+
+    Transaction::factory()->for($user)->fromCsv()->create([
+        'post_date' => '2026-07-07',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->assertSee('import-edge');
+});
+
+test('no day is flagged isImportEdge when no csv-imported transactions exist', function () {
+    $this->travelTo('2026-07-10');
+    $user = User::factory()->create();
+
+    /** @var list<CalendarDayData> $days */
+    $days = Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->instance()
+        ->days();
+
+    expect(collect($days)->filter(fn (CalendarDayData $d) => $d->isImportEdge))->toBeEmpty();
+});
+
+test('blade does not render import-edge class when no csv-imported transactions exist', function () {
+    $this->travelTo('2026-07-10');
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->assertDontSee('import-edge');
+});

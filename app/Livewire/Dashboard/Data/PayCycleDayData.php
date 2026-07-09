@@ -24,5 +24,6 @@ final readonly class PayCycleDayData
         public int $incomeCents,
         public int $postedCents,
         public int $plannedCents,
+        public bool $isImportEdge = false,
     ) {}
 }

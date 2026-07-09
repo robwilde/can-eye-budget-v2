@@ -8,6 +8,7 @@ use App\Casts\MoneyCast;
 use App\Enums\PayFrequency;
 use App\Livewire\Dashboard\Data\PayCyclePip;
 use App\Livewire\Data\CalendarDayData;
+use App\Models\Transaction;
 use App\Models\User;
 use App\Support\Calendar\DayActivity;
 use App\Support\Calendar\DayActivityLoader;
@@ -80,6 +81,16 @@ final class CalendarView extends Component
     }
 
     /**
+     * ISO date (Y-m-d) of the last imported transaction post date for the authenticated user,
+     * or null when no imported transactions exist.
+     */
+    #[Computed]
+    public function importEdgeIso(): ?string
+    {
+        return Transaction::lastImportedPostDate((int) auth()->id())?->format('Y-m-d');
+    }
+
+    /**
      * @return list<CalendarDayData>
      */
     #[Computed]
@@ -102,6 +113,7 @@ final class CalendarView extends Component
             : [];
 
         $activeCycle = $user?->currentPayCycleBounds();
+        $importEdge = $this->importEdgeIso; // @phpstan-ignore property.notFound
 
         $days = [];
         $cursor = $gridStart;
@@ -137,6 +149,7 @@ final class CalendarView extends Component
                 incomeCents: $dayActivity->incomeCents,
                 postedCents: $dayActivity->postedCents,
                 plannedCents: $dayActivity->plannedCents,
+                isImportEdge: $key === $importEdge,
             );
 
             $cursor = $cursor->addDay();
@@ -311,6 +324,6 @@ final class CalendarView extends Component
 
     private function bustCache(): void
     {
-        unset($this->days, $this->monthTotals, $this->selectedDay, $this->headerLabel); // @phpstan-ignore property.notFound
+        unset($this->days, $this->monthTotals, $this->selectedDay, $this->headerLabel, $this->importEdgeIso); // @phpstan-ignore property.notFound
     }
 }

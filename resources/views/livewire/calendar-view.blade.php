@@ -60,7 +60,9 @@
                             'lastpay' => $day->isPastPayday,
                             'payday' => $day->isNextPayday,
                             'active' => $day->iso === $this->selectedDate,
+                            'import-edge' => $day->isImportEdge,
                         ])
+                        @if($day->isImportEdge) title="Last imported transaction" @endif
                 >
                     <div class="cyc-day-top">
                         <span class="cyc-dnum">{{ $day->day }}</span>
