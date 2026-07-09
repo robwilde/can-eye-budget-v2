@@ -121,12 +121,23 @@ final class PayCycleCalendar extends Component
     }
 
     /**
+     * ISO date (Y-m-d) of the last imported transaction post date for the authenticated user,
+     * or null when no imported transactions exist.
+     */
+    #[Computed]
+    public function importEdgeIso(): ?string
+    {
+        return Transaction::lastImportedPostDate((int) auth()->id())?->format('Y-m-d');
+    }
+
+    /**
      * @return list<PayCycleDayData>
      */
     #[Computed]
     public function days(): array
     {
         $bounds = $this->bounds; // @phpstan-ignore property.notFound
+        $importEdge = $this->importEdgeIso; // @phpstan-ignore property.notFound
 
         if ($bounds === null) {
             return [];
@@ -167,6 +178,7 @@ final class PayCycleCalendar extends Component
                 incomeCents: $dayActivity->incomeCents,
                 postedCents: $dayActivity->postedCents,
                 plannedCents: $dayActivity->plannedCents,
+                isImportEdge: $key === $importEdge,
             );
 
             $cursor = $cursor->addDay();
@@ -414,6 +426,6 @@ final class PayCycleCalendar extends Component
 
     private function bustCache(): void
     {
-        unset($this->bounds, $this->days, $this->totals, $this->selectedDay, $this->isCurrentCycle, $this->header); // @phpstan-ignore property.notFound
+        unset($this->bounds, $this->days, $this->totals, $this->selectedDay, $this->isCurrentCycle, $this->header, $this->importEdgeIso); // @phpstan-ignore property.notFound
     }
 }

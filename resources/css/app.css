@@ -792,6 +792,17 @@ select:focus[data-flux-control] {
         outline-offset: -3px;
         z-index: 3;
     }
+    .cyc-day.import-edge::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 4px;
+        background: var(--color-cib-teal-500);
+        pointer-events: none;
+        z-index: 2;
+    }
 
     .cyc-day-top {
         display: flex;

@@ -28,5 +28,6 @@ final readonly class CalendarDayData
         public int $incomeCents,
         public int $postedCents,
         public int $plannedCents,
+        public bool $isImportEdge = false,
     ) {}
 }

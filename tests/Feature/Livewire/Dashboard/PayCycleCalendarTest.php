@@ -927,3 +927,63 @@ test('cyc-sub paragraph is prefixed with Pay cycle middle dot', function () {
         ->test(PayCycleCalendar::class)
         ->assertSee('Pay cycle ·');
 });
+
+// ── Import boundary marker (issue #315) ──────────────────────────────────────
+
+test('last-imported csv transaction day is flagged isImportEdge and all other days are false', function () {
+    $this->travelTo('2026-05-31');
+    [$user, $account] = fortnightlyThursdayPayUser();
+
+    Transaction::factory()->for($user)->fromCsv()->create([
+        'account_id' => $account->id,
+        'post_date' => '2026-05-27',
+    ]);
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->days();
+
+    $edgeDays = collect($days)->filter(fn (PayCycleDayData $d) => $d->isImportEdge);
+
+    expect($edgeDays)->toHaveCount(1)
+        ->and($edgeDays->first()?->iso)->toBe('2026-05-27')
+        ->and(collect($days)->every(fn (PayCycleDayData $d) => $d->isImportEdge === ($d->iso === '2026-05-27')))->toBeTrue();
+});
+
+test('blade renders import-edge class on the last-imported csv transaction day', function () {
+    $this->travelTo('2026-05-31');
+    [$user, $account] = fortnightlyThursdayPayUser();
+
+    Transaction::factory()->for($user)->fromCsv()->create([
+        'account_id' => $account->id,
+        'post_date' => '2026-05-27',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->assertSee('import-edge');
+});
+
+test('no day is flagged isImportEdge when no csv-imported transactions exist', function () {
+    $this->travelTo('2026-05-31');
+    [$user] = fortnightlyThursdayPayUser();
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->days();
+
+    expect(collect($days)->filter(fn (PayCycleDayData $d) => $d->isImportEdge))->toBeEmpty();
+});
+
+test('blade does not render import-edge class when no csv-imported transactions exist', function () {
+    $this->travelTo('2026-05-31');
+    [$user] = fortnightlyThursdayPayUser();
+
+    Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->assertDontSee('import-edge');
+});
