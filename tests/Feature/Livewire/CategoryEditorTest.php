@@ -360,3 +360,15 @@ test('cib: rename field label renders as cib-label span', function () {
 
     $component->assertSeeHtml('class="cib-label');
 });
+
+test('cib: nested rows indent by depth and top-level rows are group headers', function () {
+    $user = User::factory()->create();
+    $office = Category::factory()->create(['name' => 'Office']);
+    Category::factory()->withParent($office)->create(['name' => 'Software']);
+
+    $html = Livewire::actingAs($user)->test(CategoryEditor::class)->html();
+
+    expect($html)->toContain('cat-group-head')
+        ->and($html)->toContain('padding-left: 0.875rem')
+        ->and($html)->toContain('padding-left: 2.125rem');
+});
