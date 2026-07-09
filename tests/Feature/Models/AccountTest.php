@@ -201,3 +201,21 @@ test('amountOwed returns zero for savings account', function () {
 
     expect($account->amountOwed())->toBe(0);
 });
+
+test('availableBalance uses credit limit for any account with a credit limit', function () {
+    $account = Account::factory()->create(['type' => AccountClass::Transaction, 'balance' => -340642, 'credit_limit' => 500000]);
+
+    expect($account->availableBalance())->toBe(159358);
+});
+
+test('amountOwed counts debt for any account with a credit limit', function () {
+    $account = Account::factory()->create(['type' => AccountClass::Transaction, 'balance' => -340642, 'credit_limit' => 500000]);
+
+    expect($account->amountOwed())->toBe(340642);
+});
+
+test('amountOwed is zero when a credit-limit account is in credit', function () {
+    $account = Account::factory()->create(['type' => AccountClass::Transaction, 'balance' => 20000, 'credit_limit' => 500000]);
+
+    expect($account->amountOwed())->toBe(0);
+});

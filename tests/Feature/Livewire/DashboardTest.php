@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\AccountClass;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Livewire\Dashboard;
@@ -330,6 +331,19 @@ test('totals isolate current user from other users accounts', function () {
         ->and($numbers['owed'])->toBe(0);
 });
 
+test('available reflects credit limit for a limit-bearing non-credit-card account', function () {
+    $user = User::factory()->withPayCycle()->create();
+    Account::factory()->for($user)->create(['type' => AccountClass::Transaction, 'balance' => 219340]);
+    Account::factory()->for($user)->create(['type' => AccountClass::Transaction, 'balance' => -340642, 'credit_limit' => 500000]);
+
+    $numbers = Livewire::actingAs($user)
+        ->test(Dashboard::class)
+        ->instance()
+        ->numbers();
+
+    expect($numbers['available'])->toBe(378698)
+        ->and($numbers['owed'])->toBe(340642);
+});
 // ── Spend last 7 days ──────────────────────────────────────────────
 
 test('spend last 7 days sums debit transactions within the window', function () {

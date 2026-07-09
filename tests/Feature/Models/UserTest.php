@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\AccountClass;
 use App\Enums\PayFrequency;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
@@ -143,6 +144,22 @@ test('totalAvailable returns zero when no spendable accounts exist', function ()
     Account::factory()->mortgage()->for($user)->create(['balance' => -30000000]);
 
     expect($user->totalAvailable())->toBe(0);
+});
+
+test('totalAvailable uses available credit for accounts with a credit limit regardless of type', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create(['type' => AccountClass::Transaction, 'balance' => 219340]);
+    Account::factory()->for($user)->create(['type' => AccountClass::Transaction, 'balance' => -340642, 'credit_limit' => 500000]);
+
+    expect($user->totalAvailable())->toBe(378698);
+});
+
+test('totalOwed includes accounts that have a credit limit even when not typed credit card', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create(['type' => AccountClass::Transaction, 'balance' => 219340]);
+    Account::factory()->for($user)->create(['type' => AccountClass::Transaction, 'balance' => -340642, 'credit_limit' => 500000]);
+
+    expect($user->totalOwed())->toBe(340642);
 });
 
 test('daysUntilNextPay returns correct days when pay cycle configured', function () {
