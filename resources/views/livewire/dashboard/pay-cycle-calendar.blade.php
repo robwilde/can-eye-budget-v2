@@ -17,9 +17,9 @@
     @else
         <header class="cyc-head">
             <div>
-                <h3 class="cyc-title">Pay cycle</h3>
+                <h2 class="cyc-title" data-testid="pay-cycle-month">{{ $this->header['monthLabel'] }}</h2>
                 <p class="cyc-sub">
-                    {{ $this->header['rangeLabel'] }}
+                    Pay cycle · {{ $this->header['rangeLabel'] }}
                     @if ($this->header['daysUntilPay'] !== null)
                         · {{ $this->header['daysUntilPay'] }}d to payday
                     @endif
