@@ -75,7 +75,7 @@
                     </div>
                     <div class="cyc-day-body">
                         @foreach (array_slice($day->pips, 0, CalendarView::MAX_PIPS_PER_DAY) as $pip)
-                            <div @class(['cyc-pip', $pip->kind])>
+                            <div @class(['cyc-pip', $pip->kind]) @if($pip->tooltip !== null) title="{{ $pip->tooltip }}" @endif>
                                 <span class="cyc-pip-dot"></span>
                                 <span class="cyc-pip-name">{{ $pip->name }}</span>
                             </div>
@@ -130,6 +130,7 @@
                             :tone="$rowTone"
                             :icon="$pip->icon"
                             :matched="$pip->matched"
+                            :title="$pip->tooltip"
                     />
                 @empty
                     <p class="cyc-empty">Nothing on this day.</p>

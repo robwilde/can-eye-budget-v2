@@ -664,3 +664,48 @@ test('the add-transaction button opens the modal pre-dated to the selected day',
         ->call('addTransaction')
         ->assertDispatched('open-transaction-modal', date: $iso);
 });
+
+// ── Pip tooltip ──────────────────────────────────────────────────
+
+test('categorised transaction renders title tooltip in calendar grid html', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Fuel']);
+    $date = CarbonImmutable::now()->startOfMonth()->addDays(4);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $category->id,
+        'amount' => -6500,
+        'post_date' => $date,
+        'description' => 'BP CONNECT FORTITUDE VALLEY',
+        'planned_transaction_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->assertSeeHtml('title="BP CONNECT FORTITUDE VALLEY"');
+});
+
+test('categorised transaction renders title tooltip in selected-day detail panel', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Fuel']);
+    $date = CarbonImmutable::now()->startOfMonth()->addDays(4);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $category->id,
+        'amount' => -6500,
+        'post_date' => $date,
+        'description' => 'BP CONNECT FORTITUDE VALLEY',
+        'planned_transaction_id' => null,
+    ]);
+
+    $html = Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->call('selectDate', $date->format('Y-m-d'))
+        ->html();
+
+    expect(mb_substr_count($html, 'title="BP CONNECT FORTITUDE VALLEY"'))->toBeGreaterThanOrEqual(2);
+});
