@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\AccountClass;
 use App\Enums\PayFrequency;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
@@ -283,6 +284,7 @@ test('a configured pay cycle feeds the projection so the balance steps up on eac
     $account = Account::factory()->for($user)->create(['balance' => 100000]);
     $user->update(['primary_account_id' => $account->id]);
 
+    /** @noinspection PhpUnhandledExceptionInspection */
     app(PayCycleConfigurator::class)->apply(
         $user->fresh(),
         300000,
@@ -300,4 +302,15 @@ test('a configured pay cycle feeds the projection so the balance steps up on eac
         ->and($firstPayday->balanceCents)->toBe(400000)
         ->and($firstPayday->balanceCents)->toBeGreaterThan($projection->points[0]->balanceCents)
         ->and($projection->firstNegativeDate)->toBeNull();
+});
+
+test('starting balance uses available credit when primary account has a credit limit', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['type' => AccountClass::Transaction, 'balance' => -340642, 'credit_limit' => 500000]);
+    $user->update(['primary_account_id' => $account->id]);
+
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
+
+    expect($projection->startingBalanceCents)->toBe(159358)
+        ->and($projection->points[0]->balanceCents)->toBe(159358);
 });
