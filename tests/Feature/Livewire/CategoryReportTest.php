@@ -364,3 +364,13 @@ test('category colours are whitelisted to hex before inline styling', function (
         ->and($buckets->firstWhere('name', 'EvilCat')['color'])->toMatch('/^#[0-9a-fA-F]{6}$/')
         ->and($buckets->firstWhere('name', 'EvilCat')['color'])->not->toBe('red;background-image:url(//x)');
 });
+
+test('drilling up from a parent that no longer exists resets to the top level', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(CategoryReport::class)
+        ->set('parent', 999999)
+        ->call('drillUp')
+        ->assertSet('parent', null);
+});
