@@ -72,7 +72,7 @@
             <div class="day-card">
                 @foreach($report['buckets'] as $bucket)
                     @php
-                        $pct = $report['max'] > 0 ? round($bucket['total'] / $report['max'] * 100) : 0;
+                        $pct = $report['max'] > 0 ? min(100, max(0, round($bucket['total'] / $report['max'] * 100))) : 0;
                         $leafHref = $bucket['id'] !== null
                             ? route('transactions', array_filter([
                                 'category' => $bucket['id'],
@@ -100,7 +100,7 @@
                             </div>
                         @endif
                         <div class="track">
-                            <div class="fill" style="width: {{ $pct }}%; background: {{ $bucket['color'] }}"></div>
+                            <div class="fill" style="width: {{ $pct }}%; background-color: {{ $bucket['color'] }}"></div>
                         </div>
                     </div>
                 @endforeach
