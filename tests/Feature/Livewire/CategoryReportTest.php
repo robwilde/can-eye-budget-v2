@@ -390,3 +390,51 @@ test('invalid custom date bounds are normalised to null', function () {
         ->set('to', '2026-06-15')
         ->assertSet('to', '2026-06-15');
 });
+
+test('ancestry roll-up reaches the true root beyond ten levels', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $root = Category::factory()->create(['name' => 'DeepRoot']);
+    $current = $root;
+
+    for ($level = 1; $level <= 11; $level++) {
+        $current = Category::factory()->withParent($current)->create(['name' => "Level{$level}"]);
+    }
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $current->id,
+        'amount' => 4200,
+        'post_date' => now(),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CategoryReport::class)
+        ->assertSee('DeepRoot')
+        ->assertSee(MoneyCast::format(4200))
+        ->assertDontSee('Level11');
+});
+
+test('a cyclic category chain terminates and rolls up as uncategorised', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $a = Category::factory()->create(['name' => 'CycleA']);
+    $b = Category::factory()->withParent($a)->create(['name' => 'CycleB']);
+    $a->update(['parent_id' => $b->id]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $b->id,
+        'amount' => 3000,
+        'post_date' => now(),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CategoryReport::class)
+        ->assertSuccessful()
+        ->assertSee('Uncategorised')
+        ->assertSee(MoneyCast::format(3000))
+        ->assertDontSee('CycleA');
+});

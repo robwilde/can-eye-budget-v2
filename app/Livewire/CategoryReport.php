@@ -303,6 +303,14 @@ final class CategoryReport extends Component
 
         $chain = $this->ancestorChain($categoryId);
 
+        if ($chain === []) {
+            if ($this->parent !== null) {
+                return null;
+            }
+
+            return ['key' => 'uncategorised', 'id' => null, 'name' => 'Uncategorised', 'deeper' => false, 'special' => true];
+        }
+
         if ($this->parent === null) {
             $rootId = $chain[array_key_last($chain)];
 
@@ -343,13 +351,17 @@ final class CategoryReport extends Component
     {
         $map = $this->categoryMap();
         $chain = [];
+        $visited = [];
         $currentId = $categoryId;
-        $guard = 0;
 
-        while ($currentId !== null && isset($map[$currentId]) && $guard < 10) {
+        while ($currentId !== null && isset($map[$currentId])) {
+            if (isset($visited[$currentId])) {
+                return [];
+            }
+
+            $visited[$currentId] = true;
             $chain[] = $currentId;
             $currentId = $map[$currentId]['parent_id'];
-            $guard++;
         }
 
         return $chain;
@@ -360,7 +372,11 @@ final class CategoryReport extends Component
      */
     private function resolveIconFromMap(?int $categoryId, array $map): ?string
     {
-        while ($categoryId !== null && isset($map[$categoryId])) {
+        $visited = [];
+
+        while ($categoryId !== null && isset($map[$categoryId]) && ! isset($visited[$categoryId])) {
+            $visited[$categoryId] = true;
+
             if ($map[$categoryId]['icon'] !== null) {
                 return $map[$categoryId]['icon'];
             }
