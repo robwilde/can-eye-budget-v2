@@ -65,6 +65,16 @@
                 wire-model="account"
             />
         @endif
+
+        <x-cib.filter-toggle
+            :options="[
+                ['value' => 'all', 'label' => 'All'],
+                ['value' => 'planned', 'label' => 'Planned'],
+                ['value' => 'unplanned', 'label' => 'Unplanned'],
+            ]"
+            :selected="$planned"
+            wire-model="planned"
+        />
     </div>
 
     <flux:input wire:model.live.debounce.300ms="search" placeholder="Search transactions..." icon="magnifying-glass" size="sm"/>
@@ -126,6 +136,7 @@
                                         $transaction->category?->name,
                                         $account === null ? $transaction->account?->name : null,
                                     ]);
+                                    $isPlanned = $transaction->planned_transaction_id !== null;
                                 @endphp
                                 <x-cib.tx-row
                                     wire:key="txn-{{ $transaction->id }}"
@@ -135,8 +146,8 @@
                                     :tone="$tone"
                                     :icon="$transaction->category?->resolveIcon()"
                                 >
-                                    @if(! empty($metaParts))
-                                        <x-slot:meta>{{ implode(' · ', $metaParts) }}</x-slot:meta>
+                                    @if(! empty($metaParts) || $isPlanned)
+                                        <x-slot:meta>{{ implode(' · ', $metaParts) }}@if($isPlanned) <span class="pill plan">Planned</span>@endif</x-slot:meta>
                                     @endif
                                 </x-cib.tx-row>
                             @endforeach

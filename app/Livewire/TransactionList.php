@@ -23,8 +23,13 @@ final class TransactionList extends Component
 
     private const array VALID_DIRECTIONS = ['all', 'incoming', 'outgoing'];
 
+    private const array VALID_PLANNED_FILTERS = ['all', 'planned', 'unplanned'];
+
     #[Url]
     public string $direction = 'all';
+
+    #[Url]
+    public string $planned = 'all';
 
     #[Url]
     public ?int $account = null;
@@ -54,6 +59,10 @@ final class TransactionList extends Component
     {
         if (! in_array($this->direction, self::VALID_DIRECTIONS, true)) {
             $this->direction = 'all';
+        }
+
+        if (! in_array($this->planned, self::VALID_PLANNED_FILTERS, true)) {
+            $this->planned = 'all';
         }
 
         $this->period = match ($this->period) {
@@ -88,6 +97,15 @@ final class TransactionList extends Component
     {
         if (! in_array($this->direction, self::VALID_DIRECTIONS, true)) {
             $this->direction = 'all';
+        }
+
+        $this->resetPage();
+    }
+
+    public function updatedPlanned(): void
+    {
+        if (! in_array($this->planned, self::VALID_PLANNED_FILTERS, true)) {
+            $this->planned = 'all';
         }
 
         $this->resetPage();
@@ -140,6 +158,8 @@ final class TransactionList extends Component
             ->when($directionEnum, fn ($q, $dir) => $q->where('direction', $dir))
             ->when($this->account, fn ($q, $id) => $q->where('account_id', $id))
             ->when($this->category, fn ($q, $id) => $q->where('category_id', $id))
+            ->when($this->planned === 'planned', fn ($q) => $q->whereNotNull('planned_transaction_id'))
+            ->when($this->planned === 'unplanned', fn ($q) => $q->whereNull('planned_transaction_id'))
             ->when($this->search, fn ($q, $term) => $q->where(function ($q) use ($term) {
                 $q->where('description', 'like', "%{$term}%")
                     ->orWhere('clean_description', 'like', "%{$term}%")
