@@ -1,9 +1,11 @@
 <div class="space-y-6" data-testid="category-report">
     @php
         $summary = $this->summary;
-        $report = $this->report;
-        $net = $summary['net'];
-        $tone = $direction === 'outgoing' ? 'out' : 'inc';
+        $chart = $this->chart;
+        $treemap = $this->treemap;
+        $unit = $mode === 'plan' ? 'planned entry' : 'transaction';
+        $expenseRows = $this->expenseRows;
+        $incomeRows = $this->incomeRows;
     @endphp
 
     <div class="flex flex-wrap items-center justify-between gap-4">
@@ -31,80 +33,106 @@
         </div>
     </div>
 
-    <div class="flex flex-wrap items-center gap-3">
-        <x-cib.stat-pill tone="income">+{{ $formatMoney($summary['in']) }} in</x-cib.stat-pill>
-        <x-cib.stat-pill tone="posted">−{{ $formatMoney($summary['out']) }} out</x-cib.stat-pill>
-        <x-cib.stat-pill :tone="$net >= 0 ? 'buffer-pos' : 'buffer-neg'">
-            {{ $net >= 0 ? '+' : '−' }}{{ $formatMoney(abs($net)) }} net
-        </x-cib.stat-pill>
-    </div>
-
     <x-cib.filter-toggle
         :options="[
-            ['value' => 'outgoing', 'label' => 'Outgoing', 'tone' => 'out'],
-            ['value' => 'incoming', 'label' => 'Incoming', 'tone' => 'inc'],
+            ['value' => 'real', 'label' => 'Real', 'tone' => 'out'],
+            ['value' => 'plan', 'label' => 'Plan', 'tone' => 'xfr'],
         ]"
-        :selected="$direction"
-        wire-model="direction"
+        :selected="$mode"
+        wire-model="mode"
     />
 
-    @if($parent !== null)
-        <div class="flex flex-wrap items-center gap-2">
-            <flux:button variant="ghost" icon="arrow-left" size="sm" wire:click="drillUp" aria-label="Back"/>
-            <div class="flex flex-wrap items-center gap-1 text-sm">
-                <button type="button" wire:click="$set('parent', null)" class="font-bold text-cib-teal-500">All categories</button>
-                @foreach($this->breadcrumb as $crumb)
-                    <span class="text-fg-3">/</span>
-                    @if($loop->last)
-                        <span class="font-bold">{{ $crumb['name'] }}</span>
-                    @else
-                        <button type="button" wire:click="drillInto({{ $crumb['id'] }})" class="font-bold text-cib-teal-500">{{ $crumb['name'] }}</button>
-                    @endif
-                @endforeach
-            </div>
-        </div>
-    @endif
+    <div class="grid gap-3 sm:grid-cols-3">
+        <x-cib.money-card
+            label="Income"
+            tone="available"
+            :amount="$summary['in']"
+            hint="{{ $formatMoney($summary['inPerMonth']) }}/mo across {{ $summary['months'] }} {{ \Illuminate\Support\Str::plural('month', $summary['months']) }}"
+        />
+        <x-cib.money-card
+            label="Expenses"
+            tone="owed"
+            :amount="$summary['out']"
+            hint="{{ $formatMoney($summary['outPerMonth']) }}/mo{{ $summary['outPctIncome'] !== null ? ' · '.$summary['outPctIncome'].'% of income' : '' }}"
+        />
+        <x-cib.money-card
+            label="Net"
+            :tone="$summary['net'] >= 0 ? 'available' : 'owed'"
+            :amount="$summary['net']"
+            hint="{{ $formatMoney($summary['netPerMonth']) }}/mo{{ $summary['netPctIncome'] !== null ? ' · '.$summary['netPctIncome'].'% of income' : '' }}"
+        />
+    </div>
 
-    @if($report['buckets'] === [])
-        <x-cib.empty-state icon="chart-pie" title="No transactions in this period" description="Try a different time frame or direction."/>
-    @else
+    <div
+        wire:ignore
+        x-data="reportCharts(@js($chart), @js($treemap))"
+        class="space-y-6"
+    >
+        <x-cib.card>
+            <x-slot:header>
+                <div class="sec-head"><h3>Monthly income & expenses</h3></div>
+            </x-slot:header>
+            <div x-ref="timeseries" class="report-chart"></div>
+        </x-cib.card>
+
+        <div class="grid gap-6 lg:grid-cols-2">
+            <x-cib.card>
+                <x-slot:header>
+                    <div class="sec-head"><h3>Where it goes</h3></div>
+                </x-slot:header>
+                <div x-ref="expenseTree" class="report-treemap"></div>
+            </x-cib.card>
+            <x-cib.card>
+                <x-slot:header>
+                    <div class="sec-head"><h3>Where it comes from</h3></div>
+                </x-slot:header>
+                <div x-ref="incomeTree" class="report-treemap"></div>
+            </x-cib.card>
+        </div>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2">
+        <button type="button" wire:click="$toggle('topOnly')" @class(['report-chip', 'active' => $topOnly])>
+            Top {{ $topLimit }}
+        </button>
+        <button type="button" wire:click="$toggle('showSubcategories')" @class(['report-chip', 'active' => $showSubcategories])>
+            Subcategories
+        </button>
+    </div>
+
+    <div class="grid gap-6 lg:grid-cols-2">
         <section class="agenda-group">
-            <div class="day-card">
-                @foreach($report['buckets'] as $bucket)
-                    @php
-                        $pct = $report['max'] > 0 ? min(100, max(0, round($bucket['total'] / $report['max'] * 100))) : 0;
-                        $leafHref = $bucket['id'] !== null
-                            ? route('transactions', array_filter([
-                                'category' => $bucket['id'],
-                                'period' => $period,
-                                'direction' => $direction,
-                                'from' => $from,
-                                'to' => $to,
-                            ]))
-                            : null;
-                    @endphp
-                    <div wire:key="bucket-{{ $bucket['id'] ?? 'special' }}">
-                        @if($bucket['drillable'])
-                            <button type="button" class="tx-row" wire:click="drillInto({{ $bucket['id'] }})">
-                                @include('livewire.partials.category-report-row')
-                                <flux:icon.chevron-right class="size-4 text-fg-3"/>
-                            </button>
-                        @elseif($bucket['id'] !== null)
-                            <a href="{{ $leafHref }}" wire:navigate class="tx-row">
-                                @include('livewire.partials.category-report-row')
-                                <flux:icon.arrow-up-right class="size-4 text-fg-3"/>
-                            </a>
-                        @else
-                            <div class="tx-row passive">
-                                @include('livewire.partials.category-report-row')
-                            </div>
-                        @endif
-                        <div class="track">
-                            <div class="fill" style="width: {{ $pct }}%; background-color: {{ $bucket['color'] }}"></div>
-                        </div>
-                    </div>
-                @endforeach
-            </div>
+            <x-cib.sec-head title="Expenses"/>
+            @if($expenseRows === [])
+                <x-cib.empty-state icon="chart-pie" title="No expenses in this period" description="Try a different time frame."/>
+            @else
+                <div class="day-card">
+                    @foreach($expenseRows as $bucket)
+                        @include('livewire.partials.category-report-bucket', [
+                            'bucket' => $bucket,
+                            'tone' => 'out',
+                            'directionParam' => 'outgoing',
+                        ])
+                    @endforeach
+                </div>
+            @endif
         </section>
-    @endif
+
+        <section class="agenda-group">
+            <x-cib.sec-head title="Incomes"/>
+            @if($incomeRows === [])
+                <x-cib.empty-state icon="chart-pie" title="No income in this period" description="Try a different time frame."/>
+            @else
+                <div class="day-card">
+                    @foreach($incomeRows as $bucket)
+                        @include('livewire.partials.category-report-bucket', [
+                            'bucket' => $bucket,
+                            'tone' => 'inc',
+                            'directionParam' => 'incoming',
+                        ])
+                    @endforeach
+                </div>
+            @endif
+        </section>
+    </div>
 </div>

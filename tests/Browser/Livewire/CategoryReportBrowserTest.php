@@ -4,37 +4,15 @@
 
 declare(strict_types=1);
 
+use App\Enums\RecurrenceFrequency;
+use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 
-test('drilling into a category shows its children then returns to the top', function () {
-    $user = User::factory()->create();
-    $account = Account::factory()->for($user)->create();
-    $root = Category::factory()->create(['name' => 'Retail Trade']);
-    $child = Category::factory()->withParent($root)->create(['name' => 'Food Retailing']);
-
-    Transaction::factory()->for($user)->debit()->create([
-        'account_id' => $account->id,
-        'category_id' => $child->id,
-        'amount' => 6000,
-        'post_date' => now(),
-    ]);
-
-    $this->actingAs($user);
-
-    $page = visit('/reports');
-
-    $page->assertSee('Retail Trade')
-        ->assertSee('$60.00')
-        ->click('Retail Trade')
-        ->assertSee('Food Retailing')
-        ->click('All categories')
-        ->assertSee('Retail Trade');
-});
-
-test('toggling to incoming reveals income categories', function () {
+test('reports page renders the chart, both sections and mode tabs without JavaScript errors', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $spend = Category::factory()->create(['name' => 'Dining']);
@@ -57,13 +35,65 @@ test('toggling to incoming reveals income categories', function () {
 
     $page = visit('/reports');
 
-    $page->assertSee('Dining')
-        ->click('Incoming')
+    $page->assertSee('Expenses')
+        ->assertSee('Incomes')
+        ->assertSee('Real')
+        ->assertSee('Plan')
+        ->assertSee('Dining')
         ->assertSee('Salary')
-        ->assertDontSee('Dining');
+        ->assertPresent('.apexcharts-canvas')
+        ->assertNoJavaScriptErrors();
 });
 
-test('a top-level leaf category links through to the filtered transaction list', function () {
+test('switching to the plan tab surfaces planned-only categories', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $rent = Category::factory()->create(['name' => 'Rent']);
+
+    PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'category_id' => $rent->id,
+        'amount' => 200000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => now()->startOfMonth(),
+        'frequency' => RecurrenceFrequency::EveryMonth,
+        'is_active' => true,
+    ]);
+
+    $this->actingAs($user);
+
+    $page = visit('/reports');
+
+    $page->assertDontSee('$2,000.00')
+        ->click('Plan')
+        ->assertSee('$2,000.00')
+        ->assertNoJavaScriptErrors();
+});
+
+test('expanding a category row reveals its full-path subcategory inline', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $office = Category::factory()->create(['name' => 'Office']);
+    $software = Category::factory()->withParent($office)->create(['name' => 'Software']);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $software->id,
+        'amount' => 4500,
+        'post_date' => now(),
+    ]);
+
+    $this->actingAs($user);
+
+    $page = visit('/reports');
+
+    $page->assertSee('Office')
+        ->assertDontSee('Office / Software')
+        ->click('.tx-row[aria-expanded="false"]')
+        ->assertSee('Office / Software');
+});
+
+test('a leaf category links through to the filtered transaction list', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['name' => 'Utilities']);
@@ -80,10 +110,9 @@ test('a top-level leaf category links through to the filtered transaction list',
     $page = visit('/reports');
 
     $page->assertSee('Utilities')
-        ->click('Utilities')
+        ->click("a[href*='category={$category->id}']")
         ->assertPathBeginsWith('/transactions')
         ->assertQueryStringHas('category', (string) $category->id)
-        ->assertQueryStringHas('period', 'this-month')
         ->assertQueryStringHas('direction', 'outgoing');
 });
 
@@ -96,33 +125,4 @@ test('the sidebar links through to the reports page', function () {
         ->click('[data-flux-sidebar-item][href$="/reports"]')
         ->assertPathBeginsWith('/reports')
         ->assertSee('Incoming and outgoing by category');
-});
-
-test('changing the period reveals transactions from the wider range', function () {
-    $user = User::factory()->create();
-    $account = Account::factory()->for($user)->create();
-    $recent = Category::factory()->create(['name' => 'Dining']);
-    $older = Category::factory()->create(['name' => 'Transport']);
-
-    Transaction::factory()->for($user)->debit()->create([
-        'account_id' => $account->id,
-        'category_id' => $recent->id,
-        'amount' => 3000,
-        'post_date' => now(),
-    ]);
-    Transaction::factory()->for($user)->debit()->create([
-        'account_id' => $account->id,
-        'category_id' => $older->id,
-        'amount' => 5000,
-        'post_date' => now()->subMonths(2),
-    ]);
-
-    $this->actingAs($user);
-
-    $page = visit('/reports');
-
-    $page->assertSee('Dining')
-        ->assertDontSee('Transport')
-        ->select('[data-testid="category-report"] [wire\\:model\\.live="period"]', '3m')
-        ->assertSee('Transport');
 });
