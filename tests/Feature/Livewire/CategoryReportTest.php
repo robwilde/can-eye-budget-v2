@@ -334,3 +334,33 @@ test('reports is linked from the sidebar and the mobile more menu', function () 
 
     expect($matches[0] ?? '')->toContain(route('reports'));
 });
+
+test('category colours are whitelisted to hex before inline styling', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $safe = Category::factory()->create(['name' => 'SafeCat', 'color' => '#AABBCC']);
+    $evil = Category::factory()->create(['name' => 'EvilCat', 'color' => 'red;background-image:url(//x)']);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $safe->id,
+        'amount' => 3000,
+        'post_date' => now(),
+    ]);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $evil->id,
+        'amount' => 4000,
+        'post_date' => now(),
+    ]);
+
+    $component = Livewire::actingAs($user)
+        ->test(CategoryReport::class)
+        ->assertDontSee('background-image');
+
+    $buckets = collect($component->instance()->report()['buckets']);
+
+    expect($buckets->firstWhere('name', 'SafeCat')['color'])->toBe('#AABBCC')
+        ->and($buckets->firstWhere('name', 'EvilCat')['color'])->toMatch('/^#[0-9a-fA-F]{6}$/')
+        ->and($buckets->firstWhere('name', 'EvilCat')['color'])->not->toBe('red;background-image:url(//x)');
+});

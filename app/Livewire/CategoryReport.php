@@ -167,13 +167,10 @@ final class CategoryReport extends Component
             $sum += $bucket['total'];
             $max = max($max, $bucket['total']);
 
-            $color = null;
-
-            if ($bucket['id'] !== null && isset($map[$bucket['id']])) {
-                $color = $map[$bucket['id']]['color'];
-            }
-
-            $color ??= self::FALLBACK_COLORS[$index % count(self::FALLBACK_COLORS)];
+            $color = $this->paletteColor(
+                $bucket['id'] !== null && isset($map[$bucket['id']]) ? $map[$bucket['id']]['color'] : null,
+                $index,
+            );
 
             $result[] = [
                 'id' => $bucket['id'],
@@ -340,6 +337,15 @@ final class CategoryReport extends Component
         }
 
         return null;
+    }
+
+    private function paletteColor(?string $color, int $index): string
+    {
+        if ($color !== null && preg_match('/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/', $color) === 1) {
+            return $color;
+        }
+
+        return self::FALLBACK_COLORS[$index % count(self::FALLBACK_COLORS)];
     }
 
     /**
