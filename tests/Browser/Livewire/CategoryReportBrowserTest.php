@@ -42,6 +42,8 @@ test('reports page renders the chart, both sections and mode tabs without JavaSc
         ->assertSee('Dining')
         ->assertSee('Salary')
         ->assertPresent('.apexcharts-canvas')
+        ->assertPresent('.report-metric')
+        ->assertPresent('.track .fill')
         ->assertNoJavaScriptErrors();
 });
 
@@ -89,8 +91,9 @@ test('expanding a category row reveals its full-path subcategory inline', functi
 
     $page->assertSee('Office')
         ->assertDontSee('Office / Software')
-        ->click('.tx-row[aria-expanded="false"]')
-        ->assertSee('Office / Software');
+        ->click('.report-row[aria-expanded="false"]')
+        ->assertSee('Office / Software')
+        ->assertPresent('.track-sub .fill');
 });
 
 test('a leaf category links through to the filtered transaction list', function () {
