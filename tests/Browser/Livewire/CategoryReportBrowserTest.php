@@ -86,3 +86,43 @@ test('a top-level leaf category links through to the filtered transaction list',
         ->assertQueryStringHas('period', 'this-month')
         ->assertQueryStringHas('direction', 'outgoing');
 });
+
+test('the sidebar links through to the reports page', function () {
+    $this->actingAs(User::factory()->create());
+
+    $page = visit('/dashboard');
+
+    $page->assertSeeIn('[data-flux-sidebar-item][href$="/reports"]', 'Reports')
+        ->click('[data-flux-sidebar-item][href$="/reports"]')
+        ->assertPathBeginsWith('/reports')
+        ->assertSee('Incoming and outgoing by category');
+});
+
+test('changing the period reveals transactions from the wider range', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $recent = Category::factory()->create(['name' => 'Dining']);
+    $older = Category::factory()->create(['name' => 'Transport']);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $recent->id,
+        'amount' => 3000,
+        'post_date' => now(),
+    ]);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $older->id,
+        'amount' => 5000,
+        'post_date' => now()->subMonths(2),
+    ]);
+
+    $this->actingAs($user);
+
+    $page = visit('/reports');
+
+    $page->assertSee('Dining')
+        ->assertDontSee('Transport')
+        ->select('[data-testid="category-report"] [wire\\:model\\.live="period"]', '3m')
+        ->assertSee('Transport');
+});
