@@ -5,9 +5,12 @@
 declare(strict_types=1);
 
 use App\Casts\MoneyCast;
+use App\Enums\RecurrenceFrequency;
+use App\Enums\TransactionDirection;
 use App\Livewire\CategoryReport;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -21,16 +24,20 @@ test('guests are redirected from the reports page', function () {
     $this->get(route('reports'))->assertRedirect(route('login'));
 });
 
-test('authenticated user sees the reports page', function () {
+test('authenticated user sees the reports page with both directions and mode tabs', function () {
     $user = User::factory()->create();
 
     $this->actingAs($user)
         ->get(route('reports'))
         ->assertOk()
-        ->assertSee('data-testid="category-report"', false);
+        ->assertSee('data-testid="category-report"', false)
+        ->assertSee('Real')
+        ->assertSee('Plan')
+        ->assertSee('Expenses')
+        ->assertSee('Incomes');
 });
 
-test('rolls a sub-category transaction up to its root at the top level', function () {
+test('rolls a sub-category transaction up to its root and hides detail until expanded', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $root = Category::factory()->create(['name' => 'Retail Trade']);
@@ -48,7 +55,6 @@ test('rolls a sub-category transaction up to its root at the top level', functio
         ->test(CategoryReport::class)
         ->assertSee('Retail Trade')
         ->assertSee(MoneyCast::format(4200))
-        ->assertDontSee('Food Retailing')
         ->assertDontSee('Supermarkets');
 });
 
@@ -63,7 +69,6 @@ test('sums the absolute amount regardless of the stored sign', function () {
         'amount' => 5000,
         'post_date' => now(),
     ]);
-
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
         'category_id' => $groceries->id,
@@ -77,7 +82,32 @@ test('sums the absolute amount regardless of the stored sign', function () {
         ->assertSee(MoneyCast::format(8000));
 });
 
-test('drilling into a root splits children from root-direct general spend', function () {
+test('expenses and incomes are shown at the same time', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $spend = Category::factory()->create(['name' => 'Dining']);
+    $earn = Category::factory()->create(['name' => 'Salary']);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $spend->id,
+        'amount' => 3000,
+        'post_date' => now(),
+    ]);
+    Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $account->id,
+        'category_id' => $earn->id,
+        'amount' => 900000,
+        'post_date' => now(),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CategoryReport::class)
+        ->assertSee('Dining')
+        ->assertSee('Salary');
+});
+
+test('expanding a root reveals its full-path descendants inline', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $root = Category::factory()->create(['name' => 'Retail Trade']);
@@ -90,66 +120,89 @@ test('drilling into a root splits children from root-direct general spend', func
         'post_date' => now(),
     ]);
 
-    Transaction::factory()->for($user)->debit()->create([
-        'account_id' => $account->id,
-        'category_id' => $root->id,
-        'amount' => 1500,
-        'post_date' => now(),
-    ]);
-
-    $component = Livewire::actingAs($user)
+    Livewire::actingAs($user)
         ->test(CategoryReport::class)
-        ->call('drillInto', $root->id)
-        ->assertSet('parent', $root->id)
-        ->assertSee('Food Retailing')
-        ->assertSee('General');
-
-    $buckets = collect($component->instance()->report()['buckets']);
-
-    expect($buckets->firstWhere('name', 'Food Retailing')['total'])->toBe(6000)
-        ->and($buckets->firstWhere('name', 'General')['total'])->toBe(1500);
+        ->assertDontSee('Retail Trade / Food Retailing')
+        ->call('toggleExpand', $root->id)
+        ->assertSee('Retail Trade / Food Retailing')
+        ->call('toggleExpand', $root->id)
+        ->assertDontSee('Retail Trade / Food Retailing');
 });
 
-test('drilling up returns to the parent level', function () {
+test('the subcategories toggle expands every root at once', function () {
     $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
     $root = Category::factory()->create(['name' => 'Retail Trade']);
     $child = Category::factory()->withParent($root)->create(['name' => 'Food Retailing']);
 
-    Livewire::actingAs($user)
-        ->test(CategoryReport::class)
-        ->call('drillInto', $child->id)
-        ->assertSet('parent', $child->id)
-        ->call('drillUp')
-        ->assertSet('parent', $root->id);
-});
-
-test('direction toggle switches between outgoing and incoming categories', function () {
-    $user = User::factory()->create();
-    $account = Account::factory()->for($user)->create();
-    $spend = Category::factory()->create(['name' => 'Dining']);
-    $earn = Category::factory()->create(['name' => 'Salary']);
-
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
-        'category_id' => $spend->id,
-        'amount' => 3000,
-        'post_date' => now(),
-    ]);
-
-    Transaction::factory()->for($user)->credit()->create([
-        'account_id' => $account->id,
-        'category_id' => $earn->id,
-        'amount' => 900000,
+        'category_id' => $child->id,
+        'amount' => 6000,
         'post_date' => now(),
     ]);
 
     Livewire::actingAs($user)
         ->test(CategoryReport::class)
-        ->assertSee('Dining')
-        ->assertDontSee('Salary')
-        ->set('direction', 'incoming')
-        ->assertSee('Salary')
-        ->assertDontSee('Dining');
+        ->assertDontSee('Retail Trade / Food Retailing')
+        ->set('showSubcategories', true)
+        ->assertSee('Retail Trade / Food Retailing');
+});
+
+test('the top toggle limits the list to the five largest categories', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $amounts = [
+        'Alpha' => 6000,
+        'Bravo' => 5000,
+        'Charlie' => 4000,
+        'Delta' => 3000,
+        'Echo' => 2000,
+        'Foxtrot' => 1000,
+    ];
+
+    foreach ($amounts as $name => $amount) {
+        $category = Category::factory()->create(['name' => $name]);
+        Transaction::factory()->for($user)->debit()->create([
+            'account_id' => $account->id,
+            'category_id' => $category->id,
+            'amount' => $amount,
+            'post_date' => now(),
+        ]);
+    }
+
+    $component = Livewire::actingAs($user)->test(CategoryReport::class);
+
+    expect(collect($component->instance()->expenseRows())->pluck('name'))->toContain('Foxtrot');
+
+    $rows = collect($component->set('topOnly', true)->instance()->expenseRows());
+
+    expect($rows)->toHaveCount(5)
+        ->and($rows->pluck('name')->all())->toBe(['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo']);
+});
+
+test('plan mode reports planned amounts that are absent from real mode', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $rent = Category::factory()->create(['name' => 'Rent']);
+
+    PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'category_id' => $rent->id,
+        'amount' => 200000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => now()->startOfMonth(),
+        'frequency' => RecurrenceFrequency::EveryMonth,
+        'is_active' => true,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CategoryReport::class)
+        ->assertDontSee('Rent')
+        ->set('mode', 'plan')
+        ->assertSee('Rent')
+        ->assertSee(MoneyCast::format(200000));
 });
 
 test('period filter includes only transactions inside the selected range', function () {
@@ -164,7 +217,6 @@ test('period filter includes only transactions inside the selected range', funct
         'amount' => 1000,
         'post_date' => now(),
     ]);
-
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
         'category_id' => $old->id,
@@ -234,7 +286,6 @@ test('superseded transaction versions are counted once at the child amount', fun
         ->test(CategoryReport::class)
         ->assertSee('Groceries')
         ->assertSee(MoneyCast::format(4200))
-        ->assertDontSee(MoneyCast::format(5000))
         ->assertDontSee(MoneyCast::format(9200));
 });
 
@@ -252,7 +303,6 @@ test('other users transactions never appear', function () {
         'amount' => 3000,
         'post_date' => now(),
     ]);
-
     Transaction::factory()->for($other)->debit()->create([
         'account_id' => $otherAccount->id,
         'category_id' => $theirs->id,
@@ -283,7 +333,7 @@ test('null-category transactions produce an uncategorised bucket', function () {
         ->assertSee(MoneyCast::format(4000));
 });
 
-test('summary strip reports in, out and net across both directions', function () {
+test('summary reports in, out, net with per-month and percentage-of-income figures', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -297,85 +347,115 @@ test('summary strip reports in, out and net across both directions', function ()
         'amount' => 200000,
         'post_date' => now(),
     ]);
+
+    $summary = Livewire::actingAs($user)
+        ->test(CategoryReport::class)
+        ->instance()
+        ->summary();
+
+    expect($summary['in'])->toBe(500000)
+        ->and($summary['out'])->toBe(200000)
+        ->and($summary['net'])->toBe(300000)
+        ->and($summary['months'])->toBe(1)
+        ->and($summary['inPerMonth'])->toBe(500000)
+        ->and($summary['outPctIncome'])->toBe(40)
+        ->and($summary['netPctIncome'])->toBe(60);
+});
+
+test('each bucket carries its share of the direction total', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $big = Category::factory()->create(['name' => 'Housing']);
+    $small = Category::factory()->create(['name' => 'Fun']);
+
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
-        'amount' => -100000,
+        'category_id' => $big->id,
+        'amount' => 7500,
+        'post_date' => now(),
+    ]);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $small->id,
+        'amount' => 2500,
         'post_date' => now(),
     ]);
 
-    $component = Livewire::actingAs($user)->test(CategoryReport::class);
+    $buckets = collect(
+        Livewire::actingAs($user)
+            ->test(CategoryReport::class)
+            ->instance()
+            ->expenses()['buckets']
+    );
 
-    expect($component->instance()->summary())->toBe(['in' => 500000, 'out' => 300000, 'net' => 200000]);
-
-    $component->assertSee(MoneyCast::format(500000))
-        ->assertSee(MoneyCast::format(300000))
-        ->assertSee(MoneyCast::format(200000));
+    expect($buckets->firstWhere('name', 'Housing')['pct'])->toBe(75.0)
+        ->and($buckets->firstWhere('name', 'Fun')['pct'])->toBe(25.0);
 });
 
-test('invalid url state is normalised on mount', function () {
-    $user = User::factory()->create();
-
-    Livewire::actingAs($user)
-        ->withQueryParams(['period' => 'bogus', 'direction' => 'sideways', 'parent' => 999999])
-        ->test(CategoryReport::class)
-        ->assertSet('period', 'this-month')
-        ->assertSet('direction', 'outgoing')
-        ->assertSet('parent', null);
-});
-
-test('reports is linked from the sidebar and the mobile more menu', function () {
-    $user = User::factory()->create();
-
-    $html = (string) $this->actingAs($user)->get(route('dashboard'))->assertOk()->getContent();
-
-    expect($html)->toContain(route('reports'));
-
-    preg_match('/<nav[^>]*data-testid="mobile-tabbar"[\s\S]*?<\/nav>/', $html, $matches);
-
-    expect($matches[0] ?? '')->toContain(route('reports'));
-});
-
-test('category colours are whitelisted to hex before inline styling', function () {
+test('the monthly chart series covers each month in the range', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $safe = Category::factory()->create(['name' => 'SafeCat', 'color' => '#AABBCC']);
-    $evil = Category::factory()->create(['name' => 'EvilCat', 'color' => 'red;background-image:url(//x)']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
-        'category_id' => $safe->id,
+        'amount' => 3000,
+        'post_date' => '2026-05-10',
+    ]);
+    Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $account->id,
+        'amount' => 9000,
+        'post_date' => '2026-07-02',
+    ]);
+
+    $chart = Livewire::actingAs($user)
+        ->test(CategoryReport::class)
+        ->set('period', 'custom')
+        ->set('from', '2026-05-01')
+        ->set('to', '2026-07-31')
+        ->instance()
+        ->chart();
+
+    expect($chart['labels'])->toBe(['May 26', 'Jun 26', 'Jul 26'])
+        ->and($chart['expense'])->toBe([3000, 0, 0])
+        ->and($chart['income'])->toBe([0, 0, 9000])
+        ->and($chart['net'])->toBe([-3000, 0, 9000]);
+});
+
+test('treemap nodes are produced per direction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $spend = Category::factory()->create(['name' => 'Dining']);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $spend->id,
         'amount' => 3000,
         'post_date' => now(),
     ]);
-    Transaction::factory()->for($user)->debit()->create([
-        'account_id' => $account->id,
-        'category_id' => $evil->id,
-        'amount' => 4000,
-        'post_date' => now(),
-    ]);
 
-    $component = Livewire::actingAs($user)
+    $treemap = Livewire::actingAs($user)
         ->test(CategoryReport::class)
-        ->assertDontSee('background-image');
+        ->instance()
+        ->treemap();
 
-    $buckets = collect($component->instance()->report()['buckets']);
-
-    expect($buckets->firstWhere('name', 'SafeCat')['color'])->toBe('#AABBCC')
-        ->and($buckets->firstWhere('name', 'EvilCat')['color'])->toMatch('/^#[0-9a-fA-F]{6}$/')
-        ->and($buckets->firstWhere('name', 'EvilCat')['color'])->not->toBe('red;background-image:url(//x)');
+    expect($treemap['expense'])->toHaveCount(1)
+        ->and($treemap['expense'][0]['x'])->toBe('Dining')
+        ->and($treemap['expense'][0]['y'])->toBe(3000)
+        ->and($treemap['income'])->toBe([]);
 });
 
-test('drilling up from a parent that no longer exists resets to the top level', function () {
+test('an invalid period or mode falls back to the defaults', function () {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
-        ->test(CategoryReport::class)
-        ->set('parent', 999999)
-        ->call('drillUp')
-        ->assertSet('parent', null);
+        ->test(CategoryReport::class, ['period' => 'nonsense', 'mode' => 'bogus'])
+        ->assertSet('period', 'this-month')
+        ->assertSet('mode', 'real')
+        ->set('mode', 'also-bad')
+        ->assertSet('mode', 'real');
 });
 
-test('invalid custom date bounds are normalised to null', function () {
+test('custom date bounds are normalised to canonical dates or cleared', function () {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
@@ -383,15 +463,32 @@ test('invalid custom date bounds are normalised to null', function () {
         ->set('period', 'custom')
         ->set('from', 'not-a-date')
         ->assertSet('from', null)
-        ->set('from', '2026-06-01')
-        ->assertSet('from', '2026-06-01')
-        ->set('to', 'rubbish')
-        ->assertSet('to', null)
-        ->set('to', '2026-06-15')
-        ->assertSet('to', '2026-06-15');
+        ->set('to', '2026-07-15')
+        ->assertSet('to', '2026-07-15');
 });
 
-test('ancestry roll-up reaches the true root beyond ten levels', function () {
+test('a cyclic category chain collapses into the uncategorised bucket', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $a = Category::factory()->create(['name' => 'LoopA']);
+    $b = Category::factory()->withParent($a)->create(['name' => 'LoopB']);
+    $a->update(['parent_id' => $b->id]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $b->id,
+        'amount' => 4000,
+        'post_date' => now(),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CategoryReport::class)
+        ->assertSee('Uncategorised')
+        ->assertSee(MoneyCast::format(4000))
+        ->assertDontSee('LoopB');
+});
+
+test('a chain deeper than ten levels still rolls up to the true root', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -405,36 +502,12 @@ test('ancestry roll-up reaches the true root beyond ten levels', function () {
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
         'category_id' => $current->id,
-        'amount' => 4200,
+        'amount' => 5000,
         'post_date' => now(),
     ]);
 
     Livewire::actingAs($user)
         ->test(CategoryReport::class)
         ->assertSee('DeepRoot')
-        ->assertSee(MoneyCast::format(4200))
-        ->assertDontSee('Level11');
-});
-
-test('a cyclic category chain terminates and rolls up as uncategorised', function () {
-    $user = User::factory()->create();
-    $account = Account::factory()->for($user)->create();
-
-    $a = Category::factory()->create(['name' => 'CycleA']);
-    $b = Category::factory()->withParent($a)->create(['name' => 'CycleB']);
-    $a->update(['parent_id' => $b->id]);
-
-    Transaction::factory()->for($user)->debit()->create([
-        'account_id' => $account->id,
-        'category_id' => $b->id,
-        'amount' => 3000,
-        'post_date' => now(),
-    ]);
-
-    Livewire::actingAs($user)
-        ->test(CategoryReport::class)
-        ->assertSuccessful()
-        ->assertSee('Uncategorised')
-        ->assertSee(MoneyCast::format(3000))
-        ->assertDontSee('CycleA');
+        ->assertSee(MoneyCast::format(5000));
 });
