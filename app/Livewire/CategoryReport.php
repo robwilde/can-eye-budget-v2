@@ -91,7 +91,14 @@ final class CategoryReport extends Component
         }
 
         $map = $this->categoryMap();
-        $this->parent = $map[$this->parent]['parent_id'] ?? null;
+
+        if (! isset($map[$this->parent])) {
+            $this->parent = null;
+
+            return;
+        }
+
+        $this->parent = $map[$this->parent]['parent_id'];
     }
 
     /**
