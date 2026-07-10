@@ -374,3 +374,19 @@ test('drilling up from a parent that no longer exists resets to the top level', 
         ->call('drillUp')
         ->assertSet('parent', null);
 });
+
+test('invalid custom date bounds are normalised to null', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(CategoryReport::class)
+        ->set('period', 'custom')
+        ->set('from', 'not-a-date')
+        ->assertSet('from', null)
+        ->set('from', '2026-06-01')
+        ->assertSet('from', '2026-06-01')
+        ->set('to', 'rubbish')
+        ->assertSet('to', null)
+        ->set('to', '2026-06-15')
+        ->assertSet('to', '2026-06-15');
+});

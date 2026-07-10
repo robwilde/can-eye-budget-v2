@@ -9,6 +9,8 @@ use App\Enums\TransactionDirection;
 use App\Enums\TransactionPeriod;
 use App\Models\Category;
 use App\Models\Transaction;
+use Carbon\CarbonImmutable;
+use Exception;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
@@ -73,6 +75,16 @@ final class CategoryReport extends Component
         if (! in_array($this->direction, self::VALID_DIRECTIONS, true)) {
             $this->direction = 'outgoing';
         }
+    }
+
+    public function updatedFrom(): void
+    {
+        $this->from = $this->normaliseDate($this->from);
+    }
+
+    public function updatedTo(): void
+    {
+        $this->to = $this->normaliseDate($this->to);
     }
 
     public function drillInto(int $categoryId): void
@@ -260,6 +272,19 @@ final class CategoryReport extends Component
             'hasPayCycle' => auth()->user()->hasPayCycleConfigured(),
             'showCustomRange' => $periodEnum === TransactionPeriod::Custom,
         ]);
+    }
+
+    private function normaliseDate(?string $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        try {
+            return CarbonImmutable::parse($value)->toDateString();
+        } catch (Exception) {
+            return null;
+        }
     }
 
     /**
