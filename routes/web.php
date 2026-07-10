@@ -20,6 +20,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('import-bank', 'import-bank')->name('import-bank');
     Route::view('transactions', 'transactions')->name('transactions');
     Route::view('calendar', 'calendar')->name('calendar');
+    Route::view('reports', 'reports')->name('reports');
     Route::view('accounts', 'accounts')->name('accounts');
     Route::view('rules', 'rules')->name('rules');
     Route::get('basiq/callback', BasiqCallbackController::class)->name('basiq.callback');
