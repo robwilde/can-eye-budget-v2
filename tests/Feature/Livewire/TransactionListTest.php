@@ -9,6 +9,7 @@ use App\Enums\PayFrequency;
 use App\Livewire\TransactionList;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -470,6 +471,7 @@ test('filter state persists via url query string', function () {
             'search' => 'test',
             'sortBy' => 'amount',
             'sortDir' => 'asc',
+            'planned' => 'unplanned',
         ])
         ->assertSet('direction', 'incoming')
         ->assertSet('account', $account->id)
@@ -477,7 +479,8 @@ test('filter state persists via url query string', function () {
         ->assertSet('period', '7d')
         ->assertSet('search', 'test')
         ->assertSet('sortBy', 'amount')
-        ->assertSet('sortDir', 'asc');
+        ->assertSet('sortDir', 'asc')
+        ->assertSet('planned', 'unplanned');
 });
 
 test('loading indicator markup is present', function () {
@@ -882,7 +885,7 @@ test('account filter renders via x-cib.filter-toggle when multiple accounts', fu
         ->test(TransactionList::class)
         ->html();
 
-    expect(mb_substr_count($html, 'class="type-toggle'))->toBe(2);
+    expect(mb_substr_count($html, 'class="type-toggle'))->toBe(3);
 });
 
 test('account filter hidden when only one account', function () {
@@ -893,7 +896,7 @@ test('account filter hidden when only one account', function () {
         ->test(TransactionList::class)
         ->html();
 
-    expect(mb_substr_count($html, 'class="type-toggle'))->toBe(1);
+    expect(mb_substr_count($html, 'class="type-toggle'))->toBe(2);
 });
 
 test('empty state uses x-cib.empty-state primitive with banknotes icon', function () {
@@ -1016,4 +1019,111 @@ test('grouped collection is passed to view keyed by post_date Y-m-d', function (
             && $grouped->has('2026-04-12')
             && $grouped->get('2026-04-10')->count() === 2
             && $grouped->get('2026-04-12')->count() === 1);
+});
+
+test('planned pill shown for transactions linked to a planned transaction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $plan = PlannedTransaction::factory()->for($user)->create(['account_id' => $account->id]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'planned_transaction_id' => $plan->id,
+        'description' => 'RENT PAYMENT',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSee('RENT PAYMENT')
+        ->assertSeeHtml('pill plan');
+});
+
+test('planned pill absent for unlinked transactions', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'WOOLWORTHS SYDNEY',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSee('WOOLWORTHS SYDNEY')
+        ->assertDontSeeHtml('pill plan');
+});
+
+test('unplanned filter hides transactions linked to a planned transaction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $plan = PlannedTransaction::factory()->for($user)->create(['account_id' => $account->id]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'planned_transaction_id' => $plan->id,
+        'description' => 'RENT PAYMENT',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'WOOLWORTHS SYDNEY',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['planned' => 'unplanned'])
+        ->assertSee('WOOLWORTHS SYDNEY')
+        ->assertDontSee('RENT PAYMENT');
+});
+
+test('planned filter shows only linked transactions', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $plan = PlannedTransaction::factory()->for($user)->create(['account_id' => $account->id]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'planned_transaction_id' => $plan->id,
+        'description' => 'RENT PAYMENT',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'WOOLWORTHS SYDNEY',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['planned' => 'planned'])
+        ->assertSee('RENT PAYMENT')
+        ->assertDontSee('WOOLWORTHS SYDNEY');
+});
+
+test('invalid planned value normalizes to all', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $plan = PlannedTransaction::factory()->for($user)->create(['account_id' => $account->id]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'planned_transaction_id' => $plan->id,
+        'description' => 'RENT PAYMENT',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'WOOLWORTHS SYDNEY',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['planned' => 'garbage'])
+        ->assertSet('planned', 'all')
+        ->assertSee('RENT PAYMENT')
+        ->assertSee('WOOLWORTHS SYDNEY');
 });
