@@ -52,6 +52,14 @@
 
         <flux:menu class="border-2 border-cib-black bg-white text-cib-black shadow-pop rounded-lg">
             <flux:menu.item
+                :href="route('reports')"
+                icon="chart-bar"
+                wire:navigate
+                class="data-active:bg-cib-yellow-400 data-active:text-cib-black data-active:font-black"
+            >
+                {{ __('Reports') }}
+            </flux:menu.item>
+            <flux:menu.item
                 :href="route('profile.edit')"
                 icon="cog"
                 wire:navigate
