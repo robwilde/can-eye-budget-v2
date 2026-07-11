@@ -48,8 +48,8 @@ final class AppServiceProvider extends ServiceProvider
             stages: [
                 $this->app->make(IdentifyPrimaryAccountStage::class),
                 $this->app->make(SetPayCycleStage::class),
-                $this->app->make(IdentifyRecurringTransactionsStage::class),
                 $this->app->make(UserRulesStage::class),
+                $this->app->make(IdentifyRecurringTransactionsStage::class),
                 $this->app->make(MatchPlannedTransactionsStage::class),
             ],
         ));

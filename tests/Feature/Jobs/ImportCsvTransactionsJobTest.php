@@ -365,3 +365,43 @@ test('a csv row with no matching plan is left entered (unlinked)', function () {
     $tx = Transaction::query()->where('account_id', $account->id)->first();
     expect($tx->planned_transaction_id)->toBeNull();
 });
+
+test('a folded fee is not restored on re-import', function () {
+    Queue::fake([RunTransactionAnalysisJob::class]);
+
+    $bankImport = makeBankImportFromFixture();
+
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class));
+
+    $target = Transaction::query()
+        ->where('account_id', $bankImport->account_id)
+        ->whereNotNull('csv_hash')
+        ->first();
+
+    $merged = Transaction::factory()->create([
+        'user_id' => $bankImport->user_id,
+        'account_id' => $bankImport->account_id,
+    ]);
+    $target->update(['folded_into_transaction_id' => $merged->id]);
+    $targetId = $target->id;
+    $target->delete();
+
+    $bankImport->update([
+        'status' => BankImportStatus::Pending,
+        'imported_count' => 0,
+        'skipped_count' => 0,
+        'restored_count' => 0,
+        'row_count' => 0,
+        'row_errors' => null,
+        'completed_at' => null,
+    ]);
+
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class));
+
+    $bankImport->refresh();
+
+    expect($bankImport->status)->toBe(BankImportStatus::Completed)
+        ->and($bankImport->restored_count)->toBe(0)
+        ->and(Transaction::query()->find($targetId))->toBeNull()
+        ->and(Transaction::withTrashed()->find($targetId)->trashed())->toBeTrue();
+});

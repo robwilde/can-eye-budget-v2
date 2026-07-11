@@ -11,6 +11,7 @@ enum RuleActionType: string
     case AppendNotes = 'append_notes';
     case SetNotes = 'set_notes';
     case LinkToPlannedTransaction = 'link_to_planned_transaction';
+    case FoldIntoParent = 'fold_into_parent';
 
     public function label(): string
     {
@@ -20,6 +21,7 @@ enum RuleActionType: string
             self::AppendNotes => 'Append Notes',
             self::SetNotes => 'Set Notes',
             self::LinkToPlannedTransaction => 'Link to Planned Transaction',
+            self::FoldIntoParent => 'Fold into parent transaction',
         };
     }
 
@@ -31,6 +33,12 @@ enum RuleActionType: string
             self::AppendNotes => 'notes',
             self::SetNotes => 'notes',
             self::LinkToPlannedTransaction => 'planned_transaction_id',
+            self::FoldIntoParent => '',
         };
+    }
+
+    public function requiresValue(): bool
+    {
+        return $this !== self::FoldIntoParent;
     }
 }

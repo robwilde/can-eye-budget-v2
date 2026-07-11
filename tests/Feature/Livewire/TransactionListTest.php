@@ -12,6 +12,7 @@ use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\TransactionFeeFolder;
 use Carbon\CarbonImmutable;
 use Livewire\Livewire;
 
@@ -1126,4 +1127,31 @@ test('invalid planned value normalizes to all', function () {
         ->assertSet('planned', 'all')
         ->assertSee('RENT PAYMENT')
         ->assertSee('WOOLWORTHS SYDNEY');
+});
+
+test('a folded fee shows the merged amount and hides the fee and superseded parent', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $postDate = now()->subDays(2);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'VISA -JetBrains Prague CZ FRGN AMT 051280 #8357',
+        'amount' => -1394,
+        'post_date' => $postDate,
+    ]);
+    $fee = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'Int Tran Fee - JetBrains CZ - 951280',
+        'amount' => -42,
+        'post_date' => $postDate,
+    ]);
+
+    app(TransactionFeeFolder::class)->fold($fee);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSee(MoneyCast::format(-1436))
+        ->assertDontSee('Int Tran Fee')
+        ->assertDontSee(MoneyCast::format(-1394));
 });

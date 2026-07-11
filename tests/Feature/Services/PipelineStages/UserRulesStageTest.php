@@ -22,6 +22,7 @@ use App\Models\UserRule;
 use App\Models\UserRuleGroup;
 use App\Services\PipelineStages\UserRulesStage;
 use App\Services\TransactionAnalysisPipeline;
+use Carbon\CarbonImmutable;
 
 beforeEach(function () {
     $this->user = User::factory()->create();
@@ -338,4 +339,77 @@ test('stage is registered in pipeline via AppServiceProvider', function () {
     $stageKeys = array_map(fn ($stage) => $stage->key(), $stages);
 
     expect($stageKeys)->toContain('user-rules');
+});
+
+// ─── Fold Into Parent ──────────────────────────────────────────────────
+
+test('auto-apply fold rule folds an intl fee into its parent and writes an audit entry', function () {
+    $postDate = CarbonImmutable::parse('2026-07-05');
+
+    $parent = createStageTransaction($this->user, $this->account, [
+        'description' => 'VISA -JetBrains CZ FRGN AMT 051280 #8357',
+        'amount' => -1394,
+        'post_date' => $postDate,
+    ]);
+    $fee = createStageTransaction($this->user, $this->account, [
+        'description' => 'Int Tran Fee - JetBrains CZ - 951280',
+        'amount' => -42,
+        'post_date' => $postDate,
+    ]);
+
+    createRuleWithGroup($this->user, [
+        ['field' => 'description', 'operator' => 'starts_with', 'value' => 'Int Tran Fee'],
+    ], [
+        ['type' => 'fold_into_parent', 'value' => ''],
+    ], [], ['is_auto_apply' => true]);
+
+    $this->stage->execute($this->context);
+
+    $audit = PipelineAuditEntry::where('pipeline_run_id', $this->pipelineRun->id)
+        ->where('stage', 'user-rules')
+        ->where('action', 'auto_applied')
+        ->first();
+
+    expect(Transaction::withTrashed()->find($fee->id)->trashed())->toBeTrue()
+        ->and(Transaction::where('parent_transaction_id', $parent->id)->value('amount'))->toBe(-1436)
+        ->and($audit)->not->toBeNull();
+});
+
+test('orphan fee writes no audit entry and folds on a later run once the parent arrives', function () {
+    $postDate = CarbonImmutable::parse('2026-07-05');
+
+    $fee = createStageTransaction($this->user, $this->account, [
+        'description' => 'Int Tran Fee - JetBrains CZ - 951280',
+        'amount' => -42,
+        'post_date' => $postDate,
+    ]);
+
+    createRuleWithGroup($this->user, [
+        ['field' => 'description', 'operator' => 'starts_with', 'value' => 'Int Tran Fee'],
+    ], [
+        ['type' => 'fold_into_parent', 'value' => ''],
+    ], [], ['is_auto_apply' => true]);
+
+    $this->stage->execute($this->context);
+
+    expect(PipelineAuditEntry::where('stage', 'user-rules')->where('action', 'auto_applied')->count())->toBe(0)
+        ->and(Transaction::withTrashed()->find($fee->id)->trashed())->toBeFalse();
+
+    $parent = createStageTransaction($this->user, $this->account, [
+        'description' => 'VISA -JetBrains CZ FRGN AMT 051280 #8357',
+        'amount' => -1394,
+        'post_date' => $postDate,
+    ]);
+
+    $secondRun = PipelineRun::factory()->for($this->user)->create();
+    $secondContext = new PipelineContext(
+        user: $this->user,
+        pipelineRun: $secondRun,
+        isFirstSync: false,
+    );
+
+    app(UserRulesStage::class)->execute($secondContext);
+
+    expect(Transaction::withTrashed()->find($fee->id)->trashed())->toBeTrue()
+        ->and(Transaction::where('parent_transaction_id', $parent->id)->value('amount'))->toBe(-1436);
 });

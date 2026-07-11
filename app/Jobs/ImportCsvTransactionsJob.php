@@ -106,6 +106,10 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
                     }
 
                     if ($existing->trashed()) {
+                        if ($existing->folded_into_transaction_id !== null) {
+                            continue; // folded fee: stays hidden; merged parent already carries its amount
+                        }
+
                         $existing->fill($values);
                         $existing->restore();
                         $restored++;

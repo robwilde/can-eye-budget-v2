@@ -293,3 +293,44 @@ test('can move rule down within group', function () {
     expect($ruleA->fresh()->order)->toBe(1)
         ->and($ruleB->fresh()->order)->toBe(0);
 });
+
+// ─── Action Value Validation ─────────────────────────────
+
+test('can save a rule with a fold_into_parent action and empty value', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->call('openAddRuleModal', $group->id)
+        ->set('ruleName', 'Fold Fees')
+        ->set('triggers.0.field', RuleTriggerField::Description->value)
+        ->set('triggers.0.operator', RuleTriggerOperator::StartsWith->value)
+        ->set('triggers.0.value', 'Int Tran Fee')
+        ->set('actions.0.type', RuleActionType::FoldIntoParent->value)
+        ->set('actions.0.value', '')
+        ->call('saveRule')
+        ->assertHasNoErrors();
+
+    $rule = UserRule::where('user_id', $this->user->id)->first();
+
+    expect($rule)->not->toBeNull()
+        ->and($rule->actions[0]['type'])->toBe(RuleActionType::FoldIntoParent->value);
+});
+
+test('a value-requiring action with empty value fails validation', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->call('openAddRuleModal', $group->id)
+        ->set('ruleName', 'Bad Rule')
+        ->set('triggers.0.field', RuleTriggerField::Description->value)
+        ->set('triggers.0.operator', RuleTriggerOperator::Contains->value)
+        ->set('triggers.0.value', 'NETFLIX')
+        ->set('actions.0.type', RuleActionType::SetCategory->value)
+        ->set('actions.0.value', '')
+        ->call('saveRule')
+        ->assertHasErrors(['actions.0.value']);
+
+    expect(UserRule::where('user_id', $this->user->id)->count())->toBe(0);
+});

@@ -261,6 +261,8 @@
                                         <flux:select.option value="{{ $pt->id }}">{{ $pt->description }}</flux:select.option>
                                     @endforeach
                                 </flux:select>
+                            @elseif(isset($action['type']) && $action['type'] === RuleActionType::FoldIntoParent->value)
+                                <flux:text size="sm" class="mt-2">Finds the matching parent purchase (same day, same account, matching reference) and folds this fee into it.</flux:text>
                             @else
                                 <flux:input wire:model="actions.{{ $index }}.value" size="sm" placeholder="Value" />
                             @endif

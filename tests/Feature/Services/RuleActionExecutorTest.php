@@ -12,9 +12,10 @@ use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\RuleActionExecutor;
+use Carbon\CarbonImmutable;
 
 beforeEach(function () {
-    $this->executor = new RuleActionExecutor;
+    $this->executor = app(RuleActionExecutor::class);
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
 });
@@ -171,4 +172,56 @@ test('invalid action type is silently skipped', function () {
     ]);
 
     expect($transaction->fresh()->description)->toBe('ORIGINAL DESCRIPTION');
+});
+
+// ─── Fold Into Parent ──────────────────────────────────────────────────
+
+test('fold_into_parent folds a fee into its parent and returns true', function () {
+    $postDate = CarbonImmutable::parse('2026-07-05');
+
+    $parent = createActionTransaction($this->user, $this->account, [
+        'description' => 'VISA -JetBrains CZ FRGN AMT 051280 #8357',
+        'amount' => -1394,
+        'post_date' => $postDate,
+    ]);
+    $fee = createActionTransaction($this->user, $this->account, [
+        'description' => 'Int Tran Fee - JetBrains CZ - 951280',
+        'amount' => -42,
+        'post_date' => $postDate,
+    ]);
+
+    $applied = $this->executor->execute($fee, [
+        ['type' => 'fold_into_parent', 'value' => ''],
+    ]);
+
+    $merged = Transaction::where('parent_transaction_id', $parent->id)->first();
+
+    expect($applied)->toBeTrue()
+        ->and(Transaction::withTrashed()->find($fee->id)->trashed())->toBeTrue()
+        ->and($merged->amount)->toBe(-1436);
+});
+
+test('fold_into_parent returns false and leaves the fee when no parent matches', function () {
+    $fee = createActionTransaction($this->user, $this->account, [
+        'description' => 'Int Tran Fee - JetBrains CZ - 951280',
+        'amount' => -42,
+    ]);
+
+    $applied = $this->executor->execute($fee, [
+        ['type' => 'fold_into_parent', 'value' => ''],
+    ]);
+
+    expect($applied)->toBeFalse()
+        ->and(Transaction::withTrashed()->find($fee->id)->trashed())->toBeFalse();
+});
+
+test('effective action types return true', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $transaction = createActionTransaction($this->user, $this->account);
+
+    $applied = $this->executor->execute($transaction, [
+        ['type' => 'set_category', 'value' => (string) $category->id],
+    ]);
+
+    expect($applied)->toBeTrue();
 });
