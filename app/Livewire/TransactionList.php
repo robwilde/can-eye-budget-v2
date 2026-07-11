@@ -26,11 +26,16 @@ final class TransactionList extends Component
 
     private const array VALID_PLANNED_FILTERS = ['all', 'planned', 'unplanned'];
 
+    private const array VALID_CATEGORISED_FILTERS = ['all', 'categorised', 'uncategorised'];
+
     #[Url]
     public string $direction = 'all';
 
     #[Url]
     public string $planned = 'all';
+
+    #[Url]
+    public string $categorised = 'all';
 
     #[Url]
     public ?int $account = null;
@@ -66,6 +71,10 @@ final class TransactionList extends Component
 
         if (! in_array($this->planned, self::VALID_PLANNED_FILTERS, true)) {
             $this->planned = 'all';
+        }
+
+        if (! in_array($this->categorised, self::VALID_CATEGORISED_FILTERS, true)) {
+            $this->categorised = 'all';
         }
 
         $this->period = match ($this->period) {
@@ -116,6 +125,15 @@ final class TransactionList extends Component
     {
         if (! in_array($this->planned, self::VALID_PLANNED_FILTERS, true)) {
             $this->planned = 'all';
+        }
+
+        $this->resetPage();
+    }
+
+    public function updatedCategorised(): void
+    {
+        if (! in_array($this->categorised, self::VALID_CATEGORISED_FILTERS, true)) {
+            $this->categorised = 'all';
         }
 
         $this->resetPage();
@@ -173,6 +191,8 @@ final class TransactionList extends Component
             ->when($this->category, fn ($q, $id) => $q->where('category_id', $id))
             ->when($this->planned === 'planned', fn ($q) => $q->whereNotNull('planned_transaction_id'))
             ->when($this->planned === 'unplanned', fn ($q) => $q->whereNull('planned_transaction_id'))
+            ->when($this->categorised === 'categorised', fn ($q) => $q->whereNotNull('category_id'))
+            ->when($this->categorised === 'uncategorised', fn ($q) => $q->whereNull('category_id'))
             ->when($this->search, fn ($q, $term) => $q->where(function ($q) use ($term) {
                 $q->where('description', 'like', "%{$term}%")
                     ->orWhere('clean_description', 'like', "%{$term}%")
