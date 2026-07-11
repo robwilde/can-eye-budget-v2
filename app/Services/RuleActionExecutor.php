@@ -15,11 +15,16 @@ final readonly class RuleActionExecutor
 
     /**
      * @param  array<int, array<string, string>>  $actions
-     * @return bool Whether any action took effect.
+     * @return bool Whether the rule fully applied. Returns false when a fold
+     *              action was requested but did not fold (e.g. an orphan fee
+     *              whose parent is not yet imported), so the caller leaves it
+     *              unaudited for the next pipeline run to retry — even if other
+     *              actions in the same rule took effect.
      */
     public function execute(Transaction $transaction, array $actions): bool
     {
         $applied = false;
+        $foldPending = false;
 
         foreach ($actions as $action) {
             $type = RuleActionType::tryFrom($action['type'] ?? '');
@@ -30,21 +35,27 @@ final readonly class RuleActionExecutor
 
             $value = $action['value'] ?? '';
 
-            $applied = match ($type) {
+            $effect = match ($type) {
                 RuleActionType::SetCategory => $this->setCategory($transaction, $value),
                 RuleActionType::SetDescription => $this->setDescription($transaction, $value),
                 RuleActionType::AppendNotes => $this->appendNotes($transaction, $value),
                 RuleActionType::SetNotes => $this->setNotes($transaction, $value),
                 RuleActionType::LinkToPlannedTransaction => $this->linkToPlannedTransaction($transaction, $value),
                 RuleActionType::FoldIntoParent => $this->feeFolder->fold($transaction) instanceof Transaction,
-            } || $applied;
+            };
+
+            if ($type === RuleActionType::FoldIntoParent && ! $effect) {
+                $foldPending = true;
+            }
+
+            $applied = $effect || $applied;
         }
 
         if ($transaction->isDirty()) {
             $transaction->save();
         }
 
-        return $applied;
+        return $applied && ! $foldPending;
     }
 
     private function setCategory(Transaction $transaction, string $value): bool
