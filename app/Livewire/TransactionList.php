@@ -58,6 +58,8 @@ final class TransactionList extends Component
 
     public function mount(): void
     {
+        $this->restoreRememberedPeriod();
+
         if (! in_array($this->direction, self::VALID_DIRECTIONS, true)) {
             $this->direction = 'all';
         }
@@ -132,6 +134,7 @@ final class TransactionList extends Component
     public function updatedPeriod(): void
     {
         $this->resetPage();
+        session()->put('transactions.period', $this->period);
     }
 
     public function updatedSearch(): void
@@ -142,11 +145,13 @@ final class TransactionList extends Component
     public function updatedFrom(): void
     {
         $this->resetPage();
+        session()->put('transactions.from', $this->from);
     }
 
     public function updatedTo(): void
     {
         $this->resetPage();
+        session()->put('transactions.to', $this->to);
     }
 
     public function render(): View
@@ -202,5 +207,30 @@ final class TransactionList extends Component
             'hasPayCycle' => auth()->user()->hasPayCycleConfigured(),
             'showCustomRange' => $periodEnum === TransactionPeriod::Custom,
         ]);
+    }
+
+    private function restoreRememberedPeriod(): void
+    {
+        if (request()->query('period') !== null) {
+            return;
+        }
+
+        $period = session()->get('transactions.period');
+
+        if (! is_string($period)) {
+            return;
+        }
+
+        $this->period = $period;
+
+        if (request()->query('from') === null) {
+            $from = session()->get('transactions.from');
+            $this->from = is_string($from) ? $from : null;
+        }
+
+        if (request()->query('to') === null) {
+            $to = session()->get('transactions.to');
+            $this->to = is_string($to) ? $to : null;
+        }
     }
 }
