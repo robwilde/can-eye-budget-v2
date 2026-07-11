@@ -225,3 +225,20 @@ test('effective action types return true', function () {
 
     expect($applied)->toBeTrue();
 });
+
+test('a failed fold marks the rule unapplied even when a sibling action takes effect', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $fee = createActionTransaction($this->user, $this->account, [
+        'description' => 'Int Tran Fee - JetBrains CZ - 951280',
+        'amount' => -42,
+    ]);
+
+    $applied = $this->executor->execute($fee, [
+        ['type' => 'set_category', 'value' => (string) $category->id],
+        ['type' => 'fold_into_parent', 'value' => ''],
+    ]);
+
+    expect($applied)->toBeFalse()
+        ->and($fee->fresh()->category_id)->toBe($category->id)
+        ->and(Transaction::withTrashed()->find($fee->id)->trashed())->toBeFalse();
+});
