@@ -165,7 +165,7 @@
                 :placeholder="__('No category')"
             />
 
-            @if($editingTransactionId && $mode === 'plan' && $transactionType !== 'transfer')
+            @if($editingTransactionId && $transactionType !== 'transfer')
                 <flux:field variant="inline">
                     <flux:checkbox wire:model.live="categoriseMatching"/>
                     <flux:label>{{ __('Also categorise matching transactions') }}</flux:label>
