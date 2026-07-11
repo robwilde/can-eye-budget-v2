@@ -11,6 +11,7 @@ use App\Models\Account;
 use App\Models\Category;
 use App\Models\Transaction;
 use Illuminate\View\View;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -91,6 +92,16 @@ final class TransactionList extends Component
         }
 
         $this->resetPage();
+    }
+
+    /**
+     * The modal saved or deleted a transaction/plan; re-render so the fresh
+     * render() query picks up the change.
+     */
+    #[On('transaction-saved')]
+    public function refreshList(): void
+    {
+        //
     }
 
     public function updatedDirection(): void
