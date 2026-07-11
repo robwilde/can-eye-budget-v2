@@ -75,6 +75,16 @@
             :selected="$planned"
             wire-model="planned"
         />
+
+        <x-cib.filter-toggle
+            :options="[
+                ['value' => 'all', 'label' => 'All'],
+                ['value' => 'categorised', 'label' => 'Categorised'],
+                ['value' => 'uncategorised', 'label' => 'Uncategorised'],
+            ]"
+            :selected="$categorised"
+            wire-model="categorised"
+        />
     </div>
 
     <flux:input wire:model.live.debounce.300ms="search" placeholder="Search transactions..." icon="magnifying-glass" size="sm"/>

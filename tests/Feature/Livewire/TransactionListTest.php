@@ -886,7 +886,7 @@ test('account filter renders via x-cib.filter-toggle when multiple accounts', fu
         ->test(TransactionList::class)
         ->html();
 
-    expect(mb_substr_count($html, 'class="type-toggle'))->toBe(3);
+    expect(mb_substr_count($html, 'class="type-toggle'))->toBe(4);
 });
 
 test('account filter hidden when only one account', function () {
@@ -897,7 +897,7 @@ test('account filter hidden when only one account', function () {
         ->test(TransactionList::class)
         ->html();
 
-    expect(mb_substr_count($html, 'class="type-toggle'))->toBe(2);
+    expect(mb_substr_count($html, 'class="type-toggle'))->toBe(3);
 });
 
 test('empty state uses x-cib.empty-state primitive with banknotes icon', function () {
@@ -1264,4 +1264,90 @@ test('changing custom range dates stores them in the session', function () {
 
     expect(session()->get('transactions.from'))->toBe('2026-06-01');
     expect(session()->get('transactions.to'))->toBe('2026-06-10');
+});
+
+test('categorised filter shows only transactions with a category', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $category->id,
+        'description' => 'WOOLWORTHS CATEGORISED',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => null,
+        'description' => 'COLES UNCATEGORISED',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['categorised' => 'categorised'])
+        ->assertSee('WOOLWORTHS CATEGORISED')
+        ->assertDontSee('COLES UNCATEGORISED');
+});
+
+test('uncategorised filter shows only transactions without a category', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $category->id,
+        'description' => 'WOOLWORTHS CATEGORISED',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => null,
+        'description' => 'COLES UNCATEGORISED',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['categorised' => 'uncategorised'])
+        ->assertSee('COLES UNCATEGORISED')
+        ->assertDontSee('WOOLWORTHS CATEGORISED');
+});
+
+test('invalid categorised value normalizes to all', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $category->id,
+        'description' => 'WOOLWORTHS CATEGORISED',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => null,
+        'description' => 'COLES UNCATEGORISED',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['categorised' => 'garbage'])
+        ->assertSet('categorised', 'all')
+        ->assertSee('WOOLWORTHS CATEGORISED')
+        ->assertSee('COLES UNCATEGORISED');
+});
+
+test('categorised filter state persists via url query string', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, [
+            'categorised' => 'uncategorised',
+        ])
+        ->assertSet('categorised', 'uncategorised');
 });
