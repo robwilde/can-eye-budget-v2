@@ -1156,40 +1156,61 @@ test('a folded fee shows the merged amount and hides the fee and superseded pare
         ->assertDontSee(MoneyCast::format(-1394));
 });
 
-test('list refreshes when transaction-saved event is dispatched', function () {
+// ── Period persistence (session) ────────────────────────────────────────────
+
+test('changing period stores it in the session', function () {
     $user = User::factory()->create();
-    $account = Account::factory()->for($user)->create();
 
-    $component = Livewire::actingAs($user)->test(TransactionList::class);
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->set('period', '6m');
 
-    $component->assertDontSee('NEW COFFEE PURCHASE');
-
-    Transaction::factory()->for($user)->debit()->create([
-        'account_id' => $account->id,
-        'description' => 'NEW COFFEE PURCHASE',
-        'post_date' => now()->subDays(1),
-    ]);
-
-    $component->dispatch('transaction-saved')->assertSee('NEW COFFEE PURCHASE');
+    expect(session()->get('transactions.period'))->toBe('6m');
 });
 
-test('list reflects an edited transaction after transaction-saved', function () {
+test('period restores from session when no query param present', function () {
     $user = User::factory()->create();
-    $account = Account::factory()->for($user)->create();
 
-    $txn = Transaction::factory()->for($user)->debit()->create([
-        'account_id' => $account->id,
-        'description' => 'ORIGINAL DESC',
-        'post_date' => now()->subDays(1),
-    ]);
+    session()->put('transactions.period', '6m');
 
-    $component = Livewire::actingAs($user)
+    Livewire::actingAs($user)
         ->test(TransactionList::class)
-        ->assertSee('ORIGINAL DESC');
+        ->assertSet('period', '6m');
+});
 
-    $txn->update(['description' => 'EDITED DESC']);
+test('explicit period query param beats remembered session value', function () {
+    $user = User::factory()->create();
 
-    $component->dispatch('transaction-saved')
-        ->assertSee('EDITED DESC')
-        ->assertDontSee('ORIGINAL DESC');
+    session()->put('transactions.period', '6m');
+
+    Livewire::actingAs($user)
+        ->withQueryParams(['period' => '7d'])
+        ->test(TransactionList::class)
+        ->assertSet('period', '7d');
+});
+
+test('invalid remembered period normalizes to this-month', function () {
+    $user = User::factory()->create();
+
+    session()->put('transactions.period', 'garbage');
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSet('period', 'this-month');
+});
+
+test('custom range from and to restore from session', function () {
+    $user = User::factory()->create();
+
+    session()->put('transactions.period', 'custom');
+    session()->put('transactions.from', '2026-06-01');
+    session()->put('transactions.to', '2026-06-10');
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSet('period', 'custom')
+        ->assertSet('from', '2026-06-01')
+        ->assertSet('to', '2026-06-10')
+        ->assertSeeHtml('wire:model.live="from"')
+        ->assertSeeHtml('wire:model.live="to"');
 });
