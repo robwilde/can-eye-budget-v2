@@ -3406,3 +3406,174 @@ test('a manual entry with no matching plan is left entered (unlinked)', function
     expect($tx)->not->toBeNull()
         ->and($tx->planned_transaction_id)->toBeNull();
 });
+
+test('editing a transaction with categorise-matching ticked creates a rule and categorises matching transactions', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => 'Netflix',
+        'amount' => 1599,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'NETFLIX',
+        'post_date' => '2026-03-15',
+        'category_id' => null,
+    ]);
+    $sibling = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => 'Netflix',
+        'amount' => 1599,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'NETFLIX',
+        'post_date' => '2026-02-15',
+        'category_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('descriptionInput', '15.99 NETFLIX')
+        ->set('categoryId', $category->id)
+        ->set('categoriseMatching', true)
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    $rule = UserRule::query()->where('user_id', $user->id)->first();
+
+    expect($rule)->not->toBeNull()
+        ->and($rule->is_auto_apply)->toBeTrue()
+        ->and($rule->actions)->toBe([['type' => 'set_category', 'value' => (string) $category->id]]);
+
+    $child = Transaction::query()
+        ->where('parent_transaction_id', $source->id)
+        ->first();
+
+    expect($child)->not->toBeNull()
+        ->and($child->category_id)->toBe($category->id)
+        ->and($sibling->fresh()->category_id)->toBe($category->id);
+});
+
+test('editing a transaction without ticking categorise-matching creates no rule and leaves siblings untouched', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => 'Netflix',
+        'amount' => 1599,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'NETFLIX',
+        'post_date' => '2026-03-15',
+        'category_id' => null,
+    ]);
+    $sibling = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => 'Netflix',
+        'amount' => 1599,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'NETFLIX',
+        'post_date' => '2026-02-15',
+        'category_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('descriptionInput', '15.99 NETFLIX')
+        ->set('categoryId', $category->id)
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    expect(UserRule::query()->where('user_id', $user->id)->count())->toBe(0)
+        ->and($sibling->fresh()->category_id)->toBeNull();
+});
+
+test('editing a basiq transaction with categorise-matching ticked creates a rule and categorises matching transactions', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->fromBasiq()->create([
+        'merchant_name' => 'Netflix',
+        'amount' => 1599,
+        'direction' => TransactionDirection::Debit,
+        'post_date' => '2026-03-15',
+        'category_id' => null,
+    ]);
+    $sibling = Transaction::factory()->for($user)->for($account)->fromBasiq()->create([
+        'merchant_name' => 'Netflix',
+        'amount' => 1599,
+        'direction' => TransactionDirection::Debit,
+        'post_date' => '2026-02-15',
+        'category_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('categoryId', $category->id)
+        ->set('categoriseMatching', true)
+        ->set('categoriseMatchValue', '')
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    $rule = UserRule::query()->where('user_id', $user->id)->first();
+
+    expect($rule)->not->toBeNull()
+        ->and($rule->triggers[0])->toBe([
+            'field' => 'merchant_name',
+            'operator' => 'equals',
+            'value' => 'Netflix',
+        ])
+        ->and($sibling->fresh()->category_id)->toBe($category->id);
+});
+
+test('the categorise-matching checkbox shows when editing in enter mode and not when adding', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $source = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => 'Netflix',
+        'amount' => 1599,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'NETFLIX',
+        'post_date' => '2026-03-15',
+        'category_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->assertSee('Also categorise matching transactions');
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->assertDontSee('Also categorise matching transactions');
+
+    $debit = Transaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'original',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+    ]);
+    $credit = Transaction::factory()->for($user)->create([
+        'account_id' => Account::factory()->for($user)->create()->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Credit,
+        'description' => 'original',
+        'post_date' => '2026-03-15',
+        'source' => TransactionSource::Manual,
+        'transfer_pair_id' => $debit->id,
+    ]);
+    $debit->update(['transfer_pair_id' => $credit->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->assertDontSee('Also categorise matching transactions');
+});
