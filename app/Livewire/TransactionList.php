@@ -99,10 +99,7 @@ final class TransactionList extends Component
      * render() query picks up the change.
      */
     #[On('transaction-saved')]
-    public function refreshList(): void
-    {
-        //
-    }
+    public function refreshList(): void {}
 
     public function updatedDirection(): void
     {
