@@ -227,8 +227,8 @@
                 </div>
             @endif
 
-            {{-- Transfer / basiq notes --}}
-            @if($transactionType === 'transfer' || $isBasiqTransaction)
+            {{-- Transfer / basiq notes, plus any existing notes (e.g. folded intl-fee note) --}}
+            @if($transactionType === 'transfer' || $isBasiqTransaction || $notes !== '')
                 <flux:textarea
                     wire:model="notes"
                     :label="$transactionType === 'transfer' ? __('Transfer description') : __('Notes')"
