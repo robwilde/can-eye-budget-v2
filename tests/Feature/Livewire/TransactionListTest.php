@@ -1155,3 +1155,41 @@ test('a folded fee shows the merged amount and hides the fee and superseded pare
         ->assertDontSee('Int Tran Fee')
         ->assertDontSee(MoneyCast::format(-1394));
 });
+
+test('list refreshes when transaction-saved event is dispatched', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $component = Livewire::actingAs($user)->test(TransactionList::class);
+
+    $component->assertDontSee('NEW COFFEE PURCHASE');
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'NEW COFFEE PURCHASE',
+        'post_date' => now()->subDays(1),
+    ]);
+
+    $component->dispatch('transaction-saved')->assertSee('NEW COFFEE PURCHASE');
+});
+
+test('list reflects an edited transaction after transaction-saved', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $txn = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'ORIGINAL DESC',
+        'post_date' => now()->subDays(1),
+    ]);
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSee('ORIGINAL DESC');
+
+    $txn->update(['description' => 'EDITED DESC']);
+
+    $component->dispatch('transaction-saved')
+        ->assertSee('EDITED DESC')
+        ->assertDontSee('ORIGINAL DESC');
+});
