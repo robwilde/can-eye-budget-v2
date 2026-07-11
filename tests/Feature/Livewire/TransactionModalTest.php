@@ -1546,6 +1546,23 @@ test('basiq transaction shows notes field with notes label', function () {
         ->assertSee(__('Notes'));
 });
 
+test('csv transaction with notes shows the notes field and folded-fee note', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->fromCsv()->create([
+        'direction' => TransactionDirection::Debit,
+        'notes' => 'Includes intl transaction fee -$0.06 (folded)',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->assertSet('isBasiqTransaction', false)
+        ->assertSet('transactionType', 'expense')
+        ->assertSet('notes', 'Includes intl transaction fee -$0.06 (folded)')
+        ->assertSee(__('Notes'));
+});
+
 test('switching from transfer to expense hides notes field', function () {
     $user = User::factory()->create();
 
