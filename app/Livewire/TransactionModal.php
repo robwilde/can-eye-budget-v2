@@ -455,26 +455,26 @@ final class TransactionModal extends Component
         [$transaction, $parsed] = $resolved;
 
         if ($transaction->source === TransactionSource::Basiq) {
-            $transaction->createChild([
+            $child = $transaction->createChild([
                 'category_id' => $this->categoryId,
                 'notes' => $this->notes !== '' ? $this->notes : null,
                 'clean_description' => $this->cleanDescription !== '' ? $this->cleanDescription : null,
             ]);
-
-            return true;
+        } else {
+            $child = $transaction->createChild([
+                'account_id' => $this->accountId,
+                'category_id' => $this->categoryId,
+                'amount' => $parsed->amount,
+                'direction' => $this->transactionType === 'expense'
+                    ? TransactionDirection::Debit
+                    : TransactionDirection::Credit,
+                'description' => $parsed->description,
+                'post_date' => $this->date,
+                'notes' => $this->notes !== '' ? $this->notes : null,
+            ]);
         }
 
-        $transaction->createChild([
-            'account_id' => $this->accountId,
-            'category_id' => $this->categoryId,
-            'amount' => $parsed->amount,
-            'direction' => $this->transactionType === 'expense'
-                ? TransactionDirection::Debit
-                : TransactionDirection::Credit,
-            'description' => $parsed->description,
-            'post_date' => $this->date,
-            'notes' => $this->notes !== '' ? $this->notes : null,
-        ]);
+        $this->applyCategoriseMatching($child);
 
         return true;
     }
@@ -614,14 +614,21 @@ final class TransactionModal extends Component
             }
         });
 
-        // Generate and apply the categorisation rule after the plan transaction
-        // commits: it can touch many transactions, so keeping it outside avoids
-        // holding row locks for the length of an interactive modal save.
-        if ($isPlainSource && $this->categoriseMatching && $this->categoryId !== null) {
-            app(CategoryRuleGenerator::class)->generateAndApply($transaction, $this->categoryId, $this->categoriseMatchValue);
-        }
+        $this->applyCategoriseMatching($transaction);
 
         return true;
+    }
+
+    private function applyCategoriseMatching(Transaction $source): void
+    {
+        if (! $this->categoriseMatching
+            || $this->categoryId === null
+            || $this->transactionType === 'transfer'
+            || $source->transfer_pair_id !== null) {
+            return;
+        }
+
+        app(CategoryRuleGenerator::class)->generateAndApply($source, $this->categoryId, $this->categoriseMatchValue);
     }
 
     /**
