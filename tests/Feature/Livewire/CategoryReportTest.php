@@ -511,3 +511,65 @@ test('a chain deeper than ten levels still rolls up to the true root', function 
         ->assertSee('DeepRoot')
         ->assertSee(MoneyCast::format(5000));
 });
+
+test('category colours are whitelisted to safe hex before reaching inline styles', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $safe = Category::factory()->withColor('#AABBCC')->create(['name' => 'SafeColour']);
+    $evil = Category::factory()->withColor('red;background-image:url(//x)')->create(['name' => 'EvilColour']);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $safe->id,
+        'amount' => 5000,
+        'post_date' => now(),
+    ]);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $evil->id,
+        'amount' => 3000,
+        'post_date' => now(),
+    ]);
+
+    $buckets = collect(
+        Livewire::actingAs($user)
+            ->test(CategoryReport::class)
+            ->instance()
+            ->expenses()['buckets']
+    );
+
+    expect($buckets->firstWhere('name', 'SafeColour')['color'])->toBe('#AABBCC')
+        ->and($buckets->firstWhere('name', 'EvilColour')['color'])->toMatch('/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/')
+        ->and($buckets->firstWhere('name', 'EvilColour')['color'])->not->toContain('url');
+});
+
+test('inline children exclude the root category own direct spend', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $root = Category::factory()->create(['name' => 'Office']);
+    $child = Category::factory()->withParent($root)->create(['name' => 'Software']);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $root->id,
+        'amount' => 2000,
+        'post_date' => now(),
+    ]);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $child->id,
+        'amount' => 3000,
+        'post_date' => now(),
+    ]);
+
+    $office = collect(
+        Livewire::actingAs($user)
+            ->test(CategoryReport::class)
+            ->instance()
+            ->expenses()['buckets']
+    )->firstWhere('name', 'Office');
+
+    expect($office['total'])->toBe(5000)
+        ->and(collect($office['children'])->pluck('id')->all())->toBe([$child->id])
+        ->and(collect($office['children'])->pluck('path')->all())->toBe(['Office / Software']);
+});
