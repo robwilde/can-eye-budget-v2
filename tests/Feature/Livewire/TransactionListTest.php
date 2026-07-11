@@ -1214,3 +1214,16 @@ test('custom range from and to restore from session', function () {
         ->assertSeeHtml('wire:model.live="from"')
         ->assertSeeHtml('wire:model.live="to"');
 });
+
+test('changing custom range dates stores them in the session', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->set('period', 'custom')
+        ->set('from', '2026-06-01')
+        ->set('to', '2026-06-10');
+
+    expect(session()->get('transactions.from'))->toBe('2026-06-01');
+    expect(session()->get('transactions.to'))->toBe('2026-06-10');
+});
