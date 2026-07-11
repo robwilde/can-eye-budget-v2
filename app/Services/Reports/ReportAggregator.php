@@ -12,8 +12,6 @@ use Carbon\CarbonInterface;
 
 final class ReportAggregator
 {
-    private const int PLAN_OCCURRENCE_GUARD = 5000;
-
     /**
      * Flat aggregation of spend/income for a user, one row per
      * (month, direction, category) tuple. Actuals come from a single grouped
@@ -65,9 +63,14 @@ final class ReportAggregator
             $startMonth = ($this->earliestActualDate($user) ?? $now)->startOfMonth();
         }
 
-        $endMonth = $end !== null
-            ? CarbonImmutable::parse($end->toDateString())->endOfMonth()
-            : $now->endOfMonth();
+        if ($end !== null) {
+            $endMonth = CarbonImmutable::parse($end->toDateString())->endOfMonth();
+        } elseif ($mode === 'plan') {
+            $endMonth = $now->endOfMonth();
+        } else {
+            $latest = $this->latestActualDate($user);
+            $endMonth = ($latest !== null && $latest->greaterThan($now) ? $latest : $now)->endOfMonth();
+        }
 
         if ($endMonth->lessThan($startMonth)) {
             $endMonth = $startMonth->endOfMonth();
@@ -106,6 +109,17 @@ final class ReportAggregator
             ->min('post_date');
 
         return $min === null ? null : CarbonImmutable::parse((string) $min);
+    }
+
+    private function latestActualDate(User $user): ?CarbonImmutable
+    {
+        $max = Transaction::query()
+            ->where('user_id', $user->id)
+            ->current()
+            ->excludingTransfers()
+            ->max('post_date');
+
+        return $max === null ? null : CarbonImmutable::parse((string) $max);
     }
 
     /**
@@ -203,8 +217,9 @@ final class ReportAggregator
         }
 
         $dates = [];
+        $maxIterations = (int) ceil($start->diffInDays($end)) + 2;
 
-        for ($i = 0; $i < self::PLAN_OCCURRENCE_GUARD; $i++) {
+        for ($i = 0; $i < $maxIterations; $i++) {
             if ($current->greaterThan($end)) {
                 break;
             }

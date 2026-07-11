@@ -311,8 +311,10 @@ final class CategoryReport extends Component
 
     /**
      * Roll a direction's per-category totals up to their root categories,
-     * attaching each root's full-path descendants as inline children. Cyclic or
-     * orphaned categories collapse into a single uncategorised bucket.
+     * attaching each root's full-path descendants as inline children (the root's
+     * own directly-tagged spend stays in the root total but is not repeated as a
+     * child row). A cyclic chain, or a transaction whose category no longer
+     * exists, collapses into a single uncategorised bucket.
      *
      * @return array{buckets: list<array{id: int|null, name: string, icon: string|null, color: string, total: int, count: int, pct: float, perMonth: int, bar: int, expandable: bool, children: list<array{id: int, path: string, total: int, count: int, pct: float, perMonth: int, bar: int}>}>, sum: int, max: int}
      */
@@ -400,9 +402,11 @@ final class CategoryReport extends Component
             $expandable = false;
 
             foreach ($root['members'] as $member) {
-                if ($member['id'] !== $rootId) {
-                    $expandable = true;
+                if ($member['id'] === $rootId) {
+                    continue;
                 }
+
+                $expandable = true;
 
                 $children[] = [
                     'id' => $member['id'],

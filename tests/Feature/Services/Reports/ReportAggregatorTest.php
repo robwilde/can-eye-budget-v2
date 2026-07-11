@@ -197,3 +197,48 @@ test('open real bounds span the earliest activity to the current month', functio
     expect($bounds['start']->format('Y-m'))->toBe('2026-05')
         ->and($bounds['end']->format('Y-m'))->toBe('2026-07');
 });
+
+test('a long daily plan range is expanded without truncation', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Daily']);
+
+    PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'category_id' => $category->id,
+        'amount' => 100,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => '2016-01-01',
+        'frequency' => RecurrenceFrequency::Everyday,
+        'is_active' => true,
+    ]);
+
+    $start = CarbonImmutable::parse('2016-01-01');
+    $endDate = CarbonImmutable::parse('2031-12-31');
+    $expected = (int) $start->diffInDays($endDate) + 1;
+
+    $atoms = app(ReportAggregator::class)->atoms($user, 'plan', $start, $endDate->endOfDay());
+
+    expect($expected)->toBeGreaterThan(5000)
+        ->and((int) collect($atoms)->sum('count'))->toBe($expected);
+});
+
+test('open real bounds extend the axis to cover future-dated actuals', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => 1000,
+        'post_date' => '2026-07-01',
+    ]);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => 2000,
+        'post_date' => '2026-09-20',
+    ]);
+
+    $bounds = app(ReportAggregator::class)->monthBounds($user, 'real', null, null);
+
+    expect($bounds['end']->format('Y-m'))->toBe('2026-09');
+});
