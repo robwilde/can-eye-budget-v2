@@ -55,6 +55,9 @@ final readonly class UserRulesStage implements PipelineStageContract
             return new StageResult(success: true, stage: self::STAGE_KEY);
         }
 
+        // Transactions are loaded once, upfront. A merged child created mid-run
+        // (by a fold action) is therefore not rule-processed until the next
+        // pipeline run — an accepted limitation.
         $transactions = Transaction::query()
             ->where('user_id', $context->user->id)
             ->current()
@@ -138,7 +141,14 @@ final readonly class UserRulesStage implements PipelineStageContract
             return;
         }
 
-        $this->executor->execute($transaction, $rule->actions);
+        $applied = $this->executor->execute($transaction, $rule->actions);
+
+        // Only record the audit entry when the rule actually took effect. An
+        // ineffective auto-apply (e.g. an orphan fee whose parent has not been
+        // imported yet) is left unrecorded so the next pipeline run retries it.
+        if (! $applied) {
+            return;
+        }
 
         PipelineAuditEntry::create([
             'pipeline_run_id' => $context->pipelineRun->id,

@@ -483,7 +483,7 @@ final class UserRuleManager extends Component
     /** @return array<string, array<int, mixed>> */
     private function ruleFormRules(): array
     {
-        return [
+        $rules = [
             'ruleName' => ['required', 'string', 'max:255'],
             'triggers' => ['required', 'array', 'min:1'],
             'triggers.*.field' => ['required', Rule::in(array_column(RuleTriggerField::cases(), 'value'))],
@@ -491,8 +491,20 @@ final class UserRuleManager extends Component
             'triggers.*.value' => $this->triggerValueRules(),
             'actions' => ['required', 'array', 'min:1'],
             'actions.*.type' => ['required', Rule::in(array_column(RuleActionType::cases(), 'value'))],
-            'actions.*.value' => ['required', 'string'],
         ];
+
+        // Build the value rule per action index: value-requiring types must have
+        // a non-empty value (required is implicit so it catches empty strings),
+        // while valueless actions (e.g. fold into parent) accept an empty value.
+        foreach (array_keys($this->actions) as $index) {
+            $type = RuleActionType::tryFrom($this->actions[$index]['type'] ?? '');
+
+            $rules["actions.{$index}.value"] = $type !== null && ! $type->requiresValue()
+                ? ['nullable', 'string']
+                : ['required', 'string'];
+        }
+
+        return $rules;
     }
 
     /** @return array<int, mixed> */

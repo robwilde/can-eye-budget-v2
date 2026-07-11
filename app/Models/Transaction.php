@@ -40,6 +40,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property int|null $transfer_pair_id
  * @property int|null $planned_transaction_id
  * @property int|null $parent_transaction_id
+ * @property int|null $folded_into_transaction_id
  * @property string|null $notes
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
@@ -76,6 +77,7 @@ final class Transaction extends Model
         'transfer_pair_id',
         'planned_transaction_id',
         'parent_transaction_id',
+        'folded_into_transaction_id',
         'notes',
     ];
 
@@ -160,6 +162,18 @@ final class Transaction extends Model
     public function children(): HasMany
     {
         return $this->hasMany(self::class, 'parent_transaction_id');
+    }
+
+    /** @return BelongsTo<self, $this> */
+    public function foldedInto(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'folded_into_transaction_id');
+    }
+
+    /** @return HasMany<self, $this> */
+    public function foldedFees(): HasMany
+    {
+        return $this->hasMany(self::class, 'folded_into_transaction_id')->withTrashed();
     }
 
     /**
