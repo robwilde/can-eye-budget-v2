@@ -200,3 +200,17 @@ test('suggestMatchValue prefers the merchant name, else the longest description 
     expect($generator->suggestMatchValue($withMerchant))->toBe('Netflix')
         ->and($generator->suggestMatchValue($csvOnly))->toBe('NETFLIX.COM');
 });
+
+test('it suggests the distinctive payee token for an external transfer description', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $source = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'description' => 'Ext Tfr  - NET#4789778169 to 554078 Sekisui House MAST WBC - 260 Queen Street',
+        'direction' => TransactionDirection::Debit,
+    ]);
+
+    expect(app(CategoryRuleGenerator::class)->suggestMatchValue($source))->toBe('SEKISUI');
+});
