@@ -28,6 +28,25 @@ final class GmailService implements GmailServiceContract
     private const int DATE_WINDOW_DAYS = 7;
 
     /**
+     * Payment-processor / BNPL signatures. When a description matches one of
+     * these keywords the bank line names the processor, not the payee, so the
+     * receipt email arrives *from* the processor — searching `from:<sender>`
+     * finds it where the leftover description token (e.g. "PAYIN4") never would.
+     *
+     * @var array<string, string>
+     */
+    private const array PROVIDER_SENDERS = [
+        'afterpay' => 'afterpay',
+        'paypal' => 'paypal',
+        'pypl' => 'paypal',
+        'payin4' => 'paypal',
+        'klarna' => 'klarna',
+        'zippay' => 'zip',
+        'zip.co' => 'zip',
+        'humm' => 'humm',
+    ];
+
+    /**
      * Gmail folders searched, in priority order. All Mail covers archived
      * receipts; INBOX is the fallback for non-English locales / hidden folders.
      *
@@ -50,10 +69,7 @@ final class GmailService implements GmailServiceContract
      */
     public function buildQuery(Transaction $transaction, bool $withAmount = true): string
     {
-        $merchant = str_replace('"', ' ', $this->ruleGenerator->suggestMatchValue($transaction));
-        $merchant = mb_trim((string) preg_replace('/\s+/', ' ', $merchant));
-
-        $parts = [$merchant];
+        $parts = [$this->searchSubject($transaction)];
 
         if ($withAmount) {
             $parts[] = number_format(abs($transaction->amount) / 100, 2, '.', '');
@@ -190,5 +206,37 @@ final class GmailService implements GmailServiceContract
         $body = mb_trim((string) preg_replace('/\s+/', ' ', $body));
 
         return $body === '' ? null : Str::limit($body, 200);
+    }
+
+    /**
+     * The primary search term: a `from:<sender>` filter when the description
+     * names a payment processor, otherwise the sanitised merchant token. The
+     * value is folded into the double-quote-wrapped X-GM-RAW string, so it
+     * must never contain a double quote.
+     */
+    private function searchSubject(Transaction $transaction): string
+    {
+        $sender = $this->providerSender($transaction->description);
+
+        if ($sender !== null) {
+            return $sender;
+        }
+
+        $merchant = str_replace('"', ' ', $this->ruleGenerator->suggestMatchValue($transaction));
+
+        return mb_trim((string) preg_replace('/\s+/', ' ', $merchant));
+    }
+
+    private function providerSender(string $description): ?string
+    {
+        $haystack = mb_strtolower($description);
+
+        foreach (self::PROVIDER_SENDERS as $needle => $sender) {
+            if (str_contains($haystack, $needle)) {
+                return 'from:'.$sender;
+            }
+        }
+
+        return null;
     }
 }

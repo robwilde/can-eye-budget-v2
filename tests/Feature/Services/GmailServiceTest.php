@@ -18,9 +18,9 @@ function gmailTransaction(array $overrides = []): Transaction
     $account = Account::factory()->for($user)->create();
 
     return Transaction::factory()->for($user)->for($account)->manual()->create(array_merge([
-        'merchant_name' => 'Afterpay',
+        'merchant_name' => null,
         'clean_description' => null,
-        'description' => 'AFTERPAY PURCHASE',
+        'description' => 'GENERAL STORE PURCHASE',
         'amount' => -1250,
         'direction' => TransactionDirection::Debit,
         'post_date' => '2026-07-10',
@@ -28,41 +28,75 @@ function gmailTransaction(array $overrides = []): Transaction
     ], $overrides));
 }
 
-test('buildQuery emits merchant, amount and the ±7 day window', function () {
-    $transaction = gmailTransaction();
+test('buildQuery searches from the payment processor for a PayPal Pay-in-4 line', function () {
+    // Bank line names the processor, not the payee; the receipt is from PayPal.
+    $transaction = gmailTransaction([
+        'description' => 'VISA -PAYPAL *PYPL PAYIN4      1800073263   AU  680027 #8357',
+        'amount' => -1376,
+        'post_date' => '2026-07-06',
+    ]);
 
     expect(app(GmailService::class)->buildQuery($transaction))
-        ->toBe('Afterpay 12.50 after:2026/07/03 before:2026/07/18');
+        ->toBe('from:paypal 13.76 after:2026/06/29 before:2026/07/14');
 });
 
 test('buildQuery drops the amount term when withAmount is false', function () {
-    $transaction = gmailTransaction();
+    $transaction = gmailTransaction([
+        'description' => 'VISA -PAYPAL *PYPL PAYIN4      1800073263   AU  680027 #8357',
+        'amount' => -1376,
+        'post_date' => '2026-07-06',
+    ]);
 
     expect(app(GmailService::class)->buildQuery($transaction, withAmount: false))
-        ->toBe('Afterpay after:2026/07/03 before:2026/07/18');
+        ->toBe('from:paypal after:2026/06/29 before:2026/07/14');
 });
 
-test('buildQuery uses the suggested merchant token when there is no merchant name', function () {
+test('buildQuery detects Afterpay from the description', function () {
+    $transaction = gmailTransaction([
+        'description' => 'VISA -Afterpay                 afterpay.com AU  145377 #8357',
+        'amount' => -3255,
+        'post_date' => '2026-07-11',
+    ]);
+
+    expect(app(GmailService::class)->buildQuery($transaction))
+        ->toBe('from:afterpay 32.55 after:2026/07/04 before:2026/07/19');
+});
+
+test('buildQuery uses the merchant name for a normal (non-processor) purchase', function () {
+    $transaction = gmailTransaction([
+        'merchant_name' => 'Woolworths',
+        'description' => 'WOOLWORTHS 1234 SYDNEY',
+    ]);
+
+    expect(app(GmailService::class)->buildQuery($transaction))
+        ->toBe('Woolworths 12.50 after:2026/07/03 before:2026/07/18');
+});
+
+test('buildQuery falls back to the description token when there is no merchant name', function () {
     $transaction = gmailTransaction([
         'merchant_name' => null,
         'clean_description' => null,
-        'description' => 'PAYPAL *NETFLIX SYDNEY',
+        'description' => 'BUNNINGS WAREHOUSE 456 ADELAIDE',
     ]);
 
     $token = app(CategoryRuleGenerator::class)->suggestMatchValue($transaction);
+    $query = app(GmailService::class)->buildQuery($transaction);
 
     expect($token)->not->toBe('')
-        ->and(app(GmailService::class)->buildQuery($transaction))
-        ->toStartWith($token.' ');
+        ->and($query)->toStartWith($token.' ')
+        ->and($query)->not->toStartWith('from:');
 });
 
 test('buildQuery strips double quotes from the merchant term', function () {
-    $transaction = gmailTransaction(['merchant_name' => 'Pay"Pal']);
+    $transaction = gmailTransaction([
+        'merchant_name' => 'Big"W',
+        'description' => 'BIG W STORE',
+    ]);
 
     $query = app(GmailService::class)->buildQuery($transaction);
 
     expect($query)->not->toContain('"')
-        ->and($query)->toStartWith('Pay Pal ');
+        ->and($query)->toStartWith('Big W ');
 });
 
 test('searchForTransaction throws when Gmail is not configured', function () {
