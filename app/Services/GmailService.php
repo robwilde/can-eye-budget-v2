@@ -57,10 +57,12 @@ final class GmailService implements GmailServiceContract
     public function __construct(private readonly CategoryRuleGenerator $ruleGenerator) {}
 
     /**
-     * Build a short readable snippet from an email's text and HTML bodies.
-     * Prefers the plain-text part; when it is empty, converts the HTML —
-     * dropping style/script/head blocks whole (contents included) before
-     * stripping tags, so CSS such as @font-face rules never leaks in.
+     * Build a readable snippet from an email's text and HTML bodies. Prefers
+     * the plain-text part; when empty, converts the HTML — dropping
+     * style/script/head blocks whole (contents included) before stripping
+     * tags, so CSS such as @font-face rules never leaks in. Leads with the
+     * seller and any payment-schedule amounts (the parts a BNPL receipt is
+     * linked for), followed by a short lead of body text for context.
      */
     public static function snippetFromBodies(?string $textBody, ?string $htmlBody): ?string
     {
@@ -68,13 +70,21 @@ final class GmailService implements GmailServiceContract
 
         if ($body === '') {
             $html = (string) preg_replace('#<(style|script|head)\b[^>]*>.*?</\1>#is', ' ', (string) $htmlBody);
-            $body = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $html = (string) preg_replace('/<[^>]+>/', ' ', $html);
+            $body = html_entity_decode($html, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         }
 
         $body = str_replace("\u{00A0}", ' ', $body);
         $body = mb_trim((string) preg_replace('/\s+/', ' ', $body));
 
-        return $body === '' ? null : Str::limit($body, 200);
+        if ($body === '') {
+            return null;
+        }
+
+        $highlights = self::paymentHighlights($body);
+        $lead = Str::limit($body, 180);
+
+        return $highlights === [] ? $lead : implode(' · ', $highlights).' — '.$lead;
     }
 
     public function isConfigured(): bool
@@ -127,6 +137,34 @@ final class GmailService implements GmailServiceContract
         } finally {
             $client->disconnect();
         }
+    }
+
+    /**
+     * Pull the seller and any "amount on date" payment-schedule lines out of a
+     * cleaned receipt body. Returns an empty list for non-receipt emails, in
+     * which case the caller falls back to a plain lead snippet.
+     *
+     * @return list<string>
+     */
+    private static function paymentHighlights(string $text): array
+    {
+        $highlights = [];
+
+        if (preg_match('/\bSeller\b[:\s]+(.+?)(?=\s+(?:Current balance|Loan reference|Posted on|Payment amount|Payment type|Payment method)\b|$)/i', $text, $m) === 1) {
+            $seller = mb_trim($m[1]);
+
+            if ($seller !== '') {
+                $highlights[] = 'Seller: '.$seller;
+            }
+        }
+
+        if (preg_match_all('/\$\s?[\d,]+\.\d{2}\s*AUD\s+(?:will\s+be\s+charged\s+)?on\s+\d{1,2}\s+[A-Za-z]+\s+\d{4}/i', $text, $matches) >= 1) {
+            foreach (array_slice(array_values(array_unique($matches[0])), 0, 4) as $line) {
+                $highlights[] = mb_trim((string) preg_replace('/\s+/', ' ', $line));
+            }
+        }
+
+        return $highlights;
     }
 
     private function resolveFolder(ImapClient $client): Folder
