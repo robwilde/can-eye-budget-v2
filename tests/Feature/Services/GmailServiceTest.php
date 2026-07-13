@@ -109,3 +109,29 @@ test('searchForTransaction throws when Gmail is not configured', function () {
 
     $service->searchForTransaction($transaction);
 })->throws(GmailSearchException::class);
+
+test('snippetFromBodies prefers the plain-text body', function () {
+    expect(GmailService::snippetFromBodies('  Plain   text  body ', '<p>ignored</p>'))
+        ->toBe('Plain text body');
+});
+
+test('snippetFromBodies strips style, script and head blocks from the HTML fallback', function () {
+    $html = '<html><head><style>@font-face { font-family: SupremeLLTest; src: url("https://x"); }</style></head>'
+        .'<body><script>var a = 1;</script><p>Your PayPal Pay in 4 payment went through. You paid $13.76 AUD.</p></body></html>';
+
+    $snippet = GmailService::snippetFromBodies(null, $html);
+
+    expect($snippet)->toContain('Your PayPal Pay in 4 payment went through')
+        ->and($snippet)->not->toContain('font-face')
+        ->and($snippet)->not->toContain('SupremeLL')
+        ->and($snippet)->not->toContain('var a');
+});
+
+test('snippetFromBodies decodes entities and collapses whitespace', function () {
+    expect(GmailService::snippetFromBodies(null, "<p>Ben &amp; Jerry&#39;s\n\n  order</p>"))
+        ->toBe("Ben & Jerry's order");
+});
+
+test('snippetFromBodies returns null when both bodies are empty', function () {
+    expect(GmailService::snippetFromBodies('', '   '))->toBeNull();
+});

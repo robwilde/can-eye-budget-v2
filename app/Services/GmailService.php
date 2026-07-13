@@ -56,6 +56,27 @@ final class GmailService implements GmailServiceContract
 
     public function __construct(private readonly CategoryRuleGenerator $ruleGenerator) {}
 
+    /**
+     * Build a short readable snippet from an email's text and HTML bodies.
+     * Prefers the plain-text part; when it is empty, converts the HTML —
+     * dropping style/script/head blocks whole (contents included) before
+     * stripping tags, so CSS such as @font-face rules never leaks in.
+     */
+    public static function snippetFromBodies(?string $textBody, ?string $htmlBody): ?string
+    {
+        $body = mb_trim((string) $textBody);
+
+        if ($body === '') {
+            $html = (string) preg_replace('#<(style|script|head)\b[^>]*>.*?</\1>#is', ' ', (string) $htmlBody);
+            $body = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        }
+
+        $body = str_replace("\u{00A0}", ' ', $body);
+        $body = mb_trim((string) preg_replace('/\s+/', ' ', $body));
+
+        return $body === '' ? null : Str::limit($body, 200);
+    }
+
     public function isConfigured(): bool
     {
         return (string) config('imap.accounts.gmail.username') !== ''
@@ -197,15 +218,7 @@ final class GmailService implements GmailServiceContract
 
     private function snippet(Message $message): ?string
     {
-        $body = $message->getTextBody();
-
-        if ($body === '') {
-            $body = strip_tags($message->getHTMLBody());
-        }
-
-        $body = mb_trim((string) preg_replace('/\s+/', ' ', $body));
-
-        return $body === '' ? null : Str::limit($body, 200);
+        return self::snippetFromBodies($message->getTextBody(), $message->getHTMLBody());
     }
 
     /**
