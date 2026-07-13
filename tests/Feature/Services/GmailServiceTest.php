@@ -135,3 +135,27 @@ test('snippetFromBodies decodes entities and collapses whitespace', function () 
 test('snippetFromBodies returns null when both bodies are empty', function () {
     expect(GmailService::snippetFromBodies('', '   '))->toBeNull();
 });
+
+test('snippetFromBodies leads with the seller and payment schedule of a BNPL receipt', function () {
+    $html = '<html><head><style>@font-face { font-family: X; }</style></head><body>'
+        .'<p>Hi Robert, we received your Pay in 4 payment. You made a $13.76 AUD payment for your Pay in 4 plan.</p>'
+        .'<table><tr><td>Payment amount</td><td>$13.76 AUD</td></tr>'
+        .'<tr><td>Seller</td><td>New Eagle International Pty Ltd t/a Umart Online</td></tr>'
+        .'<tr><td>Current balance</td><td>$13.77 AUD</td></tr></table>'
+        .'<p>As a reminder, here is your upcoming payment schedule: $13.77 AUD on 19 July 2026</p>'
+        .'</body></html>';
+
+    $snippet = GmailService::snippetFromBodies(null, $html);
+
+    expect($snippet)->toStartWith('Seller: New Eagle International Pty Ltd t/a Umart Online')
+        ->and($snippet)->toContain('$13.77 AUD on 19 July 2026')
+        ->and($snippet)->not->toContain('font-face')
+        ->and($snippet)->toContain('we received your Pay in 4 payment');
+});
+
+test('snippetFromBodies adds no highlights for a plain non-receipt email', function () {
+    $snippet = GmailService::snippetFromBodies('Thanks for shopping with us. Your order is on its way.', null);
+
+    expect($snippet)->toBe('Thanks for shopping with us. Your order is on its way.')
+        ->and($snippet)->not->toContain(' — ');
+});
