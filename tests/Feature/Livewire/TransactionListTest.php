@@ -5,15 +5,20 @@
 declare(strict_types=1);
 
 use App\Casts\MoneyCast;
+use App\Contracts\GmailServiceContract;
+use App\DTOs\EmailSearchResult;
 use App\Enums\PayFrequency;
+use App\Exceptions\GmailSearchException;
 use App\Livewire\TransactionList;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
+use App\Models\TransactionEmail;
 use App\Models\User;
 use App\Services\TransactionFeeFolder;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
@@ -967,7 +972,7 @@ test('transaction row dispatches edit-transaction via tx-row primitive', functio
         ->html();
 
     expect($html)->toContain('class="tx-row');
-    expect($html)->toContain("\$dispatch('edit-transaction'");
+    expect(html_entity_decode($html))->toContain("\$dispatch('edit-transaction'");
 });
 
 test('pagination wraps in cib-card with flex justify-between', function () {
@@ -1350,4 +1355,157 @@ test('categorised filter state persists via url query string', function () {
             'categorised' => 'uncategorised',
         ])
         ->assertSet('categorised', 'uncategorised');
+});
+
+function afterpayTransaction(User $user): Transaction
+{
+    $account = Account::factory()->for($user)->create();
+
+    return Transaction::factory()->for($user)->for($account)->debit()->create([
+        'description' => 'AFTERPAY PURCHASE',
+        'merchant_name' => 'Afterpay',
+        'post_date' => now()->subDays(3),
+    ]);
+}
+
+function afterpayResult(string $messageId = 'abc@mail.gmail.com'): EmailSearchResult
+{
+    return new EmailSearchResult(
+        messageId: $messageId,
+        subject: 'Your Afterpay payment',
+        fromName: 'Afterpay',
+        fromAddress: 'no-reply@afterpay.com',
+        date: '2026-06-12T10:00:00+10:00',
+        snippet: 'Payment 1 of 4',
+        gmailUrl: 'https://mail.google.com/mail/u/0/#search/rfc822msgid:'.rawurlencode($messageId),
+    );
+}
+
+test('scanEmail populates results and opens the panel', function () {
+    $user = User::factory()->create();
+    $transaction = afterpayTransaction($user);
+
+    $this->mock(GmailServiceContract::class, function ($mock): void {
+        $mock->shouldReceive('isConfigured')->andReturn(true);
+        $mock->shouldReceive('searchForTransaction')->andReturn(collect([afterpayResult()]));
+    });
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('scanEmail', $transaction->id)
+        ->assertSet('emailPanelTxnId', $transaction->id)
+        ->assertCount('emailResults', 1)
+        ->assertSet('emailScanError', null)
+        ->assertSee('Your Afterpay payment');
+});
+
+test('a second scanEmail on the same transaction closes the panel', function () {
+    $user = User::factory()->create();
+    $transaction = afterpayTransaction($user);
+
+    $this->mock(GmailServiceContract::class, function ($mock): void {
+        $mock->shouldReceive('isConfigured')->andReturn(true);
+        $mock->shouldReceive('searchForTransaction')->andReturn(collect([afterpayResult()]));
+    });
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('scanEmail', $transaction->id)
+        ->assertSet('emailPanelTxnId', $transaction->id)
+        ->call('scanEmail', $transaction->id)
+        ->assertSet('emailPanelTxnId', null)
+        ->assertCount('emailResults', 0)
+        ->assertSet('emailScanError', null);
+});
+
+test('scanEmail refuses another users transaction', function () {
+    $user = User::factory()->create();
+    $intruder = User::factory()->create();
+    $transaction = afterpayTransaction($user);
+
+    $this->mock(GmailServiceContract::class, function ($mock): void {
+        $mock->shouldReceive('isConfigured')->andReturn(true);
+    });
+
+    expect(fn () => Livewire::actingAs($intruder)
+        ->test(TransactionList::class)
+        ->call('scanEmail', $transaction->id))
+        ->toThrow(ModelNotFoundException::class);
+});
+
+test('scanEmail records a friendly error when the search fails', function () {
+    $user = User::factory()->create();
+    $transaction = afterpayTransaction($user);
+
+    $this->mock(GmailServiceContract::class, function ($mock): void {
+        $mock->shouldReceive('isConfigured')->andReturn(true);
+        $mock->shouldReceive('searchForTransaction')
+            ->andThrow(GmailSearchException::wrap(new RuntimeException('imap down')));
+    });
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('scanEmail', $transaction->id)
+        ->assertSet('emailPanelTxnId', $transaction->id)
+        ->assertCount('emailResults', 0)
+        ->assertSet('emailScanError', 'Could not search Gmail — check the GMAIL_* credentials and connection.');
+});
+
+test('linkEmail persists the email and is idempotent', function () {
+    $user = User::factory()->create();
+    $transaction = afterpayTransaction($user);
+
+    $this->mock(GmailServiceContract::class, function ($mock): void {
+        $mock->shouldReceive('isConfigured')->andReturn(true);
+        $mock->shouldReceive('searchForTransaction')->andReturn(collect([afterpayResult()]));
+    });
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('scanEmail', $transaction->id)
+        ->call('linkEmail', $transaction->id, 0);
+
+    $this->assertDatabaseHas('transaction_emails', [
+        'transaction_id' => $transaction->id,
+        'gmail_message_id' => 'abc@mail.gmail.com',
+        'user_id' => $user->id,
+        'subject' => 'Your Afterpay payment',
+    ]);
+    expect(TransactionEmail::query()->count())->toBe(1);
+
+    $component->call('linkEmail', $transaction->id, 0);
+    expect(TransactionEmail::query()->count())->toBe(1);
+});
+
+test('unlinkEmail removes an owned email but not another users', function () {
+    $user = User::factory()->create();
+    $other = User::factory()->create();
+    $transaction = afterpayTransaction($user);
+
+    $ownEmail = TransactionEmail::factory()->for($user)->for($transaction)->create();
+    $foreignEmail = TransactionEmail::factory()->for($other)->create();
+
+    $this->mock(GmailServiceContract::class, function ($mock): void {
+        $mock->shouldReceive('isConfigured')->andReturn(true);
+    });
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('unlinkEmail', $ownEmail->id)
+        ->call('unlinkEmail', $foreignEmail->id);
+
+    $this->assertDatabaseMissing('transaction_emails', ['id' => $ownEmail->id]);
+    $this->assertDatabaseHas('transaction_emails', ['id' => $foreignEmail->id]);
+});
+
+test('scan-email action is hidden when Gmail is not configured', function () {
+    config(['imap.accounts.gmail.username' => null, 'imap.accounts.gmail.password' => null]);
+
+    $user = User::factory()->create();
+    $transaction = afterpayTransaction($user);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSee('AFTERPAY PURCHASE')
+        ->assertDontSee('scan-email-'.$transaction->id);
 });
