@@ -6,8 +6,11 @@ namespace App\Providers;
 
 use App\Contracts\BasiqServiceContract;
 use App\Contracts\GitHubServiceContract;
+use App\Contracts\GmailServiceContract;
 use App\Services\BasiqService;
+use App\Services\CategoryRuleGenerator;
 use App\Services\GitHubService;
+use App\Services\GmailService;
 use App\Services\PipelineStages\IdentifyPrimaryAccountStage;
 use App\Services\PipelineStages\IdentifyRecurringTransactionsStage;
 use App\Services\PipelineStages\MatchPlannedTransactionsStage;
@@ -35,6 +38,13 @@ final class AppServiceProvider extends ServiceProvider
         ));
 
         $this->app->alias(BasiqServiceContract::class, BasiqService::class);
+
+        $this->app->singleton(
+            GmailServiceContract::class,
+            fn (): GmailService => new GmailService(app(CategoryRuleGenerator::class)),
+        );
+
+        $this->app->alias(GmailServiceContract::class, GmailService::class);
 
         $this->app->singleton(GitHubServiceContract::class, fn (): GitHubService => new GitHubService(
             token: (string) config('services.github.token'),

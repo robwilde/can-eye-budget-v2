@@ -164,6 +164,12 @@ final class Transaction extends Model
         return $this->hasMany(self::class, 'parent_transaction_id');
     }
 
+    /** @return HasMany<TransactionEmail, $this> */
+    public function emails(): HasMany
+    {
+        return $this->hasMany(TransactionEmail::class);
+    }
+
     /** @return BelongsTo<self, $this> */
     public function foldedInto(): BelongsTo
     {

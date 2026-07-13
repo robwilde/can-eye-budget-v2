@@ -150,16 +150,81 @@
                                 @endphp
                                 <x-cib.tx-row
                                     wire:key="txn-{{ $transaction->id }}"
-                                    :transaction-id="$transaction->id"
                                     :name="$transaction->description"
                                     :amount="$transaction->amount"
                                     :tone="$tone"
                                     :icon="$transaction->category?->resolveIcon()"
+                                    :click="'$dispatch(\'edit-transaction\', { id: ' . $transaction->id . ' })'"
                                 >
-                                    @if(! empty($metaParts) || $isPlanned)
-                                        <x-slot:meta>{{ implode(' · ', $metaParts) }}@if($isPlanned) <span class="pill plan">Planned</span>@endif</x-slot:meta>
+                                    @if(! empty($metaParts) || $isPlanned || $transaction->emails->isNotEmpty())
+                                        <x-slot:meta>{{ implode(' · ', $metaParts) }}@if($isPlanned) <span class="pill plan">Planned</span>@endif@if($transaction->emails->isNotEmpty()) <span class="pill email">{{ $transaction->emails->count() }} email{{ $transaction->emails->count() > 1 ? 's' : '' }}</span>@endif</x-slot:meta>
+                                    @endif
+                                    @if($gmailEnabled)
+                                        <x-slot:actions>
+                                            <flux:button variant="ghost" size="sm" icon="envelope"
+                                                         wire:click="scanEmail({{ $transaction->id }})"
+                                                         wire:loading.attr="disabled" wire:target="scanEmail({{ $transaction->id }})"
+                                                         data-testid="scan-email-{{ $transaction->id }}" aria-label="Scan email"/>
+                                        </x-slot:actions>
                                     @endif
                                 </x-cib.tx-row>
+                                @if($emailPanelTxnId === $transaction->id)
+                                    @php
+                                        $linkedMessageIds = $transaction->emails->pluck('gmail_message_id');
+                                        $newResults = collect($emailResults)->reject(fn (array $r): bool => $linkedMessageIds->contains($r['messageId']));
+                                    @endphp
+                                    <div wire:key="email-panel-{{ $transaction->id }}" class="email-scan-panel" data-testid="email-panel-{{ $transaction->id }}">
+                                        @if($emailScanError)
+                                            <p class="email-scan-error">{{ $emailScanError }}</p>
+                                        @endif
+
+                                        @if($transaction->emails->isNotEmpty())
+                                            <div class="email-scan-section">
+                                                <span class="cib-label">Linked emails</span>
+                                                @foreach($transaction->emails as $email)
+                                                    <div wire:key="linked-email-{{ $email->id }}" class="email-row">
+                                                        <div class="email-row-body">
+                                                            <div class="email-subject">{{ $email->subject }}</div>
+                                                            <div class="email-meta">{{ $email->from_name ?? $email->from_address }}@if($email->email_date) · {{ $email->email_date->format('j M Y') }}@endif</div>
+                                                            @if($email->snippet)
+                                                                <div class="email-snippet">{{ $email->snippet }}</div>
+                                                            @endif
+                                                            <a href="{{ $email->gmail_url }}" target="_blank" rel="noopener" class="email-link">Open in Gmail</a>
+                                                        </div>
+                                                        <flux:button variant="ghost" size="sm" icon="x-mark"
+                                                                     wire:click="unlinkEmail({{ $email->id }})"
+                                                                     data-testid="unlink-email-{{ $email->id }}" aria-label="Unlink email"/>
+                                                    </div>
+                                                @endforeach
+                                            </div>
+                                        @endif
+
+                                        @if($newResults->isNotEmpty())
+                                            <div class="email-scan-section">
+                                                <span class="cib-label">Search results</span>
+                                                @foreach($newResults as $index => $result)
+                                                    <div wire:key="result-email-{{ $transaction->id }}-{{ $index }}" class="email-row">
+                                                        <div class="email-row-body">
+                                                            <div class="email-subject">{{ $result['subject'] }}</div>
+                                                            <div class="email-meta">{{ $result['fromName'] ?? $result['fromAddress'] }}@if($result['date']) · {{ CarbonImmutable::parse($result['date'])->format('j M Y') }}@endif</div>
+                                                            @if($result['snippet'])
+                                                                <div class="email-snippet">{{ $result['snippet'] }}</div>
+                                                            @endif
+                                                            <a href="{{ $result['gmailUrl'] }}" target="_blank" rel="noopener" class="email-link">Open in Gmail</a>
+                                                        </div>
+                                                        <flux:button variant="ghost" size="sm" icon="link"
+                                                                     wire:click="linkEmail({{ $transaction->id }}, {{ $index }})"
+                                                                     data-testid="link-email-{{ $transaction->id }}-{{ $index }}">Link</flux:button>
+                                                    </div>
+                                                @endforeach
+                                            </div>
+                                        @endif
+
+                                        @if(! $emailScanError && $transaction->emails->isEmpty() && $newResults->isEmpty())
+                                            <p class="email-empty">No matching emails found.</p>
+                                        @endif
+                                    </div>
+                                @endif
                             @endforeach
                         </div>
                     </section>

@@ -5,11 +5,16 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Casts\MoneyCast;
+use App\Contracts\GmailServiceContract;
+use App\DTOs\EmailSearchResult;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionPeriod;
+use App\Exceptions\GmailSearchException;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Transaction;
+use App\Models\TransactionEmail;
+use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
@@ -61,6 +66,13 @@ final class TransactionList extends Component
     #[Url]
     public string $sortDir = 'desc';
 
+    public ?int $emailPanelTxnId = null;
+
+    /** @var list<array<string, mixed>> */
+    public array $emailResults = [];
+
+    public ?string $emailScanError = null;
+
     public function mount(): void
     {
         $this->restoreRememberedPeriod();
@@ -111,6 +123,75 @@ final class TransactionList extends Component
      */
     #[On('transaction-saved')]
     public function refreshList(): void {}
+
+    public function scanEmail(int $transactionId, GmailServiceContract $gmail): void
+    {
+        if ($this->emailPanelTxnId === $transactionId) {
+            $this->emailPanelTxnId = null;
+            $this->emailResults = [];
+            $this->emailScanError = null;
+
+            return;
+        }
+
+        $transaction = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->findOrFail($transactionId);
+
+        $this->emailPanelTxnId = $transactionId;
+        $this->emailResults = [];
+        $this->emailScanError = null;
+
+        try {
+            $this->emailResults = $gmail->searchForTransaction($transaction)
+                ->map(fn (EmailSearchResult $result): array => $result->toArray())
+                ->all();
+        } catch (GmailSearchException $e) {
+            Log::warning('Gmail scan failed', [
+                'transaction_id' => $transactionId,
+                'error' => $e->getMessage(),
+            ]);
+
+            $this->emailScanError = 'Could not search Gmail — check the GMAIL_* credentials and connection.';
+        }
+    }
+
+    public function linkEmail(int $transactionId, int $index): void
+    {
+        if ($this->emailPanelTxnId !== $transactionId || ! isset($this->emailResults[$index])) {
+            return;
+        }
+
+        $transaction = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->findOrFail($transactionId);
+
+        $result = $this->emailResults[$index];
+
+        TransactionEmail::query()->firstOrCreate(
+            [
+                'transaction_id' => $transaction->id,
+                'gmail_message_id' => $result['messageId'],
+            ],
+            [
+                'user_id' => auth()->id(),
+                'subject' => $result['subject'],
+                'from_name' => $result['fromName'],
+                'from_address' => $result['fromAddress'],
+                'email_date' => $result['date'],
+                'snippet' => $result['snippet'],
+                'gmail_url' => $result['gmailUrl'],
+            ],
+        );
+    }
+
+    public function unlinkEmail(int $emailId): void
+    {
+        TransactionEmail::query()
+            ->where('user_id', auth()->id())
+            ->whereKey($emailId)
+            ->delete();
+    }
 
     public function updatedDirection(): void
     {
@@ -201,6 +282,7 @@ final class TransactionList extends Component
             ->when($dates['start'], fn ($q, $s) => $q->where('post_date', '>=', $s))
             ->when($dates['end'], fn ($q, $e) => $q->where('post_date', '<=', $e))
             ->withRelations()
+            ->with('emails')
             ->orderBy(
                 in_array($this->sortBy, self::SORTABLE_COLUMNS, true) ? $this->sortBy : 'post_date',
                 in_array($this->sortDir, ['asc', 'desc'], true) ? $this->sortDir : 'desc',
@@ -226,6 +308,7 @@ final class TransactionList extends Component
             'periodLabel' => $periodEnum->label(),
             'hasPayCycle' => auth()->user()->hasPayCycleConfigured(),
             'showCustomRange' => $periodEnum === TransactionPeriod::Custom,
+            'gmailEnabled' => app(GmailServiceContract::class)->isConfigured(),
         ]);
     }
 

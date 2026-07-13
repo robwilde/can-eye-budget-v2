@@ -278,6 +278,31 @@ select:focus[data-flux-control] {
     }
     .tx-meta .pill.plan { background: var(--color-money-planned-soft); color: var(--color-money-planned); }
 
+    .tx-meta .pill.email { background: var(--color-cib-teal-50); color: var(--color-cib-teal-600); }
+
+    /* ---------- Email scan panel (Ticket #340) ---------- */
+    .email-scan-panel {
+        padding: 10px 4px 12px 48px;
+        border-bottom: 1px solid var(--color-border-1);
+        font: 400 12px/1.4 var(--font-sans);
+        color: var(--color-fg-2);
+    }
+    .email-scan-panel:last-child { border-bottom: 0; }
+    .email-scan-error { color: var(--color-money-owed); font-weight: 700; margin-bottom: 8px; }
+    .email-scan-section { margin-bottom: 10px; }
+    .email-scan-section:last-child { margin-bottom: 0; }
+    .email-scan-section .cib-label { display: block; margin-bottom: 6px; }
+    .email-row {
+        display: flex; justify-content: space-between; align-items: flex-start;
+        gap: 12px; padding: 6px 0; border-top: 1px solid var(--color-border-1);
+    }
+    .email-row-body { min-width: 0; }
+    .email-subject { font-weight: 700; color: var(--color-fg-1); }
+    .email-meta { color: var(--color-fg-3); margin-top: 1px; }
+    .email-snippet { margin-top: 3px; color: var(--color-fg-2); }
+    .email-link { display: inline-block; margin-top: 4px; color: var(--color-cib-teal-500); font-weight: 700; }
+    .email-empty { color: var(--color-fg-3); font-style: italic; }
+
     .budget-row {
         display: flex; justify-content: space-between; align-items: center;
         font: 700 12px/1 var(--font-sans); margin-bottom: 4px;
