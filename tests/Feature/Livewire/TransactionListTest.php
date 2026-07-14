@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Services\TransactionFeeFolder;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
@@ -1510,26 +1511,28 @@ test('scan-email action is hidden when Gmail is not configured', function () {
         ->assertDontSee('scan-email-'.$transaction->id);
 });
 
-test('linkEmail stores a server-derived Gmail URL and ignores a tampered one', function () {
+test('linkEmail derives the Gmail URL server-side and ignores the result URL', function () {
     $user = User::factory()->create();
     $transaction = afterpayTransaction($user);
 
     $this->mock(GmailServiceContract::class, function ($mock): void {
         $mock->shouldReceive('isConfigured')->andReturn(true);
+        $mock->shouldReceive('searchForTransaction')->andReturn(collect([
+            new EmailSearchResult(
+                messageId: 'evil@mail.gmail.com',
+                subject: 'Tampered',
+                fromName: null,
+                fromAddress: 'a@b.com',
+                date: null,
+                snippet: null,
+                gmailUrl: 'javascript:alert(document.cookie)',
+            ),
+        ]));
     });
 
     Livewire::actingAs($user)
         ->test(TransactionList::class)
-        ->set('emailPanelTxnId', $transaction->id)
-        ->set('emailResults', [[
-            'messageId' => 'evil@mail.gmail.com',
-            'subject' => 'Tampered',
-            'fromName' => null,
-            'fromAddress' => 'a@b.com',
-            'date' => null,
-            'snippet' => null,
-            'gmailUrl' => 'javascript:alert(document.cookie)',
-        ]])
+        ->call('scanEmail', $transaction->id)
         ->call('linkEmail', $transaction->id, 0);
 
     $this->assertDatabaseHas('transaction_emails', [
@@ -1539,4 +1542,18 @@ test('linkEmail stores a server-derived Gmail URL and ignores a tampered one', f
     ]);
 
     $this->assertDatabaseMissing('transaction_emails', ['gmail_url' => 'javascript:alert(document.cookie)']);
+});
+
+test('emailResults is locked against forged client updates', function () {
+    $user = User::factory()->create();
+    afterpayTransaction($user);
+
+    $this->mock(GmailServiceContract::class, function ($mock): void {
+        $mock->shouldReceive('isConfigured')->andReturn(true);
+    });
+
+    expect(fn () => Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->set('emailResults', [['messageId' => 'x', 'gmailUrl' => 'javascript:alert(1)']]))
+        ->toThrow(CannotUpdateLockedPropertyException::class);
 });
