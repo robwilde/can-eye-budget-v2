@@ -8,6 +8,9 @@ use Spatie\LaravelData\Dto;
 
 final class EmailSearchResult extends Dto
 {
+    /**
+     * @param  array<string, mixed>|null  $details
+     */
     public function __construct(
         public readonly string $messageId,
         public readonly string $subject,
@@ -16,10 +19,11 @@ final class EmailSearchResult extends Dto
         public readonly ?string $date,
         public readonly ?string $snippet,
         public readonly string $gmailUrl,
+        public readonly ?array $details = null,
     ) {}
 
     /**
-     * @return array{messageId: string, subject: string, fromName: ?string, fromAddress: string, date: ?string, snippet: ?string, gmailUrl: string}
+     * @return array{messageId: string, subject: string, fromName: ?string, fromAddress: string, date: ?string, snippet: ?string, gmailUrl: string, details: array<string, mixed>|null}
      */
     public function toArray(): array
     {
@@ -31,6 +35,7 @@ final class EmailSearchResult extends Dto
             'date' => $this->date,
             'snippet' => $this->snippet,
             'gmailUrl' => $this->gmailUrl,
+            'details' => $this->details,
         ];
     }
 }

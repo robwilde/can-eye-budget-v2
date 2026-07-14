@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property CarbonImmutable|null $email_date
  * @property string|null $snippet
  * @property string $gmail_url
+ * @property array<string, mixed>|null $details
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
  */
@@ -42,6 +43,7 @@ final class TransactionEmail extends Model
         'email_date',
         'snippet',
         'gmail_url',
+        'details',
     ];
 
     /** @return BelongsTo<User, $this> */
@@ -63,6 +65,7 @@ final class TransactionEmail extends Model
     {
         return [
             'email_date' => 'datetime',
+            'details' => 'array',
         ];
     }
 }
