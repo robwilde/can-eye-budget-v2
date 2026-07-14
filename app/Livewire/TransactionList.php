@@ -14,6 +14,7 @@ use App\Models\Account;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\TransactionEmail;
+use App\Services\GmailService;
 use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
 use Livewire\Attributes\On;
@@ -162,25 +163,33 @@ final class TransactionList extends Component
             return;
         }
 
+        $result = $this->emailResults[$index];
+
+        $messageId = $result['messageId'] ?? null;
+
+        if (! is_string($messageId) || mb_trim($messageId) === '') {
+            return;
+        }
+
+        $messageId = mb_trim($messageId);
+
         $transaction = Transaction::query()
             ->where('user_id', auth()->id())
             ->findOrFail($transactionId);
 
-        $result = $this->emailResults[$index];
-
         TransactionEmail::query()->firstOrCreate(
             [
                 'transaction_id' => $transaction->id,
-                'gmail_message_id' => $result['messageId'],
+                'gmail_message_id' => $messageId,
             ],
             [
                 'user_id' => auth()->id(),
-                'subject' => $result['subject'],
-                'from_name' => $result['fromName'],
-                'from_address' => $result['fromAddress'],
-                'email_date' => $result['date'],
-                'snippet' => $result['snippet'],
-                'gmail_url' => $result['gmailUrl'],
+                'subject' => is_string($result['subject'] ?? null) ? $result['subject'] : '',
+                'from_name' => is_string($result['fromName'] ?? null) ? $result['fromName'] : null,
+                'from_address' => is_string($result['fromAddress'] ?? null) ? $result['fromAddress'] : '',
+                'email_date' => is_string($result['date'] ?? null) ? $result['date'] : null,
+                'snippet' => is_string($result['snippet'] ?? null) ? $result['snippet'] : null,
+                'gmail_url' => GmailService::deepLink($messageId),
             ],
         );
     }

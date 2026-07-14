@@ -87,6 +87,16 @@ final class GmailService implements GmailServiceContract
         return $highlights === [] ? $lead : implode(' · ', $highlights).' — '.$lead;
     }
 
+    /**
+     * The Gmail deep link that opens the exact message by its RFC822 id. The
+     * id is URL-encoded, so the result is always a safe mail.google.com URL
+     * even for an untrusted (client-hydrated) message id.
+     */
+    public static function deepLink(string $messageId): string
+    {
+        return 'https://mail.google.com/mail/u/0/#search/rfc822msgid:'.rawurlencode($messageId);
+    }
+
     public function isConfigured(): bool
     {
         return (string) config('imap.accounts.gmail.username') !== ''
@@ -237,7 +247,7 @@ final class GmailService implements GmailServiceContract
                 fromAddress: $fromAddress,
                 date: $date?->toIso8601String(),
                 snippet: $this->snippet($message),
-                gmailUrl: 'https://mail.google.com/mail/u/0/#search/rfc822msgid:'.rawurlencode($messageId),
+                gmailUrl: self::deepLink($messageId),
             ),
             'date' => $date,
         ];

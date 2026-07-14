@@ -1509,3 +1509,34 @@ test('scan-email action is hidden when Gmail is not configured', function () {
         ->assertSee('AFTERPAY PURCHASE')
         ->assertDontSee('scan-email-'.$transaction->id);
 });
+
+test('linkEmail stores a server-derived Gmail URL and ignores a tampered one', function () {
+    $user = User::factory()->create();
+    $transaction = afterpayTransaction($user);
+
+    $this->mock(GmailServiceContract::class, function ($mock): void {
+        $mock->shouldReceive('isConfigured')->andReturn(true);
+    });
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->set('emailPanelTxnId', $transaction->id)
+        ->set('emailResults', [[
+            'messageId' => 'evil@mail.gmail.com',
+            'subject' => 'Tampered',
+            'fromName' => null,
+            'fromAddress' => 'a@b.com',
+            'date' => null,
+            'snippet' => null,
+            'gmailUrl' => 'javascript:alert(document.cookie)',
+        ]])
+        ->call('linkEmail', $transaction->id, 0);
+
+    $this->assertDatabaseHas('transaction_emails', [
+        'transaction_id' => $transaction->id,
+        'gmail_message_id' => 'evil@mail.gmail.com',
+        'gmail_url' => 'https://mail.google.com/mail/u/0/#search/rfc822msgid:evil%40mail.gmail.com',
+    ]);
+
+    $this->assertDatabaseMissing('transaction_emails', ['gmail_url' => 'javascript:alert(document.cookie)']);
+});
