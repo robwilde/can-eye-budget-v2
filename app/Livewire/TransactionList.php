@@ -241,7 +241,7 @@ final class TransactionList extends Component
         if ($transaction->splits->isNotEmpty()) {
             $this->splitLines = $transaction->splits
                 ->map(static fn (TransactionSplit $split): array => [
-                    'category_id' => $split->category_id,
+                    'category_id' => $split->category_id === null ? '' : (string) $split->category_id,
                     'amount' => number_format(abs((int) $split->amount) / 100, 2, '.', ''),
                     'notes' => $split->notes ?? '',
                 ])
@@ -251,12 +251,8 @@ final class TransactionList extends Component
         }
 
         $this->splitLines = [
-            [
-                'category_id' => $transaction->category_id,
-                'amount' => number_format(abs((int) $transaction->amount) / 100, 2, '.', ''),
-                'notes' => '',
-            ],
-            ['category_id' => null, 'amount' => '0.00', 'notes' => ''],
+            ['category_id' => $transaction->category_id === null ? '' : (string) $transaction->category_id, 'amount' => '', 'notes' => ''],
+            ['category_id' => '', 'amount' => '', 'notes' => ''],
         ];
     }
 
@@ -266,7 +262,7 @@ final class TransactionList extends Component
             return;
         }
 
-        $this->splitLines[] = ['category_id' => null, 'amount' => '0.00', 'notes' => ''];
+        $this->splitLines[] = ['category_id' => '', 'amount' => '', 'notes' => ''];
     }
 
     public function removeSplitLine(int $index): void
@@ -334,7 +330,7 @@ final class TransactionList extends Component
             $categoryId = $line['category_id'] ?? null;
             $cents = AmountParser::parse((string) ($line['amount'] ?? ''))->amount;
 
-            if ($categoryId === null) {
+            if ($categoryId === null || $categoryId === '' || ! is_numeric($categoryId)) {
                 $this->splitError = 'Every split line needs a category.';
 
                 return;

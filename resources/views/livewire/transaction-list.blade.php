@@ -144,8 +144,11 @@
                             @foreach($dayTxns as $transaction)
                                 @php
                                     $tone = $transaction->direction === TransactionDirection::Credit ? 'inc' : 'out';
+                                    $splitCategoryLabel = $transaction->isSplit()
+                                        ? $transaction->splits->map(fn ($s) => $s->category?->name)->filter()->unique()->join(' · ')
+                                        : null;
                                     $metaParts = array_filter([
-                                        $transaction->category?->name,
+                                        $splitCategoryLabel !== null && $splitCategoryLabel !== '' ? $splitCategoryLabel : $transaction->category?->name,
                                         $account === null ? $transaction->account?->name : null,
                                     ]);
                                     $isPlanned = $transaction->planned_transaction_id !== null;
@@ -248,13 +251,14 @@
                                         <div class="split-lines">
                                             @foreach($splitLines as $index => $line)
                                                 <div wire:key="split-line-{{ $transaction->id }}-{{ $index }}" class="split-line">
-                                                    <flux:select wire:model="splitLines.{{ $index }}.category_id" size="sm" placeholder="Category">
+                                                    <flux:select wire:model.live="splitLines.{{ $index }}.category_id" size="sm">
+                                                        <flux:select.option value="">Category</flux:select.option>
                                                         @foreach($splitCategories as $cat)
-                                                            <flux:select.option :value="$cat->id">{{ $cat->fullPath() }}</flux:select.option>
+                                                            <flux:select.option :value="(string) $cat->id">{{ $cat->fullPath() }}</flux:select.option>
                                                         @endforeach
                                                     </flux:select>
-                                                    <flux:input wire:model="splitLines.{{ $index }}.amount" size="sm" class="split-amount" inputmode="decimal" placeholder="0.00"/>
-                                                    <flux:input wire:model="splitLines.{{ $index }}.notes" size="sm" class="split-notes" placeholder="Note (optional)"/>
+                                                    <flux:input wire:model.live.debounce.400ms="splitLines.{{ $index }}.amount" size="sm" class="split-amount" inputmode="decimal" placeholder="0.00"/>
+                                                    <flux:input wire:model.blur="splitLines.{{ $index }}.notes" size="sm" class="split-notes" placeholder="Note (optional)"/>
                                                     <flux:button variant="ghost" size="sm" icon="x-mark"
                                                                  wire:click="removeSplitLine({{ $index }})"
                                                                  data-testid="remove-split-line-{{ $transaction->id }}-{{ $index }}" aria-label="Remove line"/>
@@ -273,7 +277,7 @@
                                                 @if($transaction->isSplit())
                                                     <flux:button variant="ghost" size="sm" icon="arrow-uturn-left" wire:click="unsplit({{ $transaction->id }})" data-testid="unsplit-{{ $transaction->id }}">Unsplit</flux:button>
                                                 @endif
-                                                <flux:button variant="primary" size="sm" wire:click="saveSplit" :disabled="$splitRemainderCents !== 0" data-testid="save-split-{{ $transaction->id }}">Save split</flux:button>
+                                                <flux:button variant="primary" size="sm" wire:click="saveSplit" :disabled="$splitRemainderCents !== 0 || count($splitLines) < 2" data-testid="save-split-{{ $transaction->id }}">Save split</flux:button>
                                             </div>
                                         </div>
                                     </div>
