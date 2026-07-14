@@ -14,7 +14,10 @@ use App\Models\Account;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\TransactionEmail;
+use App\Models\TransactionSplit;
 use App\Services\GmailService;
+use App\Support\AmountParser;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
 use Livewire\Attributes\Locked;
@@ -77,6 +80,15 @@ final class TransactionList extends Component
 
     #[Locked]
     public ?string $emailScanError = null;
+
+    #[Locked]
+    public ?int $splitPanelTxnId = null;
+
+    /** @var list<array<string, mixed>> */
+    public array $splitLines = [];
+
+    #[Locked]
+    public ?string $splitError = null;
 
     public function mount(): void
     {
@@ -206,6 +218,195 @@ final class TransactionList extends Component
             ->delete();
     }
 
+    public function toggleSplit(int $transactionId): void
+    {
+        if ($this->splitPanelTxnId === $transactionId) {
+            $this->closeSplitPanel();
+
+            return;
+        }
+
+        $transaction = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->with('splits')
+            ->findOrFail($transactionId);
+
+        if ($transaction->transfer_pair_id !== null) {
+            return;
+        }
+
+        $this->splitPanelTxnId = $transactionId;
+        $this->splitError = null;
+
+        if ($transaction->splits->isNotEmpty()) {
+            $this->splitLines = $transaction->splits
+                ->map(static fn (TransactionSplit $split): array => [
+                    'category_id' => $split->category_id,
+                    'amount' => number_format(abs((int) $split->amount) / 100, 2, '.', ''),
+                    'notes' => $split->notes ?? '',
+                ])
+                ->all();
+
+            return;
+        }
+
+        $this->splitLines = [
+            [
+                'category_id' => $transaction->category_id,
+                'amount' => number_format(abs((int) $transaction->amount) / 100, 2, '.', ''),
+                'notes' => '',
+            ],
+            ['category_id' => null, 'amount' => '0.00', 'notes' => ''],
+        ];
+    }
+
+    public function addSplitLine(): void
+    {
+        if ($this->splitPanelTxnId === null) {
+            return;
+        }
+
+        $this->splitLines[] = ['category_id' => null, 'amount' => '0.00', 'notes' => ''];
+    }
+
+    public function removeSplitLine(int $index): void
+    {
+        if (! isset($this->splitLines[$index])) {
+            return;
+        }
+
+        unset($this->splitLines[$index]);
+        $this->splitLines = array_values($this->splitLines);
+    }
+
+    public function assignRemainderToLast(): void
+    {
+        if ($this->splitPanelTxnId === null || $this->splitLines === []) {
+            return;
+        }
+
+        $transaction = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->find($this->splitPanelTxnId);
+
+        if ($transaction === null) {
+            return;
+        }
+
+        $lastIndex = array_key_last($this->splitLines);
+        $others = 0;
+
+        foreach ($this->splitLines as $index => $line) {
+            if ($index === $lastIndex) {
+                continue;
+            }
+
+            $others += AmountParser::parse((string) ($line['amount'] ?? ''))->amount;
+        }
+
+        $remainder = abs((int) $transaction->amount) - $others;
+        $this->splitLines[$lastIndex]['amount'] = number_format(max(0, $remainder) / 100, 2, '.', '');
+    }
+
+    public function saveSplit(): void
+    {
+        $this->splitError = null;
+
+        if ($this->splitPanelTxnId === null) {
+            return;
+        }
+
+        $transaction = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->findOrFail($this->splitPanelTxnId);
+
+        if ($transaction->transfer_pair_id !== null) {
+            $this->splitError = 'Transfers cannot be split.';
+
+            return;
+        }
+
+        $sign = (int) $transaction->amount < 0 ? -1 : 1;
+
+        $lines = [];
+
+        foreach ($this->splitLines as $line) {
+            $categoryId = $line['category_id'] ?? null;
+            $cents = AmountParser::parse((string) ($line['amount'] ?? ''))->amount;
+
+            if ($categoryId === null) {
+                $this->splitError = 'Every split line needs a category.';
+
+                return;
+            }
+
+            if ($cents <= 0) {
+                $this->splitError = 'Every split line needs an amount greater than zero.';
+
+                return;
+            }
+
+            $notes = is_string($line['notes'] ?? null) ? mb_trim($line['notes']) : '';
+
+            $lines[] = [
+                'category_id' => (int) $categoryId,
+                'amount' => $sign * $cents,
+                'notes' => $notes === '' ? null : $notes,
+            ];
+        }
+
+        if (count($lines) < 2) {
+            $this->splitError = 'A split needs at least two lines.';
+
+            return;
+        }
+
+        if (array_sum(array_column($lines, 'amount')) !== (int) $transaction->amount) {
+            $this->splitError = 'Split lines must add up to the transaction total.';
+
+            return;
+        }
+
+        $categoryIds = array_column($lines, 'category_id');
+
+        if (Category::query()->whereIn('id', $categoryIds)->count() !== count(array_unique($categoryIds))) {
+            $this->splitError = 'One or more categories are invalid.';
+
+            return;
+        }
+
+        DB::transaction(static function () use ($transaction, $lines): void {
+            $transaction->splits()->delete();
+
+            foreach ($lines as $position => $line) {
+                $transaction->splits()->create([
+                    'category_id' => $line['category_id'],
+                    'amount' => $line['amount'],
+                    'notes' => $line['notes'],
+                    'position' => $position,
+                ]);
+            }
+        });
+
+        $this->closeSplitPanel();
+        $this->dispatch('transaction-saved');
+    }
+
+    public function unsplit(int $transactionId): void
+    {
+        $transaction = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->findOrFail($transactionId);
+
+        $transaction->splits()->delete();
+
+        if ($this->splitPanelTxnId === $transactionId) {
+            $this->closeSplitPanel();
+        }
+
+        $this->dispatch('transaction-saved');
+    }
+
     public function updatedDirection(): void
     {
         if (! in_array($this->direction, self::VALID_DIRECTIONS, true)) {
@@ -282,11 +483,17 @@ final class TransactionList extends Component
             ->current()
             ->when($directionEnum, fn ($q, $dir) => $q->where('direction', $dir))
             ->when($this->account, fn ($q, $id) => $q->where('account_id', $id))
-            ->when($this->category, fn ($q, $id) => $q->where('category_id', $id))
+            ->when($this->category, fn ($q, $id) => $q->where(fn ($q) => $q
+                ->where('category_id', $id)
+                ->orWhereHas('splits', fn ($s) => $s->where('category_id', $id))))
             ->when($this->planned === 'planned', fn ($q) => $q->whereNotNull('planned_transaction_id'))
             ->when($this->planned === 'unplanned', fn ($q) => $q->whereNull('planned_transaction_id'))
-            ->when($this->categorised === 'categorised', fn ($q) => $q->whereNotNull('category_id'))
-            ->when($this->categorised === 'uncategorised', fn ($q) => $q->whereNull('category_id'))
+            ->when($this->categorised === 'categorised', fn ($q) => $q->where(fn ($q) => $q
+                ->whereNotNull('category_id')
+                ->orWhereHas('splits')))
+            ->when($this->categorised === 'uncategorised', fn ($q) => $q
+                ->whereNull('category_id')
+                ->whereDoesntHave('splits'))
             ->when($this->search, fn ($q, $term) => $q->where(function ($q) use ($term) {
                 $q->where('description', 'like', "%{$term}%")
                     ->orWhere('clean_description', 'like', "%{$term}%")
@@ -295,7 +502,7 @@ final class TransactionList extends Component
             ->when($dates['start'], fn ($q, $s) => $q->where('post_date', '>=', $s))
             ->when($dates['end'], fn ($q, $e) => $q->where('post_date', '<=', $e))
             ->withRelations()
-            ->with('emails')
+            ->with(['emails', 'splits.category'])
             ->orderBy(
                 in_array($this->sortBy, self::SORTABLE_COLUMNS, true) ? $this->sortBy : 'post_date',
                 in_array($this->sortDir, ['asc', 'desc'], true) ? $this->sortDir : 'desc',
@@ -322,7 +529,15 @@ final class TransactionList extends Component
             'hasPayCycle' => auth()->user()->hasPayCycleConfigured(),
             'showCustomRange' => $periodEnum === TransactionPeriod::Custom,
             'gmailEnabled' => app(GmailServiceContract::class)->isConfigured(),
+            'splitCategories' => Category::visibleSortedByFullPath(),
         ]);
+    }
+
+    private function closeSplitPanel(): void
+    {
+        $this->splitPanelTxnId = null;
+        $this->splitLines = [];
+        $this->splitError = null;
     }
 
     private function restoreRememberedPeriod(): void

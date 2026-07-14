@@ -1557,3 +1557,210 @@ test('emailResults is locked against forged client updates', function () {
         ->set('emailResults', [['messageId' => 'x', 'gmailUrl' => 'javascript:alert(1)']]))
         ->toThrow(CannotUpdateLockedPropertyException::class);
 });
+
+function splitTransaction(User $user, int $amount = -10000): Transaction
+{
+    $account = Account::factory()->for($user)->create();
+
+    return Transaction::factory()->for($user)->for($account)->debit()->create([
+        'description' => 'AFTERPAY PURCHASE',
+        'amount' => $amount,
+        'post_date' => now()->subDays(3),
+    ]);
+}
+
+test('saveSplit persists exact-cover lines carrying the parent sign', function () {
+    $user = User::factory()->create();
+    $transaction = splitTransaction($user, -10000);
+    $groceries = Category::factory()->create();
+    $fuel = Category::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('toggleSplit', $transaction->id)
+        ->set('splitLines', [
+            ['category_id' => $groceries->id, 'amount' => '70.00', 'notes' => 'weekly shop'],
+            ['category_id' => $fuel->id, 'amount' => '30.00', 'notes' => ''],
+        ])
+        ->call('saveSplit')
+        ->assertSet('splitError', null)
+        ->assertSet('splitPanelTxnId', null);
+
+    $this->assertDatabaseHas('transaction_splits', [
+        'transaction_id' => $transaction->id,
+        'category_id' => $groceries->id,
+        'amount' => -7000,
+        'notes' => 'weekly shop',
+    ]);
+    $this->assertDatabaseHas('transaction_splits', [
+        'transaction_id' => $transaction->id,
+        'category_id' => $fuel->id,
+        'amount' => -3000,
+    ]);
+
+    expect($transaction->fresh()->splitRemainder())->toBe(0);
+});
+
+test('saveSplit rejects lines that do not cover the total', function () {
+    $user = User::factory()->create();
+    $transaction = splitTransaction($user, -10000);
+    $groceries = Category::factory()->create();
+    $fuel = Category::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('toggleSplit', $transaction->id)
+        ->set('splitLines', [
+            ['category_id' => $groceries->id, 'amount' => '70.00', 'notes' => ''],
+            ['category_id' => $fuel->id, 'amount' => '20.00', 'notes' => ''],
+        ])
+        ->call('saveSplit')
+        ->assertSet('splitError', 'Split lines must add up to the transaction total.');
+
+    $this->assertDatabaseCount('transaction_splits', 0);
+});
+
+test('saveSplit requires a category on every line', function () {
+    $user = User::factory()->create();
+    $transaction = splitTransaction($user, -10000);
+    $groceries = Category::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('toggleSplit', $transaction->id)
+        ->set('splitLines', [
+            ['category_id' => $groceries->id, 'amount' => '60.00', 'notes' => ''],
+            ['category_id' => null, 'amount' => '40.00', 'notes' => ''],
+        ])
+        ->call('saveSplit')
+        ->assertSet('splitError', 'Every split line needs a category.');
+
+    $this->assertDatabaseCount('transaction_splits', 0);
+});
+
+test('saveSplit rejects a single-line split', function () {
+    $user = User::factory()->create();
+    $transaction = splitTransaction($user, -10000);
+    $groceries = Category::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('toggleSplit', $transaction->id)
+        ->set('splitLines', [
+            ['category_id' => $groceries->id, 'amount' => '100.00', 'notes' => ''],
+        ])
+        ->call('saveSplit')
+        ->assertSet('splitError', 'A split needs at least two lines.');
+
+    $this->assertDatabaseCount('transaction_splits', 0);
+});
+
+test('unsplit removes every split line and reverts to the own category', function () {
+    $user = User::factory()->create();
+    $transaction = splitTransaction($user, -10000);
+    $groceries = Category::factory()->create();
+    $fuel = Category::factory()->create();
+
+    $transaction->splits()->createMany([
+        ['category_id' => $groceries->id, 'amount' => -7000, 'position' => 0],
+        ['category_id' => $fuel->id, 'amount' => -3000, 'position' => 1],
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('unsplit', $transaction->id);
+
+    expect($transaction->fresh()->isSplit())->toBeFalse();
+    $this->assertDatabaseCount('transaction_splits', 0);
+});
+
+test('splitPanelTxnId is locked against forged client updates', function () {
+    $user = User::factory()->create();
+
+    expect(fn () => Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->set('splitPanelTxnId', 999))
+        ->toThrow(CannotUpdateLockedPropertyException::class);
+});
+
+test('toggleSplit refuses another users transaction', function () {
+    $user = User::factory()->create();
+    $other = User::factory()->create();
+    $foreign = splitTransaction($other, -5000);
+
+    expect(fn () => Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('toggleSplit', $foreign->id))
+        ->toThrow(ModelNotFoundException::class);
+});
+
+test('category filter matches transactions by their split lines', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $ownCategory = Category::factory()->create();
+    $groceries = Category::factory()->create();
+
+    $transaction = Transaction::factory()->for($user)->for($account)->debit()->create([
+        'category_id' => $ownCategory->id,
+        'amount' => -10000,
+        'description' => 'SPLIT ME BNPL',
+        'post_date' => now()->subDays(3),
+    ]);
+    $transaction->splits()->createMany([
+        ['category_id' => $groceries->id, 'amount' => -6000, 'position' => 0],
+        ['category_id' => $ownCategory->id, 'amount' => -4000, 'position' => 1],
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->set('category', $groceries->id)
+        ->assertSee('SPLIT ME BNPL');
+});
+
+test('categorised filter treats a split transaction as categorised', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $groceries = Category::factory()->create();
+    $fuel = Category::factory()->create();
+
+    $transaction = Transaction::factory()->for($user)->for($account)->debit()->create([
+        'category_id' => null,
+        'amount' => -10000,
+        'description' => 'UNCATEGORISED BNPL',
+        'post_date' => now()->subDays(3),
+    ]);
+    $transaction->splits()->createMany([
+        ['category_id' => $groceries->id, 'amount' => -6000, 'position' => 0],
+        ['category_id' => $fuel->id, 'amount' => -4000, 'position' => 1],
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'categorised')
+        ->assertSee('UNCATEGORISED BNPL');
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->assertDontSee('UNCATEGORISED BNPL');
+});
+
+test('a transfer-paired transaction cannot be split', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $pair = Transaction::factory()->for($user)->for($account)->credit()->create([
+        'post_date' => now()->subDays(3),
+    ]);
+    $transfer = Transaction::factory()->for($user)->for($account)->debit()->create([
+        'amount' => -10000,
+        'transfer_pair_id' => $pair->id,
+        'description' => 'INTERNAL TRANSFER',
+        'post_date' => now()->subDays(3),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertDontSee('split-'.$transfer->id)
+        ->call('toggleSplit', $transfer->id)
+        ->assertSet('splitPanelTxnId', null);
+});

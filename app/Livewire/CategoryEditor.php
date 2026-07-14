@@ -7,6 +7,8 @@ namespace App\Livewire;
 use App\Casts\MoneyCast;
 use App\Models\Category;
 use App\Models\Transaction;
+use App\Support\Transactions\CategoryAttribution;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
 use Livewire\Component;
@@ -116,10 +118,10 @@ final class CategoryEditor extends Component
 
         $this->deletingCategoryId = $category->id;
         $this->deletingCategoryName = $category->fullPath();
-        $this->deletingTransactionCount = $category->transactions()
-            ->where('user_id', auth()->id())
-            ->current()
-            ->count();
+        $this->deletingTransactionCount = (int) CategoryAttribution::query(auth()->id())
+            ->where('category_id', $category->id)
+            ->distinct()
+            ->count('transaction_id');
         $this->showDeleteConfirm = true;
     }
 
@@ -147,9 +149,14 @@ final class CategoryEditor extends Component
         $search = $this->search;
         $isSearching = $search !== '';
 
+        $counts = CategoryAttribution::query(auth()->id())
+            ->whereNotNull('category_id')
+            ->groupBy('category_id')
+            ->select('category_id', DB::raw('COUNT(DISTINCT transaction_id) as aggregate'))
+            ->pluck('aggregate', 'category_id');
+
         $categories = Category::query()
             ->with(['parent.parent'])
-            ->withCount(['transactions' => fn ($q) => $q->where('user_id', auth()->id())->current()])
             ->when(! $this->showHidden, fn ($q) => $q->visible())
             ->when($isSearching, fn ($q) => $q->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
@@ -164,16 +171,17 @@ final class CategoryEditor extends Component
                 'name' => $category->name,
                 'full_path' => $category->fullPath(),
                 'depth' => $category->depth(),
-                'transactions_count' => $category->transactions_count,
+                'transactions_count' => (int) ($counts[$category->id] ?? 0),
                 'is_hidden' => $category->is_hidden,
                 'parent_id' => $category->parent_id,
             ]);
 
         $transactions = $this->selectedCategoryId
             ? Transaction::query()
-                ->where('category_id', $this->selectedCategoryId)
                 ->where('user_id', auth()->id())
                 ->current()
+                ->where(fn ($q) => $q->where('category_id', $this->selectedCategoryId)
+                    ->orWhereHas('splits', fn ($s) => $s->where('category_id', $this->selectedCategoryId)))
                 ->with('account:id,name')
                 ->orderByDesc('post_date')
                 ->limit(50)

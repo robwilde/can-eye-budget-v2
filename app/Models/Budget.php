@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Casts\MoneyCast;
 use App\Enums\BudgetPeriod;
+use App\Support\Transactions\CategoryAttribution;
 use Carbon\CarbonImmutable;
 use Database\Factories\BudgetFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -73,7 +74,15 @@ final class Budget extends Model
 
     public function remaining(): int
     {
-        return $this->limit_amount - $this->transactions()->where('user_id', $this->user_id)->current()->sum('amount');
+        if ($this->category_id === null) {
+            return $this->limit_amount;
+        }
+
+        $spent = (int) CategoryAttribution::query($this->user_id)
+            ->where('category_id', $this->category_id)
+            ->sum('amount');
+
+        return $this->limit_amount - $spent;
     }
 
     /**

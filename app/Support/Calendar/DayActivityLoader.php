@@ -27,6 +27,13 @@ final readonly class DayActivityLoader
         'plannedTransaction.category.parent.parent:id,icon,parent_id',
     ];
 
+    private const array SPLIT_EAGER_LOAD = [
+        'splits:id,transaction_id,category_id,amount,position',
+        'splits.category:id,name,icon,parent_id',
+        'splits.category.parent:id,icon,parent_id',
+        'splits.category.parent.parent:id,icon,parent_id',
+    ];
+
     /**
      * Load posted transactions and planned-transaction occurrences for the given date range,
      * grouped by ISO date. Transfers are excluded. Pips per day are sorted by amount desc.
@@ -44,7 +51,7 @@ final readonly class DayActivityLoader
             ->current()
             ->excludingTransfers()
             ->whereBetween('post_date', [$start, $end])
-            ->with([...self::CATEGORY_EAGER_LOAD, ...self::LINKED_PLAN_EAGER_LOAD])
+            ->with([...self::CATEGORY_EAGER_LOAD, ...self::LINKED_PLAN_EAGER_LOAD, ...self::SPLIT_EAGER_LOAD])
             ->orderBy('post_date')
             ->get();
 
@@ -120,13 +127,30 @@ final readonly class DayActivityLoader
 
                 if ($isCredit) {
                     $incomeCents += $absAmount;
-                }
-
-                if (! $isCredit) {
+                } else {
                     $postedCents += $absAmount;
                 }
 
                 $linkedPlan = $tx->plannedTransaction;
+
+                if ($linkedPlan === null && $tx->isSplit()) {
+                    foreach ($tx->splits as $split) {
+                        $splitName = $split->category?->name ?? ($tx->description !== '' ? $tx->description : 'Transaction'); // @phpstan-ignore nullsafe.neverNull
+                        $pips[] = new PayCyclePip(
+                            kind: $isCredit ? 'inc' : 'out',
+                            name: $splitName,
+                            amount: abs((int) $split->amount),
+                            icon: $split->category?->resolveIcon(),
+                            transactionId: $tx->id,
+                            plannedTransactionId: null,
+                            occurrenceDate: null,
+                            matched: false,
+                            tooltip: ($tx->description !== '' && $tx->description !== $splitName) ? $tx->description : null,
+                        );
+                    }
+
+                    continue;
+                }
 
                 if ($linkedPlan !== null) {
                     $name = $linkedPlan->category?->name ?? $linkedPlan->description; // @phpstan-ignore nullsafe.neverNull

@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Services\Reports;
 
+use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Support\Transactions\CategoryAttribution;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 
@@ -128,13 +130,18 @@ final class ReportAggregator
     private function actualAtoms(User $user, ?CarbonInterface $start, ?CarbonInterface $end): array
     {
         $monthExpr = $this->monthExpression();
+        $transferCategoryIds = $this->transferCategoryIds();
 
-        $rows = Transaction::query()
-            ->where('user_id', $user->id)
-            ->current()
-            ->excludingTransfers()
+        $rows = CategoryAttribution::query($user->id)
+            ->whereNull('transfer_pair_id')
             ->when($start, fn ($q, $s) => $q->where('post_date', '>=', $s))
             ->when($end, fn ($q, $e) => $q->where('post_date', '<=', $e))
+            ->when(
+                $transferCategoryIds !== [],
+                fn ($q) => $q->where(fn ($inner) => $inner
+                    ->whereNull('category_id')
+                    ->orWhereNotIn('category_id', $transferCategoryIds)),
+            )
             ->selectRaw("{$monthExpr} as ym, direction, category_id, SUM(ABS(amount)) as total, COUNT(*) as tx_count")
             ->groupByRaw($monthExpr)
             ->groupBy('direction', 'category_id')
@@ -144,15 +151,39 @@ final class ReportAggregator
 
         foreach ($rows as $row) {
             $atoms[] = [
-                'ym' => (string) $row->getAttribute('ym'),
-                'direction' => $row->direction->value,
+                'ym' => (string) $row->ym,
+                'direction' => (string) $row->direction,
                 'category_id' => $row->category_id === null ? null : (int) $row->category_id,
-                'total' => (int) $row->getAttribute('total'),
-                'count' => (int) $row->getAttribute('tx_count'),
+                'total' => (int) $row->total,
+                'count' => (int) $row->tx_count,
             ];
         }
 
         return $atoms;
+    }
+
+    /**
+     * Category ids treated as internal transfers: any category named "Transfer"
+     * and its direct children. Mirrors Transaction::scopeExcludingTransfers so
+     * attributed atoms exclude the same rows the Eloquent scope would.
+     *
+     * @return list<int>
+     */
+    private function transferCategoryIds(): array
+    {
+        $direct = Category::query()->where('name', 'Transfer')->pluck('id');
+
+        if ($direct->isEmpty()) {
+            return [];
+        }
+
+        return Category::query()
+            ->whereIn('parent_id', $direct->all())
+            ->pluck('id')
+            ->merge($direct)
+            ->map(static fn ($id): int => (int) $id)
+            ->values()
+            ->all();
     }
 
     /**
