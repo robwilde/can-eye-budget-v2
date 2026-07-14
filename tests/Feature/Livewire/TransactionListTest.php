@@ -1782,3 +1782,48 @@ test('saveSplit rejects a line whose category select was never chosen', function
 
     $this->assertDatabaseCount('transaction_splits', 0);
 });
+
+test('scanEmail surfaces the receipt breakdown and linkEmail persists it', function () {
+    $user = User::factory()->create();
+    $transaction = afterpayTransaction($user);
+
+    $details = [
+        'total' => 11279,
+        'date' => 'Fri, 3 July 2026',
+        'method' => 'Visa',
+        'last4' => '8357',
+        'items' => [
+            ['merchant' => 'Petbarn', 'reference' => '900438021', 'installment' => '4 of 4', 'amount' => 2124],
+            ['merchant' => 'Addicted To Audio', 'reference' => '917982502', 'installment' => '2 of 4', 'amount' => 3475],
+        ],
+    ];
+
+    $this->mock(GmailServiceContract::class, function ($mock) use ($details): void {
+        $mock->shouldReceive('isConfigured')->andReturn(true);
+        $mock->shouldReceive('searchForTransaction')->andReturn(collect([
+            new EmailSearchResult(
+                messageId: 'receipt@mail.gmail.com',
+                subject: 'Your Afterpay payment',
+                fromName: 'Afterpay',
+                fromAddress: 'no-reply@afterpay.com',
+                date: '2026-06-13T10:00:00+10:00',
+                snippet: 'Hi Robert Wilde',
+                gmailUrl: 'https://mail.google.com/mail/u/0/#search/rfc822msgid:receipt',
+                details: $details,
+            ),
+        ]));
+    });
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('scanEmail', $transaction->id)
+        ->assertSee('Petbarn')
+        ->assertSee('Addicted To Audio')
+        ->assertSee('$21.24')
+        ->call('linkEmail', $transaction->id, 0)
+        ->assertSee('Petbarn');
+
+    $email = TransactionEmail::query()->firstOrFail();
+
+    expect($email->details)->toBe($details);
+});

@@ -305,6 +305,28 @@ select:focus[data-flux-control] {
     .email-link { display: inline-block; margin-top: 4px; color: var(--color-cib-teal-500); font-weight: 700; }
     .email-empty { color: var(--color-fg-3); font-style: italic; }
 
+    /* ---------- Email receipt breakdown (Ticket #342) ---------- */
+    .receipt { margin-top: 4px; }
+    .receipt-head {
+        display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+        margin-bottom: 6px;
+    }
+    .receipt-total { font: 900 14px/1 var(--font-display); color: var(--color-fg-1); }
+    .receipt-date { color: var(--color-fg-3); }
+    .receipt-method { color: var(--color-fg-3); margin-left: auto; }
+    .receipt-items {
+        border-top: 1px solid var(--color-border-1);
+    }
+    .receipt-item {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 10px; align-items: baseline;
+        padding: 4px 0; border-bottom: 1px solid var(--color-border-1);
+    }
+    .receipt-merchant { font-weight: 700; color: var(--color-fg-1); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .receipt-installment { color: var(--color-fg-3); font-size: 11px; }
+    .receipt-amount { font-weight: 700; color: var(--color-fg-2); text-align: right; }
+
     /* ---------- Split panel (Ticket #342) ---------- */
     .split-panel {
         padding: 10px 4px 12px 48px;

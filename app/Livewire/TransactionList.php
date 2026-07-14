@@ -206,6 +206,7 @@ final class TransactionList extends Component
                 'email_date' => is_string($result['date'] ?? null) ? $result['date'] : null,
                 'snippet' => is_string($result['snippet'] ?? null) ? $result['snippet'] : null,
                 'gmail_url' => GmailService::deepLink($messageId),
+                'details' => is_array($result['details'] ?? null) ? $result['details'] : null,
             ],
         );
     }

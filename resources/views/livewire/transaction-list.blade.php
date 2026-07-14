@@ -197,7 +197,9 @@
                                                         <div class="email-row-body">
                                                             <div class="email-subject">{{ $email->subject }}</div>
                                                             <div class="email-meta">{{ $email->from_name ?? $email->from_address }}@if($email->email_date) · {{ $email->email_date->format('j M Y') }}@endif</div>
-                                                            @if($email->snippet)
+                                                            @if(is_array($email->details))
+                                                                <x-cib.receipt-summary :receipt="$email->details"/>
+                                                            @elseif($email->snippet)
                                                                 <div class="email-snippet">{{ $email->snippet }}</div>
                                                             @endif
                                                             <a href="{{ GmailService::deepLink($email->gmail_message_id) }}" target="_blank" rel="noopener" class="email-link">Open in Gmail</a>
@@ -218,7 +220,9 @@
                                                         <div class="email-row-body">
                                                             <div class="email-subject">{{ $result['subject'] }}</div>
                                                             <div class="email-meta">{{ $result['fromName'] ?? $result['fromAddress'] }}@if($result['date']) · {{ CarbonImmutable::parse($result['date'])->format('j M Y') }}@endif</div>
-                                                            @if($result['snippet'])
+                                                            @if(is_array($result['details'] ?? null))
+                                                                <x-cib.receipt-summary :receipt="$result['details']"/>
+                                                            @elseif($result['snippet'])
                                                                 <div class="email-snippet">{{ $result['snippet'] }}</div>
                                                             @endif
                                                             @php $resultMessageId = $result['messageId'] ?? null; @endphp

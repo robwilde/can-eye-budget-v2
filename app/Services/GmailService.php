@@ -8,6 +8,7 @@ use App\Contracts\GmailServiceContract;
 use App\DTOs\EmailSearchResult;
 use App\Exceptions\GmailSearchException;
 use App\Models\Transaction;
+use App\Support\Email\ReceiptParser;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
@@ -238,6 +239,8 @@ final class GmailService implements GmailServiceContract
         $fromAddress = $from instanceof Address ? $from->mail : '';
 
         $date = $this->messageDate($message);
+        $textBody = $message->getTextBody();
+        $htmlBody = $message->getHTMLBody();
 
         return [
             'result' => new EmailSearchResult(
@@ -246,8 +249,9 @@ final class GmailService implements GmailServiceContract
                 fromName: $fromName,
                 fromAddress: $fromAddress,
                 date: $date?->toIso8601String(),
-                snippet: $this->snippet($message),
+                snippet: self::snippetFromBodies($textBody, $htmlBody),
                 gmailUrl: self::deepLink($messageId),
+                details: ReceiptParser::parse($textBody, $htmlBody),
             ),
             'date' => $date,
         ];
@@ -262,11 +266,6 @@ final class GmailService implements GmailServiceContract
         }
 
         return null;
-    }
-
-    private function snippet(Message $message): ?string
-    {
-        return self::snippetFromBodies($message->getTextBody(), $message->getHTMLBody());
     }
 
     /**
