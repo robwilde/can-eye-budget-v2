@@ -1,5 +1,6 @@
 @php
     use App\Enums\TransactionDirection;
+    use App\Services\GmailService;
     use Carbon\CarbonImmutable;
 @endphp
 <div class="space-y-6">
@@ -189,7 +190,7 @@
                                                             @if($email->snippet)
                                                                 <div class="email-snippet">{{ $email->snippet }}</div>
                                                             @endif
-                                                            <a href="{{ $email->gmail_url }}" target="_blank" rel="noopener" class="email-link">Open in Gmail</a>
+                                                            <a href="{{ GmailService::deepLink($email->gmail_message_id) }}" target="_blank" rel="noopener" class="email-link">Open in Gmail</a>
                                                         </div>
                                                         <flux:button variant="ghost" size="sm" icon="x-mark"
                                                                      wire:click="unlinkEmail({{ $email->id }})"
@@ -210,7 +211,10 @@
                                                             @if($result['snippet'])
                                                                 <div class="email-snippet">{{ $result['snippet'] }}</div>
                                                             @endif
-                                                            <a href="{{ $result['gmailUrl'] }}" target="_blank" rel="noopener" class="email-link">Open in Gmail</a>
+                                                            @php $resultMessageId = $result['messageId'] ?? null; @endphp
+                                                            @if(is_string($resultMessageId) && trim($resultMessageId) !== '')
+                                                                <a href="{{ GmailService::deepLink(trim($resultMessageId)) }}" target="_blank" rel="noopener" class="email-link">Open in Gmail</a>
+                                                            @endif
                                                         </div>
                                                         <flux:button variant="ghost" size="sm" icon="link"
                                                                      wire:click="linkEmail({{ $transaction->id }}, {{ $index }})"

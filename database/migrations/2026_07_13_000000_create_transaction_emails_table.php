@@ -24,7 +24,6 @@ return new class extends Migration
             $table->timestamps();
 
             $table->unique(['transaction_id', 'gmail_message_id']);
-            $table->index('user_id');
         });
     }
 
