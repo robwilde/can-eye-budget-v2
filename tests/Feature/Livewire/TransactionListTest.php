@@ -1764,3 +1764,21 @@ test('a transfer-paired transaction cannot be split', function () {
         ->call('toggleSplit', $transfer->id)
         ->assertSet('splitPanelTxnId', null);
 });
+
+test('saveSplit rejects a line whose category select was never chosen', function () {
+    $user = User::factory()->create();
+    $transaction = splitTransaction($user, -10000);
+    $groceries = Category::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('toggleSplit', $transaction->id)
+        ->set('splitLines', [
+            ['category_id' => (string) $groceries->id, 'amount' => '60.00', 'notes' => ''],
+            ['category_id' => '', 'amount' => '40.00', 'notes' => ''],
+        ])
+        ->call('saveSplit')
+        ->assertSet('splitError', 'Every split line needs a category.');
+
+    $this->assertDatabaseCount('transaction_splits', 0);
+});
