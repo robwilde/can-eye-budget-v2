@@ -251,12 +251,12 @@
                                         <div class="split-lines">
                                             @foreach($splitLines as $index => $line)
                                                 <div wire:key="split-line-{{ $transaction->id }}-{{ $index }}" class="split-line">
-                                                    <flux:select wire:model.live="splitLines.{{ $index }}.category_id" size="sm">
-                                                        <flux:select.option value="">Category</flux:select.option>
-                                                        @foreach($splitCategories as $cat)
-                                                            <flux:select.option :value="(string) $cat->id">{{ $cat->fullPath() }}</flux:select.option>
-                                                        @endforeach
-                                                    </flux:select>
+                                                    <x-category-combobox
+                                                        wire:model="splitLines.{{ $index }}.category_id"
+                                                        :categories="$splitCategories"
+                                                        placeholder="Category"
+                                                        size="sm"
+                                                    />
                                                     <flux:input wire:model.live.debounce.400ms="splitLines.{{ $index }}.amount" size="sm" class="split-amount" inputmode="decimal" placeholder="0.00"/>
                                                     <flux:input wire:model.blur="splitLines.{{ $index }}.notes" size="sm" class="split-notes" placeholder="Note (optional)"/>
                                                     <flux:button variant="ghost" size="sm" icon="x-mark"
