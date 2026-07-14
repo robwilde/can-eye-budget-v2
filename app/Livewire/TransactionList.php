@@ -17,6 +17,7 @@ use App\Models\TransactionEmail;
 use App\Services\GmailService;
 use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -67,11 +68,14 @@ final class TransactionList extends Component
     #[Url]
     public string $sortDir = 'desc';
 
+    #[Locked]
     public ?int $emailPanelTxnId = null;
 
     /** @var list<array<string, mixed>> */
+    #[Locked]
     public array $emailResults = [];
 
+    #[Locked]
     public ?string $emailScanError = null;
 
     public function mount(): void
