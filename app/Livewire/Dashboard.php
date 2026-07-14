@@ -7,7 +7,7 @@ namespace App\Livewire;
 use App\Enums\TransactionDirection;
 use App\Models\Budget;
 use App\Models\PlannedTransaction;
-use App\Models\Transaction;
+use App\Support\Transactions\CategoryAttribution;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\View\View;
@@ -109,10 +109,8 @@ final class Dashboard extends Component
                     ];
                 }
 
-                $query = Transaction::query()
-                    ->where('user_id', $budget->user_id)
-                    ->current()
-                    ->where('direction', TransactionDirection::Debit)
+                $query = CategoryAttribution::query($budget->user_id)
+                    ->where('direction', TransactionDirection::Debit->value)
                     ->where('category_id', $budget->category_id);
 
                 if ($bounds !== null) {

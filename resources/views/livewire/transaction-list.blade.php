@@ -2,6 +2,7 @@
     use App\Enums\TransactionDirection;
     use App\Services\GmailService;
     use Carbon\CarbonImmutable;
+    use App\Support\AmountParser;
 @endphp
 <div class="space-y-6">
     <div class="flex flex-wrap items-center justify-between gap-4">
@@ -157,17 +158,23 @@
                                     :icon="$transaction->category?->resolveIcon()"
                                     :click="'$dispatch(\'edit-transaction\', { id: ' . $transaction->id . ' })'"
                                 >
-                                    @if(! empty($metaParts) || $isPlanned || $transaction->emails->isNotEmpty())
-                                        <x-slot:meta>{{ implode(' · ', $metaParts) }}@if($isPlanned) <span class="pill plan">Planned</span>@endif@if($transaction->emails->isNotEmpty()) <span class="pill email">{{ $transaction->emails->count() }} email{{ $transaction->emails->count() > 1 ? 's' : '' }}</span>@endif</x-slot:meta>
+                                    @if(! empty($metaParts) || $isPlanned || $transaction->emails->isNotEmpty() || $transaction->isSplit())
+                                        <x-slot:meta>{{ implode(' · ', $metaParts) }}@if($isPlanned) <span class="pill plan">Planned</span>@endif@if($transaction->isSplit()) <span class="pill split">Split ({{ $transaction->splits->count() }})</span>@endif@if($transaction->emails->isNotEmpty()) <span class="pill email">{{ $transaction->emails->count() }} email{{ $transaction->emails->count() > 1 ? 's' : '' }}</span>@endif</x-slot:meta>
                                     @endif
-                                    @if($gmailEnabled)
-                                        <x-slot:actions>
+                                    <x-slot:actions>
+                                        @if($transaction->transfer_pair_id === null)
+                                            <flux:button variant="ghost" size="sm" icon="scissors"
+                                                         wire:click="toggleSplit({{ $transaction->id }})"
+                                                         wire:loading.attr="disabled" wire:target="toggleSplit({{ $transaction->id }})"
+                                                         data-testid="split-{{ $transaction->id }}" aria-label="Split transaction"/>
+                                        @endif
+                                        @if($gmailEnabled)
                                             <flux:button variant="ghost" size="sm" icon="envelope"
                                                          wire:click="scanEmail({{ $transaction->id }})"
                                                          wire:loading.attr="disabled" wire:target="scanEmail({{ $transaction->id }})"
                                                          data-testid="scan-email-{{ $transaction->id }}" aria-label="Scan email"/>
-                                        </x-slot:actions>
-                                    @endif
+                                        @endif
+                                    </x-slot:actions>
                                 </x-cib.tx-row>
                                 @if($emailPanelTxnId === $transaction->id)
                                     @php
@@ -227,6 +234,48 @@
                                         @if(! $emailScanError && $transaction->emails->isEmpty() && $newResults->isEmpty())
                                             <p class="email-empty">No matching emails found.</p>
                                         @endif
+                                    </div>
+                                @endif
+                                @if($splitPanelTxnId === $transaction->id)
+                                    @php
+                                        $splitRemainderCents = abs((int) $transaction->amount) - collect($splitLines)->sum(fn (array $l): int => AmountParser::parse((string) ($l['amount'] ?? ''))->amount);
+                                    @endphp
+                                    <div wire:key="split-panel-{{ $transaction->id }}" class="split-panel" data-testid="split-panel-{{ $transaction->id }}">
+                                        @if($splitError)
+                                            <p class="split-error" data-testid="split-error-{{ $transaction->id }}">{{ $splitError }}</p>
+                                        @endif
+
+                                        <div class="split-lines">
+                                            @foreach($splitLines as $index => $line)
+                                                <div wire:key="split-line-{{ $transaction->id }}-{{ $index }}" class="split-line">
+                                                    <flux:select wire:model="splitLines.{{ $index }}.category_id" size="sm" placeholder="Category">
+                                                        @foreach($splitCategories as $cat)
+                                                            <flux:select.option :value="$cat->id">{{ $cat->fullPath() }}</flux:select.option>
+                                                        @endforeach
+                                                    </flux:select>
+                                                    <flux:input wire:model="splitLines.{{ $index }}.amount" size="sm" class="split-amount" inputmode="decimal" placeholder="0.00"/>
+                                                    <flux:input wire:model="splitLines.{{ $index }}.notes" size="sm" class="split-notes" placeholder="Note (optional)"/>
+                                                    <flux:button variant="ghost" size="sm" icon="x-mark"
+                                                                 wire:click="removeSplitLine({{ $index }})"
+                                                                 data-testid="remove-split-line-{{ $transaction->id }}-{{ $index }}" aria-label="Remove line"/>
+                                                </div>
+                                            @endforeach
+                                        </div>
+
+                                        <div class="split-foot">
+                                            <div class="split-remainder">
+                                                <span class="cib-label">Remainder</span>
+                                                <span @class(['split-remainder-value', 'is-zero' => $splitRemainderCents === 0]) data-testid="split-remainder-{{ $transaction->id }}">{{ $formatMoney($splitRemainderCents) }}</span>
+                                            </div>
+                                            <div class="split-buttons">
+                                                <flux:button variant="ghost" size="sm" icon="plus" wire:click="addSplitLine" data-testid="add-split-line-{{ $transaction->id }}">Add line</flux:button>
+                                                <flux:button variant="ghost" size="sm" wire:click="assignRemainderToLast" data-testid="assign-remainder-{{ $transaction->id }}">Assign remainder</flux:button>
+                                                @if($transaction->isSplit())
+                                                    <flux:button variant="ghost" size="sm" icon="arrow-uturn-left" wire:click="unsplit({{ $transaction->id }})" data-testid="unsplit-{{ $transaction->id }}">Unsplit</flux:button>
+                                                @endif
+                                                <flux:button variant="primary" size="sm" wire:click="saveSplit" :disabled="$splitRemainderCents !== 0" data-testid="save-split-{{ $transaction->id }}">Save split</flux:button>
+                                            </div>
+                                        </div>
                                     </div>
                                 @endif
                             @endforeach

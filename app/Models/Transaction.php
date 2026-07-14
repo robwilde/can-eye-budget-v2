@@ -42,6 +42,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property int|null $parent_transaction_id
  * @property int|null $folded_into_transaction_id
  * @property string|null $notes
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, TransactionSplit> $splits
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
  * @property CarbonImmutable|null $deleted_at
@@ -168,6 +169,31 @@ final class Transaction extends Model
     public function emails(): HasMany
     {
         return $this->hasMany(TransactionEmail::class);
+    }
+
+    /** @return HasMany<TransactionSplit, $this> */
+    public function splits(): HasMany
+    {
+        return $this->hasMany(TransactionSplit::class)->orderBy('position')->orderBy('id');
+    }
+
+    public function isSplit(): bool
+    {
+        return $this->relationLoaded('splits')
+            ? $this->splits->isNotEmpty()
+            : $this->splits()->exists();
+    }
+
+    public function splitTotal(): int
+    {
+        return $this->relationLoaded('splits')
+            ? (int) $this->splits->sum('amount')
+            : (int) $this->splits()->sum('amount');
+    }
+
+    public function splitRemainder(): int
+    {
+        return (int) $this->amount - $this->splitTotal();
     }
 
     /** @return BelongsTo<self, $this> */
