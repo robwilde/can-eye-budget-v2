@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support\Transactions;
 
+use App\Models\Transaction;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 
@@ -26,43 +27,36 @@ final class CategoryAttribution
 {
     public static function atoms(int $userId): Builder
     {
-        $notVersioned = static function (Builder $query): void {
-            $query->select(DB::raw('1'))
-                ->from('transactions as c')
-                ->whereColumn('c.parent_transaction_id', 't.id')
-                ->whereNull('c.deleted_at');
-        };
-
-        $unsplit = DB::table('transactions as t')
-            ->whereNull('t.deleted_at')
-            ->where('t.user_id', $userId)
-            ->whereNotExists($notVersioned)
+        $unsplit = Transaction::query()
+            ->current()
+            ->where('transactions.user_id', $userId)
+            ->toBase()
             ->whereNotExists(static function (Builder $query): void {
                 $query->select(DB::raw('1'))
                     ->from('transaction_splits as s')
-                    ->whereColumn('s.transaction_id', 't.id');
+                    ->whereColumn('s.transaction_id', 'transactions.id');
             })
             ->select([
-                't.id as transaction_id',
-                't.category_id as category_id',
-                't.amount as amount',
-                't.direction as direction',
-                't.post_date as post_date',
-                't.transfer_pair_id as transfer_pair_id',
+                'transactions.id as transaction_id',
+                'transactions.category_id as category_id',
+                'transactions.amount as amount',
+                'transactions.direction as direction',
+                'transactions.post_date as post_date',
+                'transactions.transfer_pair_id as transfer_pair_id',
             ]);
 
-        $split = DB::table('transaction_splits as s')
-            ->join('transactions as t', 't.id', '=', 's.transaction_id')
-            ->whereNull('t.deleted_at')
-            ->where('t.user_id', $userId)
-            ->whereNotExists($notVersioned)
+        $split = Transaction::query()
+            ->current()
+            ->where('transactions.user_id', $userId)
+            ->toBase()
+            ->join('transaction_splits as s', 's.transaction_id', '=', 'transactions.id')
             ->select([
-                't.id as transaction_id',
+                'transactions.id as transaction_id',
                 's.category_id as category_id',
                 's.amount as amount',
-                't.direction as direction',
-                't.post_date as post_date',
-                't.transfer_pair_id as transfer_pair_id',
+                'transactions.direction as direction',
+                'transactions.post_date as post_date',
+                'transactions.transfer_pair_id as transfer_pair_id',
             ]);
 
         return $unsplit->unionAll($split);

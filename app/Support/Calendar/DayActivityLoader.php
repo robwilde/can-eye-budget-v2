@@ -133,18 +133,18 @@ final readonly class DayActivityLoader
 
                 $linkedPlan = $tx->plannedTransaction;
 
-                if ($linkedPlan === null && $tx->isSplit()) {
+                if ($tx->isSplit()) {
                     foreach ($tx->splits as $split) {
                         $splitName = $split->category?->name ?? ($tx->description !== '' ? $tx->description : 'Transaction'); // @phpstan-ignore nullsafe.neverNull
                         $pips[] = new PayCyclePip(
                             kind: $isCredit ? 'inc' : 'out',
                             name: $splitName,
-                            amount: abs((int) $split->amount),
+                            amount: abs($split->amount),
                             icon: $split->category?->resolveIcon(),
                             transactionId: $tx->id,
                             plannedTransactionId: null,
                             occurrenceDate: null,
-                            matched: false,
+                            matched: $linkedPlan !== null,
                             tooltip: ($tx->description !== '' && $tx->description !== $splitName) ? $tx->description : null,
                         );
                     }
