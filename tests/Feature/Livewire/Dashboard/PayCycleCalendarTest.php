@@ -182,11 +182,11 @@ test('a late Friday deposit still ends the cycle on the scheduled Thursday', fun
     $this->travelTo('2026-05-31');
     [$user, $account] = fortnightlyThursdayPayUser();
 
-    // Paid one day late — Friday instead of the scheduled Thursday.
+    // Paid one day late — Friday 22 May instead of the scheduled Thursday 21 May.
     Transaction::factory()->credit()->for($user)->for($account)->create([
         'amount' => 570660,
         'description' => 'Direct Credit WINABLE PAYROLL',
-        'post_date' => '2026-05-08',
+        'post_date' => '2026-05-22',
     ]);
 
     /** @var list<PayCycleDayData> $days */
@@ -196,8 +196,8 @@ test('a late Friday deposit still ends the cycle on the scheduled Thursday', fun
         ->days();
 
     // Window starts on the actual late Friday, but the payday stays on Thursday.
-    expect($days[0]->iso)->toBe('2026-05-08')
-        ->and(end($days)->iso)->toBe('2026-05-21')
+    expect($days[0]->iso)->toBe('2026-05-22')
+        ->and(end($days)->iso)->toBe('2026-06-04')
         ->and(end($days)->isCycleEnd)->toBeTrue();
 });
 
@@ -232,15 +232,15 @@ test('anchors on the same-account amount match when the salary description has d
     $this->travelTo('2026-05-31');
     [$user, $account] = fortnightlyThursdayPayUser();
 
-    // The salary landed late (Friday 8 May) but the bank description has drifted
+    // The salary landed late (Friday 22 May) but the bank description has drifted
     // and no longer contains the configured "WINABLE PAYROLL". The same-account,
     // exact-amount, credit transaction is the only candidate, so the window must
     // anchor on it (deliberate amount-only fallback) rather than silently
-    // reverting to schedule-only bounds (which would start 21 May, end 4 Jun).
+    // reverting to schedule-only bounds (which would start 21 May).
     Transaction::factory()->credit()->for($user)->for($account)->create([
         'amount' => 570660,
         'description' => 'ACME PTY LTD 0042',
-        'post_date' => '2026-05-08',
+        'post_date' => '2026-05-22',
     ]);
 
     /** @var list<PayCycleDayData> $days */
@@ -249,8 +249,8 @@ test('anchors on the same-account amount match when the salary description has d
         ->instance()
         ->days();
 
-    expect($days[0]->iso)->toBe('2026-05-08')
-        ->and(end($days)->iso)->toBe('2026-05-21');
+    expect($days[0]->iso)->toBe('2026-05-22')
+        ->and(end($days)->iso)->toBe('2026-06-04');
 });
 
 test('falls back to schedule bounds when the income has no matching deposit yet', function () {
@@ -267,6 +267,52 @@ test('falls back to schedule bounds when the income has no matching deposit yet'
 
     expect($days[0]->iso)->toBe('2026-05-21')
         ->and(end($days)->iso)->toBe('2026-06-04');
+});
+
+test('falls back to the schedule cycle containing today when the latest deposit is from a prior cycle', function () {
+    // Today sits after a scheduled payday whose deposit has not been imported yet;
+    // the only deposit on record is a fortnight stale (issue: dashboard showed the
+    // cycle ending 16 Jul and "Today" snapped back to it).
+    $this->travelTo('2026-07-19');
+    [$user, $account] = fortnightlyThursdayPayUser('2026-06-04');
+
+    // Deposit from the 2 Jul payday — the 16 Jul deposit hasn't landed yet.
+    Transaction::factory()->credit()->for($user)->for($account)->create([
+        'amount' => 570660,
+        'description' => 'Direct Credit WINABLE PAYROLL',
+        'post_date' => '2026-07-02',
+    ]);
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)
+        ->test(PayCycleCalendar::class)
+        ->instance()
+        ->days();
+
+    // The window rolls forward to the cycle that actually contains today.
+    expect($days[0]->iso)->toBe('2026-07-16')
+        ->and(end($days)->iso)->toBe('2026-07-30')
+        ->and(collect($days)->contains(fn (PayCycleDayData $day) => $day->iso === '2026-07-19'))->toBeTrue();
+});
+
+test('goToCurrentCycle selects today within the current cycle when the latest deposit is stale', function () {
+    $this->travelTo('2026-07-19');
+    [$user, $account] = fortnightlyThursdayPayUser('2026-06-04');
+
+    Transaction::factory()->credit()->for($user)->for($account)->create([
+        'amount' => 570660,
+        'description' => 'Direct Credit WINABLE PAYROLL',
+        'post_date' => '2026-07-02',
+    ]);
+
+    $component = Livewire::actingAs($user)->test(PayCycleCalendar::class);
+    $component->call('goToCurrentCycle');
+
+    $selected = $component->instance()->selectedDay();
+
+    expect($component->get('cycleOffset'))->toBe(0)
+        ->and($selected['iso'] ?? null)->toBe('2026-07-19')
+        ->and($selected['isToday'] ?? false)->toBeTrue();
 });
 
 test('matches an income deposit whose description contains a percent sign literally', function () {
