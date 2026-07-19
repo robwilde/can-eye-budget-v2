@@ -25,6 +25,9 @@ use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
+use Psr\Container\ContainerExceptionInterface;
+use Psr\Container\NotFoundExceptionInterface;
+use Throwable;
 
 final class TransactionList extends Component
 {
@@ -90,6 +93,10 @@ final class TransactionList extends Component
     #[Locked]
     public ?string $splitError = null;
 
+    /**
+     * @throws ContainerExceptionInterface
+     * @throws NotFoundExceptionInterface
+     */
     public function mount(): void
     {
         $this->restoreRememberedPeriod();
@@ -305,6 +312,9 @@ final class TransactionList extends Component
         $this->splitLines[$lastIndex]['amount'] = number_format(max(0, $remainder) / 100, 2, '.', '');
     }
 
+    /**
+     * @throws Throwable
+     */
     public function saveSplit(): void
     {
         $this->splitError = null;
@@ -331,7 +341,7 @@ final class TransactionList extends Component
             $categoryId = $line['category_id'] ?? null;
             $cents = AmountParser::parse((string) ($line['amount'] ?? ''))->amount;
 
-            if ($categoryId === null || $categoryId === '' || ! is_numeric($categoryId)) {
+            if ($categoryId === '' || ! is_numeric($categoryId)) {
                 $this->splitError = 'Every split line needs a category.';
 
                 return;
@@ -344,6 +354,12 @@ final class TransactionList extends Component
             }
 
             $notes = is_string($line['notes'] ?? null) ? mb_trim($line['notes']) : '';
+
+            if (mb_strlen($notes) > 255) {
+                $this->splitError = 'Split notes must be 255 characters or fewer.';
+
+                return;
+            }
 
             $lines[] = [
                 'category_id' => (int) $categoryId,
@@ -537,6 +553,10 @@ final class TransactionList extends Component
         $this->splitError = null;
     }
 
+    /**
+     * @throws NotFoundExceptionInterface
+     * @throws ContainerExceptionInterface
+     */
     private function restoreRememberedPeriod(): void
     {
         if (request()->query('period') !== null) {
