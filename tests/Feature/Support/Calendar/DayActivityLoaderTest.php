@@ -343,6 +343,51 @@ test('an unmatched posted transaction is not flagged as matched', function () {
         ->and($day->pips[0]->matched)->toBeFalse();
 });
 
+test('a split reconciled transaction renders per-line pips flagged as matched', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $fuel = Category::factory()->create(['name' => 'Fuel']);
+    $planned = Category::factory()->create(['name' => 'Afterpay']);
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    $plannedTransaction = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'category_id' => $planned->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    $transaction = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $planned->id,
+        'amount' => -10000,
+        'post_date' => $date,
+        'planned_transaction_id' => $plannedTransaction->id,
+    ]);
+
+    $transaction->splits()->createMany([
+        ['category_id' => $groceries->id, 'amount' => -7000, 'position' => 0],
+        ['category_id' => $fuel->id, 'amount' => -3000, 'position' => 1],
+    ]);
+
+    $day = (new DayActivityLoader)->load(
+        CarbonImmutable::create(2026, 6, 1),
+        CarbonImmutable::create(2026, 6, 30),
+        $user->id,
+    )[$date->format('Y-m-d')];
+
+    $names = collect($day->pips)->pluck('name')->all();
+
+    expect($day->pips)->toHaveCount(2)
+        ->and($names)->toContain('Groceries')
+        ->and($names)->toContain('Fuel')
+        ->and($names)->not->toContain('Afterpay')
+        ->and(collect($day->pips)->every(fn ($pip) => $pip->matched))->toBeTrue()
+        ->and($day->postedCents)->toBe(10000)
+        ->and($day->plannedCents)->toBe(0);
+});
+
 test('reconciled income credit suppresses the planned income pip', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();

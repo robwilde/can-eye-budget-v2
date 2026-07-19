@@ -1,5 +1,7 @@
 <?php
 
+/** @noinspection PhpUnhandledExceptionInspection */
+
 /** @noinspection StaticClosureCanBeUsedInspection */
 
 declare(strict_types=1);
@@ -1599,6 +1601,25 @@ test('saveSplit persists exact-cover lines carrying the parent sign', function (
     ]);
 
     expect($transaction->fresh()->splitRemainder())->toBe(0);
+});
+
+test('saveSplit rejects a line note longer than 255 characters', function () {
+    $user = User::factory()->create();
+    $transaction = splitTransaction($user, -10000);
+    $groceries = Category::factory()->create();
+    $fuel = Category::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('toggleSplit', $transaction->id)
+        ->set('splitLines', [
+            ['category_id' => $groceries->id, 'amount' => '70.00', 'notes' => str_repeat('a', 256)],
+            ['category_id' => $fuel->id, 'amount' => '30.00', 'notes' => ''],
+        ])
+        ->call('saveSplit')
+        ->assertSet('splitError', 'Split notes must be 255 characters or fewer.');
+
+    $this->assertDatabaseCount('transaction_splits', 0);
 });
 
 test('saveSplit rejects lines that do not cover the total', function () {
