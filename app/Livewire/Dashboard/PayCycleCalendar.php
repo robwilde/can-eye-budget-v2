@@ -313,7 +313,10 @@ final class PayCycleCalendar extends Component
     /**
      * Resolve the current cycle window. Anchored on the user's most recent actual
      * pay deposit so a late (e.g. Friday) payment shifts the whole fortnight with
-     * it; falls back to the schedule-only bounds when no matching deposit exists.
+     * it; falls back to the schedule-only bounds when no matching deposit exists,
+     * or when the latest deposit is stale (its scheduled payday has already passed
+     * because the current cycle's deposit hasn't been imported yet) — the schedule
+     * fast-forwards to the cycle that contains today.
      *
      * @return array{start: CarbonImmutable, end: CarbonImmutable}|null
      */
@@ -331,13 +334,20 @@ final class PayCycleCalendar extends Component
             return $user->currentPayCycleBounds();
         }
 
+        $end = $this->nextScheduledPaydayAfter(
+            CarbonImmutable::instance($user->next_pay_date),
+            $depositDate,
+            $frequency,
+        );
+
+        // Stale deposit from a prior cycle: defer to the schedule (see docblock).
+        if ($end->lessThanOrEqualTo(CarbonImmutable::today())) {
+            return $user->currentPayCycleBounds();
+        }
+
         return [
             'start' => $depositDate,
-            'end' => $this->nextScheduledPaydayAfter(
-                CarbonImmutable::instance($user->next_pay_date),
-                $depositDate,
-                $frequency,
-            ),
+            'end' => $end,
         ];
     }
 
