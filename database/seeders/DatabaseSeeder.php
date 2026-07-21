@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Database\Seeders;
 
 use App\Models\User;
+use App\Services\MonthEndBalanceRuleProvisioner;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
@@ -45,5 +46,7 @@ final class DatabaseSeeder extends Seeder
                 'email_verified_at' => now(),
             ]);
         }
+
+        app(MonthEndBalanceRuleProvisioner::class)->provisionAllUsers();
     }
 }

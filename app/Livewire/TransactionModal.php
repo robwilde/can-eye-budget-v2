@@ -446,7 +446,7 @@ final class TransactionModal extends Component
 
     private function updateTransaction(): bool
     {
-        $resolved = $this->resolveTransactionWithParsedAmount();
+        $resolved = $this->resolveTransactionWithParsedAmount(allowZero: true);
 
         if ($resolved === false) {
             return false;
@@ -687,7 +687,7 @@ final class TransactionModal extends Component
     }
 
     /** @return array{Transaction, AmountParseResult}|false */
-    private function resolveTransactionWithParsedAmount(): array|false
+    private function resolveTransactionWithParsedAmount(bool $allowZero = false): array|false
     {
         $transaction = Transaction::query()
             ->where('user_id', auth()->id())
@@ -699,7 +699,7 @@ final class TransactionModal extends Component
 
         $parsed = AmountParser::parse($this->descriptionInput);
 
-        if ($parsed->amount <= 0) {
+        if ($allowZero ? $parsed->amount < 0 : $parsed->amount <= 0) {
             $this->addError('descriptionInput', __('The amount must be greater than zero.'));
 
             return false;
