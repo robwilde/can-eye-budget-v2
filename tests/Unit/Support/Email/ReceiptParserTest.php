@@ -24,6 +24,25 @@ $afterpayHtml = <<<'HTML'
 </body></html>
 HTML;
 
+$paypalHtml = <<<'HTML'
+<html><head><style>.x{color:red}</style></head><body>
+<h1>You sent a payment</h1>
+<p>You made a $16.01 AUD payment for your Pay in 4 plan. The payment was
+charged to the Credit Card ending in x-8357 on 25 September 2025.</p>
+<h2>Here are the details</h2>
+<table>
+  <tr><td>Payment amount</td><td>$16.01 AUD</td></tr>
+  <tr><td>Payment type</td><td>Plan payment</td></tr>
+  <tr><td>Payment method</td><td>BEYOND BANK AUSTRALIA LIMITED<br>Credit Card<br>x-8357</td></tr>
+  <tr><td>Posted on</td><td>25 September 2025</td></tr>
+  <tr><td>Seller</td><td>ONLINE STORE</td></tr>
+  <tr><td>Current balance</td><td>$0.00 AUD</td></tr>
+  <tr><td>Loan reference number</td><td>eacfa072-30dc-40eb-a93d-acc70b06d4d2</td></tr>
+</table>
+<p><a href="https://www.paypal.com/myaccount/ppcredit/plans/eacfa072-30dc-40eb-a93d-acc70b06d4d2">To make early payments, or to review your PayPal Pay in 4 Contract, log in to your PayPal account.</a></p>
+</body></html>
+HTML;
+
 test('parses total, date and payment method from an Afterpay receipt', function () use ($afterpayHtml) {
     $receipt = ReceiptParser::parse(null, $afterpayHtml);
 
@@ -81,4 +100,38 @@ test('returns null for a non-receipt email', function () {
 test('returns null for empty bodies', function () {
     expect(ReceiptParser::parse(null, null))->toBeNull()
         ->and(ReceiptParser::parse('', ''))->toBeNull();
+});
+
+test('parses a PayPal Pay-in-4 plan payment receipt', function () use ($paypalHtml) {
+    $receipt = ReceiptParser::parse(null, $paypalHtml);
+
+    expect($receipt)->not->toBeNull()
+        ->and($receipt['total'])->toBe(1601)
+        ->and($receipt['type'])->toBe('Plan payment')
+        ->and($receipt['method'])->toBe('BEYOND BANK AUSTRALIA LIMITED Credit Card')
+        ->and($receipt['last4'])->toBe('8357')
+        ->and($receipt['date'])->toBe('25 September 2025')
+        ->and($receipt['seller'])->toBe('ONLINE STORE')
+        ->and($receipt['balance'])->toBe(0)
+        ->and($receipt['loanReference'])->toBe('eacfa072-30dc-40eb-a93d-acc70b06d4d2')
+        ->and($receipt['items'])->toBe([]);
+});
+
+test('falls back to the plan link for the loan reference', function () use ($paypalHtml) {
+    $html = preg_replace('/<tr><td>Loan reference number.*?<\/tr>/s', '', $paypalHtml);
+
+    $receipt = ReceiptParser::parse(null, $html);
+
+    expect($receipt)->not->toBeNull()
+        ->and($receipt['loanReference'])->toBe('eacfa072-30dc-40eb-a93d-acc70b06d4d2');
+});
+
+test('Afterpay receipts leave the PayPal-only fields null', function () use ($afterpayHtml) {
+    $receipt = ReceiptParser::parse(null, $afterpayHtml);
+
+    expect($receipt)->not->toBeNull()
+        ->and($receipt['type'])->toBeNull()
+        ->and($receipt['seller'])->toBeNull()
+        ->and($receipt['balance'])->toBeNull()
+        ->and($receipt['loanReference'])->toBeNull();
 });

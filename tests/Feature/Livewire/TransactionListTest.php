@@ -1848,3 +1848,51 @@ test('scanEmail surfaces the receipt breakdown and linkEmail persists it', funct
 
     expect($email->details)->toBe($details);
 });
+
+test('scanEmail renders PayPal plan payment details', function () {
+    $user = User::factory()->create();
+    $transaction = afterpayTransaction($user);
+
+    $details = [
+        'total' => 1601,
+        'date' => '25 September 2025',
+        'method' => 'BEYOND BANK AUSTRALIA LIMITED Credit Card',
+        'last4' => '8357',
+        'items' => [],
+        'type' => 'Plan payment',
+        'seller' => 'ONLINE STORE',
+        'balance' => 0,
+        'loanReference' => 'eacfa072-30dc-40eb-a93d-acc70b06d4d2',
+    ];
+
+    $this->mock(GmailServiceContract::class, function ($mock) use ($details): void {
+        $mock->shouldReceive('isConfigured')->andReturn(true);
+        $mock->shouldReceive('searchForTransaction')->andReturn(collect([
+            new EmailSearchResult(
+                messageId: 'paypal@mail.gmail.com',
+                subject: 'You sent a payment',
+                fromName: 'PayPal',
+                fromAddress: 'service@paypal.com.au',
+                date: '2026-06-13T10:00:00+10:00',
+                snippet: 'You made a payment for your Pay in 4 plan',
+                gmailUrl: 'https://mail.google.com/mail/u/0/#search/rfc822msgid:paypal',
+                details: $details,
+            ),
+        ]));
+    });
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('scanEmail', $transaction->id)
+        ->assertSee('ONLINE STORE')
+        ->assertSee('Plan payment')
+        ->assertSee('eacfa072-30dc-40eb-a93d-acc70b06d4d2')
+        ->assertSee('$0.00')
+        ->call('linkEmail', $transaction->id, 0)
+        ->assertSee('ONLINE STORE')
+        ->assertSee('eacfa072-30dc-40eb-a93d-acc70b06d4d2');
+
+    $email = TransactionEmail::query()->firstOrFail();
+
+    expect($email->details)->toBe($details);
+});
