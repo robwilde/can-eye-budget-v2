@@ -14,7 +14,7 @@ return new class extends Migration
             return;
         }
 
-        Category::query()->firstOrCreate(
+        $balance = Category::query()->firstOrCreate(
             [
                 'name' => MonthEndBalanceRuleProvisioner::CATEGORY_NAME,
                 'parent_id' => null,
@@ -24,6 +24,10 @@ return new class extends Migration
                 'is_hidden' => false,
             ],
         );
+
+        if ($balance->is_hidden) {
+            $balance->update(['is_hidden' => false]);
+        }
 
         app(MonthEndBalanceRuleProvisioner::class)->provisionAllUsers();
     }

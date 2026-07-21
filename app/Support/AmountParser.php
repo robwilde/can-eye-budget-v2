@@ -28,8 +28,9 @@ final class AmountParser
         $description = mb_trim(mb_substr($stripped, mb_strlen($matches[1])));
         $amount = self::evaluate($expression);
         $cents = (int) round($amount * 100);
+        $hasAmount = preg_match('/\d/', $expression) === 1;
 
-        return new AmountParseResult($cents, $description);
+        return new AmountParseResult($cents, $description, $hasAmount);
     }
 
     private static function evaluate(string $expression): float

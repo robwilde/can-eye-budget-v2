@@ -274,3 +274,21 @@ test('summarize closing balance is null when no balance column is mapped', funct
 
     expect($summary->closingBalance)->toBeNull();
 });
+
+test('a zero in one debit/credit column does not mask a non-zero value in the other', function () {
+    $path = tmpCsv("Date,Description,Debit,Credit\n01/02/2026,COFFEE,50.00,0.00\n03/02/2026,SALARY,0.00,1500.00\n");
+
+    $parser = new CsvParserService();
+    $rows = $parser->preview($path, [
+        CsvColumnMapper::FIELD_DATE => 'Date',
+        CsvColumnMapper::FIELD_DESCRIPTION => 'Description',
+        CsvColumnMapper::FIELD_DEBIT => 'Debit',
+        CsvColumnMapper::FIELD_CREDIT => 'Credit',
+    ]);
+
+    expect($rows)->toHaveCount(2);
+    expect($rows[0]->amount)->toBe(-5000)
+        ->and($rows[0]->direction)->toBe(TransactionDirection::Debit);
+    expect($rows[1]->amount)->toBe(150000)
+        ->and($rows[1]->direction)->toBe(TransactionDirection::Credit);
+});

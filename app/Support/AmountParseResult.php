@@ -9,5 +9,6 @@ final readonly class AmountParseResult
     public function __construct(
         public int $amount,
         public string $description,
+        public bool $hasAmount = false,
     ) {}
 }

@@ -699,7 +699,7 @@ final class TransactionModal extends Component
 
         $parsed = AmountParser::parse($this->descriptionInput);
 
-        if ($allowZero ? $parsed->amount < 0 : $parsed->amount <= 0) {
+        if ($allowZero ? ($parsed->amount < 0 || ! $parsed->hasAmount) : $parsed->amount <= 0) {
             $this->addError('descriptionInput', __('The amount must be greater than zero.'));
 
             return false;
