@@ -24,7 +24,6 @@ use Webklex\PHPIMAP\Exceptions\GetMessagesFailedException;
 use Webklex\PHPIMAP\Exceptions\ImapBadRequestException;
 use Webklex\PHPIMAP\Exceptions\ImapServerErrorException;
 use Webklex\PHPIMAP\Exceptions\InvalidWhereQueryCriteriaException;
-use Webklex\PHPIMAP\Exceptions\MaskNotFoundException;
 use Webklex\PHPIMAP\Exceptions\ResponseException;
 use Webklex\PHPIMAP\Folder;
 use Webklex\PHPIMAP\Message;
@@ -124,10 +123,7 @@ final class GmailService implements GmailServiceContract
     }
 
     /**
-     * @throws \Webklex\PHPIMAP\Exceptions\RuntimeException
-     * @throws ImapBadRequestException
-     * @throws ImapServerErrorException
-     * @throws MaskNotFoundException
+     * @throws GmailSearchException
      */
     public function searchForTransaction(Transaction $transaction): Collection
     {
@@ -135,9 +131,10 @@ final class GmailService implements GmailServiceContract
             throw GmailSearchException::notConfigured();
         }
 
-        $client = Client::account('gmail');
+        $client = null;
 
         try {
+            $client = Client::account('gmail');
             $client->connect();
             $folder = $this->resolveFolder($client);
 
@@ -151,7 +148,10 @@ final class GmailService implements GmailServiceContract
         } catch (Throwable $e) {
             throw GmailSearchException::wrap($e);
         } finally {
-            $client->disconnect();
+            try {
+                $client?->disconnect();
+            } catch (Throwable) {
+            }
         }
     }
 
