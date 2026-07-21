@@ -326,6 +326,12 @@ select:focus[data-flux-control] {
     .receipt-merchant { font-weight: 700; color: var(--color-fg-1); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .receipt-installment { color: var(--color-fg-3); font-size: 11px; }
     .receipt-amount { font-weight: 700; color: var(--color-fg-2); text-align: right; }
+    .receipt-fields { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+    .receipt-field { display: flex; gap: 8px; align-items: baseline; }
+    .receipt-field-label { flex: 0 0 64px; color: var(--color-fg-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .receipt-field-value { color: var(--color-fg-2); min-width: 0; }
+    .receipt-seller { font-weight: 700; color: var(--color-fg-1); }
+    .receipt-ref { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; overflow-wrap: anywhere; }
 
     /* ---------- Split panel (Ticket #342) ---------- */
     .split-panel {
