@@ -1851,7 +1851,12 @@ test('scanEmail surfaces the receipt breakdown and linkEmail persists it', funct
 
 test('scanEmail renders PayPal plan payment details', function () {
     $user = User::factory()->create();
-    $transaction = afterpayTransaction($user);
+    $account = Account::factory()->for($user)->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->debit()->create([
+        'description' => 'PAYPAL *PYPL PAYIN4',
+        'merchant_name' => 'PayPal',
+        'post_date' => now()->subDays(3),
+    ]);
 
     $details = [
         'total' => 1601,
