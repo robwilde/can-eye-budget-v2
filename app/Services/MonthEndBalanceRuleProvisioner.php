@@ -45,6 +45,26 @@ final readonly class MonthEndBalanceRuleProvisioner
     {
         $group = $this->group($userId);
 
+        $triggers = [
+            [
+                'field' => RuleTriggerField::Description->value,
+                'operator' => RuleTriggerOperator::Contains->value,
+                'value' => self::MATCH_VALUE,
+            ],
+            [
+                'field' => RuleTriggerField::CategoryId->value,
+                'operator' => RuleTriggerOperator::IsEmpty->value,
+                'value' => '',
+            ],
+        ];
+
+        $actions = [
+            [
+                'type' => RuleActionType::SetCategory->value,
+                'value' => (string) $categoryId,
+            ],
+        ];
+
         $rule = UserRule::query()->firstOrCreate(
             [
                 'user_id' => $userId,
@@ -52,15 +72,8 @@ final readonly class MonthEndBalanceRuleProvisioner
                 'name' => self::RULE_NAME,
             ],
             [
-                'triggers' => [[
-                    'field' => RuleTriggerField::Description->value,
-                    'operator' => RuleTriggerOperator::Contains->value,
-                    'value' => self::MATCH_VALUE,
-                ]],
-                'actions' => [[
-                    'type' => RuleActionType::SetCategory->value,
-                    'value' => (string) $categoryId,
-                ]],
+                'triggers' => $triggers,
+                'actions' => $actions,
                 'strict_mode' => true,
                 'is_auto_apply' => true,
                 'is_active' => true,
@@ -68,8 +81,16 @@ final readonly class MonthEndBalanceRuleProvisioner
             ],
         );
 
-        if ($rule->wasRecentlyCreated && $group->is_active) {
-            $this->applyToExisting($userId, $rule);
+        if ($rule->wasRecentlyCreated) {
+            if ($group->is_active) {
+                $this->applyToExisting($userId, $rule);
+            }
+
+            return $rule;
+        }
+
+        if ($rule->triggers !== $triggers || $rule->actions !== $actions) {
+            $rule->update(['triggers' => $triggers, 'actions' => $actions]);
         }
 
         return $rule;
