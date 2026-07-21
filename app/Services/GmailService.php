@@ -176,7 +176,7 @@ final class GmailService implements GmailServiceContract
 
         if (preg_match_all('/\$\s?[\d,]+\.\d{2}\s*AUD\s+(?:will\s+be\s+charged\s+)?on\s+\d{1,2}\s+[A-Za-z]+\s+\d{4}/i', $text, $matches) >= 1) {
             foreach (array_slice(array_values(array_unique($matches[0])), 0, 4) as $line) {
-                $highlights[] = mb_trim(preg_replace('/\s+/', ' ', $line));
+                $highlights[] = mb_trim(preg_replace('/\s+/', ' ', $line) ?? '');
             }
         }
 
@@ -299,7 +299,7 @@ final class GmailService implements GmailServiceContract
 
         $merchant = str_replace('"', ' ', $this->ruleGenerator->suggestMatchValue($transaction));
 
-        return mb_trim(preg_replace('/\s+/', ' ', $merchant));
+        return mb_trim(preg_replace('/\s+/', ' ', $merchant) ?? '');
     }
 
     private function providerSender(string $description): ?string
