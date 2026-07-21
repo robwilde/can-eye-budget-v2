@@ -179,7 +179,7 @@ final class ReceiptParser
         $seen = [];
 
         foreach ($matches as $match) {
-            $merchant = mb_trim(preg_replace('/\s+/', ' ', $match[1]));
+            $merchant = mb_trim(preg_replace('/\s+/', ' ', $match[1]) ?? '');
             $reference = $match[2];
             $amount = self::centsFromString($match[5]);
             $key = $reference.'|'.$match[3].'|'.$amount;
