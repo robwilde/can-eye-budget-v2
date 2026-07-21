@@ -30,14 +30,14 @@ final readonly class MonthEndBalanceRuleProvisioner
 
     public function provisionAllUsers(): void
     {
-        $categoryId = $this->balanceCategoryId();
+        $category = $this->balanceCategory();
 
-        if ($categoryId === null) {
+        if ($category === null) {
             return;
         }
 
-        User::query()->eachById(function (User $user) use ($categoryId): void {
-            $this->provision($user->id, $categoryId);
+        User::query()->eachById(function (User $user) use ($category): void {
+            $this->provision($user->id, $category->id);
         });
     }
 
@@ -77,23 +77,31 @@ final readonly class MonthEndBalanceRuleProvisioner
 
     public function provisionForUser(int $userId): ?UserRule
     {
-        $categoryId = $this->balanceCategoryId();
+        $category = $this->balanceCategory();
 
-        if ($categoryId === null) {
+        if ($category === null) {
             return null;
         }
 
-        return $this->provision($userId, $categoryId);
+        return $this->provision($userId, $category->id);
     }
 
-    public function balanceCategoryId(): ?int
+    private function balanceCategory(): ?Category
     {
-        $id = Category::query()
+        $category = Category::query()
             ->whereNull('parent_id')
             ->where('name', self::CATEGORY_NAME)
-            ->value('id');
+            ->first();
 
-        return $id === null ? null : (int) $id;
+        if ($category === null) {
+            return null;
+        }
+
+        if ($category->is_hidden) {
+            $category->update(['is_hidden' => false]);
+        }
+
+        return $category;
     }
 
     private function applyToExisting(int $userId, UserRule $rule): void
