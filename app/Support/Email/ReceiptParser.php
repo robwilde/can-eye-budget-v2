@@ -44,14 +44,14 @@ final class ReceiptParser
         $body = mb_trim((string) $textBody);
 
         if ($body === '') {
-            $html = preg_replace('#<(style|script|head)\b[^>]*>.*?</\1>#is', ' ', (string) $htmlBody);
-            $html = preg_replace('/<[^>]+>/', ' ', $html);
+            $html = preg_replace('#<(style|script|head)\b[^>]*>.*?</\1>#is', ' ', (string) $htmlBody) ?? '';
+            $html = preg_replace('/<[^>]+>/', ' ', $html) ?? '';
             $body = html_entity_decode($html, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         }
 
         $body = str_replace("\u{00A0}", ' ', $body);
 
-        return mb_trim(preg_replace('/\s+/', ' ', $body));
+        return mb_trim(preg_replace('/\s+/', ' ', $body) ?? '');
     }
 
     /**
@@ -164,7 +164,7 @@ final class ReceiptParser
             $block = $bm[1];
         }
 
-        $block = preg_replace('/^.*?Payment method\b.*?\d{4}\b\s*/isu', '', $block);
+        $block = preg_replace('/^.*?Payment method\b.*?\d{4}\b\s*/isu', '', $block) ?? '';
 
         if (preg_match_all(
             '/([\p{L}\p{N}][\p{L}\p{N} &\'.\-]*?)\s*Order\s*#?(\S+)\s+(\d+)\s+of\s+(\d+)\s+\$([\d,]+\.\d{2})/iu',
