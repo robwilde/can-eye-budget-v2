@@ -11,6 +11,7 @@ use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserRule;
+use App\Models\UserRuleGroup;
 use App\Services\MonthEndBalanceRuleProvisioner;
 use App\Services\TransactionAnalysisPipeline;
 
@@ -93,4 +94,45 @@ test('provisionAllUsers is a no-op when the Balance category is absent', functio
     app(MonthEndBalanceRuleProvisioner::class)->provisionAllUsers();
 
     expect(UserRule::query()->where('user_id', $user->id)->count())->toBe(0);
+});
+
+test('provisionAllUsers creates one rule per user', function () {
+    $users = User::factory()->count(3)->create();
+    balanceCategory();
+
+    app(MonthEndBalanceRuleProvisioner::class)->provisionAllUsers();
+
+    foreach ($users as $user) {
+        expect(UserRule::query()->where('user_id', $user->id)->count())->toBe(1);
+    }
+});
+
+test('provision reuses an existing Auto-categorisation group', function () {
+    $user = User::factory()->create();
+    $balance = balanceCategory();
+    $group = UserRuleGroup::factory()->for($user)->create(['name' => 'Auto-categorisation']);
+
+    app(MonthEndBalanceRuleProvisioner::class)->provision($user->id, $balance->id);
+
+    expect(UserRuleGroup::query()->where('user_id', $user->id)->where('name', 'Auto-categorisation')->count())->toBe(1)
+        ->and(UserRule::query()->where('user_rule_group_id', $group->id)->count())->toBe(1);
+});
+
+test('provision does not back-fill when the Auto-categorisation group is inactive', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $balance = balanceCategory();
+    UserRuleGroup::factory()->for($user)->create(['name' => 'Auto-categorisation', 'is_active' => false]);
+
+    $transaction = Transaction::factory()->for($user)->for($account)->fromCsv()->create([
+        'description' => 'Purchases - Month End Balance',
+        'amount' => 0,
+        'direction' => TransactionDirection::Credit,
+        'category_id' => null,
+        'transfer_pair_id' => null,
+    ]);
+
+    app(MonthEndBalanceRuleProvisioner::class)->provision($user->id, $balance->id);
+
+    expect($transaction->refresh()->category_id)->toBeNull();
 });

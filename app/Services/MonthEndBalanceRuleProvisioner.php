@@ -68,11 +68,22 @@ final readonly class MonthEndBalanceRuleProvisioner
             ],
         );
 
-        if ($rule->wasRecentlyCreated) {
+        if ($rule->wasRecentlyCreated && $group->is_active) {
             $this->applyToExisting($userId, $rule);
         }
 
         return $rule;
+    }
+
+    public function provisionForUser(int $userId): ?UserRule
+    {
+        $categoryId = $this->balanceCategoryId();
+
+        if ($categoryId === null) {
+            return null;
+        }
+
+        return $this->provision($userId, $categoryId);
     }
 
     public function balanceCategoryId(): ?int

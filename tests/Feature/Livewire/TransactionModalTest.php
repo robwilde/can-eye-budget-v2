@@ -3651,3 +3651,47 @@ test('converting a zero-amount transaction to a transfer is rejected', function 
         ->call('save')
         ->assertHasErrors(['descriptionInput']);
 });
+
+test('editing a non-zero transaction to remove the amount is rejected', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $transaction = Transaction::factory()->for($user)->for($account)->fromCsv()->create([
+        'description' => 'COLES',
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'category_id' => null,
+        'transfer_pair_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('descriptionInput', 'Coles groceries')
+        ->call('save')
+        ->assertHasErrors(['descriptionInput']);
+
+    expect(Transaction::query()->where('user_id', $user->id)->current()->first()->amount)->toBe(5000);
+});
+
+test('editing a transaction to a negative amount is rejected', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $transaction = Transaction::factory()->for($user)->for($account)->fromCsv()->create([
+        'description' => 'COLES',
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'category_id' => null,
+        'transfer_pair_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('descriptionInput', '-5.00 refund')
+        ->call('save')
+        ->assertHasErrors(['descriptionInput']);
+
+    expect(Transaction::query()->where('user_id', $user->id)->current()->first()->amount)->toBe(5000);
+});
