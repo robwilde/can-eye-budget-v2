@@ -17,10 +17,8 @@ use App\Services\TransactionAnalysisPipeline;
 
 function balanceCategory(): Category
 {
-    return Category::create([
+    return Category::factory()->create([
         'name' => MonthEndBalanceRuleProvisioner::CATEGORY_NAME,
-        'icon' => 'building-library',
-        'is_hidden' => false,
     ]);
 }
 
@@ -35,6 +33,9 @@ test('provision creates an active auto-apply month-end balance rule', function (
         ->and($rule->triggers[0]['field'])->toBe('description')
         ->and($rule->triggers[0]['operator'])->toBe('contains')
         ->and($rule->triggers[0]['value'])->toBe('Month End Balance')
+        ->and($rule->triggers)->toHaveCount(2)
+        ->and($rule->triggers[1]['field'])->toBe('category_id')
+        ->and($rule->triggers[1]['operator'])->toBe('is_empty')
         ->and($rule->actions[0]['type'])->toBe('set_category')
         ->and($rule->actions[0]['value'])->toBe((string) $balance->id);
 });
@@ -140,10 +141,8 @@ test('provision does not back-fill when the Auto-categorisation group is inactiv
 test('provisionAllUsers unhides a hidden Balance category and still categorises', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $balance = Category::create([
+    $balance = Category::factory()->hidden()->create([
         'name' => MonthEndBalanceRuleProvisioner::CATEGORY_NAME,
-        'parent_id' => null,
-        'is_hidden' => true,
     ]);
 
     $transaction = Transaction::factory()->for($user)->for($account)->fromCsv()->create([
@@ -158,4 +157,51 @@ test('provisionAllUsers unhides a hidden Balance category and still categorises'
 
     expect($balance->refresh()->is_hidden)->toBeFalse()
         ->and($transaction->refresh()->category_id)->toBe($balance->id);
+});
+
+test('provision does not overwrite an already-categorised month-end balance transaction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $balance = balanceCategory();
+    $other = Category::factory()->create(['name' => 'Groceries']);
+
+    $transaction = Transaction::factory()->for($user)->for($account)->fromCsv()->create([
+        'description' => 'Purchases - Month End Balance',
+        'amount' => 0,
+        'direction' => TransactionDirection::Credit,
+        'category_id' => $other->id,
+        'transfer_pair_id' => null,
+    ]);
+
+    app(MonthEndBalanceRuleProvisioner::class)->provision($user->id, $balance->id);
+
+    expect($transaction->refresh()->category_id)->toBe($other->id);
+});
+
+test('provision upgrades an existing description-only rule to the tightened trigger set', function () {
+    $user = User::factory()->create();
+    $balance = balanceCategory();
+    $group = UserRuleGroup::factory()->for($user)->create(['name' => 'Auto-categorisation']);
+
+    $rule = UserRule::factory()->for($user)->create([
+        'user_rule_group_id' => $group->id,
+        'name' => 'Categorise month-end balance',
+        'triggers' => [[
+            'field' => 'description',
+            'operator' => 'contains',
+            'value' => 'Month End Balance',
+        ]],
+        'actions' => [['type' => 'set_category', 'value' => (string) $balance->id]],
+        'is_auto_apply' => true,
+        'is_active' => true,
+    ]);
+
+    app(MonthEndBalanceRuleProvisioner::class)->provision($user->id, $balance->id);
+
+    $rule->refresh();
+
+    expect($rule->triggers)->toHaveCount(2)
+        ->and($rule->triggers[1]['field'])->toBe('category_id')
+        ->and($rule->triggers[1]['operator'])->toBe('is_empty')
+        ->and(UserRule::query()->where('user_id', $user->id)->count())->toBe(1);
 });
