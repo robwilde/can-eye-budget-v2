@@ -18,6 +18,14 @@ use Throwable;
 use Webklex\IMAP\Facades\Client;
 use Webklex\PHPIMAP\Address;
 use Webklex\PHPIMAP\Client as ImapClient;
+use Webklex\PHPIMAP\Exceptions\AuthFailedException;
+use Webklex\PHPIMAP\Exceptions\ConnectionFailedException;
+use Webklex\PHPIMAP\Exceptions\GetMessagesFailedException;
+use Webklex\PHPIMAP\Exceptions\ImapBadRequestException;
+use Webklex\PHPIMAP\Exceptions\ImapServerErrorException;
+use Webklex\PHPIMAP\Exceptions\InvalidWhereQueryCriteriaException;
+use Webklex\PHPIMAP\Exceptions\MaskNotFoundException;
+use Webklex\PHPIMAP\Exceptions\ResponseException;
 use Webklex\PHPIMAP\Folder;
 use Webklex\PHPIMAP\Message;
 use Webklex\PHPIMAP\Support\MessageCollection;
@@ -58,25 +66,16 @@ final class GmailService implements GmailServiceContract
     public function __construct(private readonly CategoryRuleGenerator $ruleGenerator) {}
 
     /**
-     * Build a readable snippet from an email's text and HTML bodies. Prefers
-     * the plain-text part; when empty, converts the HTML — dropping
-     * style/script/head blocks whole (contents included) before stripping
-     * tags, so CSS such as @font-face rules never leaks in. Leads with the
-     * seller and any payment-schedule amounts (the parts a BNPL receipt is
-     * linked for), followed by a short lead of body text for context.
+     * Build a readable snippet from an email's text and HTML bodies. Flattens
+     * the bodies via ReceiptParser (plain-text preferred; HTML has
+     * style/script/head blocks dropped whole before tags are stripped, so CSS
+     * such as @font-face rules never leaks in). Leads with the seller and any
+     * payment-schedule amounts (the parts a BNPL receipt is linked for),
+     * followed by a short lead of body text for context.
      */
     public static function snippetFromBodies(?string $textBody, ?string $htmlBody): ?string
     {
-        $body = mb_trim((string) $textBody);
-
-        if ($body === '') {
-            $html = (string) preg_replace('#<(style|script|head)\b[^>]*>.*?</\1>#is', ' ', (string) $htmlBody);
-            $html = (string) preg_replace('/<[^>]+>/', ' ', $html);
-            $body = html_entity_decode($html, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        }
-
-        $body = str_replace("\u{00A0}", ' ', $body);
-        $body = mb_trim((string) preg_replace('/\s+/', ' ', $body));
+        $body = ReceiptParser::flatten($textBody, $htmlBody);
 
         if ($body === '') {
             return null;
@@ -124,6 +123,12 @@ final class GmailService implements GmailServiceContract
         return implode(' ', array_filter($parts, static fn (string $part): bool => $part !== ''));
     }
 
+    /**
+     * @throws \Webklex\PHPIMAP\Exceptions\RuntimeException
+     * @throws ImapBadRequestException
+     * @throws ImapServerErrorException
+     * @throws MaskNotFoundException
+     */
     public function searchForTransaction(Transaction $transaction): Collection
     {
         if (! $this->isConfigured()) {
@@ -171,7 +176,7 @@ final class GmailService implements GmailServiceContract
 
         if (preg_match_all('/\$\s?[\d,]+\.\d{2}\s*AUD\s+(?:will\s+be\s+charged\s+)?on\s+\d{1,2}\s+[A-Za-z]+\s+\d{4}/i', $text, $matches) >= 1) {
             foreach (array_slice(array_values(array_unique($matches[0])), 0, 4) as $line) {
-                $highlights[] = mb_trim((string) preg_replace('/\s+/', ' ', $line));
+                $highlights[] = mb_trim(preg_replace('/\s+/', ' ', $line));
             }
         }
 
@@ -195,6 +200,16 @@ final class GmailService implements GmailServiceContract
         throw new RuntimeException('No searchable Gmail folder found ('.implode(', ', self::FOLDER_PATHS).').');
     }
 
+    /**
+     * @throws \Webklex\PHPIMAP\Exceptions\RuntimeException
+     * @throws GetMessagesFailedException
+     * @throws ResponseException
+     * @throws InvalidWhereQueryCriteriaException
+     * @throws ImapBadRequestException
+     * @throws ConnectionFailedException
+     * @throws AuthFailedException
+     * @throws ImapServerErrorException
+     */
     private function runQuery(Folder $folder, string $query): MessageCollection
     {
         return $folder->query()
@@ -284,7 +299,7 @@ final class GmailService implements GmailServiceContract
 
         $merchant = str_replace('"', ' ', $this->ruleGenerator->suggestMatchValue($transaction));
 
-        return mb_trim((string) preg_replace('/\s+/', ' ', $merchant));
+        return mb_trim(preg_replace('/\s+/', ' ', $merchant));
     }
 
     private function providerSender(string $description): ?string
