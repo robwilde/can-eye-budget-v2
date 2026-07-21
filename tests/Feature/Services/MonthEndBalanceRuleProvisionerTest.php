@@ -136,3 +136,26 @@ test('provision does not back-fill when the Auto-categorisation group is inactiv
 
     expect($transaction->refresh()->category_id)->toBeNull();
 });
+
+test('provisionAllUsers unhides a hidden Balance category and still categorises', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $balance = Category::create([
+        'name' => MonthEndBalanceRuleProvisioner::CATEGORY_NAME,
+        'parent_id' => null,
+        'is_hidden' => true,
+    ]);
+
+    $transaction = Transaction::factory()->for($user)->for($account)->fromCsv()->create([
+        'description' => 'Purchases - Month End Balance',
+        'amount' => 0,
+        'direction' => TransactionDirection::Credit,
+        'category_id' => null,
+        'transfer_pair_id' => null,
+    ]);
+
+    app(MonthEndBalanceRuleProvisioner::class)->provisionAllUsers();
+
+    expect($balance->refresh()->is_hidden)->toBeFalse()
+        ->and($transaction->refresh()->category_id)->toBe($balance->id);
+});
