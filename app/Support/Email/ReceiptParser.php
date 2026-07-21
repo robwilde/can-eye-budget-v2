@@ -6,17 +6,19 @@ namespace App\Support\Email;
 
 /**
  * Extracts the structured payment breakdown from a BNPL receipt email
- * (currently Afterpay's "Payment confirmation" layout). Falls back to null
- * for anything that is not a recognisable receipt, so callers keep showing a
- * plain snippet.
+ * (Afterpay's "Payment confirmation" and PayPal's Pay-in-4 plan-payment
+ * layouts). Falls back to null for anything that is not a recognisable
+ * receipt, so callers keep showing a plain snippet.
  *
  * The returned shape is JSON-serialisable and rendered directly:
  *
  * @phpstan-type ReceiptLineItem array{merchant: string, reference: string|null, installment: string|null, amount: int}
- * @phpstan-type Receipt array{total: int|null, date: string|null, method: string|null, last4: string|null, items: list<ReceiptLineItem>}
+ * @phpstan-type Receipt array{total: int|null, date: string|null, method: string|null, last4: string|null, items: list<ReceiptLineItem>, type: string|null, seller: string|null, balance: int|null, loanReference: string|null}
  */
 final class ReceiptParser
 {
+    private const string PAYPAL_LABELS = 'Payment amount|Payment type|Payment method|Posted on|Seller|Current balance|Loan reference number';
+
     /**
      * @return Receipt|null
      */
@@ -28,6 +30,35 @@ final class ReceiptParser
             return null;
         }
 
+        return self::afterpay($text) ?? self::payPal($text, $textBody.' '.$htmlBody);
+    }
+
+    /**
+     * Normalises an email's bodies to a single whitespace-collapsed string:
+     * prefers the plain-text part, else strips style/script/head blocks and
+     * tags from the HTML and decodes entities. Shared with GmailService so the
+     * snippet and the parser flatten identically.
+     */
+    public static function flatten(?string $textBody, ?string $htmlBody): string
+    {
+        $body = mb_trim((string) $textBody);
+
+        if ($body === '') {
+            $html = preg_replace('#<(style|script|head)\b[^>]*>.*?</\1>#is', ' ', (string) $htmlBody);
+            $html = preg_replace('/<[^>]+>/', ' ', $html);
+            $body = html_entity_decode($html, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        }
+
+        $body = str_replace("\u{00A0}", ' ', $body);
+
+        return mb_trim(preg_replace('/\s+/', ' ', $body));
+    }
+
+    /**
+     * @return Receipt|null
+     */
+    private static function afterpay(string $text): ?array
+    {
         $items = self::lineItems($text);
         $total = self::money($text, '/Total amount paid\s+\$([\d,]+\.\d{2})/i');
 
@@ -43,22 +74,83 @@ final class ReceiptParser
             'method' => $method,
             'last4' => $last4,
             'items' => $items,
+            'type' => null,
+            'seller' => null,
+            'balance' => null,
+            'loanReference' => null,
         ];
     }
 
-    private static function flatten(?string $textBody, ?string $htmlBody): string
+    /**
+     * @return Receipt|null
+     */
+    private static function payPal(string $text, string $rawBodies): ?array
     {
-        $body = mb_trim((string) $textBody);
+        $total = self::money($text, '/Payment amount\s+\$([\d,]+\.\d{2})/i');
 
-        if ($body === '') {
-            $html = (string) preg_replace('#<(style|script|head)\b[^>]*>.*?</\1>#is', ' ', (string) $htmlBody);
-            $html = (string) preg_replace('/<[^>]+>/', ' ', $html);
-            $body = html_entity_decode($html, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $date = preg_match('/Posted on\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})/i', $text, $m) === 1 ? $m[1] : null;
+        $seller = self::payPalField($text, 'Seller');
+        $loanReference = self::loanReference($text, $rawBodies);
+
+        if ($total === null || ($date === null && $seller === null && $loanReference === null)) {
+            return null;
         }
 
-        $body = str_replace("\u{00A0}", ' ', $body);
+        [$method, $last4] = self::payPalMethod($text);
 
-        return mb_trim((string) preg_replace('/\s+/', ' ', $body));
+        return [
+            'total' => $total,
+            'date' => $date,
+            'method' => $method,
+            'last4' => $last4,
+            'items' => [],
+            'type' => self::payPalField($text, 'Payment type'),
+            'seller' => $seller,
+            'balance' => self::money($text, '/Current balance\s+\$([\d,]+\.\d{2})/i'),
+            'loanReference' => $loanReference,
+        ];
+    }
+
+    private static function payPalField(string $text, string $label): ?string
+    {
+        if (preg_match('/'.preg_quote($label, '/').'\s+(.+?)\s*(?='.self::PAYPAL_LABELS.')/iu', $text, $m) !== 1) {
+            return null;
+        }
+
+        $value = mb_trim($m[1]);
+
+        return $value === '' ? null : $value;
+    }
+
+    /**
+     * @return array{0: string|null, 1: string|null}
+     */
+    private static function payPalMethod(string $text): array
+    {
+        $value = self::payPalField($text, 'Payment method');
+
+        if ($value === null) {
+            return [null, null];
+        }
+
+        if (preg_match('/^(.+?)\s+(?:x-|[•*]{2,}\s*)?(\d{4})$/u', $value, $m) === 1) {
+            return [mb_trim($m[1]), $m[2]];
+        }
+
+        return [$value, null];
+    }
+
+    private static function loanReference(string $text, string $rawBodies): ?string
+    {
+        if (preg_match('/Loan reference number\s+([A-Za-z0-9][A-Za-z0-9-]{7,})/i', $text, $m) === 1) {
+            return $m[1];
+        }
+
+        if (preg_match('~paypal\.com/myaccount/ppcredit/plans/([A-Za-z0-9-]{8,})~i', $rawBodies, $m) === 1) {
+            return $m[1];
+        }
+
+        return null;
     }
 
     /**
@@ -72,7 +164,7 @@ final class ReceiptParser
             $block = $bm[1];
         }
 
-        $block = (string) preg_replace('/^.*?Payment method\b.*?\d{4}\b\s*/isu', '', $block);
+        $block = preg_replace('/^.*?Payment method\b.*?\d{4}\b\s*/isu', '', $block);
 
         if (preg_match_all(
             '/([\p{L}\p{N}][\p{L}\p{N} &\'.\-]*?)\s*Order\s*#?(\S+)\s+(\d+)\s+of\s+(\d+)\s+\$([\d,]+\.\d{2})/iu',
@@ -87,7 +179,7 @@ final class ReceiptParser
         $seen = [];
 
         foreach ($matches as $match) {
-            $merchant = mb_trim((string) preg_replace('/\s+/', ' ', $match[1]));
+            $merchant = mb_trim(preg_replace('/\s+/', ' ', $match[1]));
             $reference = $match[2];
             $amount = self::centsFromString($match[5]);
             $key = $reference.'|'.$match[3].'|'.$amount;
