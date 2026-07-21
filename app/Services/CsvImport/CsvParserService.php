@@ -269,6 +269,10 @@ final class CsvParserService
                 return [-abs($debit), TransactionDirection::Debit];
             }
 
+            if ($credit !== null || $debit !== null) {
+                return [0, TransactionDirection::Credit];
+            }
+
             return [null, TransactionDirection::Debit];
         }
 

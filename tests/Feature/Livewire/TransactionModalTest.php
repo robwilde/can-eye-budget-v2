@@ -3577,3 +3577,77 @@ test('the categorise-matching checkbox shows when editing in enter mode and not 
         ->dispatch('edit-transaction', id: $debit->id)
         ->assertDontSee('Also categorise matching transactions');
 });
+
+test('editing a zero-amount transaction can set a category', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create();
+
+    $transaction = Transaction::factory()->for($user)->for($account)->fromCsv()->create([
+        'description' => 'Purchases - Month End Balance',
+        'amount' => 0,
+        'direction' => TransactionDirection::Credit,
+        'category_id' => null,
+        'transfer_pair_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->assertSet('descriptionInput', '0.00 Purchases - Month End Balance')
+        ->set('categoryId', $category->id)
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    $current = Transaction::query()->where('user_id', $user->id)->current()->first();
+
+    expect($current->category_id)->toBe($category->id)
+        ->and($current->amount)->toBe(0);
+});
+
+test('converting a zero-amount transaction to a plan is rejected', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $transaction = Transaction::factory()->for($user)->for($account)->fromCsv()->create([
+        'description' => 'Purchases - Month End Balance',
+        'amount' => 0,
+        'direction' => TransactionDirection::Credit,
+        'category_id' => null,
+        'transfer_pair_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('mode', 'plan')
+        ->set('transactionType', 'expense')
+        ->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->call('save')
+        ->assertHasErrors(['descriptionInput']);
+
+    expect(PlannedTransaction::query()->where('user_id', $user->id)->count())->toBe(0);
+});
+
+test('converting a zero-amount transaction to a transfer is rejected', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $toAccount = Account::factory()->for($user)->create();
+
+    $transaction = Transaction::factory()->for($user)->for($account)->fromCsv()->create([
+        'description' => 'Purchases - Month End Balance',
+        'amount' => 0,
+        'direction' => TransactionDirection::Credit,
+        'category_id' => null,
+        'transfer_pair_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('transactionType', 'transfer')
+        ->set('transferToAccountId', $toAccount->id)
+        ->call('save')
+        ->assertHasErrors(['descriptionInput']);
+});

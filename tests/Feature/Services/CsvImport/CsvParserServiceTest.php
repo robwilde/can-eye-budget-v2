@@ -98,6 +98,56 @@ test('split debit credit columns parse correctly', function () {
         ->and($rows[1]->direction)->toBe(TransactionDirection::Credit);
 });
 
+test('explicit zero in debit/credit columns is imported as a zero-amount credit', function () {
+    $path = tmpCsv("Date,Description,Debit,Credit\n31/01/2026,Purchases - Month End Balance,0.00,0.00\n01/02/2026,Fee Waived,0.00,\n");
+
+    $parser = new CsvParserService();
+    $rows = $parser->preview($path, [
+        CsvColumnMapper::FIELD_DATE => 'Date',
+        CsvColumnMapper::FIELD_DESCRIPTION => 'Description',
+        CsvColumnMapper::FIELD_DEBIT => 'Debit',
+        CsvColumnMapper::FIELD_CREDIT => 'Credit',
+    ]);
+
+    expect($rows)->toHaveCount(2);
+    expect($rows[0]->amount)->toBe(0)
+        ->and($rows[0]->direction)->toBe(TransactionDirection::Credit)
+        ->and($rows[0]->description)->toBe('Purchases - Month End Balance');
+    expect($rows[1]->amount)->toBe(0)
+        ->and($rows[1]->direction)->toBe(TransactionDirection::Credit);
+});
+
+test('rows with blank debit and credit columns are skipped', function () {
+    $path = tmpCsv("Date,Description,Debit,Credit\n31/01/2026,EMPTY,,\n01/02/2026,SALARY,,1500.00\n");
+
+    $parser = new CsvParserService();
+    $rows = $parser->preview($path, [
+        CsvColumnMapper::FIELD_DATE => 'Date',
+        CsvColumnMapper::FIELD_DESCRIPTION => 'Description',
+        CsvColumnMapper::FIELD_DEBIT => 'Debit',
+        CsvColumnMapper::FIELD_CREDIT => 'Credit',
+    ]);
+
+    expect($rows)->toHaveCount(1);
+    expect($rows[0]->amount)->toBe(150000)
+        ->and($rows[0]->direction)->toBe(TransactionDirection::Credit);
+});
+
+test('explicit zero in a single signed amount column is imported', function () {
+    $path = tmpCsv("Date,Description,Amount\n31/01/2026,Purchases - Month End Balance,0.00\n");
+
+    $parser = new CsvParserService();
+    $rows = $parser->preview($path, [
+        CsvColumnMapper::FIELD_DATE => 'Date',
+        CsvColumnMapper::FIELD_DESCRIPTION => 'Description',
+        CsvColumnMapper::FIELD_AMOUNT => 'Amount',
+    ]);
+
+    expect($rows)->toHaveCount(1);
+    expect($rows[0]->amount)->toBe(0)
+        ->and($rows[0]->direction)->toBe(TransactionDirection::Credit);
+});
+
 test('currency symbols and thousands separators are stripped', function () {
     $path = tmpCsv("Date,Description,Amount\n01/01/2026,RENT,\"-\$1,250.00\"\n");
 

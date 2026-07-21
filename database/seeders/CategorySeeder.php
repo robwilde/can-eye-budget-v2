@@ -147,6 +147,11 @@ final class CategorySeeder extends Seeder
                     'Translink',
                 ],
             ],
+            [
+                'name' => 'Balance',
+                'icon' => 'building-library',
+                'children' => [],
+            ],
         ];
     }
 
