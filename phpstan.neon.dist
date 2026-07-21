@@ -13,6 +13,10 @@ parameters:
         - database/seeders
         - routes
 
+    # Pin the analysis target to the project's PHP floor (composer requires ^8.4)
+    # so results are deterministic regardless of which PHP runs PHPStan.
+    phpVersion: 80400
+
     # Be pragmatic; move towards 9 over time.
     level: 6
 
