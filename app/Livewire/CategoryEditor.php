@@ -161,6 +161,7 @@ final class CategoryEditor extends Component
     {
         $search = $this->search;
         $isSearching = $search !== '';
+        $searchLower = Str::lower($search);
 
         $counts = CategoryAttribution::query(auth()->id())
             ->whereNotNull('category_id')
@@ -171,7 +172,7 @@ final class CategoryEditor extends Component
         $categories = Category::allWithLinkedParents()
             ->when(! $this->showHidden, fn ($c) => $c->reject(fn (Category $category): bool => $category->is_hidden))
             ->when($isSearching, fn ($c) => $c->filter(
-                fn (Category $category): bool => str_contains(Str::lower($category->fullPath()), Str::lower($search))
+                fn (Category $category): bool => str_contains(Str::lower($category->fullPath()), $searchLower)
             ))
             ->sortBy(fn (Category $category): string => Str::lower($category->fullPath()), SORT_NATURAL)
             ->values()
@@ -220,12 +221,14 @@ final class CategoryEditor extends Component
 
         $parents = Category::query()->pluck('parent_id', 'id');
         $cursor = $newParentId;
+        $visited = [];
 
         while ($cursor !== null) {
-            if ($cursor === $categoryId) {
+            if ($cursor === $categoryId || isset($visited[$cursor])) {
                 return true;
             }
 
+            $visited[$cursor] = true;
             $cursor = $parents[$cursor] !== null ? (int) $parents[$cursor] : null;
         }
 
