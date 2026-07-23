@@ -47,13 +47,24 @@ final class Category extends Model
         'is_hidden',
     ];
 
+    /** @return Collection<int, self> All categories with parent relations linked in memory (no lazy loads at any depth). */
+    public static function allWithLinkedParents(): Collection
+    {
+        $all = self::query()->get();
+        $byId = $all->keyBy('id');
+
+        foreach ($all as $category) {
+            $category->setRelation('parent', $category->parent_id !== null ? ($byId[$category->parent_id] ?? null) : null);
+        }
+
+        return $all;
+    }
+
     /** @return Collection<int, self> */
     public static function visibleSortedByFullPath(): Collection
     {
-        return self::query()
-            ->visible()
-            ->with(['parent', 'parent.parent'])
-            ->get()
+        return self::allWithLinkedParents()
+            ->reject(fn (self $category): bool => $category->is_hidden)
             ->sortBy(fn (self $category): string => $category->fullPath())
             ->values();
     }

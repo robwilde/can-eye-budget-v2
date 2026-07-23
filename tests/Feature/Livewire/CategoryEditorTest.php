@@ -372,3 +372,88 @@ test('cib: nested rows indent by depth and top-level rows are group headers', fu
         ->and($html)->toContain('padding-left: 0.875rem')
         ->and($html)->toContain('padding-left: 2.125rem');
 });
+
+/* ------------------------------------------------------------------ */
+/*  Nested category parents (issue #353) */
+/* ------------------------------------------------------------------ */
+
+test('parent dropdown lists nested categories by full path', function () {
+    $user = User::factory()->create();
+    $office = Category::factory()->create(['name' => 'Office']);
+    $onlineService = Category::factory()->withParent($office)->create(['name' => 'Online Service']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('openCreateForm')
+        ->assertSee('Office / Online Service')
+        ->call('openCreateForm', $onlineService->id)
+        ->assertSet('newParentId', $onlineService->id)
+        ->set('newCategoryName', 'Apple')
+        ->call('createCategory');
+
+    $child = Category::query()->where('name', 'Apple')->firstOrFail();
+    expect($child->parent_id)->toBe($onlineService->id)
+        ->and($child->depth())->toBe(2);
+});
+
+test('search matches an ancestor three levels up', function () {
+    $user = User::factory()->create();
+    $a = Category::factory()->create(['name' => 'Alpha']);
+    $b = Category::factory()->withParent($a)->create(['name' => 'Bravo']);
+    $c = Category::factory()->withParent($b)->create(['name' => 'Charlie']);
+    Category::factory()->withParent($c)->create(['name' => 'Delta']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->set('search', 'Alpha')
+        ->assertSee('Alpha / Bravo / Charlie / Delta');
+});
+
+test('can re-parent an existing category under a nested category', function () {
+    $user = User::factory()->create();
+    $office = Category::factory()->create(['name' => 'Office']);
+    $onlineService = Category::factory()->withParent($office)->create(['name' => 'Online Service']);
+    $training = Category::factory()->create(['name' => 'Training']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $training->id)
+        ->assertSet('editingParentId', null)
+        ->set('editingParentId', $onlineService->id)
+        ->call('saveRename')
+        ->assertHasNoErrors();
+
+    $training->refresh();
+    expect($training->parent_id)->toBe($onlineService->id)
+        ->and($training->fullPath())->toBe('Office / Online Service / Training');
+});
+
+test('re-parent rejects moving a category under its own descendant', function () {
+    $user = User::factory()->create();
+    $a = Category::factory()->create(['name' => 'Alpha']);
+    $b = Category::factory()->withParent($a)->create(['name' => 'Bravo']);
+    $c = Category::factory()->withParent($b)->create(['name' => 'Charlie']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $a->id)
+        ->set('editingParentId', $c->id)
+        ->call('saveRename')
+        ->assertHasErrors('editingParentId');
+
+    expect($a->fresh()->parent_id)->toBeNull();
+});
+
+test('re-parent rejects moving a category under itself', function () {
+    $user = User::factory()->create();
+    $office = Category::factory()->create(['name' => 'Office']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $office->id)
+        ->set('editingParentId', $office->id)
+        ->call('saveRename')
+        ->assertHasErrors('editingParentId');
+
+    expect($office->fresh()->parent_id)->toBeNull();
+});
