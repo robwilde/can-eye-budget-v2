@@ -18,7 +18,7 @@
                     <flux:select wire:model="newParentId" size="sm">
                         <flux:select.option value="">{{ __('Top level (no parent)') }}</flux:select.option>
                         @foreach($parentOptions as $parent)
-                            <flux:select.option value="{{ $parent->id }}">{{ $parent->name }}</flux:select.option>
+                            <flux:select.option value="{{ $parent->id }}">{{ $parent->fullPath() }}</flux:select.option>
                         @endforeach
                     </flux:select>
                     <div class="flex gap-2">
@@ -63,6 +63,19 @@
                                 <div class="flex-1">
                                     <label class="cib-label" for="category-name-input">{{ __('Category name') }}</label>
                                     <flux:input id="category-name-input" wire:model="editingName" size="sm"/>
+                                </div>
+                                <div class="flex-1">
+                                    <label class="cib-label" for="category-parent-select">{{ __('Parent category') }}</label>
+                                    <flux:select id="category-parent-select" wire:model="editingParentId" size="sm">
+                                        <flux:select.option value="">{{ __('Top level (no parent)') }}</flux:select.option>
+                                        @foreach($parentOptions as $parent)
+                                            @continue($parent->id === $selectedCategoryId)
+                                            <flux:select.option value="{{ $parent->id }}">{{ $parent->fullPath() }}</flux:select.option>
+                                        @endforeach
+                                    </flux:select>
+                                    @error('editingParentId')
+                                        <flux:text size="sm" class="mt-1 text-red-600">{{ $message }}</flux:text>
+                                    @enderror
                                 </div>
                                 <flux:button wire:click="saveRename" variant="primary" size="sm">{{ __('Save') }}</flux:button>
                                 <flux:button wire:click="toggleHidden({{ $category['id'] }})" variant="ghost" size="sm" icon="eye-slash">

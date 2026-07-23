@@ -23,6 +23,8 @@ final class CategoryEditor extends Component
 
     public string $editingName = '';
 
+    public ?int $editingParentId = null;
+
     public bool $showCreateForm = false;
 
     public string $newCategoryName = '';
@@ -42,6 +44,7 @@ final class CategoryEditor extends Component
         if ($this->selectedCategoryId === $id) {
             $this->selectedCategoryId = null;
             $this->editingName = '';
+            $this->editingParentId = null;
             $this->showDeleteConfirm = false;
 
             return;
@@ -55,6 +58,7 @@ final class CategoryEditor extends Component
 
         $this->selectedCategoryId = $category->id;
         $this->editingName = $category->name;
+        $this->editingParentId = $category->parent_id;
         $this->showDeleteConfirm = false;
     }
 
@@ -66,10 +70,18 @@ final class CategoryEditor extends Component
 
         $this->validate([
             'editingName' => ['required', 'string', 'max:255'],
+            'editingParentId' => ['nullable', 'integer', 'exists:categories,id'],
         ]);
+
+        if ($this->wouldCreateCycle($this->selectedCategoryId, $this->editingParentId)) {
+            $this->addError('editingParentId', __('A category cannot be moved under itself or one of its subcategories.'));
+
+            return;
+        }
 
         Category::find($this->selectedCategoryId)?->update([
             'name' => $this->editingName,
+            'parent_id' => $this->editingParentId,
         ]);
     }
 
@@ -136,6 +148,7 @@ final class CategoryEditor extends Component
         if ($this->selectedCategoryId === $this->deletingCategoryId) {
             $this->selectedCategoryId = null;
             $this->editingName = '';
+            $this->editingParentId = null;
         }
 
         $this->showDeleteConfirm = false;
@@ -155,15 +168,11 @@ final class CategoryEditor extends Component
             ->select('category_id', DB::raw('COUNT(DISTINCT transaction_id) as aggregate'))
             ->pluck('aggregate', 'category_id');
 
-        $categories = Category::query()
-            ->with(['parent.parent'])
-            ->when(! $this->showHidden, fn ($q) => $q->visible())
-            ->when($isSearching, fn ($q) => $q->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                    ->orWhereHas('parent', fn ($pq) => $pq->where('name', 'like', "%{$search}%"))
-                    ->orWhereHas('parent.parent', fn ($pq) => $pq->where('name', 'like', "%{$search}%"));
-            }))
-            ->get()
+        $categories = Category::allWithLinkedParents()
+            ->when(! $this->showHidden, fn ($c) => $c->reject(fn (Category $category): bool => $category->is_hidden))
+            ->when($isSearching, fn ($c) => $c->filter(
+                fn (Category $category): bool => str_contains(Str::lower($category->fullPath()), Str::lower($search))
+            ))
             ->sortBy(fn (Category $category): string => Str::lower($category->fullPath()), SORT_NATURAL)
             ->values()
             ->map(fn (Category $category) => [
@@ -188,10 +197,7 @@ final class CategoryEditor extends Component
                 ->get()
             : collect();
 
-        $parentOptions = Category::query()
-            ->whereNull('parent_id')
-            ->orderBy('name')
-            ->get(['id', 'name']);
+        $parentOptions = Category::visibleSortedByFullPath();
 
         return view('livewire.category-editor', [
             'categories' => $categories,
@@ -200,5 +206,29 @@ final class CategoryEditor extends Component
             'isSearching' => $isSearching,
             'formatMoney' => MoneyCast::format(...),
         ]);
+    }
+
+    private function wouldCreateCycle(int $categoryId, ?int $newParentId): bool
+    {
+        if ($newParentId === null) {
+            return false;
+        }
+
+        if ($newParentId === $categoryId) {
+            return true;
+        }
+
+        $parents = Category::query()->pluck('parent_id', 'id');
+        $cursor = $newParentId;
+
+        while ($cursor !== null) {
+            if ($cursor === $categoryId) {
+                return true;
+            }
+
+            $cursor = $parents[$cursor] !== null ? (int) $parents[$cursor] : null;
+        }
+
+        return false;
     }
 }

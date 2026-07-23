@@ -264,3 +264,19 @@ test('resolveIcon fires no queries when parent.parent is eager-loaded on a grand
     expect($icon)->toBe('bolt')
         ->and(DB::getQueryLog())->toBeEmpty();
 });
+
+test('allWithLinkedParents then fullPath fires a single query on a deep node', function () {
+    $grandparent = Category::factory()->create(['name' => 'Office']);
+    $parent = Category::factory()->withParent($grandparent)->create(['name' => 'Training']);
+    Category::factory()->withParent($parent)->create(['name' => 'Subscription']);
+
+    DB::enableQueryLog();
+    DB::flushQueryLog();
+
+    $all = Category::allWithLinkedParents();
+    $deep = $all->firstWhere('name', 'Subscription');
+    $path = $deep->fullPath();
+
+    expect($path)->toBe('Office / Training / Subscription')
+        ->and(DB::getQueryLog())->toHaveCount(1);
+});
