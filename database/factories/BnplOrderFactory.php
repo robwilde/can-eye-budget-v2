@@ -24,11 +24,10 @@ final class BnplOrderFactory extends Factory
      */
     public function definition(): array
     {
-        $user = User::factory();
         $firstDue = CarbonImmutable::today()->addWeeks(2);
 
         return [
-            'user_id' => $user,
+            'user_id' => User::factory(),
             'provider' => BnplProvider::Afterpay,
             'retailer' => fake()->company(),
             'order_ref' => (string) fake()->unique()->numberBetween(100_000_000, 999_999_999),
@@ -38,7 +37,7 @@ final class BnplOrderFactory extends Factory
             'first_due_date' => $firstDue,
             'last_due_date' => $firstDue->addWeeks(6),
             'frequency' => RecurrenceFrequency::Every2Weeks,
-            'account_id' => Account::factory()->for($user),
+            'account_id' => fn (array $attributes) => Account::factory()->create(['user_id' => $attributes['user_id']])->id,
             'category_id' => null,
             'card_last4' => '8357',
             'status' => BnplOrderStatus::PendingReview,
