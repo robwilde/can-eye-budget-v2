@@ -353,6 +353,12 @@ Verified: op test.filter passes"
 
 ## Task 4: `bnpl_orders` migration and model
 
+> **Tasks 4 and 5 are one unit of work and produce ONE commit.** `BnplOrder` references
+> `BnplOrderEvent` in `events()` and `recordEvent()`, so until Task 5 creates that class
+> PHPStan fails on an unknown type — and GrumPHP runs PHPStan pre-commit, so Task 4 cannot
+> commit alone. Do Task 4, then Task 5, then commit once at Task 5 Step 9. Do not attempt
+> `op check.dirty` between them.
+
 **Files:**
 - Create: `database/migrations/2026_07_25_120000_create_bnpl_orders_table.php`
 - Create: `app/Models/BnplOrder.php`
@@ -840,10 +846,10 @@ final class BnplOrderFactory extends Factory
 Run: `op migrate`
 Expected: `2026_07_25_120000_create_bnpl_orders_table ... DONE`
 
-- [ ] **Step 7: Run test to verify it passes**
+- [ ] **Step 7: Run the order tests**
 
 Run: `op test.filter BnplOrderTest`
-Expected: FAIL on the four `recordEvent`/`events` cases only — `Class "App\Models\BnplOrderEvent" not found` — because Task 5 has not run yet. Every other test in the file passes. If anything else fails, fix it before continuing.
+Expected: every test in the file **errors** with `Class "App\Models\BnplOrderEvent" not found`, because `BnplOrder::events()` type-hints a class Task 5 has not created yet. That is expected at this point and is why Tasks 4 and 5 share one commit. Do not try to fix it by stubbing the class or by deleting `events()`/`recordEvent()` — go straight on to Task 5, which resolves it. If you see any *other* error, fix that before continuing.
 
 ---
 
