@@ -19,4 +19,19 @@ return [
 
     'recurring_detection' => env('BUDGET_RECURRING_DETECTION', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | BNPL Email Import
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, a scheduled mailbox scan turns Afterpay (and later Zip,
+    | Klarna, PayPal Pay-in-4 and Humm) payment-schedule emails into planned
+    | transactions. Disabled until every sub-task of epic #355 has merged:
+    | importing schedules without the combined-debit fan-out would make the
+    | calendar double-count.
+    |
+    */
+
+    'bnpl_email_import' => env('BUDGET_BNPL_EMAIL_IMPORT', false),
+
 ];
