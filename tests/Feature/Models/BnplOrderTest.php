@@ -12,6 +12,8 @@ use App\Models\BnplOrder;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\User;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\UniqueConstraintViolationException;
 
 test('factory creates a valid pending order', function () {
     $order = BnplOrder::factory()->create();
@@ -40,7 +42,7 @@ test('frequency is null for an unsupported cadence', function () {
         ->and($order->fresh()->review_note)->toBe('unsupported_cadence');
 });
 
-test('money columns round-trip as integer cents', function () {
+test('total and instalment amount are stored as whole cents', function () {
     $order = BnplOrder::factory()->create(['total' => 7445, 'instalment_amount' => 1861]);
 
     expect($order->fresh()->total)->toBe(7445)
@@ -70,6 +72,21 @@ test('belongs to a user, account, category and planned transaction', function ()
         ->and($order->account->id)->toBe($account->id)
         ->and($order->category->id)->toBe($category->id)
         ->and($order->plannedTransaction->id)->toBe($plan->id);
+});
+
+test('the default factory scopes the account to the order user', function () {
+    $order = BnplOrder::factory()->create();
+
+    expect($order->account->user_id)->toBe($order->user_id);
+});
+
+test('for() attaches an account owned by the same user', function () {
+    $user = User::factory()->create();
+
+    $order = BnplOrder::factory()->for($user)->create();
+
+    expect($order->user_id)->toBe($user->id)
+        ->and($order->account->user_id)->toBe($user->id);
 });
 
 test('cascades on user delete', function () {
@@ -107,7 +124,7 @@ test('rejects a second order for the same gmail message', function () {
     BnplOrder::factory()->for($user)->create(['gmail_message_id' => 'abc@afterpay.com']);
 
     BnplOrder::factory()->for($user)->create(['gmail_message_id' => 'abc@afterpay.com']);
-})->throws(Illuminate\Database\QueryException::class);
+})->throws(UniqueConstraintViolationException::class);
 
 test('rejects the same order arriving under a second message id', function () {
     $user = User::factory()->create();
@@ -122,7 +139,7 @@ test('rejects the same order arriving under a second message id', function () {
         'order_ref' => '953186001',
         'gmail_message_id' => 'second@afterpay.com',
     ]);
-})->throws(Illuminate\Database\QueryException::class);
+})->throws(UniqueConstraintViolationException::class);
 
 test('two users may hold the same order ref independently', function () {
     BnplOrder::factory()->create(['order_ref' => '953186001']);
@@ -132,10 +149,34 @@ test('two users may hold the same order ref independently', function () {
         ->and(BnplOrder::query()->count())->toBe(2);
 });
 
-test('settled state has a last due date in the past', function () {
+test('isSettled is true when the last due date is yesterday', function () {
+    $order = BnplOrder::factory()->create([
+        'last_due_date' => CarbonImmutable::today()->subDay(),
+    ]);
+
+    expect($order->isSettled())->toBeTrue();
+});
+
+test('isSettled is false when the last due date is today', function () {
+    $order = BnplOrder::factory()->create([
+        'last_due_date' => CarbonImmutable::today(),
+    ]);
+
+    expect($order->isSettled())->toBeFalse();
+});
+
+test('isSettled is false when the last due date is in the future', function () {
+    $order = BnplOrder::factory()->create([
+        'last_due_date' => CarbonImmutable::today()->addWeeks(6),
+    ]);
+
+    expect($order->isSettled())->toBeFalse();
+});
+
+test('the settled factory state produces a settled order', function () {
     $order = BnplOrder::factory()->settled()->create();
 
-    expect($order->last_due_date->isPast())->toBeTrue();
+    expect($order->isSettled())->toBeTrue();
 });
 
 test('auto approved state carries a category and a review timestamp', function () {

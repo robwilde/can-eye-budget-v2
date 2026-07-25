@@ -114,12 +114,12 @@ final class BnplOrder extends Model
      *
      * @param  array<string, mixed>  $payload
      */
-    public function recordEvent(BnplOrderEventType $event, array $payload = [], ?string $actor = null): BnplOrderEvent
+    public function recordEvent(BnplOrderEventType $event, array $payload = [], string $actor = 'system'): BnplOrderEvent
     {
         return $this->events()->create([
             'event' => $event,
             'payload' => $payload === [] ? null : $payload,
-            'actor' => $actor ?? 'system',
+            'actor' => $actor,
         ]);
     }
 
