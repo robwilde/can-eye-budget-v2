@@ -1181,10 +1181,9 @@ Common failures and their fixes:
 - *`Unable to resolve the template type`* on a relation — the `/** @return BelongsTo<X, $this> */` annotation is missing or wrong.
 - *Enum not covered in `match`* — every case needs an arm; there is no `default`.
 
-- [ ] **Step 2: Rector dry run**
+- [ ] **Step 2: Skip Rector**
 
-Run: `op rector`
-Expected: no suggested changes for the new files. If it suggests any, apply with `op rector.fix` and re-run `op check.dirty`.
+**Do not run `op rector`.** Rector is installed and aliased in `op.conf`, but this project has no `rector.php`, so the command interactively offers to generate one and then writes an untracked `rector.php` into the repo root. There is nothing to check and the only outcome is a stray file you then have to delete. Pint and PHPStan, both enforced by the GrumPHP pre-commit hook, are the real style and analysis gates.
 
 - [ ] **Step 3: Full test suite**
 
