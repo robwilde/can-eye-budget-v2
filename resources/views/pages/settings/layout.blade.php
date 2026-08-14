@@ -7,6 +7,7 @@
                 <flux:navlist.item :href="route('two-factor.show')" wire:navigate>{{ __('Two-factor auth') }}</flux:navlist.item>
             @endif
             <flux:navlist.item :href="route('pay-cycle.edit')" wire:navigate>{{ __('Pay cycle') }}</flux:navlist.item>
+            <flux:navlist.item :href="route('providers.edit')" wire:navigate>{{ __('Providers') }}</flux:navlist.item>
         </flux:navlist>
     </div>
 
