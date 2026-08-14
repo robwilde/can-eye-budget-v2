@@ -1,4 +1,4 @@
-@php use App\Enums\BankImportStatus; use App\Enums\ImportSource; @endphp
+@php use App\Enums\BankImportStatus; @endphp
 <div class="space-y-6"
      @if($step === 3 && $bankImport && ! $bankImport->status->isTerminal())
          wire:poll.2s="pollStatus"
@@ -53,12 +53,12 @@
                             @foreach($accounts as $account)
                                 <option
                                     value="{{ $account->id }}"
-                                    @disabled($account->import_source === ImportSource::Basiq)
+                                    @disabled(! $account->acceptsCsvImports())
                                 >
                                     {{ $account->name }}
-                                    @if($account->import_source === ImportSource::Basiq)
-                                        (Connected via bank)
-                                    @endif
+                                    @unless($account->acceptsCsvImports())
+                                        ({{ $account->import_source->label() }})
+                                    @endunless
                                 </option>
                             @endforeach
                         </flux:select>
