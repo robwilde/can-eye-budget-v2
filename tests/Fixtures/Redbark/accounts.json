@@ -1,0 +1,40 @@
+{
+    "data": [
+        {
+            "id": "d983bbe4-caf4-4b0c-b9f2-11bec17a2454",
+            "connectionId": "b2ce1a6f-7c83-429c-9ef6-5557be02fcc4",
+            "provider": "fiskil",
+            "name": "Low Rate Credit Card",
+            "type": "credit-card",
+            "institutionName": "Beyond Bank Australia",
+            "accountNumber": "****4373",
+            "currency": "AUD"
+        },
+        {
+            "id": "9107ff81-0566-472b-b2fd-1f86588f38cd",
+            "connectionId": "b2ce1a6f-7c83-429c-9ef6-5557be02fcc4",
+            "provider": "fiskil",
+            "name": "monEsaver Internet Account",
+            "type": "transaction",
+            "institutionName": "Beyond Bank Australia",
+            "accountNumber": "****4599",
+            "currency": "AUD"
+        },
+        {
+            "id": "6af4be01-a492-4f4b-93c9-da6dd1f93149",
+            "connectionId": "b2ce1a6f-7c83-429c-9ef6-5557be02fcc4",
+            "provider": "fiskil",
+            "name": "Purple Transactor Account",
+            "type": "transaction",
+            "institutionName": "Beyond Bank Australia",
+            "accountNumber": "****5066",
+            "currency": "AUD"
+        }
+    ],
+    "pagination": {
+        "total": 3,
+        "limit": 200,
+        "offset": 0,
+        "hasMore": false
+    }
+}

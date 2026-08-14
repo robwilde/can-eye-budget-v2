@@ -34,6 +34,11 @@ return [
         'seed_user_id' => env('BASIQ_SEED_USER_ID'),
     ],
 
+    'redbark' => [
+        'base_url' => env('REDBARK_BASE_URL', 'https://api.redbark.com/v1'),
+        'include_pending' => (bool) env('REDBARK_INCLUDE_PENDING', false),
+    ],
+
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],
