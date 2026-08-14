@@ -208,7 +208,9 @@ test('an existing CSV transaction is adopted, not duplicated', function () {
 
     expect(Transaction::query()->count())->toBe(1)
         ->and($csv->redbark_id)->toBe('rb_txn_1')
-        ->and($csv->source)->toBe(TransactionSource::Redbark)
+        // redbark_id alone marks feed ownership; the row is still the user's CSV import,
+        // so a cleanup keyed on source can never mistake it for something the feed created.
+        ->and($csv->source)->toBe(TransactionSource::Csv)
         // The user's richer description survives; the feed only adds what it knows.
         ->and($csv->description)->toBe('Direct Debit NIB - 64699390')
         ->and($csv->enrich_data['redbark']['category'])->toBe('Groceries');
@@ -217,6 +219,46 @@ test('an existing CSV transaction is adopted, not duplicated', function () {
 
     expect($log->transactions_created)->toBe(0)
         ->and($log->transactions_updated)->toBe(1);
+});
+
+test('a later sync does not overwrite an adopted row with the feed narration', function () {
+    [$feed, , $account] = linkedRedbarkFeed();
+
+    $csv = Transaction::factory()->create([
+        'user_id' => $feed->user_id,
+        'account_id' => $account->id,
+        'amount' => -4250,
+        'direction' => TransactionDirection::Debit,
+        'source' => TransactionSource::Csv,
+        'status' => TransactionStatus::Posted,
+        'post_date' => '2026-08-10',
+        'description' => 'Direct Debit NIB - 64699390',
+        'redbark_id' => null,
+    ]);
+
+    fakeRedbark(
+        accounts: [redbarkUpstreamAccount()],
+        transactions: [redbarkRow(['description' => 'Direct Debit NIB - xxxx9390'])],
+    );
+
+    runRedbarkSync($feed);
+
+    RedbarkSyncLog::query()->update(['status' => RefreshStatus::Success]);
+
+    // Second pass finds the row by redbark_id, which is the path that used to refill
+    // every column from the payload and quietly undo the adoption.
+    fakeRedbark(
+        accounts: [redbarkUpstreamAccount()],
+        transactions: [redbarkRow(['description' => 'Direct Debit NIB - xxxx9390'])],
+    );
+
+    runRedbarkSync($feed->fresh());
+
+    $csv->refresh();
+
+    expect(Transaction::query()->count())->toBe(1)
+        ->and($csv->description)->toBe('Direct Debit NIB - 64699390')
+        ->and($csv->source)->toBe(TransactionSource::Csv);
 });
 
 test('an adopted transaction keeps the category the user set', function () {
@@ -727,6 +769,8 @@ test('a settled pending transaction is claimed instead of duplicated when the ba
 
     [$feed, $redbarkAccount, $account] = linkedRedbarkFeed();
 
+    // A hold the feed created on an earlier run: it carries the id the bank has since
+    // replaced, which is exactly why the redbark_id lookup misses it.
     $pending = Transaction::factory()->create([
         'user_id' => $feed->user_id,
         'account_id' => $account->id,
@@ -735,7 +779,7 @@ test('a settled pending transaction is claimed instead of duplicated when the ba
         'status' => TransactionStatus::Pending,
         'source' => TransactionSource::Redbark,
         'post_date' => '2026-08-12',
-        'redbark_id' => null,
+        'redbark_id' => 'rb_txn_hold',
     ]);
 
     fakeRedbark(
@@ -752,6 +796,38 @@ test('a settled pending transaction is claimed instead of duplicated when the ba
         ->and($pending->status)->toBe(TransactionStatus::Posted)
         ->and($pending->post_date->toDateString())->toBe('2026-08-12')
         ->and(RedbarkSyncLog::query()->latest('id')->firstOrFail()->transactions_updated)->toBe(1);
+});
+
+test('a hold adopted from CSV history is still claimed when it settles', function () {
+    $this->travelTo('2026-08-14 09:00:00');
+
+    [$feed, , $account] = linkedRedbarkFeed();
+
+    // Adoption leaves source alone, so the claim can only find this row by redbark_id.
+    $adopted = Transaction::factory()->create([
+        'user_id' => $feed->user_id,
+        'account_id' => $account->id,
+        'amount' => -4250,
+        'direction' => TransactionDirection::Debit,
+        'status' => TransactionStatus::Pending,
+        'source' => TransactionSource::Csv,
+        'post_date' => '2026-08-12',
+        'redbark_id' => 'rb_txn_hold',
+    ]);
+
+    fakeRedbark(
+        accounts: [redbarkUpstreamAccount()],
+        transactions: [redbarkRow(['id' => 'rb_txn_settled', 'date' => '2026-08-14'])],
+    );
+
+    runRedbarkSync($feed);
+
+    $adopted->refresh();
+
+    expect(Transaction::query()->count())->toBe(1)
+        ->and($adopted->redbark_id)->toBe('rb_txn_settled')
+        ->and($adopted->status)->toBe(TransactionStatus::Posted)
+        ->and($adopted->source)->toBe(TransactionSource::Csv);
 });
 
 test('new transactions go through the ingestor', function () {
