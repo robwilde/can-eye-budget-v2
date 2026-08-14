@@ -9,6 +9,7 @@ enum ImportSource: string
     case Manual = 'manual';
     case Basiq = 'basiq';
     case Csv = 'csv';
+    case Redbark = 'redbark';
 
     public function label(): string
     {
@@ -16,6 +17,7 @@ enum ImportSource: string
             self::Manual => 'Manual',
             self::Basiq => 'Connected via bank',
             self::Csv => 'CSV import',
+            self::Redbark => 'Connected via Redbark',
         };
     }
 }
