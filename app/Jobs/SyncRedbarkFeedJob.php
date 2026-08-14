@@ -739,7 +739,8 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             'description' => mb_substr($description, 0, 255),
             'post_date' => $postDate,
             'status' => $status,
-            'source' => TransactionSource::Redbark,
+            // No 'source': only the ingest path below sets it. Rewriting it on an adopted
+            // row would hand the feed ownership of history the user typed or imported.
             'merchant_name' => $this->stringOrNull($row['merchantName'] ?? null),
             'enrich_data' => [
                 'redbark' => array_filter([
@@ -762,13 +763,14 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
                     return 'skipped';
                 }
 
-                $existing->fill($values);
+                $this->applyValues($existing, $values);
                 $existing->restore();
 
                 return 'updated';
             }
 
-            $existing->fill($values)->save();
+            $this->applyValues($existing, $values);
+            $existing->save();
 
             return 'updated';
         }
@@ -776,11 +778,14 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
         $claimed = $this->claimSettledPending($redbarkAccount, $amountCents, $postDate, $status, $payloadIds);
 
         if ($claimed !== null) {
+            $originalPostDate = $claimed->post_date;
+
+            $this->applyValues($claimed, $values);
+
             // Keep the original post_date: the pending row is the same purchase, and
             // moving it would make the user's calendar jump.
             $claimed->fill([
-                ...$values,
-                'post_date' => $claimed->post_date,
+                'post_date' => $originalPostDate,
                 'redbark_id' => $id,
             ])->save();
 
@@ -807,24 +812,43 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
                 return 'skipped';
             }
 
-            // Keep what the user already has — description, date and category are theirs, and
-            // the CSV narration is usually richer than the feed's masked one. Only add what
-            // Redbark knows and the existing row does not.
-            $adopted->fill([
-                'source' => TransactionSource::Redbark,
-                'status' => $status,
-                'enrich_data' => $values['enrich_data'],
-                'merchant_name' => $adopted->merchant_name ?? $values['merchant_name'],
-            ])->save();
+            $this->applyValues($adopted, $values);
+            $adopted->save();
 
             return 'matched';
         }
 
         // New rows must go through the ingestor: it is the single funnel that reconciles
         // against planned transactions and emits TransactionEntered/TransactionReconciled.
-        $ingestor->ingest(new Transaction(['redbark_id' => $id, ...$values]));
+        $ingestor->ingest(new Transaction([
+            'redbark_id' => $id,
+            'source' => TransactionSource::Redbark,
+            ...$values,
+        ]));
 
         return 'created';
+    }
+
+    /**
+     * Feed-created rows are the feed's to rewrite wholesale. Adopted rows are not: their
+     * source names whoever entered them, and their description, date and category are the
+     * user's — the feed only contributes what the bank alone knows.
+     *
+     * @param  array<string, mixed>  $values
+     */
+    private function applyValues(Transaction $transaction, array $values): void
+    {
+        if ($transaction->source === TransactionSource::Redbark) {
+            $transaction->fill($values);
+
+            return;
+        }
+
+        $transaction->fill([
+            'status' => $values['status'],
+            'enrich_data' => $values['enrich_data'],
+            'merchant_name' => $transaction->merchant_name ?? $values['merchant_name'],
+        ]);
     }
 
     /**
@@ -851,18 +875,16 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
 
         return Transaction::query()
             ->where('account_id', $redbarkAccount->account_id)
-            ->where('source', TransactionSource::Redbark)
+            // Feed ownership is redbark_id, never source: an adopted CSV row keeps its own
+            // source and must still be claimable when its hold clears.
+            ->whereNotNull('redbark_id')
             ->where('status', TransactionStatus::Pending)
             ->where('amount', $amountCents)
             ->whereBetween('post_date', [
                 $postDate->subDays(self::PENDING_CLAIM_WINDOW_DAYS)->toDateString(),
                 $postDate->toDateString(),
             ])
-            ->when($payloadIds !== [], fn (Builder $query): Builder => $query->where(
-                fn (Builder $inner): Builder => $inner
-                    ->whereNull('redbark_id')
-                    ->orWhereNotIn('redbark_id', $payloadIds),
-            ))
+            ->when($payloadIds !== [], fn (Builder $query): Builder => $query->whereNotIn('redbark_id', $payloadIds))
             ->latest('post_date')
             ->first();
     }
