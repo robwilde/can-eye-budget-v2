@@ -26,6 +26,7 @@ use App\Models\Transaction;
 use App\Services\RedbarkClientFactory;
 use App\Services\RedbarkTransactionMatcher;
 use App\Services\TransactionIngestor;
+use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
@@ -43,6 +44,11 @@ function fakeRedbark(
     array $transactions = [],
     array $balances = [],
 ): void {
+    // Http::fake() appends stubs and resolves on first match, so a second call would be
+    // unreachable. Swap in a fresh factory so each call is the authoritative one and a
+    // test can re-fake between two sync runs.
+    Http::swap(new Factory);
+
     Http::fake([
         '*/connections*' => Http::response(['data' => $connections, 'pagination' => ['hasMore' => false]]),
         '*/accounts*' => Http::response(['data' => $accounts, 'pagination' => ['hasMore' => false]]),
@@ -582,6 +588,100 @@ test('a brokerage connection is skipped entirely', function () {
     runRedbarkSync($feed);
 
     expect(RedbarkAccount::query()->count())->toBe(0);
+});
+
+test('an uncleared authorisation is stored as pending, named after its merchant', function () {
+    [$feed] = linkedRedbarkFeed();
+
+    // Verbatim shape of a hold: placeholder narration, merchant in its own field, and
+    // Redbark calling it posted anyway.
+    fakeRedbark(
+        accounts: [redbarkUpstreamAccount()],
+        transactions: [redbarkRow([
+            'id' => 'bank_tx_hold',
+            'status' => 'posted',
+            'description' => 'AUTHORISATION',
+            'merchantName' => 'HARRIS FARM MARKETS PTY LWEST END     AU',
+            'amount' => '-89.15',
+        ])],
+    );
+
+    runRedbarkSync($feed);
+
+    $transaction = Transaction::query()->sole();
+
+    expect($transaction->status)->toBe(TransactionStatus::Pending)
+        ->and($transaction->description)->toBe('HARRIS FARM MARKETS PTY LWEST END     AU')
+        ->and($transaction->amount)->toBe(-8915);
+});
+
+test('a hold that clears is claimed by the settled row instead of duplicated', function () {
+    $this->travelTo('2026-08-13 09:00:00');
+
+    [$feed] = linkedRedbarkFeed();
+
+    fakeRedbark(
+        accounts: [redbarkUpstreamAccount()],
+        transactions: [redbarkRow([
+            'id' => 'bank_tx_hold',
+            'description' => 'AUTHORISATION',
+            'merchantName' => 'HARRIS FARM MARKETS PTY L',
+            'amount' => '-89.15',
+            'date' => '2026-08-13',
+        ])],
+    );
+
+    runRedbarkSync($feed);
+
+    $hold = Transaction::query()->sole();
+
+    expect($hold->status)->toBe(TransactionStatus::Pending);
+
+    // Two days later the bank posts it: new content hash, real narration, no hold marker.
+    $this->travelTo('2026-08-15 09:00:00');
+
+    RedbarkSyncLog::query()->update(['status' => RefreshStatus::Success]);
+
+    fakeRedbark(
+        accounts: [redbarkUpstreamAccount()],
+        transactions: [redbarkRow([
+            'id' => 'bank_tx_settled',
+            'description' => 'VISA -HARRIS FARM MARKETS    WEST END     AU',
+            'merchantName' => 'HARRIS FARM MARKETS PTY L',
+            'amount' => '-89.15',
+            'date' => '2026-08-15',
+        ])],
+    );
+
+    runRedbarkSync($feed->fresh());
+
+    $settled = Transaction::query()->sole();
+
+    expect($settled->id)->toBe($hold->id)
+        ->and($settled->redbark_id)->toBe('bank_tx_settled')
+        ->and($settled->status)->toBe(TransactionStatus::Posted)
+        ->and($settled->description)->toBe('VISA -HARRIS FARM MARKETS    WEST END     AU')
+        // The hold's date is kept so the calendar does not jump.
+        ->and($settled->post_date->toDateString())->toBe('2026-08-13');
+});
+
+test('a hold missing from the refetch is pruned from the snapshot', function () {
+    [$feed, $redbarkAccount] = linkedRedbarkFeed(
+        ['last_synced_at' => now()->subDay()],
+        ['raw_transactions_payload' => [
+            redbarkRow(['id' => 'bank_tx_hold', 'description' => 'AUTHORISATION', 'date' => now()->toDateString()]),
+        ]],
+    );
+
+    fakeRedbark(
+        accounts: [redbarkUpstreamAccount()],
+        transactions: [redbarkRow(['id' => 'bank_tx_other', 'date' => now()->toDateString()])],
+    );
+
+    runRedbarkSync($feed);
+
+    expect(collect($redbarkAccount->fresh()->raw_transactions_payload)->pluck('id')->all())
+        ->toBe(['bank_tx_other']);
 });
 
 test('a stored pending row that vanished from the refetch is dropped from the snapshot', function () {
