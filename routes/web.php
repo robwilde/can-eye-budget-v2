@@ -23,6 +23,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('reports', 'reports')->name('reports');
     Route::view('accounts', 'accounts')->name('accounts');
     Route::view('rules', 'rules')->name('rules');
+    // Transient page reached from the providers panel, so deliberately not in the sidebar.
+    Route::view('redbark/setup', 'redbark-setup')->name('redbark.setup');
     Route::get('basiq/callback', BasiqCallbackController::class)->name('basiq.callback');
 });
 
