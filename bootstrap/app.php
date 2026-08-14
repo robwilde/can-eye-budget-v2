@@ -23,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
             ->timezone('Australia/Sydney')
             ->withoutOverlapping();
         $schedule->command('app:sync-all-transactions')->dailyAt('03:00');
+        $schedule->command('app:sync-redbark-feeds')->everySixHours()->withoutOverlapping();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
