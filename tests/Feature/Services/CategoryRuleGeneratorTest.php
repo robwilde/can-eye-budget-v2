@@ -208,9 +208,9 @@ test('it suggests the distinctive payee token for an external transfer descripti
     $source = Transaction::factory()->for($user)->for($account)->manual()->create([
         'merchant_name' => null,
         'clean_description' => null,
-        'description' => 'Ext Tfr  - NET#4789778169 to 554078 Sekisui House MAST WBC - 260 Queen Street',
+        'description' => 'Ext Tfr  - NET#1234567890 to 123456 Landlord Property MAST ABC - 1 Sample Street',
         'direction' => TransactionDirection::Debit,
     ]);
 
-    expect(app(CategoryRuleGenerator::class)->suggestMatchValue($source))->toBe('SEKISUI');
+    expect(app(CategoryRuleGenerator::class)->suggestMatchValue($source))->toBe('LANDLORD');
 });
