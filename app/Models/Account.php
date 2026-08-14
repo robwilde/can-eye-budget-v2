@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * @property int $id
@@ -81,6 +82,12 @@ final class Account extends Model
         return $this->hasMany(BankImport::class);
     }
 
+    /** @return HasOne<RedbarkAccount, $this> */
+    public function redbarkAccount(): HasOne
+    {
+        return $this->hasOne(RedbarkAccount::class);
+    }
+
     /**
      * @param  Builder<self>  $query
      * @return Builder<self>
@@ -106,6 +113,15 @@ final class Account extends Model
     public function scopeBasiqConnected(Builder $query): Builder
     {
         return $query->where('import_source', ImportSource::Basiq);
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeRedbarkConnected(Builder $query): Builder
+    {
+        return $query->where('import_source', ImportSource::Redbark);
     }
 
     public function isImportSource(ImportSource $source): bool

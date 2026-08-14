@@ -10,6 +10,7 @@ enum TransactionSource: string
     case Basiq = 'basiq';
     case Planned = 'planned';
     case Csv = 'csv';
+    case Redbark = 'redbark';
 
     /**
      * Bank-statement sources eligible for pattern analysis (primary account,
@@ -20,7 +21,7 @@ enum TransactionSource: string
      */
     public static function forAnalysis(): array
     {
-        return [self::Basiq, self::Csv];
+        return [self::Basiq, self::Csv, self::Redbark];
     }
 
     public function label(): string
@@ -30,6 +31,7 @@ enum TransactionSource: string
             self::Basiq => 'Basiq',
             self::Planned => 'Planned',
             self::Csv => 'CSV import',
+            self::Redbark => 'Redbark',
         };
     }
 }

@@ -13,6 +13,7 @@ use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Str;
@@ -99,6 +100,18 @@ final class User extends Authenticatable
     public function basiqRefreshLogs(): HasMany
     {
         return $this->hasMany(BasiqRefreshLog::class);
+    }
+
+    /** @return HasOne<RedbarkFeed, $this> */
+    public function redbarkFeed(): HasOne
+    {
+        return $this->hasOne(RedbarkFeed::class);
+    }
+
+    /** @return HasMany<RedbarkSyncLog, $this> */
+    public function redbarkSyncLogs(): HasMany
+    {
+        return $this->hasMany(RedbarkSyncLog::class);
     }
 
     /** @return BelongsTo<Account, $this> */

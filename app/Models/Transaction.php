@@ -32,6 +32,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property TransactionStatus $status
  * @property string|null $basiq_id
  * @property string|null $basiq_account_id
+ * @property string|null $redbark_id
  * @property string|null $csv_hash
  * @property string|null $merchant_name
  * @property string|null $anzsic_code
@@ -70,6 +71,7 @@ final class Transaction extends Model
         'status',
         'basiq_id',
         'basiq_account_id',
+        'redbark_id',
         'csv_hash',
         'merchant_name',
         'anzsic_code',
