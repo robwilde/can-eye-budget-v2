@@ -1,0 +1,15 @@
+{
+    "data": [
+        {
+            "id": "b2ce1a6f-7c83-429c-9ef6-5557be02fcc4",
+            "provider": "fiskil",
+            "category": "banking",
+            "institutionId": "14",
+            "institutionName": "Beyond Bank Australia",
+            "institutionLogo": "https://brand.beyondbank.com.au/m/1a1424e421d07bea/thul-RGB-GRAD-Beyond-Bank-Logo.png",
+            "status": "active",
+            "lastRefreshedAt": "2026-08-13T02:19:35.707Z",
+            "createdAt": "2026-08-13T02:19:02.400Z"
+        }
+    ]
+}

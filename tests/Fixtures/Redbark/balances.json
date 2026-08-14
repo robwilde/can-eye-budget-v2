@@ -1,0 +1,22 @@
+{
+    "data": [
+        {
+            "accountId": "6af4be01-a492-4f4b-93c9-da6dd1f93149",
+            "currentBalance": "7013.80",
+            "availableBalance": "7013.80",
+            "currency": "AUD"
+        },
+        {
+            "accountId": "d983bbe4-caf4-4b0c-b9f2-11bec17a2454",
+            "currentBalance": "-18.96",
+            "availableBalance": "4491.41",
+            "currency": "AUD"
+        },
+        {
+            "accountId": "9107ff81-0566-472b-b2fd-1f86588f38cd",
+            "currentBalance": "77.46",
+            "availableBalance": "77.46",
+            "currency": "AUD"
+        }
+    ]
+}

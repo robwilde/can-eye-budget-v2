@@ -16,6 +16,7 @@ use App\Services\PipelineStages\IdentifyRecurringTransactionsStage;
 use App\Services\PipelineStages\MatchPlannedTransactionsStage;
 use App\Services\PipelineStages\SetPayCycleStage;
 use App\Services\PipelineStages\UserRulesStage;
+use App\Services\RedbarkClientFactory;
 use App\Services\TransactionAnalysisPipeline;
 use App\View\Composers\LayoutShellComposer;
 use Carbon\CarbonImmutable;
@@ -38,6 +39,10 @@ final class AppServiceProvider extends ServiceProvider
         ));
 
         $this->app->alias(BasiqServiceContract::class, BasiqService::class);
+
+        $this->app->singleton(RedbarkClientFactory::class, fn (): RedbarkClientFactory => new RedbarkClientFactory(
+            baseUrl: (string) config('services.redbark.base_url'),
+        ));
 
         $this->app->singleton(
             GmailServiceContract::class,
