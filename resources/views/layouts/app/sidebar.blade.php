@@ -32,10 +32,6 @@
             <flux:sidebar.item icon="chart-bar" :href="route('reports')" :current="request()->routeIs('reports')" wire:navigate :class="$navItem">
                 {{ __('Reports') }}
             </flux:sidebar.item>
-            <flux:sidebar.item icon="building-library" :href="route('connect-bank')" :current="request()->routeIs('connect-bank')" wire:navigate
-                               :class="$navItem">
-                {{ __('Connect Bank') }}
-            </flux:sidebar.item>
             <flux:sidebar.item icon="arrow-up-tray" :href="route('import-bank')" :current="request()->routeIs('import-bank')" wire:navigate
                                :class="$navItem">
                 {{ __('Import Bank') }}
