@@ -13,7 +13,7 @@ test('sidebar shows all navigation links', function () {
 
     $page->assertSeeIn('[data-flux-sidebar-item][href$="/dashboard"]', 'Dashboard')
         ->assertSeeIn('[data-flux-sidebar-item][href$="/transactions"]', 'Transactions')
-        ->assertSeeIn('[data-flux-sidebar-item][href$="/connect-bank"]', 'Connect Bank');
+        ->assertSeeIn('[data-flux-sidebar-item][href$="/import-bank"]', 'Import Bank');
 });
 
 test('placeholder links are not present', function () {
@@ -34,13 +34,14 @@ test('clicking Transactions navigates to transactions page', function () {
         ->assertPathBeginsWith('/transactions');
 });
 
-test('clicking Connect Bank navigates to connect bank page', function () {
+test('the stood-down Basiq page has no sidebar entry but is still reachable', function () {
     $this->actingAs(User::factory()->create());
 
-    $page = visit('/dashboard');
+    // Redbark replaced Basiq as the live feed. The route and page are kept so the user can
+    // still reconnect Basiq by hand, but it is off the sidebar.
+    visit('/dashboard')->assertMissing('[data-flux-sidebar-item][href$="/connect-bank"]');
 
-    $page->click('[data-flux-sidebar-item][href$="/connect-bank"]')
-        ->assertPathBeginsWith('/connect-bank');
+    visit('/connect-bank')->assertPathBeginsWith('/connect-bank');
 });
 
 test('dashboard link has active state on dashboard page', function () {
@@ -59,10 +60,8 @@ test('transactions link has active state on transactions page', function () {
     $page->assertPresent('[data-flux-sidebar-item][href$="/transactions"][data-current]');
 });
 
-test('connect bank link has active state on connect bank page', function () {
+test('the redbark providers panel is reachable from settings', function () {
     $this->actingAs(User::factory()->create());
 
-    $page = visit('/connect-bank');
-
-    $page->assertPresent('[data-flux-sidebar-item][href$="/connect-bank"][data-current]');
+    visit('/settings/providers')->assertSee('Providers');
 });

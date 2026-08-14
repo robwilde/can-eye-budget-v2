@@ -68,8 +68,12 @@ test('skips users with existing pending refresh log', function () {
     expect(BasiqRefreshLog::query()->where('user_id', $userWithPending->id)->count())->toBe(1);
 });
 
-test('refresh-all-connections is registered in the schedule', function () {
-    $this->artisan('schedule:list')
-        ->expectsOutputToContain('app:refresh-all-connections')
-        ->assertSuccessful();
+test('refresh-all-connections is no longer scheduled now that Redbark is the live feed', function () {
+    // The command itself is retained and still works by hand — see the tests above.
+    $events = collect(app(Illuminate\Console\Scheduling\Schedule::class)->events())
+        ->filter(fn ($event): bool => str_contains((string) $event->command, 'app:refresh-all-connections'));
+
+    $this->artisan('schedule:list')->assertSuccessful();
+
+    expect($events)->toBeEmpty();
 });

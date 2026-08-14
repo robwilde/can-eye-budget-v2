@@ -49,10 +49,14 @@ test('dispatches jobs with staggered delays', function () {
     Queue::assertPushed(SyncTransactionsJob::class, 3);
 });
 
-test('sync-all-transactions is registered in the schedule', function () {
-    $this->artisan('schedule:list')
-        ->expectsOutputToContain('app:sync-all-transactions')
-        ->assertSuccessful();
+test('sync-all-transactions is no longer scheduled now that Redbark is the live feed', function () {
+    // The command itself is retained and still works by hand — see the tests above.
+    $events = collect(app(Illuminate\Console\Scheduling\Schedule::class)->events())
+        ->filter(fn ($event): bool => str_contains((string) $event->command, 'app:sync-all-transactions'));
+
+    $this->artisan('schedule:list')->assertSuccessful();
+
+    expect($events)->toBeEmpty();
 });
 
 test('horizon snapshot is registered in the schedule', function () {

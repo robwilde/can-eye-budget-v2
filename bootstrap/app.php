@@ -18,11 +18,8 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withSchedule(function (Schedule $schedule): void {
         $schedule->command('horizon:snapshot')->everyFiveMinutes();
-        $schedule->command('app:refresh-all-connections')
-            ->dailyAt('02:00')
-            ->timezone('Australia/Sydney')
-            ->withoutOverlapping();
-        $schedule->command('app:sync-all-transactions')->dailyAt('03:00');
+        // Basiq is stood down in favour of the Redbark feed: its commands still exist and
+        // can be run by hand, they are just no longer scheduled.
         $schedule->command('app:sync-redbark-feeds')->everySixHours()->withoutOverlapping();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
