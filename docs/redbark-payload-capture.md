@@ -116,16 +116,46 @@ Merchant names and descriptions are kept — the mapping tests need realistic st
 `Ext Tfr - NET#... to ...`). That is the account holder's own data in a private repo, but it is real
 and it is now in git history.
 
-## The one thing still unconfirmed
+## Pending: the documented `"pending"` status never appears
 
-**No pending transaction existed at capture time.** `includePending=true` returned a byte-identical
-response to the plain call, so the live `status` literal for a pending row is still unverified. The
-port compares against `"pending"`, taken from two independent places in the Ruby reference
-(`importer.rb:288`, `processor.rb:169`).
+My first pass concluded that no pending rows existed, because `status` was `"posted"` on all 685
+captured rows and `includePending=true` returned a byte-identical response. **That conclusion was
+wrong.** The pending rows were there, mislabelled.
 
-If Redbark ever emits something else, the symptom is precise and non-destructive: pending rows would
-import as `Posted` and the stale-pending prune would stop firing. Nothing corrupts. Re-run the
-`includePending=true` capture when a purchase is in flight to close this off.
+An uncleared card authorisation arrives like this:
+
+```json
+{
+  "status": "posted",
+  "description": "AUTHORISATION",
+  "merchantName": "HARRIS FARM MARKETS PTY LWEST END     AU",
+  "amount": "-89.15",
+  "date": "2026-08-13", "postDate": "2026-08-13"
+}
+```
+
+which online banking lists under *Uncleared Transactions* as
+`Hold HARRIS FARM MARKETS PTY L Auth 123023 VCC 023835`. Confirmed by amount: 9 of the 10 holds
+shown in online banking appear in the feed as `AUTHORISATION` rows, all `"posted"`.
+
+So for this institution:
+
+- **`status` is useless for pending detection** — it is always `"posted"`.
+- **`includePending` is a no-op** — holds are returned either way, so `REDBARK_INCLUDE_PENDING`
+  changes nothing here. The config is kept because the flag may matter for other institutions.
+- **The placeholder description is the only signal.** Across 886 captured rows, `"AUTHORISATION"`
+  was the only description shared by more than two distinct merchants (17 rows, 10 merchants), and
+  every one of them carried a `merchantName`. `App\Support\RedbarkNarration` encodes that: it marks
+  such a row pending and takes the narration from `merchantName`, since `"AUTHORISATION"` alone
+  tells the user nothing.
+
+The real narration must still win for non-holds — the CSV statement carries
+`VISA -Afterpay    afterpay.com AU  145377`, and cross-source matching depends on it — so the
+fallback is placeholder-only, not merchant-first as sure-finance does it (`processor.rb:117`).
+
+When a hold clears, the bank issues a **new** id (they are content hashes) and a real narration.
+`claimSettledPending()` matches it to the stored hold on amount and an 8-day window, keeping the
+original date, so the hold becomes the settled row rather than its duplicate.
 
 ## Decisions this capture settled
 

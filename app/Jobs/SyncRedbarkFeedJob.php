@@ -24,6 +24,7 @@ use App\Services\RedbarkClientFactory;
 use App\Services\RedbarkTransactionMatcher;
 use App\Services\TransactionIngestor;
 use App\Support\RedbarkCurrency;
+use App\Support\RedbarkNarration;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -507,7 +508,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
      */
     private function isStalePending(array $row, array $freshKeys): bool
     {
-        return ($row['status'] ?? null) === 'pending'
+        return RedbarkNarration::isHold($row['description'] ?? null, $row['status'] ?? null)
             && ! isset($freshKeys[$this->transactionKey($row)]);
     }
 
@@ -722,11 +723,13 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
         // Derived from the sign rather than the API's own direction field, so the two
         // can never disagree; the raw value is kept in enrich_data for audit.
         $direction = $amountCents < 0 ? TransactionDirection::Debit : TransactionDirection::Credit;
-        $status = ($row['status'] ?? null) === 'pending' ? TransactionStatus::Pending : TransactionStatus::Posted;
+        // An uncleared authorisation is only identifiable by its placeholder narration:
+        // Redbark labels holds "posted" and includePending changes nothing.
+        $status = RedbarkNarration::isHold($row['description'] ?? null, $row['status'] ?? null)
+            ? TransactionStatus::Pending
+            : TransactionStatus::Posted;
 
-        $description = $this->stringOrNull($row['description'] ?? null)
-            ?? $this->stringOrNull($row['merchantName'] ?? null)
-            ?? 'Transaction';
+        $description = RedbarkNarration::describe($row['description'] ?? null, $row['merchantName'] ?? null);
 
         $values = [
             'user_id' => $this->feed->user_id,
