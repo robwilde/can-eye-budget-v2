@@ -19,4 +19,17 @@ final class RedbarkConnectionData extends Dto
         public readonly ?string $institutionLogo = null,
         public readonly ?string $status = null,
     ) {}
+
+    /**
+     * @param  array<string, mixed>  $properties
+     * @return array<string, mixed>
+     */
+    public static function prepareForPipeline(array $properties): array
+    {
+        if (array_key_exists('id', $properties) && $properties['id'] === null) {
+            $properties['id'] = '';
+        }
+
+        return $properties;
+    }
 }

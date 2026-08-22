@@ -26,6 +26,10 @@ final class RedbarkBalanceData extends Dto
      */
     public static function prepareForPipeline(array $properties): array
     {
+        if (array_key_exists('accountId', $properties) && $properties['accountId'] === null) {
+            $properties['accountId'] = '';
+        }
+
         $properties['currency'] = RedbarkCurrency::normalise($properties['currency'] ?? null);
 
         return $properties;
