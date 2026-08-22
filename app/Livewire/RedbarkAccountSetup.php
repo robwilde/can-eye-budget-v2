@@ -157,6 +157,7 @@ final class RedbarkAccountSetup extends Component
             'pending_account_setup' => $feed->accounts()->needsSetup()->exists(),
         ]);
 
+        // @phpstan-ignore property.notFound
         unset($this->redbarkAccounts, $this->availableAccounts);
 
         if ($linked > 0) {
