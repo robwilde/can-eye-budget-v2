@@ -67,7 +67,7 @@ test('an existing CSV transaction is found despite the masked description', func
 
 test('a statement date up to three days off still matches, nearest first', function () {
     $account = Account::factory()->create();
-    csvTransaction($account, ['post_date' => '2026-08-05']);
+    csvTransaction($account, ['post_date' => '2026-08-07']);
     $nearest = csvTransaction($account, ['post_date' => '2026-08-09']);
 
     $found = matcher()->findExisting(
@@ -152,6 +152,21 @@ test('a folded fee is found rather than treated as new', function () {
     expect($found?->id)->toBe($fee->id)
         ->and($found?->trashed())->toBeTrue()
         ->and($found?->folded_into_transaction_id)->toBe($parent->id);
+});
+
+test('a plain user-deleted transaction is not resurrected as a match', function () {
+    $account = Account::factory()->create();
+    $deleted = csvTransaction($account);
+    $deleted->delete();
+
+    $found = matcher()->findExisting(
+        $account->id,
+        -4250,
+        CarbonImmutable::parse('2026-08-10'),
+        'WOOLWORTHS 1234 BONDI',
+    );
+
+    expect($found)->toBeNull();
 });
 
 test('the current version is preferred over the one it superseded', function () {

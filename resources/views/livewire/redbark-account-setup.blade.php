@@ -1,4 +1,4 @@
-<div class="space-y-6">
+<div class="space-y-6" @if ($this->isSyncing) wire:poll.3s @endif>
     <div>
         <flux:heading size="lg">{{ __('Set up your Redbark accounts') }}</flux:heading>
         <flux:subheading>
@@ -19,7 +19,12 @@
         </flux:callout>
     @endif
 
-    @if ($this->redbarkAccounts->isEmpty())
+    @if ($this->isSyncing)
+        <flux:callout icon="arrow-path">
+            <flux:callout.heading>{{ __('Fetching your accounts from Redbark…') }}</flux:callout.heading>
+            <flux:callout.text>{{ __('This can take a moment. This page will update automatically.') }}</flux:callout.text>
+        </flux:callout>
+    @elseif ($this->redbarkAccounts->isEmpty())
         <flux:callout icon="check-circle">
             <flux:callout.heading>{{ __('Nothing left to set up') }}</flux:callout.heading>
             <flux:callout.text>{{ __('Every Redbark account is either connected or skipped.') }}</flux:callout.text>

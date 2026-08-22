@@ -5,7 +5,7 @@ All four endpoints returned **HTTP 200**, so the plan is API-enabled (Developer 
 the Saver plan 403s on everything).
 
 The fixtures in `tests/Fixtures/Redbark/` are those responses, redacted and truncated as described
-under [Redaction](#redaction). The account holds **3 accounts on 1 connection** (Beyond Bank
+under . The account holds **3 accounts on 1 connection** (Beyond Bank
 Australia, upstream provider `fiskil`).
 
 ## Commands

@@ -32,7 +32,7 @@ final class TransactionModal extends Component
     public ?int $editingTransactionId = null;
 
     #[Locked]
-    public bool $isBasiqTransaction = false;
+    public bool $isBankFeedTransaction = false;
 
     public string $transactionType = 'expense';
 
@@ -100,7 +100,7 @@ final class TransactionModal extends Component
         $this->resetForm();
 
         $this->editingTransactionId = $transaction->id;
-        $this->isBasiqTransaction = $transaction->source === TransactionSource::Basiq;
+        $this->isBankFeedTransaction = $transaction->source->isBankFeed();
         $this->originalWasTransfer = $transaction->transfer_pair_id !== null;
 
         if ($transaction->transfer_pair_id) {
@@ -129,7 +129,7 @@ final class TransactionModal extends Component
         $description = $transaction->description ?? '';
         $this->descriptionInput = $description !== '' ? "{$dollars} {$description}" : $dollars;
 
-        if ($this->isBasiqTransaction) {
+        if ($this->isBankFeedTransaction) {
             $this->cleanDescription = $transaction->clean_description ?? '';
         }
 
@@ -231,7 +231,7 @@ final class TransactionModal extends Component
 
     public function updatedTransactionType(): void
     {
-        if ($this->transactionType !== 'transfer' && ! $this->isBasiqTransaction) {
+        if ($this->transactionType !== 'transfer' && ! $this->isBankFeedTransaction) {
             $this->notes = '';
         }
     }
@@ -249,7 +249,7 @@ final class TransactionModal extends Component
             return;
         }
 
-        if ($transaction->source === TransactionSource::Basiq && $transaction->parent_transaction_id === null) {
+        if ($transaction->source->isBankFeed() && $transaction->parent_transaction_id === null) {
             return;
         }
 
@@ -336,7 +336,7 @@ final class TransactionModal extends Component
      */
     private function resolveSave(): bool
     {
-        if ($this->editingTransactionId && $this->mode === 'plan' && ! $this->isBasiqTransaction) {
+        if ($this->editingTransactionId && $this->mode === 'plan' && ! $this->isBankFeedTransaction) {
             return $this->convertEnteredToPlanned();
         }
 
@@ -353,7 +353,7 @@ final class TransactionModal extends Component
         }
 
         if ($this->editingTransactionId) {
-            if ($this->isBasiqTransaction) {
+            if ($this->isBankFeedTransaction) {
                 return $this->updateTransaction();
             }
 
@@ -454,7 +454,7 @@ final class TransactionModal extends Component
 
         [$transaction, $parsed] = $resolved;
 
-        if ($transaction->source === TransactionSource::Basiq) {
+        if ($transaction->source->isBankFeed()) {
             $child = $transaction->createChild([
                 'category_id' => $this->categoryId,
                 'notes' => $this->notes !== '' ? $this->notes : null,
@@ -855,7 +855,7 @@ final class TransactionModal extends Component
         $this->occurrenceDate = null;
         $this->categoriseMatching = false;
         $this->categoriseMatchValue = '';
-        $this->isBasiqTransaction = false;
+        $this->isBankFeedTransaction = false;
         $this->transactionType = 'expense';
         $this->descriptionInput = '';
         $this->accountId = null;

@@ -10,11 +10,14 @@ use App\DTOs\RedbarkAccountData;
 use App\Exceptions\Redbark\RedbarkAuthenticationException;
 use App\Exceptions\Redbark\RedbarkException;
 use App\Exceptions\Redbark\RedbarkRateLimitException;
+use App\Exceptions\Redbark\RedbarkRequestException;
 use App\Exceptions\Redbark\RedbarkServerException;
 use App\Services\RedbarkService;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Sleep;
 
 function redbarkFixture(string $name): array
 {
@@ -244,12 +247,48 @@ test('error statuses map to typed exceptions', function (int $status, string $ex
     'teapot' => [418, RedbarkException::class, 'unknown'],
 ]);
 
-test('a failing status is not retried by the client', function () {
+test('a 429 response is retried and eventually succeeds', function () {
+    Sleep::fake();
+
+    Http::fake(['*/accounts*' => Http::sequence()
+        ->push(['error' => ['message' => 'slow down']], 429)
+        ->push(['data' => [], 'pagination' => ['hasMore' => false]])]);
+
+    expect(redbarkService()->listAccounts())->toBe([]);
+
+    Http::assertSentCount(2);
+});
+
+test('a 500 response is retried and eventually succeeds', function () {
+    Sleep::fake();
+
+    Http::fake(['*/accounts*' => Http::sequence()
+        ->push(['error' => ['message' => 'boom']], 503)
+        ->push(['data' => [], 'pagination' => ['hasMore' => false]])]);
+
+    expect(redbarkService()->listAccounts())->toBe([]);
+
+    Http::assertSentCount(2);
+});
+
+test('a failing status is retried by the client and exhausts into the typed exception', function () {
+    Sleep::fake();
+
     Http::fake(['*/accounts*' => Http::response(['error' => ['message' => 'nope']], 503)]);
 
     expect(fn () => redbarkService()->listAccounts())->toThrow(RedbarkServerException::class);
 
-    Http::assertSentCount(1);
+    Http::assertSentCount(3);
+});
+
+test('a connection exception surfaces as a typed RedbarkException, not a raw framework exception', function () {
+    Sleep::fake();
+
+    Http::fake(['*/accounts*' => fn () => throw new ConnectionException('Connection refused')]);
+
+    expect(fn () => redbarkService()->listAccounts())
+        ->toThrow(fn (RedbarkException $e) => expect($e)->toBeInstanceOf(RedbarkRequestException::class)
+            ->and($e->errorType)->toBe('connection_failed'));
 });
 
 test('the request carries the bearer token and asks for json', function () {

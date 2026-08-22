@@ -8,7 +8,6 @@ use App\Enums\RefreshStatus;
 use App\Enums\RefreshTrigger;
 use App\Models\RedbarkFeed;
 use App\Models\RedbarkSyncLog;
-use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -22,8 +21,10 @@ final class RedbarkSyncLogFactory extends Factory
     public function definition(): array
     {
         return [
-            'user_id' => User::factory(),
             'redbark_feed_id' => RedbarkFeed::factory(),
+            'user_id' => fn (array $attributes): int => (int) RedbarkFeed::query()
+                ->whereKey($attributes['redbark_feed_id'])
+                ->value('user_id'),
             'trigger' => RefreshTrigger::Manual,
             'status' => RefreshStatus::Pending,
         ];

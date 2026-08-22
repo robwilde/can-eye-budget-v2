@@ -14,6 +14,8 @@ beforeEach(function () {
 });
 
 test('every healthy feed is dispatched with a stagger', function () {
+    $this->travelTo(now());
+
     RedbarkFeed::factory()->count(3)->create();
 
     $this->artisan('app:sync-redbark-feeds')
@@ -26,6 +28,20 @@ test('every healthy feed is dispatched with a stagger', function () {
     );
 
     Queue::assertPushed(SyncRedbarkFeedJob::class, 3);
+
+    $delays = [];
+    Queue::assertPushed(SyncRedbarkFeedJob::class, function (SyncRedbarkFeedJob $job) use (&$delays): bool {
+        $delays[] = $job->delay;
+
+        return true;
+    });
+
+    usort($delays, fn ($a, $b) => $a <=> $b);
+
+    expect($delays)->toHaveCount(3);
+    expect($delays[0]->eq(now()))->toBeTrue();
+    expect($delays[1]->eq(now()->addSeconds(10)))->toBeTrue();
+    expect($delays[2]->eq(now()->addSeconds(20)))->toBeTrue();
 });
 
 test('a feed needing a new key is skipped', function () {
