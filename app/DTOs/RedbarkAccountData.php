@@ -35,6 +35,14 @@ final class RedbarkAccountData extends Dto
      */
     public static function prepareForPipeline(array $properties): array
     {
+        if (array_key_exists('id', $properties) && $properties['id'] === null) {
+            $properties['id'] = '';
+        }
+
+        if (array_key_exists('name', $properties) && $properties['name'] === null) {
+            $properties['name'] = '';
+        }
+
         $properties['currency'] = RedbarkCurrency::normalise($properties['currency'] ?? null);
 
         return $properties;

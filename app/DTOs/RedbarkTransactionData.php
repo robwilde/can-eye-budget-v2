@@ -31,4 +31,17 @@ final class RedbarkTransactionData extends Dto
         public readonly ?string $merchantName = null,
         public readonly ?string $merchantCategoryCode = null,
     ) {}
+
+    /**
+     * @param  array<string, mixed>  $properties
+     * @return array<string, mixed>
+     */
+    public static function prepareForPipeline(array $properties): array
+    {
+        if (array_key_exists('id', $properties) && $properties['id'] === null) {
+            $properties['id'] = '';
+        }
+
+        return $properties;
+    }
 }
