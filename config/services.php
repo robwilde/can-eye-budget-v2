@@ -35,7 +35,7 @@ return [
     ],
 
     'redbark' => [
-        'base_url' => env('REDBARK_BASE_URL', 'https://api.redbark.com/v1'),
+        'base_url' => env('REDBARK_BASE_URL') ?: 'https://api.redbark.com/v1',
         'include_pending' => (bool) env('REDBARK_INCLUDE_PENDING', false),
     ],
 
