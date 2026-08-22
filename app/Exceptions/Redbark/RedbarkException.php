@@ -16,7 +16,7 @@ use Throwable;
  * /balances call one account at a time.
  *
  * Types in use: bad_request, unauthorized, access_forbidden, not_found, rate_limited,
- * server_error, truncated, too_many_pages, unknown.
+ * server_error, truncated, too_many_pages, connection_failed, unknown.
  */
 abstract class RedbarkException extends RuntimeException
 {
