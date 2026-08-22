@@ -70,10 +70,12 @@ test('skips users with existing pending refresh log', function () {
 
 test('refresh-all-connections is no longer scheduled now that Redbark is the live feed', function () {
     // The command itself is retained and still works by hand — see the tests above.
+    $this->artisan('schedule:list')
+        ->doesntExpectOutputToContain('app:refresh-all-connections')
+        ->assertSuccessful();
+
     $events = collect(app(Illuminate\Console\Scheduling\Schedule::class)->events())
         ->filter(fn ($event): bool => str_contains((string) $event->command, 'app:refresh-all-connections'));
-
-    $this->artisan('schedule:list')->assertSuccessful();
 
     expect($events)->toBeEmpty();
 });

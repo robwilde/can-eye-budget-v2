@@ -170,6 +170,7 @@ test('a pending log older than 15 minutes no longer blocks a manual sync', funct
 
     Livewire::actingAs($user)
         ->test('pages::settings.providers')
+        ->assertSet('isSyncing', false)
         ->call('syncNow');
 
     Queue::assertPushed(SyncRedbarkFeedJob::class, 1);

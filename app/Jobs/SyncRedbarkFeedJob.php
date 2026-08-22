@@ -75,6 +75,8 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
      */
     private array $claimedTransactionIds = [];
 
+    private bool $transactionFetchFailed = false;
+
     public function __construct(
         public readonly RedbarkFeed $feed,
         public readonly RefreshTrigger $trigger = RefreshTrigger::Scheduled,
@@ -139,9 +141,11 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             'accounts' => $linkedCount,
         ] = $this->applyToAccounts($ingestor, $matcher);
 
-        // Written even on partial failure: this is the incremental cursor, and the
-        // 7-day lookback absorbs anything a failed run missed.
-        $this->feed->update(['last_synced_at' => now()]);
+        // Only advance the cursor if no account's fetch failed. If any fetch failed,
+        // the next run needs to retry that account or risk losing transactions past the 7-day lookback.
+        if (! $this->transactionFetchFailed) {
+            $this->feed->update(['last_synced_at' => now()]);
+        }
 
         $log->update([
             'status' => $this->errors === [] ? RefreshStatus::Success : RefreshStatus::Failed,
@@ -392,6 +396,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
                 throw $e;
             } catch (Throwable $e) {
                 $this->appendError('transactions', "{$redbarkAccount->name}: {$e->getMessage()}");
+                $this->transactionFetchFailed = true;
 
                 continue;
             }
@@ -430,11 +435,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             return $this->feed->last_synced_at->subDays(self::INCREMENTAL_LOOKBACK_DAYS)->startOfDay();
         }
 
-        if ($redbarkAccount->sync_start_date !== null) {
-            return $redbarkAccount->sync_start_date;
-        }
-
-        return CarbonImmutable::now()->subDays(self::BACKFILL_DAYS);
+        return $redbarkAccount->sync_start_date ?? CarbonImmutable::now()->subDays(self::BACKFILL_DAYS);
     }
 
     /**
@@ -695,6 +696,9 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
     }
 
     /**
+     * @param  TransactionIngestor  $ingestor
+     * @param  RedbarkTransactionMatcher  $matcher
+     * @param  RedbarkAccount  $redbarkAccount
      * @param  array<string, mixed>  $row
      * @param  list<string>  $payloadIds
      * @return 'created'|'updated'|'matched'|'skipped'

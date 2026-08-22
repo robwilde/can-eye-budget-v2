@@ -17,6 +17,7 @@ use App\Exceptions\Redbark\RedbarkServerException;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use SensitiveParameter;
@@ -26,9 +27,8 @@ use Throwable;
  * Client for the Redbark CDR API (https://api.redbark.com/v1), a plain Bearer-token
  * REST service. One instance per user key — build it through RedbarkClientFactory.
  *
- * Retries: only transient connection failures are retried here. 429 and 5xx are
- * deliberately NOT retried by the client, because SyncRedbarkFeedJob already has
- * $tries = 5 with backoff and retrying in both places multiplies the delay.
+ * Retries: connection failures, HTTP 429 and 5xx are all retried here, since this is
+ * the only layer that can recover a transient failure before it reaches the caller.
  *
  * Errors: responses are never chained through ->throw(). Status mapping is explicit so
  * every failure carries a machine-readable errorType the job can branch on.
@@ -80,7 +80,7 @@ final readonly class RedbarkService implements RedbarkServiceContract
     public function listConnections(): array
     {
         // Unpaginated: the endpoint accepts no limit/offset at all.
-        $json = $this->handle($this->request()->get('/connections'));
+        $json = $this->handle($this->get('/connections'));
 
         return array_map(
             static fn (array $row): RedbarkConnectionData => RedbarkConnectionData::from($row),
@@ -100,7 +100,7 @@ final readonly class RedbarkService implements RedbarkServiceContract
             return [];
         }
 
-        $json = $this->handle($this->request()->get('/balances', [
+        $json = $this->handle($this->get('/balances', [
             'accountIds' => implode(',', $accountIds),
         ]));
 
@@ -143,7 +143,26 @@ final readonly class RedbarkService implements RedbarkServiceContract
             ->withToken($this->apiKey)
             ->acceptJson()
             ->timeout(120)
-            ->retry(3, 2000, static fn (Throwable $e): bool => $e instanceof ConnectionException, throw: false);
+            ->retry(3, 2000, static fn (Throwable $e): bool => $e instanceof ConnectionException
+                || ($e instanceof RequestException && ($e->response->status() === 429 || $e->response->status() >= 500)), throw: false);
+    }
+
+    /**
+     * @param  array<string, mixed>  $query
+     *
+     * @throws RedbarkException
+     */
+    private function get(string $path, array $query = []): Response
+    {
+        try {
+            return $this->request()->get($path, $query);
+        } catch (ConnectionException $e) {
+            throw new RedbarkRequestException(
+                'Connection failed: '.$e->getMessage(),
+                errorType: 'connection_failed',
+                previous: $e,
+            );
+        }
     }
 
     /**
@@ -163,7 +182,7 @@ final readonly class RedbarkService implements RedbarkServiceContract
         $exhausted = false;
 
         for ($page = 0; $page < self::MAX_PAGES; $page++) {
-            $response = $this->request()->get($path, [
+            $response = $this->get($path, [
                 ...$query,
                 'limit' => $pageSize,
                 'offset' => $offset,

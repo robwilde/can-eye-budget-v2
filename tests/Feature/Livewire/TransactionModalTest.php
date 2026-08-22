@@ -346,7 +346,7 @@ test('opens for edit with pre-filled data from manual transaction', function () 
         ->dispatch('edit-transaction', id: $transaction->id)
         ->assertSet('showModal', true)
         ->assertSet('editingTransactionId', $transaction->id)
-        ->assertSet('isBasiqTransaction', false)
+        ->assertSet('isBankFeedTransaction', false)
         ->assertSet('transactionType', 'expense')
         ->assertSet('descriptionInput', '42.50 coffee and cake')
         ->assertSet('accountId', $account->id)
@@ -375,7 +375,7 @@ test('basiq transaction sets read-only flag', function () {
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('edit-transaction', id: $transaction->id)
-        ->assertSet('isBasiqTransaction', true)
+        ->assertSet('isBankFeedTransaction', true)
         ->assertSet('editingTransactionId', $transaction->id);
 });
 
@@ -557,7 +557,7 @@ test('resets form after edit save including edit-specific properties', function 
         ->set('descriptionInput', '10.00 test')
         ->call('save')
         ->assertSet('editingTransactionId', null)
-        ->assertSet('isBasiqTransaction', false)
+        ->assertSet('isBankFeedTransaction', false)
         ->assertSet('notes', '')
         ->assertSet('cleanDescription', '');
 });
@@ -1542,7 +1542,7 @@ test('basiq transaction shows notes field with notes label', function () {
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('edit-transaction', id: $transaction->id)
-        ->assertSet('isBasiqTransaction', true)
+        ->assertSet('isBankFeedTransaction', true)
         ->assertSee(__('Notes'));
 });
 
@@ -1557,7 +1557,7 @@ test('csv transaction with notes shows the notes field and folded-fee note', fun
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('edit-transaction', id: $transaction->id)
-        ->assertSet('isBasiqTransaction', false)
+        ->assertSet('isBankFeedTransaction', false)
         ->assertSet('transactionType', 'expense')
         ->assertSet('notes', 'Includes intl transaction fee -$0.06 (folded)')
         ->assertSee(__('Notes'));

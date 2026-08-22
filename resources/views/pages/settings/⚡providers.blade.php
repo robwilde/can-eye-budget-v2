@@ -34,12 +34,17 @@ new #[Title('Bank providers')] class extends Component {
     }
 
     /**
-     * Polling is only worth its cost while a run is actually open.
+     * Polling is only worth its cost while a run is actually open. A Pending row
+     * older than SyncRedbarkFeedJob::UNIQUE_FOR is stranded (job died mid-run
+     * without updating its log), not actually syncing.
      */
     #[Computed]
     public function isSyncing(): bool
     {
-        return $this->logs->first()?->status === RefreshStatus::Pending;
+        $log = $this->logs->first();
+
+        return $log?->status === RefreshStatus::Pending
+            && $log->created_at->greaterThan(now()->subSeconds(SyncRedbarkFeedJob::UNIQUE_FOR));
     }
 
     public function save(): void
@@ -75,7 +80,7 @@ new #[Title('Bank providers')] class extends Component {
         $inFlight = RedbarkSyncLog::query()
             ->where('user_id', Auth::id())
             ->where('status', RefreshStatus::Pending)
-            ->where('created_at', '>=', now()->subMinutes(15))
+            ->where('created_at', '>=', now()->subSeconds(SyncRedbarkFeedJob::UNIQUE_FOR))
             ->exists();
 
         if ($inFlight) {

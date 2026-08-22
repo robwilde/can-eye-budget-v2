@@ -8,14 +8,13 @@ use App\Enums\AccountClass;
 use App\Enums\AccountGroup;
 use App\Enums\AccountStatus;
 use App\Enums\ImportSource;
+use App\Enums\RefreshStatus;
 use App\Enums\RefreshTrigger;
 use App\Jobs\SyncRedbarkFeedJob;
 use App\Models\Account;
 use App\Models\RedbarkAccount;
 use App\Models\RedbarkFeed;
-use App\Services\RedbarkClientFactory;
-use App\Services\RedbarkTransactionMatcher;
-use App\Services\TransactionIngestor;
+use App\Models\RedbarkSyncLog;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -41,11 +40,8 @@ final class RedbarkAccountSetup extends Component
     /** @var list<string> */
     public array $rowErrors = [];
 
-    public function mount(
-        RedbarkClientFactory $factory,
-        TransactionIngestor $ingestor,
-        RedbarkTransactionMatcher $matcher,
-    ): void {
+    public function mount(): void
+    {
         $feed = $this->feed();
 
         if ($feed === null) {
@@ -55,15 +51,10 @@ final class RedbarkAccountSetup extends Component
         }
 
         // Straight after saving a key the queued sync may not have run yet, which would
-        // leave the wizard empty and useless. Fetch inline once.
-        if ($feed->last_synced_at === null && ! $this->redbarkAccounts()->isNotEmpty()) {
-            try {
-                (new SyncRedbarkFeedJob($feed, RefreshTrigger::Manual))->handle($factory, $ingestor, $matcher);
-            } catch (Throwable $e) {
-                $this->rowErrors[] = $e->getMessage();
-            }
-
-            unset($this->redbarkAccounts);
+        // leave the wizard empty. Queue it and let the view poll for the result instead
+        // of blocking the request on a backfill that can outlive the request lifetime.
+        if ($feed->last_synced_at === null) {
+            SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Manual);
         }
 
         foreach ($this->redbarkAccounts() as $redbarkAccount) {
@@ -95,6 +86,28 @@ final class RedbarkAccountSetup extends Component
             ->get();
     }
 
+    /**
+     * Mirrors the providers panel: only worth polling while a run is actually open. A
+     * Pending row older than SyncRedbarkFeedJob::UNIQUE_FOR is stranded, not syncing.
+     */
+    #[Computed]
+    public function isSyncing(): bool
+    {
+        $feed = $this->feed();
+
+        if ($feed === null || $feed->last_synced_at !== null) {
+            return false;
+        }
+
+        $log = RedbarkSyncLog::query()
+            ->where('redbark_feed_id', $feed->id)
+            ->latest('id')
+            ->first();
+
+        return $log?->status === RefreshStatus::Pending
+            && $log->created_at->greaterThan(now()->subSeconds(SyncRedbarkFeedJob::UNIQUE_FOR));
+    }
+
     public function save(): void
     {
         $feed = $this->feed();
@@ -104,6 +117,16 @@ final class RedbarkAccountSetup extends Component
 
             return;
         }
+
+        // Drop choices for rows this feed already resolved (linked or skipped) since the
+        // last save; resubmitting must not re-apply a stale 'new:'/'existing:' choice.
+        // Ids that are not one of this feed's rows at all (e.g. another user's account)
+        // are left in place so the ownership check below still rejects them.
+        $resolvedIds = $feed->accounts()
+            ->whereNotIn('id', $this->redbarkAccounts()->pluck('id'))
+            ->pluck('id')
+            ->all();
+        $this->choices = array_diff_key($this->choices, array_flip($resolvedIds));
 
         $this->rowErrors = [];
         $linked = 0;
@@ -136,12 +159,12 @@ final class RedbarkAccountSetup extends Component
 
         unset($this->redbarkAccounts, $this->availableAccounts);
 
-        if ($this->rowErrors !== []) {
-            return;
-        }
-
         if ($linked > 0) {
             SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Manual);
+        }
+
+        if ($this->rowErrors !== []) {
+            return;
         }
 
         session()->flash('status', __('Redbark accounts set up.'));
@@ -152,13 +175,7 @@ final class RedbarkAccountSetup extends Component
     public function render(): View
     {
         return view('livewire.redbark-account-setup', [
-            'accountClasses' => [
-                AccountClass::Transaction,
-                AccountClass::Savings,
-                AccountClass::CreditCard,
-                AccountClass::Loan,
-                AccountClass::Mortgage,
-            ],
+            'accountClasses' => $this->offeredAccountClasses(),
         ]);
     }
 
@@ -194,7 +211,7 @@ final class RedbarkAccountSetup extends Component
             ? AccountClass::tryFrom(mb_substr($choice, mb_strlen('new:')))
             : null;
 
-        if ($class === null) {
+        if ($class === null || ! in_array($class, $this->offeredAccountClasses(), true)) {
             throw new RuntimeException(__('Unrecognised choice for this account.'));
         }
 
@@ -220,5 +237,17 @@ final class RedbarkAccountSetup extends Component
     {
         $redbarkAccount->update(['account_id' => $account->id, 'ignored' => false]);
         $account->update(['import_source' => ImportSource::Redbark]);
+    }
+
+    /** @return list<AccountClass> the classes offered for a 'new:' choice */
+    private function offeredAccountClasses(): array
+    {
+        return [
+            AccountClass::Transaction,
+            AccountClass::Savings,
+            AccountClass::CreditCard,
+            AccountClass::Loan,
+            AccountClass::Mortgage,
+        ];
     }
 }

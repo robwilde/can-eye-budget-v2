@@ -183,29 +183,93 @@ test('another user\'s app account cannot be linked', function () {
     expect($redbarkAccount->fresh()->account_id)->toBeNull();
 });
 
-test('a never-synced feed fetches inline so the wizard is usable straight away', function () {
+test('mount queues a sync for a never-synced feed instead of running it inline', function () {
     $user = User::factory()->create();
     $feed = RedbarkFeed::factory()->create(['user_id' => $user->id]);
 
-    Http::fake([
-        '*/connections*' => Http::response(['data' => [], 'pagination' => ['hasMore' => false]]),
-        '*/accounts*' => Http::response([
-            'data' => [[
-                'id' => 'rb_acc_inline',
-                'connectionId' => 'rb_conn_1',
-                'name' => 'Inline Account',
-                'institutionName' => 'Test Bank',
-                'currency' => 'AUD',
-            ]],
-            'pagination' => ['hasMore' => false],
-        ]),
-        '*/transactions*' => Http::response(['data' => [], 'pagination' => ['hasMore' => false]]),
-        '*/balances*' => Http::response(['data' => [], 'pagination' => ['hasMore' => false]]),
+    Livewire::actingAs($user)
+        ->test(RedbarkAccountSetup::class)
+        ->assertSee('Fetching your accounts from Redbark')
+        ->assertSeeHtml('wire:poll.3s');
+
+    Queue::assertPushed(SyncRedbarkFeedJob::class, 1);
+
+    expect($feed->fresh()->last_synced_at)->toBeNull();
+});
+
+test('resubmitting after a partial failure does not re-apply already-resolved choices', function () {
+    [$user, $feed, $accountA] = wizardFixture();
+
+    $accountB = RedbarkAccount::factory()->create([
+        'redbark_feed_id' => $feed->id,
+        'account_id' => null,
+    ]);
+
+    $taken = Account::factory()->for($user)->create();
+
+    RedbarkAccount::factory()->create([
+        'redbark_feed_id' => $feed->id,
+        'account_id' => $taken->id,
+    ]);
+
+    $component = Livewire::actingAs($user)
+        ->test(RedbarkAccountSetup::class)
+        ->set("choices.{$accountA->id}", 'new:credit-card')
+        ->set("choices.{$accountB->id}", "existing:{$taken->id}")
+        ->call('save')
+        ->assertNoRedirect();
+
+    $linkedAccountId = $accountA->fresh()->account_id;
+
+    expect($linkedAccountId)->not->toBeNull()
+        ->and($accountB->fresh()->account_id)->toBeNull();
+
+    // Resubmitting without changing anything must not re-create an account for the
+    // row that already succeeded, nor re-throw the stale 'already connected' error.
+    $component->call('save')->assertNoRedirect();
+
+    expect(Account::query()->where('user_id', $user->id)->count())->toBe(2)
+        ->and($accountA->fresh()->account_id)->toBe($linkedAccountId)
+        ->and($accountB->fresh()->account_id)->toBeNull();
+});
+
+test('a partially-failed batch still dispatches sync for the accounts that succeeded', function () {
+    [$user, $feed, $accountA] = wizardFixture();
+
+    $accountB = RedbarkAccount::factory()->create([
+        'redbark_feed_id' => $feed->id,
+        'account_id' => null,
+    ]);
+
+    $taken = Account::factory()->for($user)->create();
+
+    RedbarkAccount::factory()->create([
+        'redbark_feed_id' => $feed->id,
+        'account_id' => $taken->id,
     ]);
 
     Livewire::actingAs($user)
         ->test(RedbarkAccountSetup::class)
-        ->assertSee('Test Bank - Inline Account');
+        ->set("choices.{$accountA->id}", 'new:credit-card')
+        ->set("choices.{$accountB->id}", "existing:{$taken->id}")
+        ->call('save')
+        ->assertNoRedirect();
 
-    expect($feed->fresh()->last_synced_at)->not->toBeNull();
+    expect($accountA->fresh()->account_id)->not->toBeNull();
+
+    Queue::assertPushed(SyncRedbarkFeedJob::class, 1);
+});
+
+test('choosing a new account type outside the offered list is rejected', function () {
+    [$user, , $redbarkAccount] = wizardFixture();
+
+    Livewire::actingAs($user)
+        ->test(RedbarkAccountSetup::class)
+        ->set("choices.{$redbarkAccount->id}", 'new:investment')
+        ->call('save')
+        ->assertNoRedirect();
+
+    expect($redbarkAccount->fresh()->account_id)->toBeNull();
+
+    Queue::assertNothingPushed();
 });

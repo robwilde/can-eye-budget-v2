@@ -18,7 +18,7 @@
                             {{ __('Add transaction') }}
                         @endif
                     </flux:heading>
-                    @if($isBasiqTransaction)
+                    @if($isBankFeedTransaction)
                         <flux:badge color="blue" size="sm" icon="cloud-arrow-down" class="mt-1">
                             {{ __('Synced from bank') }}
                         </flux:badge>
@@ -26,7 +26,7 @@
                 </div>
 
                 <div>
-                    @if($date && $isBasiqTransaction)
+                    @if($date && $isBankFeedTransaction)
                         <flux:badge color="zinc">
                             {{ CarbonImmutable::parse($date)->format('D j M Y') }}
                         </flux:badge>
@@ -41,7 +41,7 @@
             </div>
 
             {{-- Type toggle: three-pill segmented control (manual only) --}}
-            @if(!$isBasiqTransaction)
+            @if(!$isBankFeedTransaction)
                 <div class="type-toggle" role="group" aria-label="{{ __('Transaction type') }}">
                     <button type="button"
                             aria-pressed="{{ $transactionType === 'expense' ? 'true' : 'false' }}"
@@ -75,7 +75,7 @@
             @endif
 
             {{-- Enter vs Plan toggle (manual only) --}}
-            @if(!$isBasiqTransaction)
+            @if(!$isBankFeedTransaction)
                 <div class="type-toggle" role="group" aria-label="{{ __('Enter vs Plan') }}">
                     <button type="button"
                             aria-pressed="{{ $mode === 'enter' ? 'true' : 'false' }}"
@@ -100,7 +100,7 @@
                     :label="$mode === 'plan' ? __('Planned amount with description') : __('Actual amount with description')"
                     placeholder="100 savings transfer"
                     required
-                    :disabled="$isBasiqTransaction"
+                    :disabled="$isBankFeedTransaction"
                 />
             @else
                 <flux:textarea
@@ -110,11 +110,11 @@
                     placeholder="4*15 zoo tickets&#10;(100 in parentheses is ignored)"
                     rows="2"
                     required
-                    :disabled="$isBasiqTransaction"
+                    :disabled="$isBankFeedTransaction"
                 />
             @endif
 
-            @if($isBasiqTransaction)
+            @if($isBankFeedTransaction)
                 <flux:input
                     wire:model.blur="cleanDescription"
                     :label="__('Clean description')"
@@ -137,7 +137,7 @@
                 wire:model="accountId"
                 :label="$transactionType === 'transfer' ? __('From account') : __('Account')"
                 required
-                :disabled="$isBasiqTransaction"
+                :disabled="$isBankFeedTransaction"
             >
                 <flux:select.option value="">{{ __('Select account') }}</flux:select.option>
                 @foreach($accounts as $account)
@@ -189,7 +189,7 @@
                     :label="__('Date')"
                     type="date"
                     required
-                    :disabled="$isBasiqTransaction"
+                    :disabled="$isBankFeedTransaction"
                 />
 
                 <flux:select wire:model="frequency" :label="__('Frequency')" required>
@@ -228,7 +228,7 @@
             @endif
 
             {{-- Transfer / basiq notes, plus any existing notes (e.g. folded intl-fee note) --}}
-            @if($transactionType === 'transfer' || $isBasiqTransaction || $notes !== '')
+            @if($transactionType === 'transfer' || $isBankFeedTransaction || $notes !== '')
                 <flux:textarea
                     wire:model="notes"
                     :label="$transactionType === 'transfer' ? __('Transfer description') : __('Notes')"
@@ -238,7 +238,7 @@
             @endif
 
             {{-- Rule-suggest card (plan-mode, non-transfer, manual) --}}
-            @if(!$isBasiqTransaction && $mode === 'plan' && $transactionType !== 'transfer')
+            @if(!$isBankFeedTransaction && $mode === 'plan' && $transactionType !== 'transfer')
                 <div class="rule-suggest" role="complementary">
                     <flux:icon name="sparkles" class="mt-0.5 shrink-0" />
                     <div>
@@ -263,7 +263,7 @@
                     >
                         {{ __('Delete') }}
                     </flux:button>
-                @elseif($editingTransactionId && !$isBasiqTransaction)
+                @elseif($editingTransactionId && !$isBankFeedTransaction)
                     <flux:button
                         variant="danger"
                         wire:click="deleteTransaction"

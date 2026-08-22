@@ -51,10 +51,12 @@ test('dispatches jobs with staggered delays', function () {
 
 test('sync-all-transactions is no longer scheduled now that Redbark is the live feed', function () {
     // The command itself is retained and still works by hand — see the tests above.
+    $this->artisan('schedule:list')
+        ->doesntExpectOutputToContain('app:sync-all-transactions')
+        ->assertSuccessful();
+
     $events = collect(app(Illuminate\Console\Scheduling\Schedule::class)->events())
         ->filter(fn ($event): bool => str_contains((string) $event->command, 'app:sync-all-transactions'));
-
-    $this->artisan('schedule:list')->assertSuccessful();
 
     expect($events)->toBeEmpty();
 });

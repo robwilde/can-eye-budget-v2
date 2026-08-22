@@ -241,7 +241,7 @@ final class Transaction extends Model
      */
     public function createChild(array $overrides = []): self
     {
-        $excluded = ['id', 'created_at', 'updated_at', 'deleted_at', 'parent_transaction_id', 'basiq_id'];
+        $excluded = ['id', 'created_at', 'updated_at', 'deleted_at', 'parent_transaction_id', 'basiq_id', 'redbark_id'];
 
         $attributes = collect($this->getAttributes())
             ->except($excluded)

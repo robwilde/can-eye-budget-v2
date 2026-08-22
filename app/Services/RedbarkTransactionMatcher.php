@@ -51,9 +51,11 @@ final readonly class RedbarkTransactionMatcher
     /**
      * The transaction this row already exists as, or null when it is genuinely new.
      *
-     * Soft-deleted rows are included on purpose: an international fee that
-     * TransactionFeeFolder folded into its parent purchase lives on as a trashed row, and the
-     * caller must recognise it rather than resurrect the fee the parent already absorbs.
+     * Trashed rows are included only when they were folded into a parent by
+     * TransactionFeeFolder: an international fee that got merged into its parent purchase
+     * lives on as a trashed row with folded_into_transaction_id set, and the caller must
+     * recognise it rather than resurrect the fee the parent already absorbs. A trashed row
+     * the user deliberately deleted has folded_into_transaction_id null and must stay excluded.
      *
      * @param  list<int>  $alreadyClaimed  ids claimed earlier in this run, so the match is one-to-one
      */
@@ -74,6 +76,8 @@ final readonly class RedbarkTransactionMatcher
             ->where('account_id', $accountId)
             ->whereNull('redbark_id')
             ->where('amount', $amountCents)
+            ->where(fn (Builder $query): Builder => $query->whereNull('deleted_at')
+                ->orWhereNotNull('folded_into_transaction_id'))
             ->whereBetween('post_date', [
                 $postDate->subDays(self::DATE_TOLERANCE_DAYS)->toDateString(),
                 $postDate->addDays(self::DATE_TOLERANCE_DAYS)->toDateString(),
