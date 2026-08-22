@@ -37,7 +37,9 @@ final class BnplOrderFactory extends Factory
             'first_due_date' => $firstDue,
             'last_due_date' => $firstDue->addWeeks(6),
             'frequency' => RecurrenceFrequency::Every2Weeks,
-            'account_id' => fn (array $attributes) => Account::factory()->create(['user_id' => $attributes['user_id']])->id,
+            'account_id' => fn (array $attributes) => $attributes['user_id']
+                ? Account::factory()->create(['user_id' => $attributes['user_id']])->id
+                : null,
             'category_id' => null,
             'card_last4' => '8357',
             'status' => BnplOrderStatus::PendingReview,
