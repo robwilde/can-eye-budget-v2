@@ -93,10 +93,22 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
      */
     public static function dispatchFor(RedbarkFeed $feed, RefreshTrigger $trigger): void
     {
-        RedbarkSyncLog::firstOrCreate(
-            ['redbark_feed_id' => $feed->id, 'status' => RefreshStatus::Pending],
-            ['user_id' => $feed->user_id, 'trigger' => $trigger],
-        );
+        // Reuse pending logs only within the UNIQUE_FOR window to avoid stale UI state
+        // (created_at, trigger). After 15 minutes, create a fresh log for the next run.
+        $log = RedbarkSyncLog::where('redbark_feed_id', $feed->id)
+            ->where('status', RefreshStatus::Pending)
+            ->where('created_at', '>', now()->subSeconds(self::UNIQUE_FOR))
+            ->latest()
+            ->first();
+
+        if (! $log) {
+            $log = RedbarkSyncLog::create([
+                'redbark_feed_id' => $feed->id,
+                'user_id' => $feed->user_id,
+                'status' => RefreshStatus::Pending,
+                'trigger' => $trigger,
+            ]);
+        }
 
         self::dispatch($feed, $trigger);
     }
