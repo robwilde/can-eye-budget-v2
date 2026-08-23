@@ -56,7 +56,7 @@ new #[Title('Bank providers')] class extends Component {
         // Resetting the status is what lets a rotated key clear a RequiresUpdate state.
         $feed = RedbarkFeed::updateOrCreate(
             ['user_id' => Auth::id()],
-            ['api_key' => $validated['api_key'], 'status' => RedbarkFeedStatus::Good],
+            ['api_key' => $validated['api_key'], 'status' => RedbarkFeedStatus::Good, 'auth_failure_count' => 0],
         );
 
         $this->api_key = '';
