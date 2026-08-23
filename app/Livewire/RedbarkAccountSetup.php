@@ -223,6 +223,8 @@ final class RedbarkAccountSetup extends Component
             'institution' => $redbarkAccount->institution_name ?? '',
             'currency' => $redbarkAccount->currency,
             'balance' => $redbarkAccount->current_balance ?? 0,
+            'balance_source' => $redbarkAccount->current_balance === null ? null : ImportSource::Redbark,
+            'balance_updated_at' => $redbarkAccount->current_balance === null ? null : now(),
             'account_last4' => $redbarkAccount->account_number === null
                 ? null
                 : mb_substr($redbarkAccount->account_number, -4),
