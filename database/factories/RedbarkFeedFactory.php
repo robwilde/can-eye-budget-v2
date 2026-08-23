@@ -23,6 +23,7 @@ final class RedbarkFeedFactory extends Factory
             'user_id' => User::factory(),
             'api_key' => 'rbk_live_'.fake()->regexify('[a-z0-9]{24}'),
             'status' => RedbarkFeedStatus::Good,
+            'auth_failure_count' => 0,
             'pending_account_setup' => false,
             'last_synced_at' => null,
         ];
