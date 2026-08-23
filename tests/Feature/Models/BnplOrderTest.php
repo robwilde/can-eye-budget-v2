@@ -89,6 +89,15 @@ test('for() attaches an account owned by the same user', function () {
         ->and($order->account->user_id)->toBe($user->id);
 });
 
+test('withoutParents makes an unsaved order and creates no user or account', function () {
+    $order = BnplOrder::factory()->withoutParents()->make();
+
+    expect($order->user_id)->toBeNull()
+        ->and($order->account_id)->toBeNull()
+        ->and(User::query()->count())->toBe(0)
+        ->and(Account::query()->count())->toBe(0);
+});
+
 test('cascades on user delete', function () {
     $user = User::factory()->create();
     BnplOrder::factory()->for($user)->create();
