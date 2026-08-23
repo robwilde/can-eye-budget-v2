@@ -1,5 +1,7 @@
 <?php
 
+/** @noinspection PhpUnhandledExceptionInspection */
+
 /** @noinspection StaticClosureCanBeUsedInspection */
 
 declare(strict_types=1);
@@ -92,7 +94,9 @@ test('inline account creation registers a new csv account with last 4 digits', f
         ->and($account->name)->toBe('Westpac Choice')
         ->and($account->account_last4)->toBe('4599')
         ->and($account->import_source)->toBe(ImportSource::Csv)
-        ->and($account->balance)->toBe(168_619);
+        ->and($account->balance)->toBe(168_619)
+        ->and($account->balance_source)->toBe(ImportSource::Csv)
+        ->and($account->balance_updated_at)->not->toBeNull();
 });
 
 test('inline account creation defaults balance to zero when left blank', function () {
@@ -327,7 +331,9 @@ test('a manually entered current balance overrides the prefilled closing balance
         ->call('confirmImport')
         ->assertSet('step', 3);
 
-    expect($account->refresh()->balance)->toBe(123456);
+    expect($account->refresh()->balance)->toBe(123456)
+        ->and($account->balance_source)->toBe(ImportSource::Csv)
+        ->and($account->balance_updated_at)->not->toBeNull();
 });
 
 test('changing the balance column re-derives the prefilled current balance', function () {

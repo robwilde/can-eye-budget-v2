@@ -59,7 +59,7 @@ function fakeRedbark(
 
 function runRedbarkSync(RedbarkFeed $feed, RefreshTrigger $trigger = RefreshTrigger::Manual): void
 {
-    (new SyncRedbarkFeedJob($feed, $trigger))->handle(
+    new SyncRedbarkFeedJob($feed, $trigger)->handle(
         app(RedbarkClientFactory::class),
         app(TransactionIngestor::class),
         app(RedbarkTransactionMatcher::class),
@@ -153,8 +153,8 @@ test('a synced account only looks back 7 days', function () {
     $this->travelTo('2026-08-14 09:00:00');
 
     [$feed] = linkedRedbarkFeed(
-        ['last_synced_at' => '2026-08-10 06:00:00'],
-        ['raw_transactions_payload' => [redbarkRow()]],
+        [],
+        ['raw_transactions_payload' => [redbarkRow()], 'transactions_synced_at' => '2026-08-10 06:00:00'],
     );
 
     fakeRedbark(accounts: [redbarkUpstreamAccount()]);
@@ -563,7 +563,7 @@ test('a rejected balances batch retries one account at a time', function () {
     expect($balanceCalls)->toBe(3);
 });
 
-test('an authentication failure marks the feed as needing a new key', function () {
+test('a single authentication failure counts the failure but leaves the feed usable', function () {
     [$feed] = linkedRedbarkFeed();
 
     Http::fake([
@@ -573,7 +573,8 @@ test('an authentication failure marks the feed as needing a new key', function (
 
     expect(fn () => runRedbarkSync($feed))->toThrow(RedbarkAuthenticationException::class);
 
-    expect($feed->fresh()->status)->toBe(RedbarkFeedStatus::RequiresUpdate)
+    expect($feed->fresh()->status)->toBe(RedbarkFeedStatus::Good)
+        ->and($feed->fresh()->auth_failure_count)->toBe(1)
         ->and(RedbarkSyncLog::query()->latest('id')->firstOrFail()->status)->toBe(RefreshStatus::Failed);
 });
 
@@ -907,4 +908,201 @@ test('a successful run records the cursor and a clean log', function () {
         ->and($log->accounts_synced)->toBe(1)
         ->and($log->transactions_created)->toBe(1)
         ->and($log->balances_updated)->toBe(1);
+});
+
+test('middleware expires the overlap lock after UNIQUE_FOR seconds, which exceeds the job timeout', function () {
+    $feed = RedbarkFeed::factory()->create();
+    $job = new SyncRedbarkFeedJob($feed);
+
+    $middleware = $job->middleware();
+
+    expect($middleware)->toHaveCount(1)
+        ->and($middleware[0])->toBeInstanceOf(Illuminate\Queue\Middleware\WithoutOverlapping::class)
+        ->and($middleware[0]->expiresAfter)->toBe(SyncRedbarkFeedJob::UNIQUE_FOR)
+        ->and(SyncRedbarkFeedJob::UNIQUE_FOR)->toBeGreaterThan($job->timeout);
+});
+
+test('the stranded pending sync log schedule closes only logs past the expiry window', function () {
+    $feed = RedbarkFeed::factory()->create();
+
+    $stranded = RedbarkSyncLog::factory()->create([
+        'redbark_feed_id' => $feed->id,
+        'user_id' => $feed->user_id,
+        'status' => RefreshStatus::Pending,
+        'created_at' => now()->subSeconds(SyncRedbarkFeedJob::UNIQUE_FOR + 61),
+    ]);
+
+    $fresh = RedbarkSyncLog::factory()->create([
+        'redbark_feed_id' => $feed->id,
+        'user_id' => $feed->user_id,
+        'status' => RefreshStatus::Pending,
+        'created_at' => now(),
+    ]);
+
+    $this->artisan('schedule:list')->assertSuccessful();
+
+    $event = collect(app(Illuminate\Console\Scheduling\Schedule::class)->events())
+        ->sole(fn ($event): bool => $event->description === 'redbark:fail-stuck-sync-logs');
+
+    $event->run(app());
+
+    expect($stranded->fresh()->status)->toBe(RefreshStatus::Failed)
+        ->and($fresh->fresh()->status)->toBe(RefreshStatus::Pending);
+});
+
+test('a per-account transaction fetch failure holds back only that account', function () {
+    $this->travelTo('2026-08-14 09:00:00');
+
+    $feed = RedbarkFeed::factory()->create();
+
+    $redbarkAccounts = [];
+
+    foreach (['rb_acc_1', 'rb_acc_2'] as $upstreamId) {
+        $account = Account::factory()->for($feed->user)->create(['import_source' => ImportSource::Redbark]);
+
+        $redbarkAccounts[$upstreamId] = RedbarkAccount::factory()->create([
+            'redbark_feed_id' => $feed->id,
+            'account_id' => $account->id,
+            'redbark_account_id' => $upstreamId,
+            'bank_connection_id' => 'rb_conn_1',
+            'current_balance' => null,
+        ]);
+    }
+
+    Http::fake([
+        '*/connections*' => Http::response(['data' => [], 'pagination' => ['hasMore' => false]]),
+        '*/accounts*' => Http::response([
+            'data' => [
+                redbarkUpstreamAccount(),
+                redbarkUpstreamAccount(['id' => 'rb_acc_2', 'name' => 'Savings']),
+            ],
+            'pagination' => ['hasMore' => false],
+        ]),
+        '*/transactions*' => function (Request $request) {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            if (($query['accountId'] ?? null) === 'rb_acc_2') {
+                return Http::response(['error' => ['message' => 'server error']], 500);
+            }
+
+            // A non-empty snapshot is what makes transactionStartDate() take the
+            // 7-day incremental branch on the next sync instead of a fresh backfill.
+            return Http::response(['data' => [redbarkRow()], 'pagination' => ['hasMore' => false]]);
+        },
+        '*/balances*' => Http::response(['data' => [], 'pagination' => ['hasMore' => false]]),
+    ]);
+
+    runRedbarkSync($feed);
+
+    expect($redbarkAccounts['rb_acc_1']->fresh()->transactions_synced_at)->not->toBeNull()
+        ->and($redbarkAccounts['rb_acc_2']->fresh()->transactions_synced_at)->toBeNull()
+        ->and($feed->fresh()->last_synced_at)->toBeNull();
+
+    $log = RedbarkSyncLog::query()->latest('id')->firstOrFail();
+
+    expect($log->status)->toBe(RefreshStatus::Failed)
+        ->and(collect($log->errors)->pluck('context')->all())->toContain('transactions');
+
+    Http::swap(new Factory);
+
+    Http::fake([
+        '*/connections*' => Http::response(['data' => [], 'pagination' => ['hasMore' => false]]),
+        '*/accounts*' => Http::response([
+            'data' => [
+                redbarkUpstreamAccount(),
+                redbarkUpstreamAccount(['id' => 'rb_acc_2', 'name' => 'Savings']),
+            ],
+            'pagination' => ['hasMore' => false],
+        ]),
+        '*/transactions*' => Http::response(['data' => [], 'pagination' => ['hasMore' => false]]),
+        '*/balances*' => Http::response(['data' => [], 'pagination' => ['hasMore' => false]]),
+    ]);
+
+    runRedbarkSync($feed->fresh());
+
+    $windows = collect(Http::recorded())
+        ->filter(fn (array $pair): bool => str_contains($pair[0]->url(), '/transactions'))
+        ->mapWithKeys(function (array $pair): array {
+            parse_str((string) parse_url($pair[0]->url(), PHP_URL_QUERY), $query);
+
+            return [$query['accountId'] => $query['from']];
+        });
+
+    // Account 1 has a non-null cursor and a non-empty snapshot from the first sync, so
+    // it takes the 7-day incremental window; account 2 never got a successful fetch, so
+    // it still takes the 90-day backfill. This is the actual per-account holdback
+    // guarantee Step 2 exists for — not merely that the two windows differ.
+    expect($windows['rb_acc_1'])->toBe('2026-08-07')
+        ->and($windows['rb_acc_2'])->toBe('2026-05-16');
+});
+
+test('a synced redbark balance stamps the account balance source and timestamp', function () {
+    [$feed, , $account] = linkedRedbarkFeed();
+
+    fakeRedbark(
+        accounts: [redbarkUpstreamAccount()],
+        balances: [['accountId' => 'rb_acc_1', 'currentBalance' => '99.99']],
+    );
+
+    runRedbarkSync($feed);
+
+    expect($account->fresh()->balance_source)->toBe(ImportSource::Redbark)
+        ->and($account->fresh()->balance_updated_at)->not->toBeNull();
+});
+
+test('auth failures reaching the threshold flag the feed as needing a new key', function () {
+    [$feed] = linkedRedbarkFeed(['auth_failure_count' => SyncRedbarkFeedJob::AUTH_FAILURE_THRESHOLD - 1]);
+
+    Http::fake([
+        '*/connections*' => Http::response(['data' => [], 'pagination' => ['hasMore' => false]]),
+        '*/accounts*' => Http::response(['error' => ['message' => 'bad key']], 401),
+    ]);
+
+    expect(fn () => runRedbarkSync($feed))->toThrow(RedbarkAuthenticationException::class);
+
+    expect($feed->fresh()->status)->toBe(RedbarkFeedStatus::RequiresUpdate)
+        ->and($feed->fresh()->auth_failure_count)->toBe(SyncRedbarkFeedJob::AUTH_FAILURE_THRESHOLD);
+});
+
+test('a clean sync resets a prior authentication failure streak', function () {
+    [$feed] = linkedRedbarkFeed(['auth_failure_count' => 2]);
+
+    fakeRedbark(accounts: [redbarkUpstreamAccount()]);
+
+    runRedbarkSync($feed);
+
+    expect($feed->fresh()->auth_failure_count)->toBe(0);
+});
+
+test('backoff is exponential across three tiers', function () {
+    $feed = RedbarkFeed::factory()->create();
+
+    expect(new SyncRedbarkFeedJob($feed)->backoff())->toBe([60, 300, 900]);
+});
+
+test('a retry after a failed attempt authenticates with a fresh client using the current key', function () {
+    [$feed] = linkedRedbarkFeed(['api_key' => 'old-key']);
+
+    Http::fake([
+        '*/connections*' => Http::response(['data' => [], 'pagination' => ['hasMore' => false]]),
+        '*/accounts*' => Http::response(['error' => ['message' => 'bad key']], 401),
+    ]);
+
+    expect(fn () => runRedbarkSync($feed))->toThrow(RedbarkAuthenticationException::class);
+
+    $firstAttemptAuth = collect(Http::recorded())->last()[0]->header('Authorization')[0];
+
+    expect($firstAttemptAuth)->toBe('Bearer old-key');
+
+    // A rotated key between retries is the only re-authentication seam Redbark's
+    // static-key protocol offers: each attempt re-resolves the client from the feed.
+    $feed->update(['api_key' => 'new-key']);
+
+    fakeRedbark(accounts: [redbarkUpstreamAccount()]);
+
+    runRedbarkSync($feed->fresh());
+
+    $secondAttemptAuth = collect(Http::recorded())->last()[0]->header('Authorization')[0];
+
+    expect($secondAttemptAuth)->toBe('Bearer new-key');
 });

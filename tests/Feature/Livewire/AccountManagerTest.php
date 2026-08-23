@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Enums\AccountClass;
 use App\Enums\AccountGroup;
+use App\Enums\ImportSource;
 use App\Livewire\AccountManager;
 use App\Models\Account;
 use App\Models\Transaction;
@@ -77,7 +78,9 @@ test('can add a new account with valid data', function () {
         ->balance->toBe(150050)
         ->type->toBe(AccountClass::Transaction)
         ->group->toBe(AccountGroup::DayToDay)
-        ->currency->toBe('AUD');
+        ->currency->toBe('AUD')
+        ->balance_source->toBe(ImportSource::Manual);
+    expect($account->balance_updated_at)->not->toBeNull();
 });
 
 test('validates required fields on add', function () {

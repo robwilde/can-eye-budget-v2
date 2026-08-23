@@ -11,6 +11,7 @@ use App\DTOs\BasiqAccount;
 use App\DTOs\BasiqJob;
 use App\DTOs\BasiqTransaction;
 use App\Enums\AccountClass;
+use App\Enums\ImportSource;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\RefreshStatus;
 use App\Enums\RefreshTrigger;
@@ -225,7 +226,9 @@ test('successful job syncs accounts via updateOrCreate', function () {
         ->user_id->toBe($user->id)
         ->name->toBe('Everyday')
         ->balance->toBe(50000)
-        ->currency->toBe('AUD');
+        ->currency->toBe('AUD')
+        ->balance_source->toBe(ImportSource::Basiq);
+    expect($account->balance_updated_at)->not->toBeNull();
 });
 
 test('syncs credit_limit and available_funds from basiq', function () {
