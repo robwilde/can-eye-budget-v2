@@ -37,6 +37,7 @@ return [
     'redbark' => [
         'base_url' => env('REDBARK_BASE_URL') ?: 'https://api.redbark.com/v1',
         'include_pending' => (bool) env('REDBARK_INCLUDE_PENDING', false),
+        'hold_ttl_days' => (int) env('REDBARK_HOLD_TTL_DAYS', 14),
     ],
 
     'postmark' => [
