@@ -8,6 +8,7 @@ use App\Casts\MoneyCast;
 use App\Enums\AccountClass;
 use App\Enums\AccountGroup;
 use App\Enums\AccountStatus;
+use App\Enums\ImportSource;
 use App\Models\Account;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
@@ -80,6 +81,8 @@ final class AccountManager extends Component
         $mutableData = [
             'name' => $validated['name'],
             'balance' => (int) round((float) $validated['balance'] * 100),
+            'balance_source' => ImportSource::Manual,
+            'balance_updated_at' => now(),
             'type' => $validated['type'],
             'group' => $validated['group'],
             'institution' => $validated['institution'] ?: null,

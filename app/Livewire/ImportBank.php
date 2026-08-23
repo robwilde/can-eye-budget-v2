@@ -158,7 +158,11 @@ final class ImportBank extends Component
             ->update(['column_mapping' => $this->mapping]);
 
         if ($this->currentBalance !== '') {
-            $account->update(['balance' => (int) round(((float) $this->currentBalance) * 100)]);
+            $account->update([
+                'balance' => (int) round(((float) $this->currentBalance) * 100),
+                'balance_source' => ImportSource::Csv,
+                'balance_updated_at' => now(),
+            ]);
         }
 
         ImportCsvTransactionsJob::dispatch($bankImport);
@@ -320,6 +324,8 @@ final class ImportBank extends Component
             'institution' => 'CSV import',
             'currency' => 'AUD',
             'balance' => (int) round(((float) $this->newAccountBalance) * 100),
+            'balance_source' => ImportSource::Csv,
+            'balance_updated_at' => now(),
             'group' => 'day-to-day',
             'status' => 'active',
             'import_source' => ImportSource::Csv,
