@@ -29,6 +29,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property string $institution
  * @property string $currency
  * @property int $balance
+ * @property ImportSource|null $balance_source
+ * @property CarbonImmutable|null $balance_updated_at
  * @property int|null $credit_limit
  * @property int|null $available_funds
  * @property string|null $description
@@ -56,6 +58,8 @@ final class Account extends Model
         'institution',
         'currency',
         'balance',
+        'balance_source',
+        'balance_updated_at',
         'credit_limit',
         'available_funds',
         'description',
@@ -186,6 +190,8 @@ final class Account extends Model
             'status' => AccountStatus::class,
             'import_source' => ImportSource::class,
             'balance' => MoneyCast::class,
+            'balance_source' => ImportSource::class,
+            'balance_updated_at' => 'immutable_datetime',
             'credit_limit' => MoneyCast::class,
             'available_funds' => MoneyCast::class,
             'column_mapping' => 'array',

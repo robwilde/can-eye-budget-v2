@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int $user_id
  * @property string $api_key
  * @property RedbarkFeedStatus $status
+ * @property int $auth_failure_count
  * @property bool $pending_account_setup
  * @property CarbonImmutable|null $last_synced_at
  * @property CarbonImmutable $created_at
@@ -38,6 +39,7 @@ final class RedbarkFeed extends Model
         'user_id',
         'api_key',
         'status',
+        'auth_failure_count',
         'pending_account_setup',
         'last_synced_at',
     ];
@@ -68,6 +70,7 @@ final class RedbarkFeed extends Model
         return [
             'api_key' => 'encrypted',
             'status' => RedbarkFeedStatus::class,
+            'auth_failure_count' => 'integer',
             'last_synced_at' => 'immutable_datetime',
             'pending_account_setup' => 'boolean',
         ];
