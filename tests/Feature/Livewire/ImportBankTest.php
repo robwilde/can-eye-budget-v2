@@ -112,7 +112,11 @@ test('inline account creation defaults balance to zero when left blank', functio
         ->call('uploadAndDetectHeaders')
         ->assertSet('step', 2);
 
-    expect(Account::query()->where('user_id', $user->id)->first()->balance)->toBe(0);
+    $account = Account::query()->where('user_id', $user->id)->first();
+
+    expect($account->balance)->toBe(0)
+        ->and($account->balance_source)->toBeNull()
+        ->and($account->balance_updated_at)->toBeNull();
 });
 
 test('confirmImport dispatches the job and moves to step 3', function () {
