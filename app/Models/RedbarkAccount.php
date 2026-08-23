@@ -28,6 +28,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $institution_name
  * @property bool $ignored
  * @property CarbonImmutable|null $sync_start_date
+ * @property CarbonImmutable|null $transactions_synced_at
  * @property array<int, array<string, mixed>>|null $raw_transactions_payload
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
@@ -53,6 +54,7 @@ final class RedbarkAccount extends Model
         'institution_name',
         'ignored',
         'sync_start_date',
+        'transactions_synced_at',
         'raw_transactions_payload',
     ];
 
@@ -104,6 +106,7 @@ final class RedbarkAccount extends Model
             'current_balance' => MoneyCast::class,
             'raw_transactions_payload' => 'array',
             'sync_start_date' => 'immutable_date',
+            'transactions_synced_at' => 'immutable_datetime',
             'ignored' => 'boolean',
         ];
     }
