@@ -8,6 +8,7 @@ use App\Contracts\RedbarkServiceContract;
 use App\DTOs\RedbarkBalanceData;
 use App\DTOs\RedbarkConnectionData;
 use App\DTOs\RedbarkTransactionData;
+use App\Enums\ImportSource;
 use App\Enums\RedbarkFeedStatus;
 use App\Enums\RefreshStatus;
 use App\Enums\RefreshTrigger;
@@ -49,16 +50,16 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
 
     public const int UNIQUE_FOR = 900;
 
+    public const int AUTH_FAILURE_THRESHOLD = 3;
+
     /** A settled pending row may post up to this many days after it appeared. */
-    private const int PENDING_CLAIM_WINDOW_DAYS = 8;
+    public const int PENDING_CLAIM_WINDOW_DAYS = 8;
 
     private const int BACKFILL_DAYS = 90;
 
     private const int INCREMENTAL_LOOKBACK_DAYS = 7;
 
     public int $tries = 5;
-
-    public int $backoff = 30;
 
     /** A 90-day backfill across several accounts is many sequential HTTP calls. */
     public int $timeout = 600;
@@ -102,7 +103,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             ->first();
 
         if (! $log) {
-            $log = RedbarkSyncLog::create([
+            RedbarkSyncLog::create([
                 'redbark_feed_id' => $feed->id,
                 'user_id' => $feed->user_id,
                 'status' => RefreshStatus::Pending,
@@ -111,6 +112,18 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
         }
 
         self::dispatch($feed, $trigger);
+    }
+
+    /**
+     * Exponential rather than flat: neither a rotated key nor a provider-side auth blip
+     * clears in 30 seconds, and five attempts 30 seconds apart burn the whole retry
+     * budget inside three minutes.
+     *
+     * @return list<int>
+     */
+    public function backoff(): array
+    {
+        return [60, 300, 900];
     }
 
     public function uniqueId(): int
@@ -122,7 +135,10 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
     public function middleware(): array
     {
         return [
-            new WithoutOverlapping("redbark-feed-{$this->feed->id}"),
+            // expireAfter is load-bearing: without it a worker killed mid-run (queue
+            // timeout, OOM) leaves the lock held forever and every later sync for this
+            // feed is dropped silently.
+            new WithoutOverlapping("redbark-feed-{$this->feed->id}")->expireAfter(self::UNIQUE_FOR),
         ];
     }
 
@@ -153,10 +169,19 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             'accounts' => $linkedCount,
         ] = $this->applyToAccounts($ingestor, $matcher);
 
-        // Only advance the cursor if no account's fetch failed. If any fetch failed,
-        // the next run needs to retry that account or risk losing transactions past the 7-day lookback.
+        // last_synced_at is no longer the per-account data cursor (see
+        // transactions_synced_at); it now means "last run in which every account's
+        // fetch succeeded", read by the providers panel and by RedbarkAccountSetup,
+        // which only test it for null. Removing it would break both.
         if (! $this->transactionFetchFailed) {
             $this->feed->update(['last_synced_at' => now()]);
+        }
+
+        // Reaching here means every phase authenticated, so an earlier streak is stale.
+        // Deliberately not gated on transactionFetchFailed: that flag is about fetches,
+        // not credentials.
+        if ($this->feed->auth_failure_count !== 0) {
+            $this->feed->update(['auth_failure_count' => 0]);
         }
 
         $log->update([
@@ -217,12 +242,22 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * An authentication failure means the stored key is dead: flag the feed so the
-     * settings panel prompts for a new one, close the log, and stop.
+     * An authentication failure *may* mean the stored key is dead — it is also what a
+     * provider-side auth blip looks like. Count the failures and only flag the feed once
+     * the streak reaches AUTH_FAILURE_THRESHOLD, because RequiresUpdate takes it out of
+     * the scheduled sweep entirely until the user pastes a new key.
      */
     private function abortOnAuthFailure(RedbarkSyncLog $log, RedbarkAuthenticationException $exception): void
     {
-        $this->feed->update(['status' => RedbarkFeedStatus::RequiresUpdate]);
+        $failures = $this->feed->auth_failure_count + 1;
+
+        $this->feed->update([
+            'auth_failure_count' => $failures,
+            'status' => $failures >= self::AUTH_FAILURE_THRESHOLD
+                ? RedbarkFeedStatus::RequiresUpdate
+                : $this->feed->status,
+        ]);
+
         $this->appendError('authentication', $exception->getMessage());
 
         $log->update([
@@ -419,12 +454,16 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             );
 
             // An empty response leaves the snapshot alone. Merging it would read every
-            // stored pending row as settled and drop the lot.
+            // stored pending row as settled and drop the lot. The fetch still succeeded,
+            // so this account's cursor advances.
             if ($freshRows === []) {
+                $redbarkAccount->update(['transactions_synced_at' => now()]);
+
                 continue;
             }
 
             $redbarkAccount->update([
+                'transactions_synced_at' => now(),
                 'raw_transactions_payload' => $this->mergeTransactions(
                     $redbarkAccount->raw_transactions_payload ?? [],
                     $freshRows,
@@ -443,8 +482,10 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
     {
         $snapshot = $redbarkAccount->raw_transactions_payload;
 
-        if ($snapshot !== null && $snapshot !== [] && $this->feed->last_synced_at !== null) {
-            return $this->feed->last_synced_at->subDays(self::INCREMENTAL_LOOKBACK_DAYS)->startOfDay();
+        if ($snapshot !== null && $snapshot !== [] && $redbarkAccount->transactions_synced_at !== null) {
+            return $redbarkAccount->transactions_synced_at
+                ->subDays(self::INCREMENTAL_LOOKBACK_DAYS)
+                ->startOfDay();
         }
 
         return $redbarkAccount->sync_start_date ?? CarbonImmutable::now()->subDays(self::BACKFILL_DAYS);
@@ -681,6 +722,8 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             if ($redbarkAccount->current_balance !== null) {
                 $account->update([
                     'balance' => $redbarkAccount->current_balance,
+                    'balance_source' => ImportSource::Redbark,
+                    'balance_updated_at' => now(),
                     'currency' => $redbarkAccount->currency,
                 ]);
             }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Contracts\BasiqServiceContract;
+use App\Enums\ImportSource;
 use App\Enums\RefreshStatus;
 use App\Enums\TransactionSource;
 use App\Models\Account;
@@ -160,6 +161,8 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
                     'institution' => $dto->institution,
                     'currency' => $dto->currency,
                     'balance' => self::toCents($dto->balance ?? '0'),
+                    'balance_source' => ImportSource::Basiq,
+                    'balance_updated_at' => now(),
                     'credit_limit' => self::toCentsOrNull($dto->creditLimit),
                     'available_funds' => self::toCentsOrNull($dto->availableFunds),
                     'status' => $dto->status ?? 'active',
