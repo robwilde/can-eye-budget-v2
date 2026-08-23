@@ -35,6 +35,7 @@ final class RedbarkAccountFactory extends Factory
             'institution_name' => $institution,
             'ignored' => false,
             'sync_start_date' => null,
+            'transactions_synced_at' => null,
             'raw_transactions_payload' => null,
         ];
     }
