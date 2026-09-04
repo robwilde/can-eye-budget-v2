@@ -16,7 +16,7 @@ test('transaction list page renders with data', function () {
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
         'description' => 'WOOLWORTHS SYDNEY',
-        'post_date' => now()->subDays(5),
+        'post_date' => now()->startOfMonth(),
     ]);
 
     $this->actingAs($user);
@@ -36,7 +36,7 @@ test('category filter from URL shows correct transactions', function () {
         'account_id' => $account->id,
         'category_id' => $groceries->id,
         'description' => 'WOOLWORTHS',
-        'post_date' => now()->subDays(5),
+        'post_date' => now()->startOfMonth(),
     ]);
 
     $this->actingAs($user);
@@ -54,13 +54,13 @@ test('search filters transactions by description', function () {
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
         'description' => 'WOOLWORTHS SYDNEY',
-        'post_date' => now()->subDays(5),
+        'post_date' => now()->startOfMonth(),
     ]);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
         'description' => 'COLES MELBOURNE',
-        'post_date' => now()->subDays(5),
+        'post_date' => now()->startOfMonth(),
     ]);
 
     $this->actingAs($user);
@@ -79,13 +79,13 @@ test('account filter shows only transactions from selected account', function ()
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $accountA->id,
         'description' => 'WOOLWORTHS SYDNEY',
-        'post_date' => now()->subDays(5),
+        'post_date' => now()->startOfMonth(),
     ]);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $accountB->id,
         'description' => 'COLES MELBOURNE',
-        'post_date' => now()->subDays(5),
+        'post_date' => now()->startOfMonth(),
     ]);
 
     $this->actingAs($user);
@@ -103,13 +103,13 @@ test('direction toggle switches between all outgoing and incoming', function () 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
         'description' => 'WOOLWORTHS SYDNEY',
-        'post_date' => now()->subDays(5),
+        'post_date' => now()->startOfMonth(),
     ]);
 
     Transaction::factory()->for($user)->credit()->create([
         'account_id' => $account->id,
         'description' => 'SALARY PAYMENT',
-        'post_date' => now()->subDays(5),
+        'post_date' => now()->startOfMonth(),
     ]);
 
     $this->actingAs($user);
@@ -138,14 +138,14 @@ test('clicking sort header changes sort order', function () {
         'account_id' => $account->id,
         'description' => 'EXPENSIVE ITEM',
         'amount' => 50000,
-        'post_date' => now()->subDays(5),
+        'post_date' => now()->startOfMonth(),
     ]);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
         'description' => 'CHEAP ITEM',
         'amount' => 500,
-        'post_date' => now()->subDays(5),
+        'post_date' => now()->startOfMonth(),
     ]);
 
     $this->actingAs($user);
