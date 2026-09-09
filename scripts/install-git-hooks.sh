@@ -14,8 +14,23 @@
 set -euo pipefail
 
 root="$(git rev-parse --show-toplevel)"
-src="$root/scripts/git-hooks"
-dest="$root/.git/hooks"
+
+# Locate the hooks directory via git, not by assuming "$root/.git/hooks":
+# in a linked `git worktree` checkout .git is a FILE, that path does not exist,
+# and mkdir -p under it fails. git also shares one hooks directory across every
+# worktree, so --git-path resolves to the main repository's hooks dir.
+dest="$(cd "$root" && git rev-parse --git-path hooks)"
+case "$dest" in
+	/*) ;;
+	*) dest="$root/$dest" ;; # --git-path may return a relative path
+esac
+
+# Because that shared hooks directory belongs to the main repository, link to
+# the main worktree's scripts rather than this checkout's: a linked worktree
+# can be removed later, which would leave every worktree with a dangling hook.
+main_root="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
+[ -n "$main_root" ] || main_root="$root"
+src="$main_root/scripts/git-hooks"
 
 [ -d "$src" ] || {
 	printf 'install-git-hooks: %s missing\n' "$src" >&2
@@ -31,12 +46,12 @@ for hook in "$src"/*; do
 
 	if [ -e "$target" ] && [ ! -L "$target" ]; then
 		printf 'install-git-hooks: %s exists and is not a symlink; leaving it alone.\n' "$name" >&2
-		printf '  Inspect .git/hooks/%s and either delete it or chain it manually.\n' "$name" >&2
+		printf '  Inspect %s and either delete it or chain it manually.\n' "$target" >&2
 		skipped="$skipped $name"
 		continue
 	fi
 
-	ln -sfn "../../scripts/git-hooks/$name" "$target"
+	ln -sfn "$src/$name" "$target"
 	chmod +x "$hook"
 	printf 'install-git-hooks: linked %s\n' "$name"
 done
@@ -47,7 +62,7 @@ for hook in "$src"/*; do
 	[ -f "$hook" ] || continue
 	name="$(basename "$hook")"
 	target="$dest/$name"
-	if [ ! -L "$target" ] || [ "$(readlink "$target")" != "../../scripts/git-hooks/$name" ]; then
+	if [ ! -L "$target" ] || [ "$(readlink "$target")" != "$src/$name" ]; then
 		printf '\ninstall-git-hooks: FAILED — %s is not linked to this repo'"'"'s hook.\n' "$name" >&2
 		[ -n "$skipped" ] && printf 'Skipped:%s\n' "$skipped" >&2
 		exit 1
