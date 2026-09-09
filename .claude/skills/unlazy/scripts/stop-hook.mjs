@@ -20,7 +20,7 @@
 //   stdout {"decision":"block","reason":"..."} + exit 0 to block; exit 0 silent to allow.
 
 import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { createHash } from "node:crypto";
 
 const MAX_BLOCKS = 6;
@@ -61,6 +61,12 @@ for (const file of files) {
   try { text = readFileSync(file, "utf8"); } catch { continue; }
   combined += text;
   const lines = text.split(/\r?\n/);
+  // Orchestrated mode deliberately reuses ids (G1, G2, ...) across leaf ledgers,
+  // so a bare id is ambiguous once more than one gate file is in play. Qualify
+  // with the ledger name rather than de-duplicating: two distinct unmet gates
+  // that happen to share an id must stay two entries, or the reported count and
+  // the listed ids disagree and a real outstanding gate goes unreported.
+  const ledger = files.length > 1 ? `${basename(file).replace(/\.md$/, "")}/` : "";
   const abandoned = new Set(
     lines.map(l => (l.match(ABANDON_RE) || [])[1]).filter(Boolean).map(s => s.replace(/:$/, ""))
   );
@@ -68,7 +74,7 @@ for (const file of files) {
   const flush = () => {
     if (!cur || abandoned.has(cur.id)) { cur = null; return; }
     const pending = cur.evidence === null || /^pending$/i.test(cur.evidence);
-    if (!cur.checked || pending) unmet.push(cur.id);
+    if (!cur.checked || pending) unmet.push(`${ledger}${cur.id}`);
     cur = null;
   };
   for (const line of lines) {
