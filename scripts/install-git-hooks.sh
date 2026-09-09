@@ -23,6 +23,7 @@ dest="$root/.git/hooks"
 }
 mkdir -p "$dest"
 
+skipped=""
 for hook in "$src"/*; do
 	[ -f "$hook" ] || continue
 	name="$(basename "$hook")"
@@ -30,13 +31,27 @@ for hook in "$src"/*; do
 
 	if [ -e "$target" ] && [ ! -L "$target" ]; then
 		printf 'install-git-hooks: %s exists and is not a symlink; leaving it alone.\n' "$name" >&2
-		printf '  (GrumPHP-managed hook? merge manually if you meant to replace it.)\n' >&2
+		printf '  Inspect .git/hooks/%s and either delete it or chain it manually.\n' "$name" >&2
+		skipped="$skipped $name"
 		continue
 	fi
 
 	ln -sfn "../../scripts/git-hooks/$name" "$target"
 	chmod +x "$hook"
 	printf 'install-git-hooks: linked %s\n' "$name"
+done
+
+# Assert every hook we ship is actually live. Reporting success while a hook
+# was skipped is how a repo ends up believing it is guarded when it is not.
+for hook in "$src"/*; do
+	[ -f "$hook" ] || continue
+	name="$(basename "$hook")"
+	target="$dest/$name"
+	if [ ! -L "$target" ] || [ "$(readlink "$target")" != "../../scripts/git-hooks/$name" ]; then
+		printf '\ninstall-git-hooks: FAILED — %s is not linked to this repo'"'"'s hook.\n' "$name" >&2
+		[ -n "$skipped" ] && printf 'Skipped:%s\n' "$skipped" >&2
+		exit 1
+	fi
 done
 
 # Pin credentials now so the very first push works, rather than only after the

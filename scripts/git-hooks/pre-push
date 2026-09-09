@@ -6,6 +6,15 @@
 # post-checkout in .git/hooks, so core.hooksPath is deliberately NOT repointed;
 # doing so would disable those hooks.
 #
+# What this does and does not do:
+#   - ALWAYS: pins this repo's git credentials to the required account, so the
+#     push itself succeeds no matter which account is globally active.
+#   - NOT by default: switching the globally active gh account. That is global
+#     state and would change identity for every other project mid-push, so it
+#     is opt-in. Only `gh` subcommands (gh pr create, gh api) need it; git does
+#     not. Enable per-push or in your shell profile with:
+#         GH_ACCOUNT_GUARD_FIX=1
+#
 # Escape hatch:  GH_ACCOUNT_GUARD=0 git push ...
 
 [ "${GH_ACCOUNT_GUARD:-1}" = "0" ] && exit 0
@@ -16,7 +25,13 @@ guard="$root/scripts/gh-account-guard.sh"
 # Missing guard must not become an unpushable repo (e.g. older branches).
 [ -x "$guard" ] || exit 0
 
-if ! "$guard" --quiet; then
+if [ "${GH_ACCOUNT_GUARD_FIX:-0}" = "1" ]; then
+	set -- --quiet --fix
+else
+	set -- --quiet
+fi
+
+if ! "$guard" "$@"; then
 	printf '\npre-push aborted: wrong or unusable GitHub account.\n' >&2
 	printf 'Fix with: scripts/gh-account-guard.sh --fix\n' >&2
 	printf 'Bypass with: GH_ACCOUNT_GUARD=0 git push ...\n\n' >&2
