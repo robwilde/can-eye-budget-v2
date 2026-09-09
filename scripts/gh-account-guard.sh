@@ -65,6 +65,18 @@ command -v git >/dev/null 2>&1 || {
 required="$(git config --get canieye.githubAccount || true)"
 [ -n "$required" ] || required="$REQUIRED_ACCOUNT_DEFAULT"
 
+# This value is interpolated into the credential helper written to git config,
+# which git executes as a shell command. Anything outside the GitHub login
+# grammar could therefore become shell syntax, so reject it rather than quote
+# around it. GitHub logins are alphanumeric with internal hyphens.
+case "$required" in
+	*[!A-Za-z0-9-]* | -* | *- | "")
+		err "invalid account login '$required' (expected [A-Za-z0-9-], no leading/trailing hyphen)."
+		err "check: git config canieye.githubAccount"
+		exit 1
+		;;
+esac
+
 # Repo slug from origin, tolerating https and ssh remotes.
 origin_url="$(git config --get remote.origin.url || true)"
 slug="$(printf '%s' "$origin_url" |
