@@ -22,7 +22,15 @@ const global_ = args.includes("--global");
 const shared = args.includes("--shared");
 
 const hookScript = join(dirname(fileURLToPath(import.meta.url)), "stop-hook.mjs");
-const MARKER = "unlazy"; // identifies our entries: command mentions unlazy + stop-hook.mjs
+// Ownership marker. Keying off the directory name alone ("unlazy" in the path)
+// breaks --uninstall the moment the skill directory is renamed, leaving an
+// unremovable hook behind; keying off the stop-hook.mjs basename alone would
+// claim another tool's Stop hook of the same name and delete it. So the
+// generated command carries an inert, path-independent flag, and ownership
+// requires that flag (or, for entries written by an older installer, the
+// legacy directory-name match).
+const MARKER_FLAG = "--unlazy-stop-hook";
+const LEGACY_MARKER = "unlazy";
 
 const target = global_
   ? join(homedir(), ".claude", "settings.json")
@@ -43,7 +51,8 @@ const stopHooks = Array.isArray(settings.hooks.Stop) ? settings.hooks.Stop : [];
 const isOurs = (entry) =>
   Array.isArray(entry?.hooks) &&
   entry.hooks.some(h => typeof h?.command === "string" &&
-    h.command.includes("stop-hook.mjs") && h.command.toLowerCase().includes(MARKER));
+    h.command.includes("stop-hook.mjs") &&
+    (h.command.includes(MARKER_FLAG) || h.command.toLowerCase().includes(LEGACY_MARKER)));
 
 const kept = stopHooks.filter(e => !isOurs(e));
 
@@ -63,7 +72,7 @@ if (uninstall) {
 const entry = {
   hooks: [{
     type: "command",
-    command: `node "${hookScript}"`,
+    command: `node "${hookScript}" ${MARKER_FLAG}`,
     timeout: 20,
   }],
 };
@@ -78,7 +87,7 @@ mkdirSync(dirname(target), { recursive: true });
 writeFileSync(target, JSON.stringify(settings, null, 2) + "\n");
 
 console.log(`Installed unlazy Stop hook into ${target}
-  command: node "${hookScript}"
+  command: node "${hookScript}" ${MARKER_FLAG}
   effect:  while GATES.md or gates/*.md in the working directory contain unmet
            gates, ending the turn is blocked (max 6 blocks without progress,
            ABANDON lines are honored as an honest exit).
