@@ -88,8 +88,12 @@ fi
 helper_key="credential.https://github.com.helper"
 want_helper="!f() { test \"\$1\" = get && printf 'username=%s\\npassword=%s\\n' '$required' \"\$(gh auth token --user '$required')\"; }; f"
 
+# The desired state is exactly two entries: an empty one that discards the
+# inherited global helper, then the pinned one. Compare against that, or the
+# guard rewrites the config (and says so) on every single run.
 current_helpers="$(git config --local --get-all "$helper_key" 2>/dev/null || true)"
-if [ "$current_helpers" != "$want_helper" ]; then
+want_helpers="$(printf '\n%s' "$want_helper")"
+if [ "$current_helpers" != "$want_helpers" ]; then
 	git config --local --unset-all "$helper_key" 2>/dev/null || true
 	# An empty first entry resets the inherited global helper, so the pinned
 	# one below is the only helper git consults in this repo.
