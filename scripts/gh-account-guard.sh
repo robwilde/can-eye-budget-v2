@@ -33,6 +33,12 @@ set -uo pipefail
 
 REQUIRED_ACCOUNT_DEFAULT="robwilde"
 
+# Every gh call is pinned to this host. gh defaults to whatever host the user
+# configured, so on a machine fronted by GitHub Enterprise an unqualified call
+# would resolve a different account and could pin an enterprise token into the
+# github.com credential helper.
+HOST="github.com"
+
 fix=0
 quiet=0
 for arg in "$@"; do
@@ -88,17 +94,17 @@ fi
 
 # 1. Is the required account authenticated at all? Nothing else can be fixed
 #    from here if it is not, so fail with the exact command to run.
-if ! gh auth token --user "$required" >/dev/null 2>&1; then
-	err "account '$required' is not authenticated in the gh keyring."
-	err "run: gh auth login --hostname github.com   (as $required)"
+if ! gh auth token --hostname "$HOST" --user "$required" >/dev/null 2>&1; then
+	err "account '$required' is not authenticated on $HOST."
+	err "run: gh auth login --hostname $HOST   (as $required)"
 	exit 1
 fi
 
 # 2. Pin git's credentials for THIS repository to the required account. This is
 #    the actual fix: it is local config, it survives the global active account
 #    changing under us, and it leaves other repos alone. Idempotent.
-helper_key="credential.https://github.com.helper"
-want_helper="!f() { test \"\$1\" = get && printf 'username=%s\\npassword=%s\\n' '$required' \"\$(gh auth token --user '$required')\"; }; f"
+helper_key="credential.https://$HOST.helper"
+want_helper="!f() { test \"\$1\" = get && printf 'username=%s\\npassword=%s\\n' '$required' \"\$(gh auth token --hostname '$HOST' --user '$required')\"; }; f"
 
 # The desired state is exactly two entries: an empty one that discards the
 # inherited global helper, then the pinned one. Compare against that, or the
@@ -106,31 +112,46 @@ want_helper="!f() { test \"\$1\" = get && printf 'username=%s\\npassword=%s\\n' 
 current_helpers="$(git config --local --get-all "$helper_key" 2>/dev/null || true)"
 want_helpers="$(printf '\n%s' "$want_helper")"
 if [ "$current_helpers" != "$want_helpers" ]; then
+	# Every write is checked: a silent failure here would leave the repo
+	# unpinned while the script went on to report success.
 	git config --local --unset-all "$helper_key" 2>/dev/null || true
 	# An empty first entry resets the inherited global helper, so the pinned
 	# one below is the only helper git consults in this repo.
-	git config --local --add "$helper_key" ""
-	git config --local --add "$helper_key" "$want_helper"
+	if ! git config --local --add "$helper_key" "" ||
+		! git config --local --add "$helper_key" "$want_helper"; then
+		err "failed to write $helper_key to this repo's git config."
+		err "check permissions on $(git rev-parse --git-path config)."
+		exit 1
+	fi
 	say "gh-account-guard: pinned this repo's git credentials to '$required'."
 fi
 
 # 3. Confirm the pinned token actually grants push on this repo. Catches a
-#    revoked or under-scoped token before git talks to the remote.
-perms="$(GH_TOKEN="$(gh auth token --user "$required")" \
-	gh api "repos/$slug" --jq '.permissions.push' 2>/dev/null || true)"
-if [ "$perms" != "true" ]; then
-	err "account '$required' cannot push to $slug (permissions.push=${perms:-unknown})."
-	err "check the token's scopes, or that '$required' still has write access."
-	exit 1
+#    revoked or under-scoped token before git talks to the remote. An API that
+#    cannot be reached is NOT the same as a denial: blocking every push during
+#    a rate limit or outage would be worse than the 403 this guard exists to
+#    prevent, so an indeterminate answer warns and allows.
+token="$(gh auth token --hostname "$HOST" --user "$required")"
+if perms="$(GH_TOKEN="$token" gh api --hostname "$HOST" "repos/$slug" --jq '.permissions.push' 2>/dev/null)"; then
+	if [ "$perms" != "true" ]; then
+		err "account '$required' cannot push to $slug (permissions.push=$perms)."
+		err "check the token's scopes, or that '$required' still has write access."
+		err "to push anyway: GH_ACCOUNT_GUARD=0 git push ..."
+		exit 1
+	fi
+else
+	say "gh-account-guard: warning — could not reach the $HOST API to confirm push"
+	say "  access for '$required' (offline, rate limited, or an outage). Credentials"
+	say "  are pinned; continuing rather than blocking the push."
 fi
 
 # 4. gh CLI subcommands (gh pr create, gh api, ...) read the globally active
 #    account and cannot be redirected by git config. Report the mismatch, and
 #    only switch when explicitly asked, since the effect is global.
-active="$(gh api user --jq .login 2>/dev/null || true)"
+active="$(gh api --hostname "$HOST" user --jq .login 2>/dev/null || true)"
 if [ "$active" != "$required" ]; then
 	if [ "$fix" -eq 1 ]; then
-		if gh auth switch --hostname github.com --user "$required" >/dev/null 2>&1; then
+		if gh auth switch --hostname "$HOST" --user "$required" >/dev/null 2>&1; then
 			say "gh-account-guard: switched active gh account to '$required' (global)."
 		else
 			err "failed to switch active gh account to '$required'."
