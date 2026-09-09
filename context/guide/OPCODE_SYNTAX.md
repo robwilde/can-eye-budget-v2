@@ -1,3 +1,4 @@
+op down
 # Opcode Syntax Reference
 
 Opcode is a lightweight Bash command shortcut manager. Define shortcuts in a config file and execute them with `op <code>`.
