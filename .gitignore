@@ -28,8 +28,7 @@ tests/Basiq/http-client.env.json
 !/CLAUDE.md
 .claude/scheduled_tasks.lock
 .unlazy-hook-state.json
-/GATES.md
-/gates
+.claude/settings.local.json
 /context
 /graphify-out
 /thoughts
