@@ -1,0 +1,26 @@
+#!/usr/bin/env sh
+# pre-push — refuse to push with the wrong GitHub identity.
+#
+# Installed by scripts/install-git-hooks.sh, which symlinks it into
+# .git/hooks/pre-push. GrumPHP owns pre-commit, commit-msg, post-commit and
+# post-checkout in .git/hooks, so core.hooksPath is deliberately NOT repointed;
+# doing so would disable those hooks.
+#
+# Escape hatch:  GH_ACCOUNT_GUARD=0 git push ...
+
+[ "${GH_ACCOUNT_GUARD:-1}" = "0" ] && exit 0
+
+root="$(git rev-parse --show-toplevel)" || exit 0
+guard="$root/scripts/gh-account-guard.sh"
+
+# Missing guard must not become an unpushable repo (e.g. older branches).
+[ -x "$guard" ] || exit 0
+
+if ! "$guard" --quiet; then
+	printf '\npre-push aborted: wrong or unusable GitHub account.\n' >&2
+	printf 'Fix with: scripts/gh-account-guard.sh --fix\n' >&2
+	printf 'Bypass with: GH_ACCOUNT_GUARD=0 git push ...\n\n' >&2
+	exit 1
+fi
+
+exit 0
