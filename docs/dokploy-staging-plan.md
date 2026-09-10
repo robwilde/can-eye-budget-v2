@@ -168,8 +168,12 @@ Evidence from the repository:
   therefore required by the current report implementation.
 - `bootstrap/app.php` now calls `$middleware->trustProxies(at: '*')` alongside `validateCsrfTokens(except: ['webhooks/basiq'])` (#371), so behind Dokploy's
   Traefik the application resolves the real client IP and recognises the request as secure. The framework's default trusted-header set is kept.
-- `/up` is registered via `withRouting(health: '/up')`. The framework handler dispatches `DiagnosingHealth` and returns 200 unless a listener throws
-  (`Illuminate\Foundation\Configuration\ApplicationBuilder`). `app/Listeners/VerifyHealthDependencies.php` (#372) is that listener: it runs `select 1` on the
+- `/up` is registered explicitly in `bootstrap/app.php` as `App\Http\Controllers\HealthCheckController` behind `throttle:60,1` (#382); the
+  `withRouting(health: '/up')` shorthand was dropped because it offers no middleware hook. The controller reproduces the framework handler
+  (`Illuminate\Foundation\Configuration\ApplicationBuilder`): it dispatches `DiagnosingHealth` and returns 200 unless a listener throws. Two behaviours the
+  shorthand provided are preserved deliberately — `preventRequestsDuringMaintenance(except: ['up'])` keeps `/up` reachable during `artisan down`, and the
+  limiter keys per client IP, so the container's own `HEALTHCHECK` (`curl http://127.0.0.1/up`, no forwarded header) cannot be starved by an external burst.
+  `app/Listeners/VerifyHealthDependencies.php` (#372) is that listener: it runs `select 1` on the
   default connection and pings Redis, so `/up` returns 500 when MariaDB or Redis is unreachable instead of reporting healthy on a broken application. Note the
   scope: `select 1` proves connectivity, **not** schema state, so `/up` can still return 200 against a reachable but unmigrated database. Migration ordering is
   guaranteed by `docker/entrypoint.sh` running `migrate` before `exec`, not by this listener.

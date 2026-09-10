@@ -32,3 +32,55 @@ test('forwarded headers from the reverse proxy are trusted', function () {
         'X-Forwarded-Proto' => 'https',
     ])->assertOk()->assertJson(['ip' => '203.0.113.9', 'secure' => true]);
 });
+
+test('up runs the dependency checks on every request within the throttle limit', function () {
+    Redis::shouldReceive('connection->ping')->times(60)->andReturnTrue();
+
+    foreach (range(1, 60) as $ignored) {
+        $this->get('/up', ['X-Forwarded-For' => '203.0.113.10'])->assertOk();
+    }
+});
+
+test('up returns 429 once one client exceeds the throttle limit', function () {
+    Redis::shouldReceive('connection->ping')->andReturnTrue();
+
+    foreach (range(1, 60) as $ignored) {
+        $this->get('/up', ['X-Forwarded-For' => '203.0.113.10'])->assertOk();
+    }
+
+    $this->get('/up', ['X-Forwarded-For' => '203.0.113.10'])->assertStatus(429);
+});
+
+test('a burst from one client leaves other clients unthrottled', function () {
+    Redis::shouldReceive('connection->ping')->andReturnTrue();
+
+    foreach (range(1, 61) as $ignored) {
+        $this->get('/up', ['X-Forwarded-For' => '203.0.113.10']);
+    }
+
+    $this->get('/up', ['X-Forwarded-For' => '203.0.113.10'])->assertStatus(429);
+    $this->get('/up', ['X-Forwarded-For' => '198.51.100.7'])->assertOk();
+});
+
+test('a burst from one client leaves the container health probe unthrottled', function () {
+    Redis::shouldReceive('connection->ping')->andReturnTrue();
+
+    foreach (range(1, 61) as $ignored) {
+        $this->get('/up', ['X-Forwarded-For' => '203.0.113.10']);
+    }
+
+    $this->get('/up', ['X-Forwarded-For' => '203.0.113.10'])->assertStatus(429);
+    $this->get('/up')->assertOk();
+});
+
+test('up stays reachable while the application is in maintenance mode', function () {
+    Redis::shouldReceive('connection->ping')->andReturnTrue();
+
+    $this->app->maintenanceMode()->activate([]);
+
+    try {
+        $this->get('/up')->assertOk();
+    } finally {
+        $this->app->maintenanceMode()->deactivate();
+    }
+});
