@@ -21,10 +21,11 @@ for every non-SQLite driver, so PostgreSQL would break monthly report aggregatio
 
 This document is a provisioning plan, not a request to create or deploy Dokploy resources during this investigation.
 
-**Step 0 is implemented on the working branch and awaits merge to `develop`.** The four blocking code changes now exist: a root production image
+**Step 0 is implemented on the working branches and awaits merge to `develop`.** The five blocking code changes now exist: a root production image
 (`Dockerfile`, `.dockerignore`, `docker/`), a trusted-proxy call in `bootstrap/app.php`, an allow-listed Horizon gate
-(`app/Providers/HorizonServiceProvider.php` + `config/horizon.php` `authorized_emails`), and `app/Listeners/VerifyHealthDependencies.php` so `/up` asserts
-MariaDB and Redis. Bank-import storage is settled as a shared volume — a Dokploy provisioning step, not a code change. Do not begin the "Deployment sequence"
+(`app/Providers/HorizonServiceProvider.php` + `config/horizon.php` `authorized_emails`), `app/Listeners/VerifyHealthDependencies.php` so `/up` asserts
+MariaDB and Redis, and the `FORTIFY_REGISTRATION_ENABLED` gate in `config/fortify.php` that lets staging close public sign-up.
+Bank-import storage is settled as a shared volume — a Dokploy provisioning step, not a code change. Do not begin the "Deployment sequence"
 until those changes are merged to `develop`, because that is the branch every Application service builds.
 
 ## Step 0: raise the GitHub work before touching Dokploy
@@ -32,8 +33,10 @@ until those changes are merged to `develop`, because that is the branch every Ap
 The GitHub work is raised in `robwilde/can-eye-budget-v2`. Parent tracking issue: **#375 "Staging deployment readiness (Dokploy)"** — links this document and
 tracks the children below via a task list. Close it only when every blocking child is merged to `develop`.
 
-Children: #369 (production image), #370 (Horizon gate), #371 (trusted proxies), #372 (`/up` dependencies) are blocking; #373 (dev-only dependencies) and #374
-(CI gating for staging deploys) are non-blocking and remain open.
+Children: #369 (production image), #370 (Horizon gate), #371 (trusted proxies), #372 (`/up` dependencies) and #383 (registration env gate) are blocking;
+#373 (dev-only dependencies) and #374 (CI gating for staging deploys) are non-blocking and remain open. #383 blocks because
+`FORTIFY_REGISTRATION_ENABLED` does nothing until its config gate is on `develop`: setting the variable on the service beforehand leaves sign-up open with
+no error to say so.
 
 | # | Issue | Work item                                                               | Status | Scope                                                                                                                                                                                                                                                        |
 |---|---|-------------------------------------------------------------------------|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -366,8 +369,10 @@ environment. Any live-looking credentials previously exposed in Dokploy output s
 Steps 1 and 2 are the gate. Do not start step 3 until step 2 is complete.
 
 1. Done: parent issue #375 and children #369–#374 exist in `robwilde/can-eye-budget-v2`.
-2. Merge #369, #370, #371 and #372 to `develop`. Confirm the branch contains the root `Dockerfile`, `docker/entrypoint.sh` migrating before serving,
-   `trustProxies` in `bootstrap/app.php`, the allow-listed Horizon gate, and `app/Listeners/VerifyHealthDependencies.php`. #373 and #374 do not gate the deploy.
+2. Merge #369, #370, #371, #372 and #383 to `develop`. Confirm the branch contains the root `Dockerfile`, `docker/entrypoint.sh` migrating before serving,
+   `trustProxies` in `bootstrap/app.php`, the allow-listed Horizon gate, `app/Listeners/VerifyHealthDependencies.php`, and the
+   `FORTIFY_REGISTRATION_ENABLED` gate in `config/fortify.php`. Without that last one the staging variable in step 12 is inert. #373 and #374 do not gate
+   the deploy.
 3. Confirm the GitHub repository is accessible to Dokploy.
 4. Create project `can-eye-budget-v2` and environment `staging`.
 5. Create and deploy MariaDB and Redis; wait for both services to report ready and record their internal hostnames.
@@ -415,8 +420,8 @@ Steps 1 and 2 are the gate. Do not start step 3 until step 2 is complete.
 
 ## Open prerequisites
 
-1. Merge #369, #370, #371 and #372 to `develop`. This is the gating prerequisite for everything else; the changes exist on the working branch but Dokploy builds
-   `develop`.
+1. Merge #369, #370, #371, #372 and #383 to `develop`. This is the gating prerequisite for everything else; the changes exist on working branches but Dokploy
+   builds `develop`. #383 must land before prerequisite 3 is actioned, or the variable set there has nothing to read it.
 2. Create the shared import volume in Dokploy and mount it at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon`. The storage
    arrangement itself is settled — shared volume, `FILESYSTEM_DISK=local`. Never adopt `FILESYSTEM_DISK=s3`: `league/flysystem-aws-s3-v3` is absent from
    `composer.lock` and the import path calls `Storage::disk('local')->path()` directly.
