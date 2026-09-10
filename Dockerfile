@@ -47,6 +47,9 @@ RUN mkdir -p bootstrap/cache storage/framework/cache/data storage/framework/sess
 
 EXPOSE 80
 
+# 5 retries x 15s = 75s of failing probes before Docker marks a container unhealthy.
+# Worst-case detection per role: web ~75s from the first failing /up; horizon ~90s
+# (14s Horizon master-supervisor expiry + 75s); scheduler ~255s (180s heartbeat TTL + 75s).
 HEALTHCHECK --start-period=90s --interval=15s --timeout=5s --retries=5 \
   CMD /usr/local/bin/healthcheck.sh
 
