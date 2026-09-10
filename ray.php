@@ -128,7 +128,7 @@ return [
      * Absolute base path for your sites or projects on your local
      * computer where your IDE or code editor is running on.
      */
-    'local_path' => env('RAY_LOCAL_PATH', '/var/home/mrwilde/Projects/MrWilde/Apps/CanEye-Project/can-eye-budget-v2'),
+    'local_path' => env('RAY_LOCAL_PATH'),
 
     /*
      * When this setting is enabled, the package will not try to format values sent to Ray.
