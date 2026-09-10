@@ -12,7 +12,7 @@ mkdir -p \
 
 php artisan storage:link --force
 
-if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
+if [ "${CONTAINER_ROLE:-web}" = "web" ]; then
     php artisan migrate --force --isolated
 fi
 

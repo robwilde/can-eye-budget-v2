@@ -273,8 +273,8 @@ MariaDB, or Redis. Attach it **after** the first successful migration — see th
 - Configure the Laravel environment listed in the environment matrix below.
 - `storage:link` runs in `docker/entrypoint.sh` (`--force`, idempotent), never as a manual step: the container filesystem is ephemeral and a hand-run symlink is
   lost on every redeploy.
-- Migrations run from the entrypoint before the HTTP server binds, gated on `RUN_MIGRATIONS=true` and taking a cache lock via `--isolated`, so the container
-  cannot report ready on an unmigrated schema. Set `RUN_MIGRATIONS=true` on this service only.
+- Migrations run from the entrypoint before the HTTP server binds, gated on `CONTAINER_ROLE=web` and taking a cache lock via `--isolated`, so the container
+  cannot report ready on an unmigrated schema. `CONTAINER_ROLE` defaults to `web`, so this is the only service that migrates.
 - Define a health check against Laravel's `/up` route. #372 gives `/up` a `DiagnosingHealth` listener asserting MariaDB and Redis, so it is now a real readiness
   gate: it returns 500 when either dependency is unreachable. The image also declares an equivalent `HEALTHCHECK` with a 90s start period.
 - Attach `can-eye.mrwilde.dev` to port 80 with HTTPS and Let's Encrypt after the first migration succeeds.
@@ -285,6 +285,7 @@ MariaDB, or Redis. Attach it **after** the first successful migration — see th
   same root `Dockerfile`; do not select Nixpacks.
 - Use one replica.
 - Override the container command with `php artisan horizon`.
+- Set `CONTAINER_ROLE=horizon`. This suppresses the entrypoint migration.
 - Do not attach a domain or external port.
 - Reuse the same application, database, Redis, and storage environment values as the web service. Set a distinct `HORIZON_NAME`, for example
   `can-eye-staging-horizon`.
@@ -298,6 +299,7 @@ MariaDB, or Redis. Attach it **after** the first successful migration — see th
   same root `Dockerfile`; do not select Nixpacks.
 - Use one replica.
 - Override the container command with `php artisan schedule:work`, matching the reference scheduler service.
+- Set `CONTAINER_ROLE=scheduler`. This suppresses the entrypoint migration.
 - Do not attach a domain or external port.
 - Reuse the same application, database, Redis, and storage environment values as the web service.
 - Note that two of the three schedules in `routes/console.php` are `Schedule::call()` closures that execute in this container and write to the database directly,
@@ -334,7 +336,7 @@ Set the common application environment on all three Application services. Values
 | `HORIZON_NAME`                                                           | `can-eye-staging-horizon` on the Horizon service                                                                                         |
 | `HORIZON_PATH`                                                           | Optional defence in depth now the gate is an allow-list; the default is `horizon`                                                          |
 | `HORIZON_AUTHORIZED_EMAILS`                                              | Comma-separated allow-list of emails permitted to open the dashboard outside `local`. Empty means nobody can — fails closed                |
-| `RUN_MIGRATIONS`                                                         | `true` on `can-eye-web` **only**; unset (defaults `false`) on `can-eye-horizon` and `can-eye-scheduler` so only one service migrates       |
+| `CONTAINER_ROLE`                                                         | `web` on `can-eye-web`, `horizon` on `can-eye-horizon`, `scheduler` on `can-eye-scheduler`. Defaults to `web`. Only the `web` role migrates |
 | `FILESYSTEM_DISK`                                                        | `local`, paired with the shared volume at `storage/app/private` — see "Storage decision (settled): shared volume". Never set `s3`          |
 | `AWS_*`                                                                  | Not used; leave empty. Only relevant if the rejected S3 refactor is ever revisited                                                        |
 | `MAIL_*`                                                                 | Staging SMTP/sandbox settings; never production mailbox credentials. `log` is fine unless password reset or verification is being tested   |
@@ -367,7 +369,7 @@ Steps 1 and 2 are the gate. Do not start step 3 until step 2 is complete.
 6. Create the shared import volume (settled decision) before any Application is deployed.
 7. Create `can-eye-web`, `can-eye-horizon`, and `can-eye-scheduler` from the same source and Dockerfile. Keep one replica for each initially and do not deploy
    any Application yet. Mount the shared volume on `can-eye-web` and `can-eye-horizon`.
-8. Set common environment variables and service-specific command/name values. Set `APP_DEBUG=false`, `DB_CONNECTION=mariadb`, `RUN_MIGRATIONS=true` on `can-eye-web` only, and `HORIZON_AUTHORIZED_EMAILS` before the first deployment.
+8. Set common environment variables and service-specific command/name values. Set `APP_DEBUG=false`, `DB_CONNECTION=mariadb`, `CONTAINER_ROLE` per service (`web`, `horizon`, `scheduler`), and `HORIZON_AUTHORIZED_EMAILS` before the first deployment.
 9. Deploy `can-eye-web` with **no domain attached**. The entrypoint runs `php artisan migrate --force` before binding the HTTP port, so the service only reports
    ready once the schema exists. Take a MariaDB snapshot before this first migration.
 10. Confirm readiness genuinely: `/up` must be green *with* the database/Redis listener active, and the container log must show the migration completing. `/up`
