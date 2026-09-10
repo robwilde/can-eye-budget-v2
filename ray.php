@@ -128,7 +128,7 @@ return [
      * Absolute base path for your sites or projects on your local
      * computer where your IDE or code editor is running on.
      */
-    'local_path' => env('RAY_LOCAL_PATH'),
+    'local_path' => env('RAY_LOCAL_PATH') ?: null,
 
     /*
      * When this setting is enabled, the package will not try to format values sent to Ray.

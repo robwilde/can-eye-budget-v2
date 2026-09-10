@@ -78,6 +78,15 @@ test('an explicit RAY_ENABLED overrides the environment default', function (stri
     'forced off in local' => ['local', 'false', false],
 ]);
 
-test('local_path is unset so origin paths are never rewritten', function () {
-    expect(rayConfigForEnvironment(['APP_ENV' => 'local'])['local_path'])->toBeNull();
+test('local_path stays null so origin paths are never rewritten', function (array $environment) {
+    expect(rayConfigForEnvironment($environment)['local_path'])->toBeNull();
+})->with([
+    'no RAY_LOCAL_PATH' => [['APP_ENV' => 'local']],
+    'blank RAY_LOCAL_PATH' => [['APP_ENV' => 'local', 'RAY_LOCAL_PATH' => '']],
+]);
+
+test('an explicit RAY_LOCAL_PATH is passed through', function () {
+    $config = rayConfigForEnvironment(['APP_ENV' => 'local', 'RAY_LOCAL_PATH' => '/home/dev/project']);
+
+    expect($config['local_path'])->toBe('/home/dev/project');
 });
