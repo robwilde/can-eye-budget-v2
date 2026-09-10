@@ -21,10 +21,11 @@ for every non-SQLite driver, so PostgreSQL would break monthly report aggregatio
 
 This document is a provisioning plan, not a request to create or deploy Dokploy resources during this investigation.
 
-**Step 0 is implemented on the working branch and awaits merge to `develop`.** The four blocking code changes now exist: a root production image
+**Step 0 is implemented on the working branches and awaits merge to `develop`.** The five blocking code changes now exist: a root production image
 (`Dockerfile`, `.dockerignore`, `docker/`), a trusted-proxy call in `bootstrap/app.php`, an allow-listed Horizon gate
-(`app/Providers/HorizonServiceProvider.php` + `config/horizon.php` `authorized_emails`), and `app/Listeners/VerifyHealthDependencies.php` so `/up` asserts
-MariaDB and Redis. Bank-import storage is settled as a shared volume — a Dokploy provisioning step, not a code change. Do not begin the "Deployment sequence"
+(`app/Providers/HorizonServiceProvider.php` + `config/horizon.php` `authorized_emails`), `app/Listeners/VerifyHealthDependencies.php` so `/up` asserts
+MariaDB and Redis, and the `FORTIFY_REGISTRATION_ENABLED` gate in `config/fortify.php` that lets staging close public sign-up.
+Bank-import storage is settled as a shared volume — a Dokploy provisioning step, not a code change. Do not begin the "Deployment sequence"
 until those changes are merged to `develop`, because that is the branch every Application service builds.
 
 ## Step 0: raise the GitHub work before touching Dokploy
@@ -32,22 +33,25 @@ until those changes are merged to `develop`, because that is the branch every Ap
 The GitHub work is raised in `robwilde/can-eye-budget-v2`. Parent tracking issue: **#375 "Staging deployment readiness (Dokploy)"** — links this document and
 tracks the children below via a task list. Close it only when every blocking child is merged to `develop`.
 
-Children: #369 (production image), #370 (Horizon gate), #371 (trusted proxies), #372 (`/up` dependencies) are blocking; #373 (dev-only dependencies) and #374
-(CI gating for staging deploys) are non-blocking and remain open.
+Children: #369 (production image), #370 (Horizon gate), #371 (trusted proxies), #372 (`/up` dependencies) and #383 (registration env gate) are blocking;
+#373 (dev-only dependencies) and #374 (CI gating for staging deploys) are non-blocking and remain open. #383 blocks because
+`FORTIFY_REGISTRATION_ENABLED` does nothing until its config gate is on `develop`: setting the variable on the service beforehand leaves sign-up open with
+no error to say so.
 
 | # | Issue | Work item                                                               | Status | Scope                                                                                                                                                                                                                                                        |
 |---|---|-------------------------------------------------------------------------|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 1 | #369 | Add production `Dockerfile`, `.dockerignore`, and container entrypoint   | Implemented, pending merge | Multi-stage Node asset build plus PHP 8.4 runtime; installs the extension set listed under "PHP extension requirements"; entrypoint runs migrations and caches config **before** the HTTP server binds; runs `storage:link` in the image, not by hand. Delivered as root `Dockerfile`, `.dockerignore`, `docker/entrypoint.sh`, `docker/nginx/default.conf`, `docker/supervisord.conf`, `docker/php.ini` |
 | 2 | — | Provision the shared import volume                                      | Provisioning only | Mount one volume at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon`. Settled — see "Storage decision (settled): shared volume". No repository change; `FILESYSTEM_DISK` stays `local`                                          |
-| 3 | #370 | Restrict Horizon dashboard access outside `local`                       | Implemented, pending merge | Gate is now an explicit allow-list: `config('horizon.authorized_emails')` from `HORIZON_AUTHORIZED_EMAILS`, with `local` short-circuited. Fails closed when unset. Registration is still open — see "Security exposure decision"                              |
+| 3 | #370 | Restrict Horizon dashboard access outside `local`                       | Implemented, pending merge | Gate is now an explicit allow-list: `config('horizon.authorized_emails')` from `HORIZON_AUTHORIZED_EMAILS`, with `local` short-circuited. Fails closed when unset. Registration is env-gated as of #383 — see "Security exposure decision"                              |
 | 4 | #371 | Configure trusted proxies                                               | Implemented, pending merge | `bootstrap/app.php` now calls `$middleware->trustProxies(at: '*')` with the framework's default header set; correct because the container is only reachable through Traefik on the Dokploy network                                                            |
 | 5 | #372 | Add a `DiagnosingHealth` listener that asserts database and Redis       | Implemented, pending merge | `app/Listeners/VerifyHealthDependencies.php` runs `select 1` and a Redis `ping`; auto-discovered from `app/Listeners`. `/up` now returns 500 when either dependency is unreachable, making it a usable Dokploy readiness gate                                 |
-| 6 | #373 | Move development-only dependencies out of the production dependency set | Open, non-blocking | `laravel/boost` and `spatie/laravel-ray` sit in `require`, so `composer install --no-dev` still ships them; `playwright` sits in `dependencies` with an empty `devDependencies`, so `npm ci` pulls it into the build stage                                     |
-| 7 | #374 | Decide whether staging deploys are gated on CI                          | Open, non-blocking | `.github/workflows/lint.yml` and `tests.yml` exist but nothing ties a staging deploy to them                                                                                                                                                                  |
+| 6 | #383 | Env-gate registration and guard the landing page                        | Implemented, pending merge | `config/fortify.php` gates `Features::registration()` on `FORTIFY_REGISTRATION_ENABLED`, default `true` so local and production are unchanged; set `false` on staging. The three `route('register')` call sites in `resources/views/welcome.blade.php` are guarded with `Route::has('register')` so the landing page still renders once the routes are gone. Registration/password-reset throttling is out of scope — #394 |
+| 7 | #373 | Move development-only dependencies out of the production dependency set | Open, non-blocking | `laravel/boost` and `spatie/laravel-ray` sit in `require`, so `composer install --no-dev` still ships them; `playwright` sits in `dependencies` with an empty `devDependencies`, so `npm ci` pulls it into the build stage                                     |
+| 8 | #374 | Decide whether staging deploys are gated on CI                          | Open, non-blocking | `.github/workflows/lint.yml` and `tests.yml` exist but nothing ties a staging deploy to them                                                                                                                                                                  |
 
-Rows 1, 3, 4 and 5 (#369, #370, #371, #372) are release blockers: implemented on the working branch, not yet merged. Do not begin the "Deployment sequence" until
-they are merged to `develop`, because that is the branch every Application service below is configured to build. Row 2 is a Dokploy provisioning step, not a merge
-gate — but the volume must exist before the first bank import.
+Rows 1, 3, 4, 5 and 6 (#369, #370, #371, #372, #383) are release blockers: implemented on working branches, not yet merged. Do not begin the "Deployment
+sequence" until they are merged to `develop`, because that is the branch every Application service below is configured to build. Row 2 is a Dokploy
+provisioning step, not a merge gate — but the volume must exist before the first bank import.
 
 ## Dokploy inventory
 
@@ -226,10 +230,16 @@ Resolved in #370: `app/Providers/HorizonServiceProvider::gate()` now allows `loc
 appear in `config('horizon.authorized_emails')` — populated from the comma-separated `HORIZON_AUTHORIZED_EMAILS` variable. With that variable unset the
 allow-list is empty and nobody outside `local` can open the dashboard, so the control fails closed. Covered by `tests/Feature/HorizonAccessTest.php`.
 
-Still open, and deliberately out of scope for #370:
+Also resolved, in #383: `config/fortify.php` now gates `Features::registration()` on `FORTIFY_REGISTRATION_ENABLED`, defaulting to `true` so local and
+production are unchanged. Set it to `false` on staging and seed accounts instead. The three `route('register')` call sites in
+`resources/views/welcome.blade.php` are guarded with `Route::has('register')`, so the landing page still renders once the routes are gone. Covered by
+`tests/Feature/Auth/RegistrationDisabledTest.php`.
 
-- `config/fortify.php:149` enables `Features::registration()`, so registration remains open on the public domain. Consider disabling it on staging and seeding
-  accounts instead.
+Remaining hardening, deliberately out of scope for #370 and #383:
+
+- Registration and password-reset requests are unthrottled. Fortify resolves a limiter name for `login`, `two-factor` and `verification` only; its
+  `register.store` and `password.email` routes carry no limiter lookup and no `throttle` middleware, so a named limiter alone would never be applied. Needs
+  its own mechanism — tracked in #394.
 - `HORIZON_PATH` is still the default `horizon`. An unguessable path is optional defence in depth now that the gate is an allow-list.
 
 ## Domain status
@@ -334,6 +344,7 @@ Set the common application environment on all three Application services. Values
 | `HORIZON_NAME`                                                           | `can-eye-staging-horizon` on the Horizon service                                                                                         |
 | `HORIZON_PATH`                                                           | Optional defence in depth now the gate is an allow-list; the default is `horizon`                                                          |
 | `HORIZON_AUTHORIZED_EMAILS`                                              | Comma-separated allow-list of emails permitted to open the dashboard outside `local`. Empty means nobody can — fails closed                |
+| `FORTIFY_REGISTRATION_ENABLED`                                           | `false` on staging — closes public sign-up on a bank-feed application. Default is `true`, so local and production are unchanged            |
 | `RUN_MIGRATIONS`                                                         | `true` on `can-eye-web` **only**; unset (defaults `false`) on `can-eye-horizon` and `can-eye-scheduler` so only one service migrates       |
 | `FILESYSTEM_DISK`                                                        | `local`, paired with the shared volume at `storage/app/private` — see "Storage decision (settled): shared volume". Never set `s3`          |
 | `AWS_*`                                                                  | Not used; leave empty. Only relevant if the rejected S3 refactor is ever revisited                                                        |
@@ -358,9 +369,11 @@ environment. Any live-looking credentials previously exposed in Dokploy output s
 
 Steps 1 and 2 are the gate. Do not start step 3 until step 2 is complete.
 
-1. Done: parent issue #375 and children #369–#374 exist in `robwilde/can-eye-budget-v2`.
-2. Merge #369, #370, #371 and #372 to `develop`. Confirm the branch contains the root `Dockerfile`, `docker/entrypoint.sh` migrating before serving,
-   `trustProxies` in `bootstrap/app.php`, the allow-listed Horizon gate, and `app/Listeners/VerifyHealthDependencies.php`. #373 and #374 do not gate the deploy.
+1. Done: parent issue #375 and children #369–#374 plus #383 exist in `robwilde/can-eye-budget-v2`.
+2. Merge #369, #370, #371, #372 and #383 to `develop`. Confirm the branch contains the root `Dockerfile`, `docker/entrypoint.sh` migrating before serving,
+   `trustProxies` in `bootstrap/app.php`, the allow-listed Horizon gate, `app/Listeners/VerifyHealthDependencies.php`, and the
+   `FORTIFY_REGISTRATION_ENABLED` gate in `config/fortify.php`. Without that last one the staging variable set in step 8 is inert. #373 and #374 do not gate
+   the deploy.
 3. Confirm the GitHub repository is accessible to Dokploy.
 4. Create project `can-eye-budget-v2` and environment `staging`.
 5. Create and deploy MariaDB and Redis; wait for both services to report ready and record their internal hostnames.
@@ -375,8 +388,10 @@ Steps 1 and 2 are the gate. Do not start step 3 until step 2 is complete.
 11. Attach `can-eye.mrwilde.dev` to `can-eye-web` with HTTPS/Let's Encrypt. Traffic reaches the application only from this point, and only against a migrated
     schema. Run any approved staging seed/setup command once, now.
 12. Deploy `can-eye-horizon` and `can-eye-scheduler` so both start against the migrated schema. Never run migrations from these services.
-13. Exercise `/up`, registration/login, database-backed sessions, monthly report aggregation, a queued job, Horizon metrics, scheduler output, a full bank-import
-    round trip across the web and worker containers, and the approved external integrations.
+13. Exercise `/up`, login with a seeded account, database-backed sessions, monthly report aggregation, a queued job, Horizon metrics, scheduler output, a full
+    bank-import round trip across the web and worker containers, and the approved external integrations. With `FORTIFY_REGISTRATION_ENABLED=false` the check
+    for registration is the opposite of the others: `/register` must return **404** and `/` must render with no sign-up link. A reachable registration form
+    here means the flag did not take effect, not that the deployment is healthy.
 14. Confirm no MariaDB, Redis, Horizon dashboard, scheduler, or debug endpoint is publicly accessible.
 
 ### Redeployment and rollback
@@ -401,20 +416,24 @@ Steps 1 and 2 are the gate. Do not start step 3 until step 2 is complete.
 - A CSV bank import uploaded through the web container is read successfully by the Horizon container — this is the specific flow that fails without shared
   storage, so upload alone is not sufficient evidence.
 - Storage is verified by reading the file back, not by a successful write: every disk sets `'throw' => false`, so failures are silent.
-- The Horizon dashboard is not reachable by a freshly registered account.
+- The Horizon dashboard is not reachable by a seeded account absent from `HORIZON_AUTHORIZED_EMAILS`. With registration disabled on staging there is no way
+  to self-register a fresh account for this check, so seed one.
+- `/register` returns 404 and `/` renders with no sign-up link, confirming `FORTIFY_REGISTRATION_ENABLED=false` reached the running container.
 - No production Basiq, Redbark, Gmail, GitHub, mail, or storage credentials are present unless explicitly approved for staging.
 - MariaDB and Redis have no external ports and no public domain.
 - The service count is five: three Applications, one MariaDB/MySQL service, and one Redis.
 
 ## Open prerequisites
 
-1. Merge #369, #370, #371 and #372 to `develop`. This is the gating prerequisite for everything else; the changes exist on the working branch but Dokploy builds
-   `develop`.
+1. Merge #369, #370, #371, #372 and #383 to `develop`. This is the gating prerequisite for everything else; the changes exist on working branches but Dokploy
+   builds `develop`. #383 must land before prerequisite 3 is actioned, or the variable set there has nothing to read it.
 2. Create the shared import volume in Dokploy and mount it at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon`. The storage
    arrangement itself is settled — shared volume, `FILESYSTEM_DISK=local`. Never adopt `FILESYSTEM_DISK=s3`: `league/flysystem-aws-s3-v3` is absent from
    `composer.lock` and the import path calls `Storage::disk('local')->path()` directly.
-3. Decide whether `Features::registration()` stays enabled on a public staging domain, and populate `HORIZON_AUTHORIZED_EMAILS`. The Horizon gate itself is
-   resolved (#370) and fails closed when that variable is unset.
+3. Set `FORTIFY_REGISTRATION_ENABLED=false` on the staging service. The two controls here are not symmetrical, so treat them differently: the Horizon gate
+   (#370) **fails closed** — leave `HORIZON_AUTHORIZED_EMAILS` unset and nobody outside `local` gets in, so populating it grants access. The registration
+   toggle (#383) **fails open**: it defaults to `true`, so omitting the variable leaves public sign-up enabled on the domain. It is the one control on this
+   list that must be set explicitly to be safe.
 4. Confirm Dokploy's managed MariaDB service version, data-volume path, internal hostname, and authentication fields.
 5. Confirm the Dokploy internal Redis hostname and supported managed Redis version/authentication fields.
 6. Choose the mail sandbox and external integration policy, and decide whether staging should exercise Basiq/Redbark/Gmail/GitHub integrations or keep them
