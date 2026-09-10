@@ -49,9 +49,9 @@ no error to say so.
 | 7 | #373 | Move development-only dependencies out of the production dependency set | Open, non-blocking | `laravel/boost` and `spatie/laravel-ray` sit in `require`, so `composer install --no-dev` still ships them; `playwright` sits in `dependencies` with an empty `devDependencies`, so `npm ci` pulls it into the build stage                                     |
 | 8 | #374 | Decide whether staging deploys are gated on CI                          | Open, non-blocking | `.github/workflows/lint.yml` and `tests.yml` exist but nothing ties a staging deploy to them                                                                                                                                                                  |
 
-Rows 1, 3, 4 and 5 (#369, #370, #371, #372) are release blockers: implemented on the working branch, not yet merged. Do not begin the "Deployment sequence" until
-they are merged to `develop`, because that is the branch every Application service below is configured to build. Row 2 is a Dokploy provisioning step, not a merge
-gate — but the volume must exist before the first bank import.
+Rows 1, 3, 4, 5 and 6 (#369, #370, #371, #372, #383) are release blockers: implemented on working branches, not yet merged. Do not begin the "Deployment
+sequence" until they are merged to `develop`, because that is the branch every Application service below is configured to build. Row 2 is a Dokploy
+provisioning step, not a merge gate — but the volume must exist before the first bank import.
 
 ## Dokploy inventory
 
