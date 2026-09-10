@@ -346,6 +346,8 @@ Set the common application environment on all three Application services. Values
 | `GITHUB_FEEDBACK_RELEASE_ID`                                             | A staging release asset target, or empty                                                                                                 |
 | `FEEDBACK_SCREENSHOT_URL`                                                | Empty/disabled unless a separately hosted screenshot service is provided; the local `host.docker.internal` value is not valid on Dokploy |
 | `BUDGET_RECURRING_DETECTION` / `BUDGET_BNPL_EMAIL_IMPORT`                | Set deliberately for staging; retain the repository defaults until those flows are approved                                               |
+| `RAY_ENABLED`                                                            | `false` on all three services. `ray.php` defaults it to `true`, so Ray is on in staging unless this is set: 18 watchers per request and per queued job, and a 2s-timeout curl to `RAY_HOST:23517` on every log line and exception |
+| `BOOST_ENABLED`                                                          | `false` on all three services. Boost activates on `local` **or** `APP_DEBUG=true`, and publishes an unauthenticated, CSRF-exempt `POST /_boost/browser-logs` plus a JS-injecting `web` middleware. This makes it safe to debug with `APP_DEBUG=true` |
 
 Repository defaults are adequate for `APP_LOCALE`, `SESSION_LIFETIME`, `BROADCAST_CONNECTION`, `BCRYPT_ROUNDS`, and `LOG_LEVEL`.
 
