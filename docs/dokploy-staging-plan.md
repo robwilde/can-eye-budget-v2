@@ -317,7 +317,8 @@ Set the common application environment on all three Application services. Values
 | `APP_DEBUG`                                                              | `false`                                                                                                                                  |
 | `APP_URL`                                                                | `https://can-eye.mrwilde.dev`                                                                                                            |
 | `APP_TIMEZONE`                                                           | `Australia/Brisbane`                                                                                                                     |
-| `LOG_CHANNEL` / `LOG_STACK`                                              | Keep the repository's supported stack; send logs to Dokploy/container logging                                                             |
+| `LOG_CHANNEL` / `LOG_STACK`                                              | `stack` / `stderr` on all three services. `single` writes to `storage/logs/laravel.log`, which is ephemeral and invisible to Dokploy      |
+| `LOG_LEVEL`                                                              | `info` on all three services. The repository default is `debug`, which streams query-level noise                                         |
 | `DB_CONNECTION`                                                          | `mariadb` — must be set explicitly; the repository default is `sqlite`                                                                    |
 | `DB_HOST` / `DB_PORT`                                                    | Dokploy MariaDB internal hostname / `3306`                                                                                               |
 | `DB_DATABASE` / `DB_USERNAME` / `DB_PASSWORD`                            | Staging-only MariaDB values                                                                                                              |
@@ -347,7 +348,8 @@ Set the common application environment on all three Application services. Values
 | `FEEDBACK_SCREENSHOT_URL`                                                | Empty/disabled unless a separately hosted screenshot service is provided; the local `host.docker.internal` value is not valid on Dokploy |
 | `BUDGET_RECURRING_DETECTION` / `BUDGET_BNPL_EMAIL_IMPORT`                | Set deliberately for staging; retain the repository defaults until those flows are approved                                               |
 
-Repository defaults are adequate for `APP_LOCALE`, `SESSION_LIFETIME`, `BROADCAST_CONNECTION`, `BCRYPT_ROUNDS`, and `LOG_LEVEL`.
+Repository defaults are adequate for `APP_LOCALE`, `SESSION_LIFETIME`, `BROADCAST_CONNECTION`, and `BCRYPT_ROUNDS`. `LOG_LEVEL` is not among them: set it
+explicitly, as the matrix above requires.
 
 ### Secret handling
 
