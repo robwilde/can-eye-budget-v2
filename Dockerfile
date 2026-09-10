@@ -40,6 +40,7 @@ COPY docker/php.ini /usr/local/etc/php/conf.d/zz-app.ini
 COPY docker/nginx/default.conf /etc/nginx/http.d/default.conf
 COPY docker/supervisord.conf /etc/supervisord.conf
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chmod=0755 docker/healthcheck.sh /usr/local/bin/healthcheck.sh
 
 RUN mkdir -p bootstrap/cache storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs storage/app/private storage/app/public \
  && chown -R www-data:www-data storage bootstrap/cache
@@ -47,7 +48,7 @@ RUN mkdir -p bootstrap/cache storage/framework/cache/data storage/framework/sess
 EXPOSE 80
 
 HEALTHCHECK --start-period=90s --interval=15s --timeout=5s --retries=5 \
-  CMD curl -fsS http://127.0.0.1/up || exit 1
+  CMD /usr/local/bin/healthcheck.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
