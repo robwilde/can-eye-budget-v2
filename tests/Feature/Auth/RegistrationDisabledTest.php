@@ -22,9 +22,22 @@ $setRegistrationFlag = function (string|false $value): void {
 };
 
 $flagBeforeTest = false;
+$environmentFileBackup = null;
 
-beforeEach(function () use ($setRegistrationFlag, &$flagBeforeTest): void {
+beforeEach(function () use ($setRegistrationFlag, &$flagBeforeTest, &$environmentFileBackup): void {
     $flagBeforeTest = getenv('FORTIFY_REGISTRATION_ENABLED');
+
+    $testingEnvironmentFile = base_path('.env.testing');
+    $environmentFileBackup = file_exists($testingEnvironmentFile)
+        ? file_get_contents($testingEnvironmentFile)
+        : null;
+
+    $baseEnvironmentFile = file_exists(base_path('.env')) ? base_path('.env') : base_path('.env.example');
+
+    file_put_contents(
+        $testingEnvironmentFile,
+        file_get_contents($baseEnvironmentFile)."\nFORTIFY_REGISTRATION_ENABLED=false\n",
+    );
 
     $setRegistrationFlag('false');
 
@@ -32,7 +45,15 @@ beforeEach(function () use ($setRegistrationFlag, &$flagBeforeTest): void {
     $this->restoreInMemoryDatabase();
 });
 
-afterEach(function () use ($setRegistrationFlag, &$flagBeforeTest): void {
+afterEach(function () use ($setRegistrationFlag, &$flagBeforeTest, &$environmentFileBackup): void {
+    $testingEnvironmentFile = base_path('.env.testing');
+
+    if ($environmentFileBackup === null) {
+        @unlink($testingEnvironmentFile);
+    } else {
+        file_put_contents($testingEnvironmentFile, $environmentFileBackup);
+    }
+
     $setRegistrationFlag($flagBeforeTest);
 });
 
