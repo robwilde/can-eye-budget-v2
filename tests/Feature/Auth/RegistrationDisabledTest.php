@@ -7,36 +7,12 @@
 declare(strict_types=1);
 
 use App\Models\User;
-use Laravel\Fortify\Features;
 use Tests\Concerns\DisablesRegistration;
 
 uses(DisablesRegistration::class);
 
-$setRegistrationFlag = function (string|false $value): void {
-    if ($value === false) {
-        putenv('FORTIFY_REGISTRATION_ENABLED');
-        unset($_ENV['FORTIFY_REGISTRATION_ENABLED'], $_SERVER['FORTIFY_REGISTRATION_ENABLED']);
-
-        return;
-    }
-
-    putenv('FORTIFY_REGISTRATION_ENABLED='.$value);
-    $_ENV['FORTIFY_REGISTRATION_ENABLED'] = $value;
-    $_SERVER['FORTIFY_REGISTRATION_ENABLED'] = $value;
-};
-
-test('the fortify config drops the registration feature when the flag is false', function () use ($setRegistrationFlag) {
-    $flagBeforeTest = getenv('FORTIFY_REGISTRATION_ENABLED');
-
-    $setRegistrationFlag('false');
-
-    try {
-        $config = require config_path('fortify.php');
-
-        expect($config['features'])->not->toContain(Features::registration());
-    } finally {
-        $setRegistrationFlag($flagBeforeTest);
-    }
+afterEach(function (): void {
+    $this->restoreRegistrationFlag();
 });
 
 test('the registration screen is gone when registration is disabled', function () {
