@@ -10,7 +10,7 @@ declare(strict_types=1);
  */
 function rayConfigForEnvironment(array $environment): array
 {
-    $keys = ['APP_ENV', 'RAY_ENABLED'];
+    $keys = ['APP_ENV', 'RAY_ENABLED', 'RAY_LOCAL_PATH'];
 
     $set = function (string $key, ?string $value): void {
         unset($_ENV[$key], $_SERVER[$key]);
