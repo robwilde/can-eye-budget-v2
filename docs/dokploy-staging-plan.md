@@ -233,8 +233,9 @@ production are unchanged. Set it to `false` on staging and seed accounts instead
 
 Remaining hardening, deliberately out of scope for #370 and #383:
 
-- Registration and password-reset requests are unthrottled. Fortify attaches limiters only to `login` and `two-factor`, so this needs its own mechanism —
-  tracked in #394.
+- Registration and password-reset requests are unthrottled. Fortify resolves a limiter name for `login`, `two-factor` and `verification` only; its
+  `register.store` and `password.email` routes carry no limiter lookup and no `throttle` middleware, so a named limiter alone would never be applied. Needs
+  its own mechanism — tracked in #394.
 - `HORIZON_PATH` is still the default `horizon`. An unguessable path is optional defence in depth now that the gate is an allow-list.
 
 ## Domain status
