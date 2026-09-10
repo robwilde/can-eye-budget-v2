@@ -419,8 +419,10 @@ Steps 1 and 2 are the gate. Do not start step 3 until step 2 is complete.
 2. Create the shared import volume in Dokploy and mount it at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon`. The storage
    arrangement itself is settled — shared volume, `FILESYSTEM_DISK=local`. Never adopt `FILESYSTEM_DISK=s3`: `league/flysystem-aws-s3-v3` is absent from
    `composer.lock` and the import path calls `Storage::disk('local')->path()` directly.
-3. Set `FORTIFY_REGISTRATION_ENABLED=false` on staging and populate `HORIZON_AUTHORIZED_EMAILS`. The registration toggle exists as of #383 and the Horizon gate
-   is resolved (#370); both fail closed only once these variables are set on the service.
+3. Set `FORTIFY_REGISTRATION_ENABLED=false` on the staging service. The two controls here are not symmetrical, so treat them differently: the Horizon gate
+   (#370) **fails closed** — leave `HORIZON_AUTHORIZED_EMAILS` unset and nobody outside `local` gets in, so populating it grants access. The registration
+   toggle (#383) **fails open**: it defaults to `true`, so omitting the variable leaves public sign-up enabled on the domain. It is the one control on this
+   list that must be set explicitly to be safe.
 4. Confirm Dokploy's managed MariaDB service version, data-volume path, internal hostname, and authentication fields.
 5. Confirm the Dokploy internal Redis hostname and supported managed Redis version/authentication fields.
 6. Choose the mail sandbox and external integration policy, and decide whether staging should exercise Basiq/Redbark/Gmail/GitHub integrations or keep them
