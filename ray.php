@@ -8,9 +8,9 @@ return [
     /*
     * This setting controls whether data should be sent to Ray.
     *
-    * By default, `ray()` will only transmit data in non-production environments.
+    * By default, `ray()` will only transmit data in the local environment.
     */
-    'enable' => env('RAY_ENABLED', true),
+    'enable' => env('RAY_ENABLED', env('APP_ENV', 'production') === 'local'),
 
     /*
     * When enabled, all cache events will automatically be sent to Ray.
