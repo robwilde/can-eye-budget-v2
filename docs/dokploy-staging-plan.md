@@ -226,12 +226,15 @@ Resolved in #370: `app/Providers/HorizonServiceProvider::gate()` now allows `loc
 appear in `config('horizon.authorized_emails')` — populated from the comma-separated `HORIZON_AUTHORIZED_EMAILS` variable. With that variable unset the
 allow-list is empty and nobody outside `local` can open the dashboard, so the control fails closed. Covered by `tests/Feature/HorizonAccessTest.php`.
 
-Still open, and deliberately out of scope for #370:
+Also resolved, in #383: `config/fortify.php` now gates `Features::registration()` on `FORTIFY_REGISTRATION_ENABLED`, defaulting to `true` so local and
+production are unchanged. Set it to `false` on staging and seed accounts instead. The three `route('register')` call sites in
+`resources/views/welcome.blade.php` are guarded with `Route::has('register')`, so the landing page still renders once the routes are gone. Covered by
+`tests/Feature/Auth/RegistrationDisabledTest.php`.
 
-- Resolved in #383: `config/fortify.php` now gates `Features::registration()` on `FORTIFY_REGISTRATION_ENABLED`, defaulting to `true` so local and production
-  are unchanged. Set it to `false` on staging and seed accounts instead. The three `route('register')` call sites in `resources/views/welcome.blade.php` are
-  guarded with `Route::has('register')`, so the landing page still renders once the routes are gone. Covered by
-  `tests/Feature/Auth/RegistrationDisabledTest.php`. Registration and password-reset requests remain unthrottled — tracked separately in #394.
+Remaining hardening, deliberately out of scope for #370 and #383:
+
+- Registration and password-reset requests are unthrottled. Fortify attaches limiters only to `login` and `two-factor`, so this needs its own mechanism —
+  tracked in #394.
 - `HORIZON_PATH` is still the default `horizon`. An unguessable path is optional defence in depth now that the gate is an allow-list.
 
 ## Domain status
