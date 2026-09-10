@@ -21,6 +21,16 @@ test('up reports unhealthy when redis is unreachable', function () {
     $this->get('/up')->assertStatus(500);
 });
 
+test('up rethrows the dependency failure when debug mode is enabled', function () {
+    config(['app.debug' => true]);
+
+    Redis::shouldReceive('connection->ping')->once()->andThrow(new RuntimeException('redis down'));
+
+    $this->withoutExceptionHandling();
+
+    expect(fn () => $this->get('/up'))->toThrow(RuntimeException::class, 'redis down');
+});
+
 test('forwarded headers from the reverse proxy are trusted', function () {
     Route::get('/__proxy-probe', fn (): array => [
         'ip' => request()->ip(),
