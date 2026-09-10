@@ -170,9 +170,12 @@ Evidence from the repository:
   Traefik the application resolves the real client IP and recognises the request as secure. The framework's default trusted-header set is kept.
 - `/up` is registered explicitly in `bootstrap/app.php` as `App\Http\Controllers\HealthCheckController` behind `throttle:60,1` (#382); the
   `withRouting(health: '/up')` shorthand was dropped because it offers no middleware hook. The controller reproduces the framework handler
-  (`Illuminate\Foundation\Configuration\ApplicationBuilder`): it dispatches `DiagnosingHealth` and returns 200 unless a listener throws. Two behaviours the
-  shorthand provided are preserved deliberately — `preventRequestsDuringMaintenance(except: ['up'])` keeps `/up` reachable during `artisan down`, and the
-  limiter keys per client IP, so the container's own `HEALTHCHECK` (`curl http://127.0.0.1/up`, no forwarded header) cannot be starved by an external burst.
+  (`Illuminate\Foundation\Configuration\ApplicationBuilder`): it dispatches `DiagnosingHealth` and returns 200 unless a listener throws. One behaviour the
+  shorthand provided implicitly is preserved deliberately: `preventRequestsDuringMaintenance(except: ['up'])`, which keeps `/up` reachable during
+  `artisan down` so a deploy does not mark the container unhealthy. The throttle itself is new — the shorthand applied no middleware at all, so the endpoint
+  was previously unlimited. Its limiter keys per client IP, and the container's own `HEALTHCHECK` (`curl http://127.0.0.1/up`) bypasses Traefik and so
+  carries no forwarded header, giving it a bucket no external burst can starve. One deliberate divergence from the framework handler: it stores the throwable
+  rather than its message, so a listener failing with an empty message still reports unhealthy instead of rendering the healthy state.
   `app/Listeners/VerifyHealthDependencies.php` (#372) is that listener: it runs `select 1` on the
   default connection and pings Redis, so `/up` returns 500 when MariaDB or Redis is unreachable instead of reporting healthy on a broken application. Note the
   scope: `select 1` proves connectivity, **not** schema state, so `/up` can still return 200 against a reachable but unmigrated database. Migration ordering is
