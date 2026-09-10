@@ -25,7 +25,7 @@ final class HealthCheckController extends Controller
 
             report($e);
 
-            $exception = $e->getMessage();
+            $exception = $e;
         }
 
         return response(

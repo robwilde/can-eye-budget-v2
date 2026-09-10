@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Route;
 
@@ -19,6 +20,20 @@ test('up reports unhealthy when redis is unreachable', function () {
     Redis::shouldReceive('connection->ping')->once()->andThrow(new RuntimeException('redis down'));
 
     $this->get('/up')->assertStatus(500);
+});
+
+test('up reports unhealthy when the database is unreachable', function () {
+    DB::shouldReceive('connection->select')->once()->andThrow(new RuntimeException('database down'));
+
+    $this->get('/up')->assertStatus(500);
+});
+
+test('up reports the failure state when a dependency throws without a message', function () {
+    Redis::shouldReceive('connection->ping')->once()->andThrow(new RuntimeException(''));
+
+    $this->get('/up')
+        ->assertStatus(500)
+        ->assertSee('experiencing problems');
 });
 
 test('up rethrows the dependency failure when debug mode is enabled', function () {
