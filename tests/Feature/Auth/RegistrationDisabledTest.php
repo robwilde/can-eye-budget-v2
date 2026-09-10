@@ -7,54 +7,21 @@
 declare(strict_types=1);
 
 use App\Models\User;
+use Laravel\Fortify\Features;
+use Tests\Concerns\DisablesRegistration;
 
-$setRegistrationFlag = function (string|false $value): void {
-    if ($value === false) {
+uses(DisablesRegistration::class);
+
+test('the fortify config drops the registration feature when the flag is false', function () {
+    putenv('FORTIFY_REGISTRATION_ENABLED=false');
+
+    try {
+        $config = require config_path('fortify.php');
+
+        expect($config['features'])->not->toContain(Features::registration());
+    } finally {
         putenv('FORTIFY_REGISTRATION_ENABLED');
-        unset($_ENV['FORTIFY_REGISTRATION_ENABLED'], $_SERVER['FORTIFY_REGISTRATION_ENABLED']);
-
-        return;
     }
-
-    putenv('FORTIFY_REGISTRATION_ENABLED='.$value);
-    $_ENV['FORTIFY_REGISTRATION_ENABLED'] = $value;
-    $_SERVER['FORTIFY_REGISTRATION_ENABLED'] = $value;
-};
-
-$flagBeforeTest = false;
-$environmentFileBackup = null;
-
-beforeEach(function () use ($setRegistrationFlag, &$flagBeforeTest, &$environmentFileBackup): void {
-    $flagBeforeTest = getenv('FORTIFY_REGISTRATION_ENABLED');
-
-    $testingEnvironmentFile = base_path('.env.testing');
-    $environmentFileBackup = file_exists($testingEnvironmentFile)
-        ? file_get_contents($testingEnvironmentFile)
-        : null;
-
-    $baseEnvironmentFile = file_exists(base_path('.env')) ? base_path('.env') : base_path('.env.example');
-
-    file_put_contents(
-        $testingEnvironmentFile,
-        file_get_contents($baseEnvironmentFile)."\nFORTIFY_REGISTRATION_ENABLED=false\n",
-    );
-
-    $setRegistrationFlag('false');
-
-    $this->refreshApplication();
-    $this->restoreInMemoryDatabase();
-});
-
-afterEach(function () use ($setRegistrationFlag, &$flagBeforeTest, &$environmentFileBackup): void {
-    $testingEnvironmentFile = base_path('.env.testing');
-
-    if ($environmentFileBackup === null) {
-        @unlink($testingEnvironmentFile);
-    } else {
-        file_put_contents($testingEnvironmentFile, $environmentFileBackup);
-    }
-
-    $setRegistrationFlag($flagBeforeTest);
 });
 
 test('the registration screen is gone when registration is disabled', function () {
