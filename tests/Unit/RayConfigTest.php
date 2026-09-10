@@ -12,29 +12,46 @@ function rayConfigForEnvironment(array $environment): array
 {
     $keys = ['APP_ENV', 'RAY_ENABLED', 'RAY_LOCAL_PATH'];
 
-    $set = function (string $key, ?string $value): void {
+    $clear = function (string $key): void {
         unset($_ENV[$key], $_SERVER[$key]);
         putenv($key);
-
-        if ($value !== null) {
-            $_ENV[$key] = $value;
-            $_SERVER[$key] = $value;
-            putenv("{$key}={$value}");
-        }
     };
 
-    $restore = [];
+    $snapshot = [];
 
     foreach ($keys as $key) {
-        $restore[$key] = isset($_SERVER[$key]) ? (string) $_SERVER[$key] : null;
-        $set($key, $environment[$key] ?? null);
+        $snapshot[$key] = [
+            'env' => $_ENV[$key] ?? null,
+            'server' => $_SERVER[$key] ?? null,
+            'putenv' => getenv($key),
+        ];
+
+        $clear($key);
+
+        if (isset($environment[$key])) {
+            $_ENV[$key] = $environment[$key];
+            $_SERVER[$key] = $environment[$key];
+            putenv("{$key}={$environment[$key]}");
+        }
     }
 
     try {
         return include dirname(__DIR__, 2).'/ray.php';
     } finally {
-        foreach ($restore as $key => $value) {
-            $set($key, $value);
+        foreach ($snapshot as $key => $sources) {
+            $clear($key);
+
+            if ($sources['env'] !== null) {
+                $_ENV[$key] = $sources['env'];
+            }
+
+            if ($sources['server'] !== null) {
+                $_SERVER[$key] = $sources['server'];
+            }
+
+            if ($sources['putenv'] !== false) {
+                putenv("{$key}={$sources['putenv']}");
+            }
         }
     }
 }
