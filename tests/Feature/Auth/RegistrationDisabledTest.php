@@ -8,18 +8,32 @@ declare(strict_types=1);
 
 use App\Models\User;
 
-beforeEach(function (): void {
-    putenv('FORTIFY_REGISTRATION_ENABLED=false');
-    $_ENV['FORTIFY_REGISTRATION_ENABLED'] = 'false';
-    $_SERVER['FORTIFY_REGISTRATION_ENABLED'] = 'false';
+$setRegistrationFlag = function (string|false $value): void {
+    if ($value === false) {
+        putenv('FORTIFY_REGISTRATION_ENABLED');
+        unset($_ENV['FORTIFY_REGISTRATION_ENABLED'], $_SERVER['FORTIFY_REGISTRATION_ENABLED']);
+
+        return;
+    }
+
+    putenv('FORTIFY_REGISTRATION_ENABLED='.$value);
+    $_ENV['FORTIFY_REGISTRATION_ENABLED'] = $value;
+    $_SERVER['FORTIFY_REGISTRATION_ENABLED'] = $value;
+};
+
+$flagBeforeTest = false;
+
+beforeEach(function () use ($setRegistrationFlag, &$flagBeforeTest): void {
+    $flagBeforeTest = getenv('FORTIFY_REGISTRATION_ENABLED');
+
+    $setRegistrationFlag('false');
 
     $this->refreshApplication();
     $this->restoreInMemoryDatabase();
 });
 
-afterEach(function (): void {
-    putenv('FORTIFY_REGISTRATION_ENABLED');
-    unset($_ENV['FORTIFY_REGISTRATION_ENABLED'], $_SERVER['FORTIFY_REGISTRATION_ENABLED']);
+afterEach(function () use ($setRegistrationFlag, &$flagBeforeTest): void {
+    $setRegistrationFlag($flagBeforeTest);
 });
 
 test('the registration screen is gone when registration is disabled', function () {
