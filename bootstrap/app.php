@@ -20,6 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withSchedule(function (Schedule $schedule): void {
         $schedule->command('horizon:snapshot')->everyFiveMinutes();
+        $schedule->command('app:schedule-heartbeat')->everyMinute()->runInBackground();
         // Basiq is stood down in favour of the Redbark feed: its commands still exist and
         // can be run by hand, they are just no longer scheduled.
         $schedule->command('app:sync-redbark-feeds')->everySixHours()->withoutOverlapping();
