@@ -159,13 +159,15 @@
             <a href="{{ route('login') }}" class="focus-ring hidden sm:inline font-medium hover:text-teal-deep">
                 Log in
             </a>
-            <a
-                    href="{{ route('register') }}"
-                    class="focus-ring inline-flex items-center px-4 py-2 rounded-full border-2 font-medium hover:bg-teal-soft"
-                    style="border-color: var(--ce-ink);"
-            >
-                Register
-            </a>
+            @if (Route::has('register'))
+                <a
+                        href="{{ route('register') }}"
+                        class="focus-ring inline-flex items-center px-4 py-2 rounded-full border-2 font-medium hover:bg-teal-soft"
+                        style="border-color: var(--ce-ink);"
+                >
+                    Register
+                </a>
+            @endif
         @endauth
     </div>
 </nav>
@@ -204,20 +206,22 @@
             </p>
 
             <div class="mt-10 flex flex-wrap items-center gap-5">
-                <a
-                        href="{{ route('register') }}"
-                        class="btn-primary focus-ring display-wonk inline-flex items-center gap-2 px-7 py-4 rounded-full font-semibold text-lg"
-                >
-                    Get started — it's
-                    <span class="relative">
-                            free
-                            <svg aria-hidden="true" class="absolute -inset-x-2 -inset-y-1 w-[calc(100%+1rem)] h-[calc(100%+0.5rem)]" viewBox="0 0 60 30"
-                                 preserveAspectRatio="none">
-                                <ellipse cx="30" cy="15" rx="27" ry="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                         style="color: var(--ce-ink);"/>
-                            </svg>
-                        </span>
-                </a>
+                @if (Route::has('register'))
+                    <a
+                            href="{{ route('register') }}"
+                            class="btn-primary focus-ring display-wonk inline-flex items-center gap-2 px-7 py-4 rounded-full font-semibold text-lg"
+                    >
+                        Get started — it's
+                        <span class="relative">
+                                free
+                                <svg aria-hidden="true" class="absolute -inset-x-2 -inset-y-1 w-[calc(100%+1rem)] h-[calc(100%+0.5rem)]" viewBox="0 0 60 30"
+                                     preserveAspectRatio="none">
+                                    <ellipse cx="30" cy="15" rx="27" ry="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                             style="color: var(--ce-ink);"/>
+                                </svg>
+                            </span>
+                    </a>
+                @endif
 
                 <a href="#how-it-works" class="focus-ring font-medium text-teal-deep inline-flex items-center gap-2 hover:gap-3 transition-all">
                     See how it works
@@ -348,18 +352,20 @@
         Pick one.
     </h2>
 
-    <div class="mt-12">
-        <a
-                href="{{ route('register') }}"
-                class="btn-primary focus-ring display-wonk inline-flex items-center gap-2 px-8 py-4 rounded-full font-semibold text-lg"
-        >
-            Get started — free forever
-            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
-                 stroke-linejoin="round">
-                <path d="M5 12h14M13 5l7 7-7 7"/>
-            </svg>
-        </a>
-    </div>
+    @if (Route::has('register'))
+        <div class="mt-12">
+            <a
+                    href="{{ route('register') }}"
+                    class="btn-primary focus-ring display-wonk inline-flex items-center gap-2 px-8 py-4 rounded-full font-semibold text-lg"
+            >
+                Get started — free forever
+                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
+                     stroke-linejoin="round">
+                    <path d="M5 12h14M13 5l7 7-7 7"/>
+                </svg>
+            </a>
+        </div>
+    @endif
 </section>
 
 {{-- FOOTER --}}
