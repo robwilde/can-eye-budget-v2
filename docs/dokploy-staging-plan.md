@@ -172,8 +172,15 @@ Evidence from the repository:
   therefore required by the current report implementation.
 - `bootstrap/app.php` now calls `$middleware->trustProxies(at: '*')` alongside `validateCsrfTokens(except: ['webhooks/basiq'])` (#371), so behind Dokploy's
   Traefik the application resolves the real client IP and recognises the request as secure. The framework's default trusted-header set is kept.
-- `/up` is registered via `withRouting(health: '/up')`. The framework handler dispatches `DiagnosingHealth` and returns 200 unless a listener throws
-  (`Illuminate\Foundation\Configuration\ApplicationBuilder`). `app/Listeners/VerifyHealthDependencies.php` (#372) is that listener: it runs `select 1` on the
+- `/up` is registered explicitly in `bootstrap/app.php` as `App\Http\Controllers\HealthCheckController` behind `throttle:60,1` (#382); the
+  `withRouting(health: '/up')` shorthand was dropped because it offers no middleware hook. The controller reproduces the framework handler
+  (`Illuminate\Foundation\Configuration\ApplicationBuilder`): it dispatches `DiagnosingHealth` and returns 200 unless a listener throws. One behaviour the
+  shorthand provided implicitly is preserved deliberately: `preventRequestsDuringMaintenance(except: ['up'])`, which keeps `/up` reachable during
+  `artisan down` so a deploy does not mark the container unhealthy. The throttle itself is new — the shorthand applied no middleware at all, so the endpoint
+  was previously unlimited. Its limiter keys per client IP, and the container's own `HEALTHCHECK` (`curl http://127.0.0.1/up`) bypasses Traefik and so
+  carries no forwarded header, giving it a bucket no external burst can starve. One deliberate divergence from the framework handler: it stores the throwable
+  rather than its message, so a listener failing with an empty message still reports unhealthy instead of rendering the healthy state.
+  `app/Listeners/VerifyHealthDependencies.php` (#372) is that listener: it runs `select 1` on the
   default connection and pings Redis, so `/up` returns 500 when MariaDB or Redis is unreachable instead of reporting healthy on a broken application. Note the
   scope: `select 1` proves connectivity, **not** schema state, so `/up` can still return 200 against a reachable but unmigrated database. Migration ordering is
   guaranteed by `docker/entrypoint.sh` running `migrate` before `exec`, not by this listener.
@@ -283,10 +290,11 @@ MariaDB, or Redis. Attach it **after** the first successful migration — see th
 - Configure the Laravel environment listed in the environment matrix below.
 - `storage:link` runs in `docker/entrypoint.sh` (`--force`, idempotent), never as a manual step: the container filesystem is ephemeral and a hand-run symlink is
   lost on every redeploy.
-- Migrations run from the entrypoint before the HTTP server binds, gated on `RUN_MIGRATIONS=true` and taking a cache lock via `--isolated`, so the container
-  cannot report ready on an unmigrated schema. Set `RUN_MIGRATIONS=true` on this service only.
+- Migrations run from the entrypoint before the HTTP server binds, gated on `CONTAINER_ROLE=web` and taking a cache lock via `--isolated`, so the container
+  cannot report ready on an unmigrated schema. `CONTAINER_ROLE` defaults to `web`, so this is the only service that migrates.
 - Define a health check against Laravel's `/up` route. #372 gives `/up` a `DiagnosingHealth` listener asserting MariaDB and Redis, so it is now a real readiness
-  gate: it returns 500 when either dependency is unreachable. The image also declares an equivalent `HEALTHCHECK` with a 90s start period.
+  gate: it returns 500 when either dependency is unreachable. The image also declares an equivalent `HEALTHCHECK` with a 90s start period, which
+  `docker/healthcheck.sh` applies to the `web` role only.
 - Attach `can-eye.mrwilde.dev` to port 80 with HTTPS and Let's Encrypt after the first migration succeeds.
 
 ### Service: can-eye-horizon
@@ -295,6 +303,8 @@ MariaDB, or Redis. Attach it **after** the first successful migration — see th
   same root `Dockerfile`; do not select Nixpacks.
 - Use one replica.
 - Override the container command with `php artisan horizon`.
+- Set `CONTAINER_ROLE=horizon`. This suppresses the entrypoint migration and makes `docker/healthcheck.sh` exit 0, so the container reports healthy without an
+  HTTP server.
 - Do not attach a domain or external port.
 - Reuse the same application, database, Redis, and storage environment values as the web service. Set a distinct `HORIZON_NAME`, for example
   `can-eye-staging-horizon`.
@@ -308,6 +318,8 @@ MariaDB, or Redis. Attach it **after** the first successful migration — see th
   same root `Dockerfile`; do not select Nixpacks.
 - Use one replica.
 - Override the container command with `php artisan schedule:work`, matching the reference scheduler service.
+- Set `CONTAINER_ROLE=scheduler`. This suppresses the entrypoint migration and makes `docker/healthcheck.sh` exit 0, so the container reports healthy without an
+  HTTP server.
 - Do not attach a domain or external port.
 - Reuse the same application, database, Redis, and storage environment values as the web service.
 - Note that two of the three schedules in `routes/console.php` are `Schedule::call()` closures that execute in this container and write to the database directly,
@@ -327,7 +339,8 @@ Set the common application environment on all three Application services. Values
 | `APP_DEBUG`                                                              | `false`                                                                                                                                  |
 | `APP_URL`                                                                | `https://can-eye.mrwilde.dev`                                                                                                            |
 | `APP_TIMEZONE`                                                           | `Australia/Brisbane`                                                                                                                     |
-| `LOG_CHANNEL` / `LOG_STACK`                                              | Keep the repository's supported stack; send logs to Dokploy/container logging                                                             |
+| `LOG_CHANNEL` / `LOG_STACK`                                              | `stack` / `stderr` on all three services. `single` writes to `storage/logs/laravel.log`, which is ephemeral and invisible to Dokploy      |
+| `LOG_LEVEL`                                                              | `info` on all three services. Set it explicitly: `.env.example` is not deployed and `config/logging.php` falls back to `debug`           |
 | `DB_CONNECTION`                                                          | `mariadb` — must be set explicitly; the repository default is `sqlite`                                                                    |
 | `DB_HOST` / `DB_PORT`                                                    | Dokploy MariaDB internal hostname / `3306`                                                                                               |
 | `DB_DATABASE` / `DB_USERNAME` / `DB_PASSWORD`                            | Staging-only MariaDB values                                                                                                              |
@@ -345,7 +358,7 @@ Set the common application environment on all three Application services. Values
 | `HORIZON_PATH`                                                           | Optional defence in depth now the gate is an allow-list; the default is `horizon`                                                          |
 | `HORIZON_AUTHORIZED_EMAILS`                                              | Comma-separated allow-list of emails permitted to open the dashboard outside `local`. Empty means nobody can — fails closed                |
 | `FORTIFY_REGISTRATION_ENABLED`                                           | `false` on staging — closes public sign-up on a bank-feed application. Default is `true`, so local and production are unchanged            |
-| `RUN_MIGRATIONS`                                                         | `true` on `can-eye-web` **only**; unset (defaults `false`) on `can-eye-horizon` and `can-eye-scheduler` so only one service migrates       |
+| `CONTAINER_ROLE`                                                         | `web` on `can-eye-web`, `horizon` on `can-eye-horizon`, `scheduler` on `can-eye-scheduler`. Defaults to `web`. Only the `web` role migrates and only the `web` role is health-checked over HTTP |
 | `FILESYSTEM_DISK`                                                        | `local`, paired with the shared volume at `storage/app/private` — see "Storage decision (settled): shared volume". Never set `s3`          |
 | `AWS_*`                                                                  | Not used; leave empty. Only relevant if the rejected S3 refactor is ever revisited                                                        |
 | `MAIL_*`                                                                 | Staging SMTP/sandbox settings; never production mailbox credentials. `log` is fine unless password reset or verification is being tested   |
@@ -357,8 +370,11 @@ Set the common application environment on all three Application services. Values
 | `GITHUB_FEEDBACK_RELEASE_ID`                                             | A staging release asset target, or empty                                                                                                 |
 | `FEEDBACK_SCREENSHOT_URL`                                                | Empty/disabled unless a separately hosted screenshot service is provided; the local `host.docker.internal` value is not valid on Dokploy |
 | `BUDGET_RECURRING_DETECTION` / `BUDGET_BNPL_EMAIL_IMPORT`                | Set deliberately for staging; retain the repository defaults until those flows are approved                                               |
+| `RAY_ENABLED`                                                            | `false` on all three services. `ray.php` defaults it to `true`, so Ray is on in staging unless this is set: 18 watchers per request and per queued job, and a 2s-timeout availability probe to `RAY_HOST:RAY_PORT`. That probe is not per log line: Ray caches the unavailable result for 30s per process (`Client.php:67`), so only the first call after each window expires pays the timeout. Those default to `host.docker.internal` and `23517` (`ray.php:114`, `ray.php:119`), neither of which resolves on a Dokploy container |
+| `BOOST_ENABLED`                                                          | `false` on all three services. Boost activates on `local` **or** `APP_DEBUG=true`, and publishes an unauthenticated, CSRF-exempt `POST /_boost/browser-logs` plus a JS-injecting `web` middleware. Setting it `false` removes that route only — it does not make `APP_DEBUG=true` safe on a public domain, where the debug error page still exposes stack traces, configuration and query bindings. `APP_DEBUG` stays `false` |
 
-Repository defaults are adequate for `APP_LOCALE`, `SESSION_LIFETIME`, `BROADCAST_CONNECTION`, `BCRYPT_ROUNDS`, and `LOG_LEVEL`.
+Repository defaults are adequate for `APP_LOCALE`, `SESSION_LIFETIME`, `BROADCAST_CONNECTION`, and `BCRYPT_ROUNDS`. `LOG_LEVEL` is not among them: set it
+explicitly, as the matrix above requires.
 
 ### Secret handling
 
@@ -380,7 +396,7 @@ Steps 1 and 2 are the gate. Do not start step 3 until step 2 is complete.
 6. Create the shared import volume (settled decision) before any Application is deployed.
 7. Create `can-eye-web`, `can-eye-horizon`, and `can-eye-scheduler` from the same source and Dockerfile. Keep one replica for each initially and do not deploy
    any Application yet. Mount the shared volume on `can-eye-web` and `can-eye-horizon`.
-8. Set common environment variables and service-specific command/name values. Set `APP_DEBUG=false`, `DB_CONNECTION=mariadb`, `RUN_MIGRATIONS=true` on `can-eye-web` only, and `HORIZON_AUTHORIZED_EMAILS` before the first deployment.
+8. Set common environment variables and service-specific command/name values. Set `APP_DEBUG=false`, `DB_CONNECTION=mariadb`, `CONTAINER_ROLE` per service (`web`, `horizon`, `scheduler`), and `HORIZON_AUTHORIZED_EMAILS` before the first deployment.
 9. Deploy `can-eye-web` with **no domain attached**. The entrypoint runs `php artisan migrate --force` before binding the HTTP port, so the service only reports
    ready once the schema exists. Take a MariaDB snapshot before this first migration.
 10. Confirm readiness genuinely: `/up` must be green *with* the database/Redis listener active, and the container log must show the migration completing. `/up`

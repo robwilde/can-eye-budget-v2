@@ -12,7 +12,7 @@ mkdir -p \
 
 php artisan storage:link --force
 
-if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
+if [ "${CONTAINER_ROLE:-web}" = "web" ]; then
     php artisan migrate --force --isolated
 fi
 
@@ -23,4 +23,8 @@ php artisan event:cache
 
 chown -R www-data:www-data storage bootstrap/cache
 
-exec "$@"
+if [ "${CONTAINER_ROLE:-web}" = "web" ]; then
+    exec "$@"
+fi
+
+exec su-exec www-data "$@"
