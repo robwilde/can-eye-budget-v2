@@ -8,9 +8,9 @@ return [
     /*
     * This setting controls whether data should be sent to Ray.
     *
-    * By default, `ray()` will only transmit data in non-production environments.
+    * By default, `ray()` will only transmit data in the local environment.
     */
-    'enable' => env('RAY_ENABLED', true),
+    'enable' => env('RAY_ENABLED', env('APP_ENV', 'production') === 'local'),
 
     /*
     * When enabled, all cache events will automatically be sent to Ray.
@@ -128,7 +128,7 @@ return [
      * Absolute base path for your sites or projects on your local
      * computer where your IDE or code editor is running on.
      */
-    'local_path' => env('RAY_LOCAL_PATH', '/var/home/mrwilde/Projects/MrWilde/Apps/CanEye-Project/can-eye-budget-v2'),
+    'local_path' => env('RAY_LOCAL_PATH') ?: null,
 
     /*
      * When this setting is enabled, the package will not try to format values sent to Ray.
