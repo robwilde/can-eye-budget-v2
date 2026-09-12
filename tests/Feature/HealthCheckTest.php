@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Contracts\Foundation\MaintenanceMode;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Route;
@@ -101,11 +102,24 @@ test('a burst from one client leaves the container health probe unthrottled', fu
 test('up stays reachable while the application is in maintenance mode', function () {
     Redis::shouldReceive('connection->ping')->andReturnTrue();
 
-    $this->app->maintenanceMode()->activate([]);
+    $this->app->instance(MaintenanceMode::class, new class implements MaintenanceMode
+    {
+        public function activate(array $payload): void {}
 
-    try {
-        $this->get('/up')->assertOk();
-    } finally {
-        $this->app->maintenanceMode()->deactivate();
-    }
+        public function deactivate(): void {}
+
+        public function active(): bool
+        {
+            return true;
+        }
+
+        public function data(): array
+        {
+            return [];
+        }
+    });
+
+    expect($this->app->isDownForMaintenance())->toBeTrue();
+
+    $this->get('/up')->assertOk();
 });
