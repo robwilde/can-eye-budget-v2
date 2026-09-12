@@ -23,4 +23,8 @@ php artisan event:cache
 
 chown -R www-data:www-data storage bootstrap/cache
 
-exec "$@"
+if [ "${CONTAINER_ROLE:-web}" = "web" ]; then
+    exec "$@"
+fi
+
+exec su-exec www-data "$@"

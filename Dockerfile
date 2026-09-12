@@ -28,7 +28,7 @@ FROM php:8.4-fpm-alpine AS runtime
 
 ADD --chmod=0755 https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
 RUN install-php-extensions bcmath pcntl pdo_mysql redis zip opcache \
- && apk add --no-cache nginx supervisor curl \
+ && apk add --no-cache nginx supervisor curl su-exec \
  && rm -rf /var/cache/apk/*
 
 WORKDIR /var/www/html
