@@ -183,7 +183,7 @@ Implemented role-specific liveness probes for `horizon` and `scheduler` containe
 - `sh -n docker/healthcheck.sh` — clean
 - `shellcheck docker/healthcheck.sh` — clean
 
-**Copilot Balanced review:**
+**Copilot review:**
 - Status: Changes recommended (5 findings)
 - All addressed in follow-up commit `0a91a71`:
   1. Added test coverage (`SchedulerHeartbeatTest`)
