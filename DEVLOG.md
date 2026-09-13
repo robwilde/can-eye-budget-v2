@@ -1,6 +1,62 @@
 # Dev Log
 
 
+## 2026-09-13 — Issue #416: Env-First `APP_ENV` Resolution for Ray — PR #418
+
+### The Change
+
+The root `ray.php` `enable` default now resolves `APP_ENV` env-first, so a config cache can no longer decide Ray is off on a developer's machine. Final expression at `ray.php:36`:
+
+```php
+'enable' => env('RAY_ENABLED', (env('APP_ENV') ?? (app()->has('config') ? config('app.env', 'production') : 'production')) === 'local'),
+```
+
+Any non-null `env('APP_ENV')` wins; `config('app.env')` is consulted **only** when `env('APP_ENV')` is `null`.
+
+**Files modified:**
+- `ray.php` (+24, -1) — The one-line default from #397 replaced with the env-first `??` expression, plus a comment block at lines 13-34 recording the precedence rule, the `??`-vs-`?:` choice (lines 21-24), the `RAY_ENABLED`/`config/ray.php` escape hatch, and the framework-less path
+- `tests/Unit/RayConfigTest.php` (+81) — 12 new datasets over the existing `rayConfigForEnvironment()` isolation pattern (`$_ENV` + `$_SERVER` + `putenv`); the new helper binds and restores its own container because `tests/Unit` boots no app, so `app()->has('config')` would otherwise depend on test ordering
+- `.env.example` (+14, -6) — Ray note rewritten for `??` semantics including the empty/`false` cases, scoped to exported OS variables, citing `ray.php:36`
+- `docs/dokploy-staging-plan.md` (+1, -1) — `RAY_ENABLED` row rewritten for the resolution order and the `config:cache` interaction, citing `ray.php:36`, `ray.php:137`, `ray.php:142`
+
+### The Reasoning
+
+- **The bug is the cache, not the default.** `docker/entrypoint.sh:32` runs `php artisan config:cache` on *every* container start. Once a cache exists, `LoadEnvironmentVariables` returns early and never reads `.env`, so an `APP_ENV` that lives only in `.env` is invisible to `env()`: the old `env('APP_ENV', 'production')` collapsed to `production` and left Ray off even locally. Verified against a genuine `config:cache` rather than taken on trust — post-cache, `env('APP_ENV')` is `NULL` while `config('app.env')` is still `'local'`.
+- **Env-first, not the issue's option 2.** Config-first fixes #416 but regresses the fail-closed guarantee #391 introduced: a stale cache baked at `local` would re-enable Ray against an exported `APP_ENV=production`. Env-first fixes the bug *and* keeps that guarantee for exported OS variables.
+- **`??` rather than `?:`, caught in review.** Laravel's `Env` treats only `null` as absent, so the raw return is not always a non-empty string: `APP_ENV=''` yields `''`, `APP_ENV=false` yields boolean `false`, and `APP_ENV=empty` yields `''`. `?:` discarded all three as falsy and fell through to the cache — which, with a cache baked at `local`, re-enabled Ray: a narrow reopening of the same #391 failure mode this change claims to preserve. `??` keeps those values, and they compare unequal to `'local'`, so Ray stays off.
+- **Honest residue.** Laravel coerces the literal strings `null` and `(null)` to PHP `null`, so `APP_ENV=null` still falls back to the cache even with `??`. That is inherent to `env()` — an unset variable and the literal `null` are indistinguishable at this call site. Documented in the comment block rather than papered over.
+- **`app()->has('config')` is load-bearing; the draft's other guards are not.** Measured with the autoloader loaded and no application bootstrapped: `app()` is defined and returns a bare `Illuminate\Container\Container`, and `app()->has('config')` is `false` without throwing. So the recovered draft's `function_exists('app')` guard and `catch (\Throwable)` arm are dead code and were deliberately omitted; the `has('config')` check is genuinely required. No closure and no function declaration are used — `ray.php` is re-`include`d by a shutdown hook, so a declared function would fatal on redeclare.
+- **No `config/ray.php`.** Spatie's `SettingsFactory::searchConfigFilesOnDisk()` (`vendor/spatie/ray/src/Settings/SettingsFactory.php:50-79`) searches upward from `config/`, so a `config/ray.php` would *shadow* the root file entirely. Measured, not assumed.
+
+### Verification
+
+**Quality gates:**
+- `op test.parallel` — 2226 passed, 5672 assertions (baseline 2214 / 5660 → +12/+12, exactly the 12 new datasets)
+- `op lint.check` — PASS, 449 files
+- `op analyse` — PHPStan, 0 errors
+
+**Caveat reported rather than glossed:** PHPStan's configured paths are `app`, `bootstrap`, `config`, `database/factories`, `database/seeders`, `routes` — root `ray.php` and `tests/` are *not* in scope, so the green gate does not itself analyse the changed files. Analysed explicitly, `ray.php` holds at 24 pre-existing `larastan.noEnvCallsOutsideOfConfig` notices, identical to HEAD (24 → 24), and `tests/Unit/RayConfigTest.php` reports no errors. Zero new errors introduced.
+
+**Tests proven load-bearing** by swapping the expression and re-running the file:
+
+| `ray.php` variant | `RayConfigTest` result |
+|---|---|
+| old `develop` one-liner | 1 failed — catches #416 |
+| option 2 (config-first) | 3 failed — catches the #391 regression |
+| `?:` (the reviewed hole) | 3 failed (`''`, `'false'`, `'empty'`) |
+| shipped `??`, env-first | 23 passed |
+
+**CI on `f7dda87`:** `ci (8.4)`, `ci (8.5)`, `quality` — all completed/success.
+
+### The Known Limitation
+
+Env-first protects **exported OS variables only**. A config cache baked at `local` and then run somewhere non-local, with `APP_ENV` present only in `.env`, still enables Ray — because post-cache `.env` is never read, and that same fallback is precisely what fixes #416. The mitigation is to export `RAY_ENABLED=false` as a real OS variable, which the suite pins.
+
+Worth stating plainly: a `.env`-only `RAY_ENABLED=false` was never a working off-switch post-cache. Under the old expression `env('RAY_ENABLED')` was equally `NULL`, and Ray was off only because `env('APP_ENV', 'production')` collapsed to `production` — which *is* bug #416. The switch was inert before this change too.
+
+Raised by Copilot review `5190351459` and left as an open owner decision rather than silently closed.
+
+---
 ## 2026-09-13 — Issue #396: Worker Liveness Probes — PR #409
 
 ### The Change
