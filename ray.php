@@ -24,11 +24,15 @@ return [
     * unequal to `'local'`, so Ray stays off.
     *
     * `RAY_ENABLED` reaches this file only through `env()`. It has no cached config
-    * key, and adding `config/ray.php` is not an option: Spatie's `SettingsFactory`
-    * searches upward from `config/` and would shadow this file entirely. So to force
-    * Ray off where the cache was baked at `local`, export `RAY_ENABLED=false` as an
-    * OS variable; a `RAY_ENABLED=false` that exists only in `.env` is not read once
-    * the config cache exists.
+    * key, and this file stays at the project root rather than in `config/`: the
+    * Laravel provider seeds Spatie's `SettingsFactory` at `$app->configPath()` and
+    * walks upward, so a `config/ray.php` would win on that path — but the
+    * framework-less `ray()` helper seeds the same search at `getcwd()` and also only
+    * walks upward, so it would never see `config/ray.php`. The root is the one
+    * location both resolution paths agree on. So to force Ray off where the cache
+    * was baked at `local`, export `RAY_ENABLED=false` as an OS variable; a
+    * `RAY_ENABLED=false` that exists only in `.env` is not read once the config
+    * cache exists.
     *
     * On the framework-less `ray()` path no `config` repository is bound, so
     * resolution falls through to `production` and Ray stays off.

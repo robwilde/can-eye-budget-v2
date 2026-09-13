@@ -221,7 +221,7 @@ protected function isAccessible(User $user, ?string $path = null): bool
 
 ## Configuration
 
-- Use environment variables only in configuration files - never use the `env()` function directly outside of config files. Always use `config('app.name')`, not `env('APP_NAME')`.
+- Use environment variables only in configuration files - never use the `env()` function directly outside of config files. Always use `config('app.name')`, not `env('APP_NAME')`. The one exemption is a root-level service config file that a package resolves outside `config/` — currently only `ray.php`, which is itself a config file and must read `env()` directly.
 
 ## Testing
 

@@ -8,7 +8,7 @@ Laravel 12 + PHP 8.4 budget app. Livewire 4, Flux UI Free, Pest 3, Tailwind v4, 
 
 ### Critical (block merge)
 - Security vulnerabilities (SQL injection, XSS, mass assignment)
-- `env()` used outside `config/` files
+- `env()` used outside `config/` directory, except in root-level config files like `ray.php` (service config that must use `env()` for environment-dependent defaults before caching)
 - Raw SQL or `DB::` facade (use `Model::query()`)
 - Missing `$fillable` on models accepting user input
 - Exposed secrets or credentials
