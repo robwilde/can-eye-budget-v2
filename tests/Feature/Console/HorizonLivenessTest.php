@@ -23,31 +23,68 @@ function fakeMasters(array $masters): void
         /** @param array<int, array{name: string, status: string}> $masters */
         public function __construct(private array $masters) {}
 
-        public function names()
+        public function names(): array
         {
             return array_column($this->masters, 'name');
         }
 
-        public function all()
+        public function all(): array
         {
             return array_map(fn (array $master): object => (object) $master, $this->masters);
         }
 
-        public function find($name)
+        public function find($name): ?object
         {
             return collect($this->all())->firstWhere('name', $name);
         }
 
-        public function get(array $names)
+        public function get(array $names): array
         {
             return collect($this->all())->whereIn('name', $names)->values()->all();
         }
 
-        public function update(MasterSupervisor $master) {}
+        public function update(MasterSupervisor $master): void {}
 
-        public function forget($name) {}
+        public function forget($name): void {}
 
-        public function flushExpired() {}
+        public function flushExpired(): void {}
+    });
+}
+
+/**
+ * Bind a repository that cannot reach Horizon's state at all, as when Redis is down.
+ */
+function unreachableMasters(string $message = 'Connection refused [tcp://redis:6379]'): void
+{
+    app()->instance(MasterSupervisorRepository::class, new class($message) implements MasterSupervisorRepository
+    {
+        public function __construct(private string $message) {}
+
+        public function names(): array
+        {
+            throw new RuntimeException($this->message);
+        }
+
+        public function all(): array
+        {
+            return [];
+        }
+
+        public function find($name): ?object
+        {
+            return null;
+        }
+
+        public function get(array $names): array
+        {
+            return [];
+        }
+
+        public function update(MasterSupervisor $master): void {}
+
+        public function forget($name): void {}
+
+        public function flushExpired(): void {}
     });
 }
 
@@ -138,34 +175,7 @@ test('a host sharing a name prefix does not satisfy the probe', function () {
 test('unreachable horizon state is unhealthy', function () {
     // Redis down: the container cannot prove its master is alive, so it must fail
     // the probe rather than pass on absent evidence.
-    app()->instance(MasterSupervisorRepository::class, new class implements MasterSupervisorRepository
-    {
-        public function names()
-        {
-            throw new RuntimeException('Connection refused [tcp://redis:6379]');
-        }
-
-        public function all()
-        {
-            return [];
-        }
-
-        public function find($name)
-        {
-            return null;
-        }
-
-        public function get(array $names)
-        {
-            return [];
-        }
-
-        public function update(MasterSupervisor $master) {}
-
-        public function forget($name) {}
-
-        public function flushExpired() {}
-    });
+    unreachableMasters();
 
     $this->artisan('horizon:liveness')->assertExitCode(1);
 });
@@ -181,34 +191,7 @@ test('an unhealthy probe explains which master it looked for', function () {
 });
 
 test('an unreachable horizon state explains the underlying cause', function () {
-    app()->instance(MasterSupervisorRepository::class, new class implements MasterSupervisorRepository
-    {
-        public function names()
-        {
-            throw new RuntimeException('Connection refused [tcp://redis:6379]');
-        }
-
-        public function all()
-        {
-            return [];
-        }
-
-        public function find($name)
-        {
-            return null;
-        }
-
-        public function get(array $names)
-        {
-            return [];
-        }
-
-        public function update(MasterSupervisor $master) {}
-
-        public function forget($name) {}
-
-        public function flushExpired() {}
-    });
+    unreachableMasters();
 
     $this->artisan('horizon:liveness')
         ->expectsOutputToContain('Connection refused [tcp://redis:6379]')

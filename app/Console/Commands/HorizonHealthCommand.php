@@ -51,7 +51,7 @@ final class HorizonHealthCommand extends Command
         } catch (Throwable $e) {
             // Redis unreachable: this container cannot prove its master is alive,
             // so it must fail the probe rather than pass on missing evidence.
-            return $this->unhealthy('cannot reach Horizon state: '.$e->getMessage());
+            return $this->unhealthy("cannot reach Horizon state: {$e->getMessage()}");
         }
 
         foreach ($names as $name) {
