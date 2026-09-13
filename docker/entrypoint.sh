@@ -18,8 +18,8 @@ esac
 # env('APP_ENV') resolves and the env-first precedence in ray.php:40 governs.
 # env() only sees exported variables, and once config:cache has run Laravel never
 # reads .env again, so an APP_ENV living only in .env is invisible to env() and
-# resolution falls back to the cached config('app.env'). A cache built at local
-# and then run elsewhere would enable Ray off that stale value (issue #419).
+# resolution falls back to the cached config('app.env'). Absent this block a cache
+# built at local and then run elsewhere would enable Ray off that stale value (#419).
 # This runs ahead of every php artisan call, not merely ahead of config:cache:
 # storage:link and migrate also boot the framework and evaluate ray.php.
 #
