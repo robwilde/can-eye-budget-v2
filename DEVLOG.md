@@ -33,7 +33,7 @@ Three of the nine were review or correction follow-ups rather than new behaviour
 
 ### The Tech Debt
 
-- `CONTAINER_ROLE=""` (empty string) is still accepted as `web` by both `docker/entrypoint.sh` and `docker/healthcheck.sh`, because `${VAR:-default}` substitutes on empty as well as unset. The validation added in #400 catches typos, not blanks.
+- ~~`CONTAINER_ROLE=""` (empty string) is still accepted as `web` by both `docker/entrypoint.sh` and `docker/healthcheck.sh`, because `${VAR:-default}` substitutes on empty as well as unset. The validation added in #400 catches typos, not blanks.~~ Closed by #402: both validation `case` statements now read `${CONTAINER_ROLE-web}` (no colon), which substitutes only when the variable is *unset*, so an empty value falls through to a dedicated `"")` branch and exits 1 before any side effect. Unset remains the web default — the `Dockerfile` sets no `ENV CONTAINER_ROLE`. Proved by the same differential method as #400: only the empty-string row changed on either script, every other row byte-identical.
 - Issue #396 remains open: the `horizon` and `scheduler` health checks return 0 unconditionally, so those containers carry no worker liveness signal — they are only "not failing the web probe", which is not the same as working.
 - `AGENTS.md:99` mandates squash-merge, but the repo has `allow_squash_merge: false`; all nine landed as merge commits. Related: `delete_branch_on_merge=false` meant GitHub did not auto-retarget stacked PRs, so #393 (stacked on #390) had to be retargeted by hand.
 
