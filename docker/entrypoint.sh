@@ -28,8 +28,8 @@ esac
 # treats a present-but-empty APP_ENV as a deliberate non-local signal. When
 # neither source defines it the variable is exported as production, matching
 # Laravel's own default in config/app.php. Precedence: exported var > .env > production.
-# No codepath now leaves it unset. The literal null/(null) stay the residue:
-# present here, so the fallback skips them, but coerced to null by env().
+# No codepath leaves it unset, and the null/(null) sentinels are dropped below,
+# so env('APP_ENV') cannot resolve null and never reaches the config cache.
 if [ -z "${APP_ENV+x}" ] && [ -f .env ]; then
     # Parse .env without sourcing it: values may contain #, $, quotes or backticks
     # that a `.` would execute. The key is anchored whole, so a commented
@@ -53,6 +53,18 @@ if [ -z "${APP_ENV+x}" ] && [ -f .env ]; then
         export APP_ENV="$app_env_value"
     fi
 fi
+
+# Laravel's own encoding of absence includes two literals: Env.php:256 lowercases
+# before matching and Env.php:266-268 maps null and (null) to PHP null. A guard
+# testing shell presence would disagree with env() about what absent means and
+# leak those two to config('app.env'), so they are dropped here and picked up by
+# the fallback below. Matched case-insensitively and untrimmed, mirroring
+# strtolower($value) with no trim: ' null ' is not a sentinel to env() either.
+# empty, false, true and the (empty)/(false)/(true) forms are deliberately kept
+# -- each is a value env() reports, and each compares unequal to local.
+case "${APP_ENV-}" in
+    [Nn][Uu][Ll][Ll]|'('[Nn][Uu][Ll][Ll]')') unset APP_ENV ;;
+esac
 
 if [ -z "${APP_ENV+x}" ]; then
     export APP_ENV=production
