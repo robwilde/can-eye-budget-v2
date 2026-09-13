@@ -36,6 +36,10 @@ if [ -z "${APP_ENV+x}" ] && [ -f .env ]; then
     # #APP_ENV= line and a decoy MY_APP_ENV= both fail to match, while the
     # optional `export` prefix and whitespace around `=` that phpdotenv accepts
     # are matched. The last definition wins, as it does in phpdotenv.
+    # Matched quote spans, inline # comments and surrounding whitespace are
+    # handled too; ${VAR} interpolation, double-quote escapes (\" and \\) and
+    # multi-line values are not. Each resolves to a non-local value here, so
+    # Ray fails closed, and APP_ENV is the root others interpolate from.
     app_env_line=$(grep -E '^[[:space:]]*(export[[:space:]]+)?APP_ENV[[:space:]]*=' .env 2>/dev/null | tail -n 1) || app_env_line=''
     if [ -n "$app_env_line" ]; then
         app_env_value=$(printf '%s\n' "$app_env_line" | sed -e 's/^[[:space:]]*//' -e 's/^export[[:space:]]\{1,\}//' -e 's/^APP_ENV[[:space:]]*=//' -e 's/^[[:space:]]*//')
