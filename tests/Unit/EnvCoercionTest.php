@@ -4,25 +4,32 @@
 
 declare(strict_types=1);
 
-use Illuminate\Support\Env;
-
 /**
- * Read a value back through the real `Env::get()` coercion, then restore the slot.
+ * Read a value back through the real `env()` coercion, restoring the slot afterwards.
  *
- * `Env::get()` is called directly rather than through the `env()` helper because
- * `tests/Pest.php` binds `Tests\TestCase` only to Feature and Browser, so this file
- * runs as plain PHPUnit with no booted application and no container to resolve the
- * helper against. `Env::get()` is the same framework code path the helper delegates
- * to, so the contract under test is the framework's, not a reimplementation of it.
+ * The global `env()` helper is used rather than `Illuminate\Support\Env::get()` because
+ * it is the surface `docker/entrypoint.sh` is written against, and it is available here:
+ * `Illuminate\Support\helpers.php` defines it as a direct `Env::get()` delegation with no
+ * container involvement, and Composer's `files` autoload loads it, so it resolves even
+ * though `tests/Pest.php` binds `Tests\TestCase` only to Feature and Browser and this
+ * file therefore runs as plain PHPUnit with no booted application.
+ *
+ * The previous value is snapshotted and restored rather than unconditionally unset, so a
+ * pre-existing variable of this name in the runner's environment survives and no later
+ * test in the same parallel worker can become order-dependent on this one.
  */
 function envCoercionOf(string $value): mixed
 {
+    $previous = getenv('CAN_EYE_ENV_COERCION');
+
     putenv('CAN_EYE_ENV_COERCION='.$value);
 
     try {
-        return Env::get('CAN_EYE_ENV_COERCION');
+        return env('CAN_EYE_ENV_COERCION');
     } finally {
-        putenv('CAN_EYE_ENV_COERCION');
+        $previous === false
+            ? putenv('CAN_EYE_ENV_COERCION')
+            : putenv('CAN_EYE_ENV_COERCION='.$previous);
     }
 }
 
