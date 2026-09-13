@@ -30,8 +30,13 @@ return Application::configure(basePath: dirname(__DIR__))
         // Scheduler liveness: write a heartbeat file every minute for the healthcheck to verify
         // freshness without booting Laravel. Threshold 120s tolerates the scheduler's 60s tick
         // interval + jitter within Docker's 15s probe interval, 5 retries (75s worst-case).
+        // runInBackground() is load-bearing, not decoration: schedule:run executes due
+        // foreground events sequentially in-process, so a slow sibling (app:sync-redbark-feeds)
+        // overrunning the 120s threshold would stall the beat and trip a FALSE unhealthy —
+        // which would then restart the container and kill the very sync that caused it.
         $schedule->command('scheduler:heartbeat')
-            ->everyMinute();
+            ->everyMinute()
+            ->runInBackground();
         // Basiq is stood down in favour of the Redbark feed: its commands still exist and
         // can be run by hand, they are just no longer scheduled.
         $schedule->command('app:sync-redbark-feeds')->everySixHours()->withoutOverlapping();
