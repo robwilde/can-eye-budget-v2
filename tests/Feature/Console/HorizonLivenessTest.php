@@ -162,14 +162,35 @@ test('no reported masters is unhealthy', function () {
     $this->artisan('horizon:liveness')->assertExitCode(1);
 });
 
-test('a host sharing a name prefix does not satisfy the probe', function () {
-    // Boundary: dropping the '-' separator from the prefix would let a longer
-    // hostname on the same Redis pass this container's probe.
+test('a longer peer hostname does not satisfy the probe', function () {
+    // Boundary: dropping the '-' separator would let a longer hostname on the
+    // same Redis pass this container's probe.
     MasterSupervisor::$nameResolver = fn (): string => 'worker-1';
 
     fakeMasters([['name' => 'worker-10-ab12', 'status' => 'running']]);
 
     $this->artisan('horizon:liveness')->assertExitCode(1);
+});
+
+test('a hyphenated child hostname does not satisfy the parent probe', function () {
+    // The inverse boundary, and the one a bare startsWith() gets wrong: host
+    // 'worker' must not be satisfied by peer 'worker-1', whose master is named
+    // 'worker-1-ab12' and does start with 'worker-'. Scaled replicas make this
+    // exact pairing ordinary, so it is the fleet-masking bug in miniature.
+    MasterSupervisor::$nameResolver = fn (): string => 'worker';
+
+    fakeMasters([['name' => 'worker-1-ab12', 'status' => 'running']]);
+
+    $this->artisan('horizon:liveness')->assertExitCode(1);
+});
+
+test('a parent hostname master still satisfies its own probe', function () {
+    // The tightened match must not cost a true positive for the same host.
+    MasterSupervisor::$nameResolver = fn (): string => 'worker';
+
+    fakeMasters([['name' => 'worker-ab12', 'status' => 'running']]);
+
+    $this->artisan('horizon:liveness')->assertExitCode(0);
 });
 
 test('unreachable horizon state is unhealthy', function () {
@@ -180,13 +201,13 @@ test('unreachable horizon state is unhealthy', function () {
     $this->artisan('horizon:liveness')->assertExitCode(1);
 });
 
-test('an unhealthy probe explains which master it looked for', function () {
+test('an unhealthy probe explains which host it looked for', function () {
     // The healthcheck drops stdout, so this reason is what an operator actually
     // sees in `docker inspect .State.Health.Log`. An empty failure is not useful.
     fakeMasters([['name' => 'some-other-host-cd34', 'status' => 'running']]);
 
     $this->artisan('horizon:liveness')
-        ->expectsOutputToContain(LOCAL_BASENAME.'-*')
+        ->expectsOutputToContain(LOCAL_BASENAME)
         ->assertExitCode(1);
 });
 

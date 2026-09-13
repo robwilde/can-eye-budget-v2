@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Support\Str;
 use Laravel\Horizon\Contracts\MasterSupervisorRepository;
 use Laravel\Horizon\MasterSupervisor;
 use Throwable;
@@ -37,11 +36,21 @@ final class HorizonHealthCommand extends Command
 
     public function handle(MasterSupervisorRepository $masters): int
     {
-        // Master names are basename().'-'.Str::random(4), so the basename plus the
-        // separator is the exact prefix that identifies this container's masters.
-        // The trailing '-' stops a host from matching a longer-named sibling
-        // (e.g. 'worker-1' must not be satisfied by 'worker-10-ab12').
-        $prefix = MasterSupervisor::basename().'-';
+        // A master is named basename().'-'.Str::random(4), and Str::random strips '/', '+'
+        // and '=' out of base64, so the token is always hyphen-free. Matching this host
+        // therefore means: our basename, the separator, then a final segment containing no
+        // further hyphen.
+        //
+        // A bare startsWith() on "basename-" is NOT enough, and gets symptom B back for
+        // hyphenated hostnames: with basename 'worker', a live peer 'worker-1' publishes
+        // 'worker-1-ab12', which starts with 'worker-' and would report a dead 'worker'
+        // container healthy. Requiring the remainder to be hyphen-free makes the match
+        // exact -- a peer 'basename-suffix' always leaves a hyphen in the remainder, so
+        // only this host can satisfy it. Deliberately not pinning the token to 4 characters:
+        // if Horizon ever changed that length, the probe would never match and would restart
+        // a perfectly healthy container forever, which is a far worse failure than this.
+        $basename = MasterSupervisor::basename();
+        $pattern = '/^'.preg_quote($basename, '/').'-[^-]+$/';
 
         try {
             // names() is already bounded to the last 14 seconds by Horizon itself,
@@ -55,14 +64,14 @@ final class HorizonHealthCommand extends Command
         }
 
         foreach ($names as $name) {
-            if (Str::startsWith($name, $prefix)) {
+            if (preg_match($pattern, (string) $name) === 1) {
                 $this->line("horizon:liveness: master {$name} is alive.");
 
                 return self::SUCCESS;
             }
         }
 
-        return $this->unhealthy("no master matching '{$prefix}*' reported within the last 14s.");
+        return $this->unhealthy("no master for host '{$basename}' reported within the last 14s.");
     }
 
     /**
