@@ -1,6 +1,54 @@
 # Dev Log
 
 
+## 2026-09-13 — Issue #423 hardening: Pin the `env()` Null Coercion — PR #428
+
+### The Change
+
+`docker/entrypoint.sh:65-67` unsets `APP_ENV` for exactly the literals `env()` decodes as PHP `null`. That mirror is hand-written and, until now, entirely unenforced: the only record of the dependency was a comment above the block citing `Env.php:256` and `:266-268` — vendor line numbers that a `composer update` can move, or repoint at different behaviour, with **no diff to any file this repository owns and no failing check**. The comment would keep reading plausibly while describing a coercion that no longer exists, and the `APP_ENV=null` hole #427 closed would reopen silently. A new test pins the framework contract itself instead of citing where it lives. Merged as `97c2332` (commits `25a70f2`, `4087c4c`, footer `Refs #423`). Issue #423 stayed **closed** — this hardens the fix that closed it rather than reopening it.
+
+**Files modified:**
+- `tests/Unit/EnvCoercionTest.php` (+77) — new file; 14 cases across three `test()` blocks, plus an `envCoercionOf()` probe helper that snapshots and restores the variable it sets
+
+Test-only change. No production code touched.
+
+### The Reasoning
+
+- **Three layers, and now all three are defended.** `tests/Unit/RayConfigTest.php` pins what `ray.php` computes *given* a value; `tests/Unit/EntrypointAppEnvTest.php` pins what the *shell* actually exports; this pins the *framework coercion* that justifies the shell block existing at all. None of the three substitutes for the others: a `RayConfigTest` row says nothing about whether the entrypoint exported anything, an `EntrypointAppEnvTest` row says nothing about whether `env()` still reads `null` as absence, and this file says nothing about either consumer. The mirror needed its own pin because it is the only one of the three whose other half lives in `vendor/`.
+- **Asserted on behaviour, never on vendor source.** No assertion touches `Env.php` text or line numbers — every expectation is on what `env()` *returns*. That is the distinction that makes the test worth keeping: a vendor line moving, a reformat, or a refactor inside the switch is harmless and must not fail; the semantics changing is the thing that reopens the hole, and now only that fails. A test that grepped the vendor file would have inverted both.
+- **The `env()` helper, not `Env::get()`.** `env()` is the surface the entrypoint is written against, so it is the surface asserted on — and it works in `tests/Unit` despite there being no booted application: `Illuminate/Support/helpers.php:150-153` defines it as a direct `Env::get()` delegation with no container involvement, and Composer's `files` autoload makes it resolvable even though `tests/Pest.php` binds `Tests\TestCase` only to `Feature` and `Browser`. Recorded honestly: the first draft used `Env::get()` and justified the choice with a docblock claim that the helper was *unavailable without a booted container*. That claim was **false**. Copilot flagged it, and the implementation was switched to the helper rather than the comment reworded into something narrower — the cheaper fix would have left the test asserting on the wrong surface for a reason that was never true. A dead `Env::getRepository()` call and a memoisation claim in the same docblock went the same way, both disproved by probe before removal rather than after.
+- **Copilot returned Balanced, with 2 valid findings.** The first **Balanced** review since 2026-09-12T23:21Z, ending a six-review Lite streak. The accepted one that changed behaviour: the probe helper unconditionally `unset` its variable on the way out instead of restoring whatever was there before. It now snapshots the prior value and restores it in a `finally`, distinguishing genuinely absent (`getenv()` returning `false`) from a real prior value. Severity was scoped honestly rather than inflated to match the reviewer's label: `CAN_EYE_ENV_COERCION` is unique to this file, so no live order-dependency existed and no test was actually at risk — but restore-to-previous is only *accidentally* equivalent to unset here, and accidental equivalence is not a property worth depending on in a parallel runner.
+
+### Verification
+
+Red state was proven the only way it can be for a vendor contract: by mutating `vendor/laravel/framework/src/Illuminate/Support/Env.php` and watching the pins fail.
+
+| mutation to vendor `Env.php` | result |
+|---|---|
+| `strtolower($value)` → `strtolower(trim($value))` | **1 failed** — `Failed asserting that null is identical to ' null '` |
+| `strtolower($value)` → `$value` | **3 failed** — `NULL`, `nUlL`, `(NULL)` |
+
+The vendor file was restored **byte-identical** after each mutation, verified with `cmp` both times. The `trim()` mutation was then re-run *after* the switch from `Env::get()` to `env()`, to confirm the coverage survived the implementation change rather than assuming it had — the delegation is direct, but that was checked rather than argued.
+
+What would break these tests, each row of the file corresponding to one way the mirror can fail:
+
+| change in the framework | which pin catches it |
+|---|---|
+| a `trim()` added before the match | `' null '` would start decoding as absent while the shell still exports it |
+| `strtolower()` dropped | `NULL`/`(NULL)` would stop decoding as null while the shell still unsets them |
+| either `null` case removed | the shell would unset a value the framework now reports as real |
+| a new sentinel introduced | the framework would read as absent a value the shell exports |
+| `false`/`true`/`empty` demoted to absence | the shell's deliberate decision to preserve them would become wrong |
+
+**Quality gates:**
+- `op test.parallel` — 2259 passed, 5743 assertions (2245 / 5729 → **+14/+14**, exactly the 14 cases in the new file)
+- `op lint.check` — PASS, 451 files (450 → 451, the new test file)
+- `op analyse` — PHPStan, 0 errors, 222 files
+- Copilot review (**Balanced**) — 2 findings, both valid, both fixed in `4087c4c`
+- **CI on `97c2332`:** green
+
+---
+
 ## 2026-09-13 — Issue #423 follow-up: Treat the Null Sentinels as Absent — PR #427
 
 ### The Change
