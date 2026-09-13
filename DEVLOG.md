@@ -5,7 +5,7 @@
 
 ### The Change
 
-`docker/entrypoint.sh` now exports `APP_ENV` as a real OS variable before it runs `php artisan config:cache`, so `env('APP_ENV')` always resolves and the env-first precedence added by #416 actually governs instead of falling through to the config cache. The block sits at `docker/entrypoint.sh:41-51`, ahead of the `config:cache` call now at `docker/entrypoint.sh:53`:
+`docker/entrypoint.sh` now exports `APP_ENV` as a real OS variable before it runs `php artisan config:cache`, so `env('APP_ENV')` always resolves and the env-first precedence added by #416 actually governs instead of falling through to the config cache. The block sits at `docker/entrypoint.sh:33-51`, ahead of the first `php artisan` call at `docker/entrypoint.sh:62` and the `config:cache` call at `docker/entrypoint.sh:68`:
 
 ```sh
 if [ -z "${APP_ENV+x}" ] && [ -f .env ]; then
@@ -17,19 +17,22 @@ fi
 ```
 
 **Files modified:**
-- `docker/entrypoint.sh` (+21) — the export block plus a comment block at lines 32-40 recording why `env()` cannot see `.env` post-cache, that an exported value is authoritative, and that the no-value path fails closed
+- `docker/entrypoint.sh` (+36, -6) — the export block plus a comment block at lines 17-32 recording why `env()` cannot see `.env` post-cache, that an exported value is authoritative, that a present-but-empty value is exported deliberately, and what the no-value path actually resolves to
 - `.env.example` (+5, -4) — Ray note re-scoped: the `APP_ENV` half of the old caveat is closed by the entrypoint export, the `RAY_ENABLED`-only-in-`.env` half is not and is called out explicitly
-- `docs/dokploy-staging-plan.md` (+1, -1) — `RAY_ENABLED` row rewritten for the export, citing `docker/entrypoint.sh:41-51`
-- `DEVLOG.md` — this entry; the #416 entry's `docker/entrypoint.sh:32` citation re-pointed to `:53` because the insertion moved `config:cache`
+- `docs/dokploy-staging-plan.md` (+1, -1) — `RAY_ENABLED` row rewritten for the export, citing `docker/entrypoint.sh:33-51`
+- `DEVLOG.md` — this entry; the #416 entry's `docker/entrypoint.sh:32` citation re-pointed to `:68` because the insertion moved `config:cache`
 
 ### The Reasoning
 
-- **Three behaviours, one precedence rule.** An already-exported `APP_ENV` is never overwritten, because on Dokploy the container environment is the authoritative signal. Absent that, `.env` is consulted. Absent both, the variable is left unset and `ray.php:36` falls through to `production` — no invented value, and the boot is not failed over a missing developer convenience.
-- **Parsed, not sourced.** `.env` is untrusted shell input: it can contain `#`, `$`, quotes and backticks that a `.` would execute or mangle. The value is extracted with `grep`/`cut`/`sed` instead. The key is anchored with `^[[:space:]]*APP_ENV=`, so a commented `#APP_ENV=staging` line and a decoy `MY_APP_ENV=` both fail to match; surrounding whitespace and a matched pair of single or double quotes are stripped. First match wins, matching phpdotenv's non-overwriting load.
+- **Three behaviours, one precedence rule.** An already-exported `APP_ENV` is never overwritten, because on Dokploy the container environment is the authoritative signal. Absent that, `.env` is consulted — and a key that is present but empty is exported as empty, because `ray.php` treats an empty `APP_ENV` as a deliberate non-local signal rather than as absence. Absent both, the variable is left unset: no invented value, and the boot is not failed over a missing developer convenience.
+- **What the no-source path actually resolves to.** The first draft's comment claimed it "falls through to `ray.php`'s `production` default, which fails closed". That is wrong, and Copilot caught it. The `'production'` literal in `ray.php:36` is only reached when no `config` repository is bound; under a normal bootstrap `app()->has('config')` is true, so a null `env('APP_ENV')` resolves to `config('app.env')` — the *cached* value. With no `.env` that is `production` (measured, case C), so it does fail closed in the realistic deployment, but it is not guaranteed by the literal. Leaving the variable unset is the instructed behaviour; the comment was corrected to describe the real mechanism and to name the stale-`local`-cache case as the residual, mitigated by exporting `RAY_ENABLED=false`.
+- **Parsed, not sourced, and parity-checked against phpdotenv.** `.env` is untrusted shell input: it can contain `#`, `$`, quotes and backticks that a `.` would execute or mangle. The value is extracted with `grep`/`sed` instead. The first draft matched only `APP_ENV=value`; Copilot pointed out that phpdotenv also accepts `export APP_ENV=`, whitespace around `=`, and inline comments. Measured against the framework rather than assumed, all of those hold, and unquoted values end at the *first* `#` (`APP_ENV=loc#al` → `'loc'`). The parser now matches `^[[:space:]]*(export[[:space:]]+)?APP_ENV[[:space:]]*=`, takes the quoted span for quoted values while discarding a trailing comment, and truncates unquoted values at `#` before trimming.
+- **Last definition wins — caught by measurement, not review.** The first draft used `head -n 1` and a comment asserting "first match wins, matching phpdotenv's non-overwriting load". Measured: a `.env` with `APP_ENV=local` then `APP_ENV=production` resolves to `'production'`. Laravel's loader overwrites within the file, so last wins. Changed to `tail -n 1` and the comment corrected.
 - **`[[:space:]]` over `\s`, measured rather than assumed.** The first draft used `\s` and a comment asserting BusyBox grep lacks it. Checked in the actual `php:8.4-fpm-alpine` image (BusyBox v1.37.0) and `\s` *does* match — so the comment was wrong and was corrected. `[[:space:]]` is kept because only it is POSIX-guaranteed, not because this image needs it.
 - **`${APP_ENV+x}` rather than `-z "$APP_ENV"`.** The script is `#!/bin/sh` with `set -e`. `${APP_ENV+x}` distinguishes unset from empty, is `set -u`-safe if that flag is ever added, and treats an exported-but-empty `APP_ENV` as set, so it is left alone as authoritative.
-- **`|| app_env_value=''` is load-bearing under `set -e`.** When no `APP_ENV` line matches, `grep` exits 1. The pipeline's status is `sed`'s, so the assignment happens to survive, but relying on that is invisible. The explicit guard makes the no-match path unambiguously non-fatal — pinned by case D, which exits 0 with a `.env` containing no usable `APP_ENV`.
-- **Placed outside every role branch.** All three of `web`, `horizon` and `scheduler` reach the export, and all three reach it before `config:cache`.
+- **Key presence is decided on the matched line, not the parsed value.** The `[ -n ... ]` test is applied to the matched `.env` *line*, so "no such key" (leave unset) stays distinguishable from "key present, value empty" (export empty). Testing the parsed value instead — as the first draft did — silently collapsed the second case into the first and reopened the fail-closed hole.
+- **`|| app_env_line=''` is load-bearing under `set -e`.** When no `APP_ENV` line matches, `grep` exits 1. The pipeline's status is `tail`'s, so the assignment happens to survive, but relying on that is invisible. The explicit guard makes the no-match path unambiguously non-fatal — pinned by case D, which exits 0 with a `.env` containing no usable `APP_ENV`.
+- **Ahead of every `php artisan` call, not merely ahead of `config:cache`.** The first draft sat after `storage:link` and `migrate`, both of which boot the framework and evaluate `ray.php`; Copilot caught that those two processes would still have run under the old precedence. The block moved to `docker/entrypoint.sh:33-51`, immediately after role validation and before the first artisan invocation at line 62. It sits outside every role branch, so `web`, `horizon` and `scheduler` all reach it.
 
 ### Verification
 
@@ -43,8 +46,23 @@ Entrypoint behaviour is not covered by the PHP suite, so the change was exercise
 | D | unset | `#APP_ENV=staging` + `MY_APP_ENV=decoy` | `NULL` | `false` | 0 |
 | E | unset | `APP_ENV=local` | `'local'` | `true` | 0 for `web`, `horizon`, `scheduler` |
 | F | unset | `APP_ENV="local"` / `'local'` / padded | `'local'` | `true` | 0 |
+| G | unset | `APP_ENV=` (empty) | `''` | `false` | 0 |
+| H | unset | `export APP_ENV=local` | `'local'` | `true` | 0 |
+| I | unset | `APP_ENV=local # dev only` | `'local'` | `true` | 0 |
+| J | unset | `APP_ENV=local` then `APP_ENV=production` | `'production'` | `false` | 0 |
 
-A proves the exported value wins; B proves #416 stays fixed; C and D prove the fail-closed path does not abort the boot under `set -e`; E covers all three roles including the `su-exec` hand-off; F covers the quoting and whitespace forms.
+A proves the exported value wins; B proves #416 stays fixed; C and D prove the fail-closed path does not abort the boot under `set -e`; E covers all three roles including the `su-exec` hand-off; F covers the quoting and whitespace forms; G, H, I and J cover the four parsing gaps found in review and by measurement.
+
+**Parser/framework parity.** Fifteen `.env` forms, comparing what the entrypoint exports against what phpdotenv resolves for the same file: **0 mismatches**, covering `export` prefixes, whitespace around `=`, quoted and unquoted inline comments, `APP_ENV=loc#al` → `'loc'`, empty and whitespace-only values, duplicate keys, commented keys, decoy keys, and an absent key.
+
+**The empty-value hole, isolated.** With a cache baked at `local` and a `.env` reading `APP_ENV=`:
+
+| entrypoint behaviour | `env('APP_ENV')` | `config('app.env')` | `enable` |
+|---|---|---|---|
+| empty discarded, `APP_ENV` left unset (first draft) | `NULL` | `'local'` (stale) | **`true`** |
+| empty exported (shipped) | `''` | `'local'` (stale) | **`false`** |
+
+**Ordering.** `sh -x` trace of a real run: `export 'APP_ENV=local'` appears before `php artisan storage:link --force`, confirming the move ahead of the first framework boot.
 
 **The mechanism, isolated.** With a config cache deliberately baked at `local` while `.env` reads `production`:
 
@@ -86,7 +104,7 @@ Any non-null `env('APP_ENV')` wins; `config('app.env')` is consulted **only** wh
 
 ### The Reasoning
 
-- **The bug is the cache, not the default.** `docker/entrypoint.sh:53` runs `php artisan config:cache` on *every* container start. Once a cache exists, `LoadEnvironmentVariables` returns early and never reads `.env`, so an `APP_ENV` that lives only in `.env` is invisible to `env()`: the old `env('APP_ENV', 'production')` collapsed to `production` and left Ray off even locally. Verified against a genuine `config:cache` rather than taken on trust — post-cache, `env('APP_ENV')` is `NULL` while `config('app.env')` is still `'local'`.
+- **The bug is the cache, not the default.** `docker/entrypoint.sh:68` runs `php artisan config:cache` on *every* container start. Once a cache exists, `LoadEnvironmentVariables` returns early and never reads `.env`, so an `APP_ENV` that lives only in `.env` is invisible to `env()`: the old `env('APP_ENV', 'production')` collapsed to `production` and left Ray off even locally. Verified against a genuine `config:cache` rather than taken on trust — post-cache, `env('APP_ENV')` is `NULL` while `config('app.env')` is still `'local'`.
 - **Env-first, not the issue's option 2.** Config-first fixes #416 but regresses the fail-closed guarantee #391 introduced: a stale cache baked at `local` would re-enable Ray against an exported `APP_ENV=production`. Env-first fixes the bug *and* keeps that guarantee for exported OS variables.
 - **`??` rather than `?:`, caught in review.** Laravel's `Env` treats only `null` as absent, so the raw return is not always a non-empty string: `APP_ENV=''` yields `''`, `APP_ENV=false` yields boolean `false`, and `APP_ENV=empty` yields `''`. `?:` discarded all three as falsy and fell through to the cache — which, with a cache baked at `local`, re-enabled Ray: a narrow reopening of the same #391 failure mode this change claims to preserve. `??` keeps those values, and they compare unequal to `'local'`, so Ray stays off.
 - **Honest residue.** Laravel coerces the literal strings `null` and `(null)` to PHP `null`, so `APP_ENV=null` still falls back to the cache even with `??`. That is inherent to `env()` — an unset variable and the literal `null` are indistinguishable at this call site. Documented in the comment block rather than papered over.
