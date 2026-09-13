@@ -1,5 +1,52 @@
 # Dev Log
 
+## 2026-09-13 — Dokploy staging hardening — PRs #388–#400
+
+### The Change
+
+Nine PRs merged into `develop`, in this order: #390, #393, #388, #389, #392, #395, #397, #398, #400. Together they make the container image role-aware, move the deployment's observability onto the container log stream, turn developer tooling off outside a developer machine, and close two ways a public staging domain could be poked at (open registration, an unthrottled `/up`).
+
+**Files created:**
+- `docker/healthcheck.sh` (#390) — Role-aware health check. The image's single `HEALTHCHECK` previously probed the web endpoint in every container, so `horizon` and `scheduler` containers reported `unhealthy` forever. Copilot's Balanced review caught that the first role test was fail-open — an unrecognised `CONTAINER_ROLE` fell through to the web probe — fixed in `d94425a` with a `case` that rejects unknown roles.
+- `app/Http/Controllers/HealthCheckController.php`, `resources/views/health-up.blade.php` (#392) — Explicit controller and view backing `/up`, replacing the framework's implicitly registered route so the endpoint can carry middleware.
+- `tests/Feature/HealthCheckTest.php` (#392) — Pins the throttle, the 200, and the maintenance-mode exemption.
+- `tests/Concerns/DisablesRegistration.php`, `tests/Feature/Auth/RegistrationDisabledTest.php` (#395) — Exercise the flag through a real config load and route-registration pass, not by poking `config()` after boot.
+- `tests/Unit/RayConfigTest.php` (#397) — Pins the fail-closed Ray default.
+
+**Files modified:**
+- `Dockerfile` (#390, #393) — `HEALTHCHECK` delegates to `docker/healthcheck.sh`. Worker containers drop to `www-data` via `su-exec`; the web container stays root so nginx can bind :80.
+- `docker/entrypoint.sh` (#390, #393, #400) — Migration gating moved off `RUN_MIGRATIONS` onto `CONTAINER_ROLE`, then gained the privilege drop, then (#400) validation of `CONTAINER_ROLE` against `web|horizon|scheduler` *before any side effect*, symmetric with `docker/healthcheck.sh`. Previously a typo silently skipped migrations and dropped privileges with no diagnostic.
+- `.env.example` (#388, #389, #395, #398) — `LOG_STACK=stderr` and `LOG_LEVEL=info`; `RAY_ENABLED=false` and `BOOST_ENABLED=false`; `FORTIFY_REGISTRATION_ENABLED`; then the Ray note corrected by #398.
+- `docs/dokploy-staging-plan.md` (#390, #388, #389, #392, #395, #398) — Staging environment matrix and rationale kept in step with each change. #395 conflicted here; resolved by keeping the `CONTAINER_ROLE` and `FORTIFY_REGISTRATION_ENABLED` rows and dropping the stale `RUN_MIGRATIONS` row.
+- `bootstrap/app.php` (#392) — `/up` registered explicitly behind `throttle:60,1`, with the maintenance-mode exemption preserved.
+- `config/fortify.php`, `resources/views/welcome.blade.php`, `tests/Feature/Auth/RegistrationTest.php` (#395) — Registration gated behind `FORTIFY_REGISTRATION_ENABLED`; the landing page's register links guarded with `Route::has` so disabling the flag does not turn `/` into a 500.
+- `ray.php` (#397) — Line 13 default changed to `env('RAY_ENABLED', env('APP_ENV', 'production') === 'local')`, and the hardcoded `local_path` removed.
+- `.gitignore` (#395) — Added `.env.testing`.
+
+Three of the nine were review or correction follow-ups rather than new behaviour. Copilot's Balanced review corrected a false rationale in #388 (`57ffd90`) and an overstated latency claim in #389 (`6426fe9`). On #392 it flagged that the maintenance test wrote the checkout-wide `storage/framework/down` marker and could hand parallel workers spurious 503s; `8df4b96` binds an in-memory `MaintenanceMode` fake instead, plus an `expect(isDownForMaintenance())->toBeTrue()` guard so the test cannot pass vacuously. #398 is a pure docs correction: #397 silently falsified text #389 had just landed — `.env.example` and `docs/dokploy-staging-plan.md:373` still claimed `ray.php` defaults Ray to `true`. It also corrected a second error in that text: demonstrating the 2s Ray timeout needs a routable-but-dropping address, because unresolvable `host.docker.internal` fails DNS in ~0.024s, refused `127.0.0.1` in ~0.002s, and Ray caches unavailability for 30s per process (`Client.php:67`).
+
+### The Reasoning
+
+- One mechanism now drives three behaviours. `CONTAINER_ROLE` gates migrations, selects the health probe, and decides the privilege drop. The previous split — `RUN_MIGRATIONS` for one, an implicit web assumption for the other — allowed a container to be configured correct on one axis and wrong on another.
+- Role validation belongs at the top of both scripts, and must fail closed. A fail-open role test degrades exactly where it matters: a misconfigured worker looks healthy (#390's first cut) or quietly runs with no migrations and reduced privileges (#400). #400 was proved safe by differential testing — all four in-contract cases are byte-identical to the prior script, and only `weeb` changed behaviour (rc 0 with all side effects → rc 1 with none).
+- Merge order alone does not keep prose true. #389 documented Ray's default; #397 then changed that default and left the documentation stating the opposite. Neither PR was wrong in isolation, and no reviewer on either one could have seen it — the falsification only exists in the pair. #398 had to exist. The generalisation: when a PR changes a default that another PR *documents*, the documentation is a dependency, and something has to re-check it after both land.
+
+### The Tech Debt
+
+- `CONTAINER_ROLE=""` (empty string) is still accepted as `web` by both `docker/entrypoint.sh` and `docker/healthcheck.sh`, because `${VAR:-default}` substitutes on empty as well as unset. The validation added in #400 catches typos, not blanks.
+- Issue #396 remains open: the `horizon` and `scheduler` health checks return 0 unconditionally, so those containers carry no worker liveness signal — they are only "not failing the web probe", which is not the same as working.
+- `AGENTS.md:99` mandates squash-merge, but the repo has `allow_squash_merge: false`; all nine landed as merge commits. Related: `delete_branch_on_merge=false` meant GitHub did not auto-retarget stacked PRs, so #393 (stacked on #390) had to be retargeted by hand.
+
+### Verification
+
+Integrated on `develop` after all nine merges:
+
+- `op test` — 2199 tests passed
+- `op lint` — Pint clean on 445 files
+- `op analyse` — PHPStan, no errors
+
+---
+
 ## 2026-03-19 — Extract BasiqServiceContract Interface for Testability
 
 ### The Change
