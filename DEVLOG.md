@@ -1,7 +1,114 @@
 # Dev Log
 
 
-## 2026-09-13 — Issue #419: Export `APP_ENV` Before `config:cache` — PR #TBD
+## 2026-09-13 — Issue #423 follow-up: Treat the Null Sentinels as Absent — PR #427
+
+### The Change
+
+`docker/entrypoint.sh:65-67` now drops the `null` and `(null)` literals before the `production` fallback is reached, so a sentinel value can no longer satisfy the presence guard and skip the default. The block sits between the `.env` parser and the fallback added by #426:
+
+```sh
+case "${APP_ENV-}" in
+    [Nn][Uu][Ll][Ll]|'('[Nn][Uu][Ll][Ll]')') unset APP_ENV ;;
+esac
+```
+
+It applies to both sources — an already-exported value and a `.env`-parsed one — because it runs after each has had its turn. Merged as `659e2c1` (commit `9646a4e`, footer `Refs #423`). Issue #423 stayed **closed**: #426 closed it correctly, and this closes the same hole reached by a different route rather than reopening it.
+
+**Files modified:**
+- `docker/entrypoint.sh` (+14, -2) — the `case` block at lines 65-67 plus the comment above it recording that the two literals are Laravel's own encoding of absence, that matching is case-insensitive and untrimmed to mirror `Env.php`, and which neighbouring forms are deliberately *not* dropped
+- `tests/Unit/EntrypointAppEnvTest.php` (+131) — new file; 19 cases executing the real entrypoint
+- `.env.example` (+6, -4) — the sentinel residue documented by #426 removed from the caveat, since it no longer exists
+- `docs/dokploy-staging-plan.md` (+1, -1) — `RAY_ENABLED` row re-pointed at the normalising entrypoint
+
+### The Reasoning
+
+- **The layer mismatch is the whole bug.** The shell guard asked *"is the variable present?"*; `env()` asks *"did a meaningful value arrive?"*. `Env.php:256` is `switch (strtolower($value))`, and `:266-268` maps the literals `null` and `(null)` to PHP `null`. Those literals are Laravel's own encoding of **absent**. So the two layers disagreed on the definition of absence, and the disagreement was the hole: `APP_ENV=null` was present, the `production` fallback therefore did not fire, `env('APP_ENV')` still returned `null`, and the `??` in `ray.php:40` handed resolution back to `config('app.env')`.
+- **The earlier decline was wrong, and it is worth recording why.** During #426 this was declined on the grounds that `null` is "a value a source supplies", and therefore outside the no-source defect #423 described. That reading is mistaken. It is true at the shell layer and false at the layer that consumes the variable — and the consumer is the only layer whose opinion decides whether Ray transmits. Aligning the guard with `env()`'s own definition of absent is *agreement* with `env()`, not a shell-side override of it; the entrypoint is not inventing a normalisation rule, it is declining to hand `env()` a string that `env()` has already told us it treats as nothing.
+- **Mirrors `Env.php` exactly rather than approximating it.** Matching is case-insensitive, because `Env.php:256` lowercases before switching — `NULL`, `nUlL` and `(NULL)` all normalise. Matching is *untrimmed*, because there is no `trim()` in that path — `' null '` is not a sentinel to `env()` either, so it is not one here. Approximating in either direction would put the shell and PHP back out of step, which is the defect being fixed.
+- **The neighbouring sentinels are deliberately preserved.** `empty`, `false`, `true` and the parenthesised `(empty)`/`(false)`/`(true)` forms are left alone. `env()` reports each of them as a *value* — `''`, `false`, `true` — not as absence, and each compares unequal to `'local'`, so Ray already fails closed on all of them. Only `null` and `(null)` vanish into PHP `null`, and only those two are dropped.
+
+### Verification
+
+Composed through the real shell block and then `ray.php:40`, against a config cache deliberately baked at `local` so that `config('app.env')` is the stale `'local'`:
+
+| `APP_ENV` | before (#426) | after (#427) |
+|---|---|---|
+| `production` | false | false |
+| `null` | TRUE — Ray transmits | false |
+| `(null)` | TRUE — Ray transmits | false |
+| `NULL` | TRUE — Ray transmits | false |
+| `staging` | false | false |
+| `''` empty | false | false |
+| `false` | false | false |
+| `local` | TRUE | TRUE (correct — developer machine) |
+| unset | false | false |
+
+Three rows flip and the rest hold: exactly the sentinel set, nothing else.
+
+**The entrypoint is now under test.** `tests/Unit/EntrypointAppEnvTest.php` — 19 cases, 57 assertions — runs the **real** `docker/entrypoint.sh` under `env -i` with `php` and `chown` stubbed onto `PATH`, and uses the script's own `exec "$@"` hand-off to probe the value actually exported. Executed rather than line-sliced deliberately: the block has already drifted three times (`33-55` → `33-59` → `33-71`), and an excerpt-based assertion would keep passing after the code it claimed to cover had moved. Parallel-safe via a temp directory keyed on `getmypid()` plus 8 random bytes (`tests/Unit/EntrypointAppEnvTest.php:30`). Red-before-green confirmed: all 7 sentinel cases fail against the pre-fix entrypoint.
+
+That closes a gap `RayConfigTest` never covered. `RayConfigTest` pins what `ray.php` does *given* an `APP_ENV`; nothing previously proved the entrypoint exported anything at all, in any case — the export behaviour from #416, #419 and #426 had been verified only by hand.
+
+**Quality gates:**
+- `op test.parallel` — 2245 passed, 5729 assertions (2226 / 5672 → +19/+57, exactly the new file), stable across three runs
+- `op lint.check` — PASS, 450 files (449 → 450, the new test file)
+- `op analyse` — PHPStan, 0 errors, 222 files
+- `shellcheck docker/entrypoint.sh` — 0 findings, and 0 under explicit `-s sh`
+- Copilot review (Lite) — 0 findings
+- **CI on `659e2c1`:** green
+
+---
+
+## 2026-09-13 — Issue #423: Default `APP_ENV` to `production` — PR #426
+
+### The Change
+
+`docker/entrypoint.sh` exported `APP_ENV` only when `.env` existed. A container where the variable was neither exported **nor** present in `.env` left it unset by design, so `ray.php:40` fell through to `config('app.env')` — and a cache baked at `local` and then shipped elsewhere resolved `local`, made `enable` evaluate `true`, and had **Ray transmitting from a non-local container**. The only mitigation was an out-of-band `RAY_ENABLED=false` an operator had to remember to export. The fix adds a fallback immediately after the `.env` parse block, at `docker/entrypoint.sh:57-59`:
+
+```sh
+if [ -z "${APP_ENV+x}" ]; then
+    export APP_ENV=production
+fi
+```
+
+Resulting precedence: **exported OS var > `.env` > `production`**. Merged as `dc3f09f` (commits `977904a`, `c2710dd`, `8578a03`).
+
+**Files modified:**
+- `docker/entrypoint.sh` (+10, -6) — the fallback block plus comment corrections: the guarantee re-scoped off "total on every path", and the stale-cache hazard reworded into the counterfactual it is
+- `.env.example` (+5, -4) — Ray caveat re-scoped for the new default and the remaining sentinel residue named
+- `docs/dokploy-staging-plan.md` (+1, -1) — `RAY_ENABLED` row rewritten for the fallback and its citation re-pointed
+
+### The Reasoning
+
+- **`production` invents nothing.** `config/app.php:31` is `'env' => env('APP_ENV', 'production'),` — the framework's own default for this key. The entrypoint is not introducing a convention, it is making Laravel's existing one reachable before `config:cache` runs, where `env()` can still see it. It is also the fail-closed choice, and the only behaviour it changes is the previously broken case: a container with no `APP_ENV` source running off a stale cache.
+- **The guard tests presence, not truthiness.** `${APP_ENV+x}` distinguishes unset from empty, so an exported `''` and an exported `false` are left exactly as they were. Both are deliberate non-local signals under the `??` semantics from #416 — `env()` reports each as a value, and each compares unequal to `'local'` — and overwriting them with `production` would silently discard an operator's explicit choice while changing nothing about the outcome.
+- **Three Copilot findings (Lite), all accepted.** The first draft's claim that `APP_ENV` resolution was now "total on every path" was overstated, because of the `null`/`(null)` sentinels: the guard tests presence, `APP_ENV=null` *is* present, so the fallback does not fire, yet `env()` still returns `null`. Verified against `Env.php:266-268` rather than argued, and that correction produced `c2710dd` — the guarantee is total with respect to *presence*, which is what #423 asked for, but is not a total Ray guarantee, and the docs now say only the narrower thing and name the residue. (That residue is what #427 subsequently closed.) The stale-cache sentence in the comment block was likewise reworded to "Absent this block a cache built at `local` …", since sitting above a block that forecloses it, the bare conditional read as a live warning — `8578a03`.
+- **Half of one finding was declined, with reasoning.** The suggestion to also amend the *parser* comment was refused: its "each resolves to a non-local value here" is scoped to the three unparsed forms named immediately before it — `${VAR}` interpolation, double-quote escapes, multi-line values — and each of those genuinely does yield a literal non-local string. The sentinel exception is stated once, generally, above; repeating it inside the parser comment would add length and no information.
+- **No test added, deliberately.** `tests/Unit/RayConfigTest.php:135` already pinned `'production environment beats a stale cache baked at local' => ['production', 'local', false]` — the exact assertion this change relies on. What was genuinely unpinned at that point was the entrypoint's own export behaviour, and covering that needed a different kind of test than `RayConfigTest` is; #427 added it.
+
+### Verification
+
+Exercised as the real script, with the entrypoint's own `exec "$@"` handing off to a probe that prints the exported value:
+
+| exported `APP_ENV` | `.env` | exported after the block |
+|---|---|---|
+| unset | absent | `production` |
+| `staging` | absent | `staging` |
+| unset | `APP_ENV=local` | `local` |
+
+Row 1 is #423 closed — the no-source path no longer leaves the variable unset for the cache to answer. Rows 2 and 3 prove the fallback is strictly last: neither an exported value nor a `.env` value is overwritten by it.
+
+**Quality gates:**
+- `op test.parallel` — 2226 passed, 5672 assertions (unchanged; no PHP behaviour changed)
+- `op lint.check` — PASS, 449 files
+- `op analyse` — PHPStan, 0 errors, 222 files
+- `shellcheck docker/entrypoint.sh` — 0 findings, and 0 under explicit `-s sh`
+- **CI on `dc3f09f`:** green
+
+---
+
+## 2026-09-13 — Issue #419: Export `APP_ENV` Before `config:cache` — PR #420
 
 ### The Change
 
