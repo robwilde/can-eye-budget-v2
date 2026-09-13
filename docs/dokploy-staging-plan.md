@@ -310,7 +310,12 @@ MariaDB, or Redis. Attach it **after** the first successful migration — see th
   same root `Dockerfile`; do not select Nixpacks.
 - Use one replica.
 - Override the container command with `php artisan horizon`.
-- Set `CONTAINER_ROLE=horizon`. This makes `docker/healthcheck.sh` verify Horizon's liveness via `php artisan horizon:status` (#396), so the container reports unhealthy if the Horizon supervisor crashes or loses Redis connectivity.
+- Set `CONTAINER_ROLE=horizon`. This makes `docker/healthcheck.sh` verify Horizon's liveness via `php artisan horizon:liveness` (#396), a container-local check that
+  looks for a master named for this container's hostname within Horizon's 14s expiry window, so the container reports unhealthy if its own Horizon supervisor crashes
+  or loses Redis connectivity. It deliberately does not use `horizon:status`: that returns non-zero while Horizon is merely `paused` (which a deploy does), and it
+  reads Horizon's fleet-wide `masters` set, so a healthy peer sharing this Redis and `HORIZON_PREFIX` would mask a dead local master. Note that `HORIZON_NAME` does
+  not scope this: `horizon.name` is a display label (notifications and the Horizon UI, per `config/horizon.php`) and never participates in `MasterSupervisor`'s name
+  resolution, which is what actually names a master.
 - Do not attach a domain or external port.
 - Reuse the same application, database, Redis, and storage environment values as the web service. Set a distinct `HORIZON_NAME`, for example
   `can-eye-staging-horizon`.

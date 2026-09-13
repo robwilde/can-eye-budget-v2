@@ -6,12 +6,18 @@ case "${CONTAINER_ROLE-web}" in
         exec curl -fsS http://127.0.0.1/up
         ;;
     horizon)
-        # Use php artisan horizon:status to verify the Horizon supervisor is running
-        # and communicating with Redis. This costs ~0.13s (framework boot) with 36x timeout
-        # margin on the 5s limit. A Redis outage correctly marks unhealthy.
-        # Bounded ~14s false-healthy window after kill -9 (Horizon's stale-master cutoff in RedisMasterSupervisorRepository); within --retries=5
-        # at 15s interval. Measured empirically; exit 0 = running, exit 2 = inactive.
-        exec php artisan horizon:status >/dev/null 2>&1
+        # Container-local liveness, NOT horizon:status. horizon:status returns 1 when any
+        # master is paused, so a deploy-time `horizon:pause` held longer than
+        # --interval=15s x --retries=5 (~75s) would mark this container unhealthy and invite
+        # a restart mid-deploy. It is also fleet-wide: Horizon's `masters` sorted set is read
+        # without a host filter, so a healthy peer on the same Redis + HORIZON_PREFIX masks a
+        # dead local master. horizon:liveness scopes the check to this host's master name
+        # prefix and treats paused as alive. Costs ~0.13s (framework boot), well inside the 5s
+        # limit. Bounded ~14s false-healthy window after kill -9 (Horizon's own stale-master
+        # cutoff in RedisMasterSupervisorRepository::names()); within --retries=5 at 15s
+        # interval. Redis outage correctly marks unhealthy. stdout is dropped; stderr carries
+        # the failure reason into `docker inspect` health output.
+        exec php artisan horizon:liveness --no-ansi >/dev/null
         ;;
     scheduler)
         # Verify the scheduler is actively dispatching by checking a heartbeat file.
