@@ -47,7 +47,8 @@ RUN mkdir -p bootstrap/cache storage/framework/cache/data storage/framework/sess
 
 EXPOSE 80
 
-# Container health probes: web uses /up endpoint; horizon uses horizon:status; scheduler
+# Container health probes: web uses /up endpoint; horizon uses horizon:liveness, a
+# container-local master-presence check that treats paused as alive (#396); scheduler
 # uses heartbeat freshness (#396). Bounded liveness windows: horizon ~14s (Horizon stale-master
 # cutoff); scheduler 120s (heartbeat threshold). With --retries=5 --interval=15s, worst-case
 # time-to-unhealthy: web ~75s, horizon ~90s (14s + 75s), scheduler ~195s (120s + 75s).
