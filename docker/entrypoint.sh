@@ -15,7 +15,7 @@ case "${CONTAINER_ROLE-web}" in
 esac
 
 # Export APP_ENV as a real OS variable before anything boots Laravel, so that
-# env('APP_ENV') resolves and the env-first precedence in ray.php:36 governs.
+# env('APP_ENV') resolves and the env-first precedence in ray.php:40 governs.
 # env() only sees exported variables, and once config:cache has run Laravel never
 # reads .env again, so an APP_ENV living only in .env is invisible to env() and
 # resolution falls back to the cached config('app.env'). A cache built at local
