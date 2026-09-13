@@ -51,7 +51,7 @@ applyTo: "**/*.php"
 - Use named routes with `route()` helper for URL generation
 
 ## Configuration
-- Never use `env()` outside `config/` files
+- Never use `env()` outside `config/` files, except in root-level service config files (e.g. `ray.php`) that must read environment variables before config caching
 - Always use `config('key')` instead
 
 ## PHP 8.4 Features
