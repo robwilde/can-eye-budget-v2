@@ -21,37 +21,44 @@ for every non-SQLite driver, so PostgreSQL would break monthly report aggregatio
 
 This document is a provisioning plan, not a request to create or deploy Dokploy resources during this investigation.
 
-**Step 0 is implemented on the working branches and awaits merge to `develop`.** The five blocking code changes now exist: a root production image
+**Step 0 has been implemented and merged to `develop`.** The five blocking code changes are now present: a root production image
 (`Dockerfile`, `.dockerignore`, `docker/`), a trusted-proxy call in `bootstrap/app.php`, an allow-listed Horizon gate
 (`app/Providers/HorizonServiceProvider.php` + `config/horizon.php` `authorized_emails`), `app/Listeners/VerifyHealthDependencies.php` so `/up` asserts
 MariaDB and Redis, and the `FORTIFY_REGISTRATION_ENABLED` gate in `config/fortify.php` that lets staging close public sign-up.
-Bank-import storage is settled as a shared volume — a Dokploy provisioning step, not a code change. Do not begin the "Deployment sequence"
-until those changes are merged to `develop`, because that is the branch every Application service builds.
+Bank-import storage is settled as a shared volume — a Dokploy provisioning step, not a code change. The "Deployment sequence" is ready to proceed,
+with the code prerequisites confirmed on `develop`.
 
 ## Step 0: raise the GitHub work before touching Dokploy
 
 The GitHub work is raised in `robwilde/can-eye-budget-v2`. Parent tracking issue: **#375 "Staging deployment readiness (Dokploy)"** — links this document and
-tracks the children below via a task list. Close it only when every blocking child is merged to `develop`.
+tracks the children below via a task list. Every blocking child is now merged to `develop`; the epic stays open until the Dokploy environment itself is
+provisioned and verified.
 
-Children: #369 (production image), #370 (Horizon gate), #371 (trusted proxies), #372 (`/up` dependencies) and #383 (registration env gate) are blocking;
-#373 (dev-only dependencies) and #374 (CI gating for staging deploys) are non-blocking and remain open. #383 blocks because
-`FORTIFY_REGISTRATION_ENABLED` does nothing until its config gate is on `develop`: setting the variable on the service beforehand leaves sign-up open with
-no error to say so.
+Children: #369 (production image), #370 (Horizon gate), #371 (trusted proxies), #372 (`/up` dependencies) and #383 (registration env gate) were the blocking
+set and are all merged to `develop`; #373 (dev-only dependencies) and #374 (CI gating for staging deploys) are non-blocking and remain open. #383 blocked
+because `FORTIFY_REGISTRATION_ENABLED` does nothing without its config gate: setting the variable on the service beforehand would leave sign-up open with
+no error to say so. That gate is now on `develop` (`config/fortify.php:149`), so the staging variable is read.
 
 | # | Issue | Work item                                                               | Status | Scope                                                                                                                                                                                                                                                        |
 |---|---|-------------------------------------------------------------------------|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 1 | #369 | Add production `Dockerfile`, `.dockerignore`, and container entrypoint   | Implemented, pending merge | Multi-stage Node asset build plus PHP 8.4 runtime; installs the extension set listed under "PHP extension requirements"; entrypoint runs migrations and caches config **before** the HTTP server binds; runs `storage:link` in the image, not by hand. Delivered as root `Dockerfile`, `.dockerignore`, `docker/entrypoint.sh`, `docker/nginx/default.conf`, `docker/supervisord.conf`, `docker/php.ini` |
+| 1 | #369 | Add production `Dockerfile`, `.dockerignore`, and container entrypoint   | Merged to `develop` (c0ade4a) | Multi-stage Node asset build plus PHP 8.4 runtime; installs the extension set listed under "PHP extension requirements"; entrypoint runs migrations and caches config **before** the HTTP server binds; runs `storage:link` in the image, not by hand. Delivered as root `Dockerfile`, `.dockerignore`, `docker/entrypoint.sh`, `docker/nginx/default.conf`, `docker/supervisord.conf`, `docker/php.ini` |
 | 2 | — | Provision the shared import volume                                      | Provisioning only | Mount one volume at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon`. Settled — see "Storage decision (settled): shared volume". No repository change; `FILESYSTEM_DISK` stays `local`                                          |
-| 3 | #370 | Restrict Horizon dashboard access outside `local`                       | Implemented, pending merge | Gate is now an explicit allow-list: `config('horizon.authorized_emails')` from `HORIZON_AUTHORIZED_EMAILS`, with `local` short-circuited. Fails closed when unset. Registration is env-gated as of #383 — see "Security exposure decision"                              |
-| 4 | #371 | Configure trusted proxies                                               | Implemented, pending merge | `bootstrap/app.php` now calls `$middleware->trustProxies(at: '*')` with the framework's default header set; correct because the container is only reachable through Traefik on the Dokploy network                                                            |
-| 5 | #372 | Add a `DiagnosingHealth` listener that asserts database and Redis       | Implemented, pending merge | `app/Listeners/VerifyHealthDependencies.php` runs `select 1` and a Redis `ping`; auto-discovered from `app/Listeners`. `/up` now returns 500 when either dependency is unreachable, making it a usable Dokploy readiness gate                                 |
-| 6 | #383 | Env-gate registration and guard the landing page                        | Implemented, pending merge | `config/fortify.php` gates `Features::registration()` on `FORTIFY_REGISTRATION_ENABLED`, default `true` so local and production are unchanged; set `false` on staging. The three `route('register')` call sites in `resources/views/welcome.blade.php` are guarded with `Route::has('register')` so the landing page still renders once the routes are gone. Registration/password-reset throttling is out of scope — #394 |
+| 3 | #370 | Restrict Horizon dashboard access outside `local`                       | Merged to `develop` (f39fcdd) | Gate is now an explicit allow-list: `config('horizon.authorized_emails')` from `HORIZON_AUTHORIZED_EMAILS`, with `local` short-circuited. Fails closed when unset. Registration is env-gated as of #383 — see "Security exposure decision"                              |
+| 4 | #371 | Configure trusted proxies                                               | Merged to `develop` (94303c5) | `bootstrap/app.php` now calls `$middleware->trustProxies(at: '*')` with the framework's default header set; correct because the container is only reachable through Traefik on the Dokploy network                                                            |
+| 5 | #372 | Add a `DiagnosingHealth` listener that asserts database and Redis       | Merged to `develop` (74ed230) | `app/Listeners/VerifyHealthDependencies.php` runs `select 1` and a Redis `ping`; auto-discovered from `app/Listeners`. `/up` now returns 500 when either dependency is unreachable, making it a usable Dokploy readiness gate                                 |
+| 6 | #383 | Env-gate registration and guard the landing page                        | Merged to `develop` (PR #395, c10c5b4) | `config/fortify.php` gates `Features::registration()` on `FORTIFY_REGISTRATION_ENABLED`, default `true` so local and production are unchanged; set `false` on staging. The three `route('register')` call sites in `resources/views/welcome.blade.php` are guarded with `Route::has('register')` so the landing page still renders once the routes are gone. Registration/password-reset throttling is out of scope — #394 |
 | 7 | #373 | Move development-only dependencies out of the production dependency set | Open, non-blocking | `laravel/boost` and `spatie/laravel-ray` sit in `require`, so `composer install --no-dev` still ships them; `playwright` sits in `dependencies` with an empty `devDependencies`, so `npm ci` pulls it into the build stage                                     |
 | 8 | #374 | Decide whether staging deploys are gated on CI                          | Open, non-blocking | `.github/workflows/lint.yml` and `tests.yml` exist but nothing ties a staging deploy to them                                                                                                                                                                  |
 
-Rows 1, 3, 4, 5 and 6 (#369, #370, #371, #372, #383) are release blockers: implemented on working branches, not yet merged. Do not begin the "Deployment
-sequence" until they are merged to `develop`, because that is the branch every Application service below is configured to build. Row 2 is a Dokploy
-provisioning step, not a merge gate — but the volume must exist before the first bank import.
+Rows 1, 3, 4, 5 and 6 (#369, #370, #371, #372, #383) were the release blockers and are all merged to `develop`, the branch every Application service below is
+configured to build, so the code gate on the "Deployment sequence" is satisfied. Row 2 is a Dokploy provisioning step, not a merge gate — but the volume must
+exist before the first bank import.
+
+Further hardening landed on `develop` after that blocking set, and the runbook below assumes it: a role-aware container health check (#379, PR #390), worker
+containers running as `www-data` rather than root (#384, PR #393), application logs on the container `stderr` stream (#380, PR #388), Ray and Boost off
+outside a developer machine (#381, PR #389) with the Ray enable default itself failing closed (#391, PRs #397 and #398), a throttle on `/up` (#382, PR #392),
+and `CONTAINER_ROLE` validated before any side effect so an unknown or blank value aborts instead of silently defaulting to `web` (#399, PR #400; #401,
+PR #402). None of this changes the deployment order below; it only means the image and configuration already behave as the later steps expect.
 
 ## Dokploy inventory
 
@@ -99,12 +106,12 @@ be independently inspected; verify the reference image entrypoints and environme
 
 ## Can Eye build strategy
 
-The root `Dockerfile`, `.dockerignore`, and `docker/` configs now exist on the working branch (there is still no `nixpacks.toml`, `Procfile`, or production
-`docker-compose` file; `.ddev/` remains development-only). Point Dokploy at the root `Dockerfile` once #369 is merged to `develop`.
+The root `Dockerfile`, `.dockerignore`, and `docker/` configs are on `develop` (there is still no `nixpacks.toml`, `Procfile`, or production
+`docker-compose` file; `.ddev/` remains development-only). Point Dokploy at the root `Dockerfile`.
 
 | Planned service     | Dokploy build mode    | Dockerfile/Nixpacks decision                                             | Prerequisite                                    |
 |---------------------|-----------------------|--------------------------------------------------------------------------|-------------------------------------------------|
-| `can-eye-web`       | Application           | Root `Dockerfile`; do not use Nixpacks                                   | #369 merged to `develop`                        |
+| `can-eye-web`       | Application           | Root `Dockerfile`; do not use Nixpacks                                   | Satisfied — #369 on `develop`                   |
 | `can-eye-horizon`   | Application           | Reuse the same root `Dockerfile`; do not use Nixpacks                    | Same Dockerfile as `can-eye-web`                |
 | `can-eye-scheduler` | Application           | Reuse the same root `Dockerfile`; do not use Nixpacks                    | Same Dockerfile as `can-eye-web`                |
 | `can-eye-mariadb`   | Managed MariaDB/MySQL | Managed MariaDB 11.8 image; neither Nixpacks nor a repository Dockerfile | Create the managed database service and volume  |
@@ -282,7 +289,7 @@ MariaDB, or Redis. Attach it **after** the first successful migration — see th
 ### Service: can-eye-web
 
 - Create an Application service with repository `https://github.com/robwilde/can-eye-budget-v2.git`, owner `robwilde`, branch `develop`, repository root as
-  build path/context, `buildType=dockerfile`, and `dockerfile=Dockerfile`. This requires the root Dockerfile from #369 merged to `develop`; do not select Nixpacks.
+  build path/context, `buildType=dockerfile`, and `dockerfile=Dockerfile`. The root Dockerfile from #369 is on `develop`; do not select Nixpacks.
 - The image prerequisite is a multi-stage Node build that runs `npm ci` and `npm run build`; the runtime contains PHP 8.4, the extensions listed under "PHP
   extension requirements", Composer production dependencies, and an HTTP server listening on port 80.
 - Serve the Laravel `public` directory. Do not run `npm run dev` in staging.
@@ -383,13 +390,13 @@ environment. Any live-looking credentials previously exposed in Dokploy output s
 
 ## Deployment sequence
 
-Steps 1 and 2 are the gate. Do not start step 3 until step 2 is complete.
+Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onward is outstanding Dokploy work and has not been performed.
 
 1. Done: parent issue #375 and children #369–#374 plus #383 exist in `robwilde/can-eye-budget-v2`.
-2. Merge #369, #370, #371, #372 and #383 to `develop`. Confirm the branch contains the root `Dockerfile`, `docker/entrypoint.sh` migrating before serving,
-   `trustProxies` in `bootstrap/app.php`, the allow-listed Horizon gate, `app/Listeners/VerifyHealthDependencies.php`, and the
-   `FORTIFY_REGISTRATION_ENABLED` gate in `config/fortify.php`. Without that last one the staging variable set in step 8 is inert. #373 and #374 do not gate
-   the deploy.
+2. Done: #369, #370, #371, #372 and #383 are merged to `develop`. If in doubt, confirm the branch contains the root `Dockerfile`, `docker/entrypoint.sh`
+   migrating before serving, `trustProxies` in `bootstrap/app.php`, the allow-listed Horizon gate, `app/Listeners/VerifyHealthDependencies.php`, and the
+   `FORTIFY_REGISTRATION_ENABLED` gate in `config/fortify.php`. Without that last one the staging variable set in step 8 would be inert. #373 and #374 do
+   not gate the deploy.
 3. Confirm the GitHub repository is accessible to Dokploy.
 4. Create project `can-eye-budget-v2` and environment `staging`.
 5. Create and deploy MariaDB and Redis; wait for both services to report ready and record their internal hostnames.
@@ -441,8 +448,10 @@ Steps 1 and 2 are the gate. Do not start step 3 until step 2 is complete.
 
 ## Open prerequisites
 
-1. Merge #369, #370, #371, #372 and #383 to `develop`. This is the gating prerequisite for everything else; the changes exist on working branches but Dokploy
-   builds `develop`. #383 must land before prerequisite 3 is actioned, or the variable set there has nothing to read it.
+Prerequisite 1 is satisfied and retained for context; 2 onward are still outstanding.
+
+1. Satisfied: #369, #370, #371, #372 and #383 are merged to `develop`, the branch Dokploy builds. #383 landing is what makes prerequisite 3 effective —
+   without its config gate the variable set there would have nothing to read it.
 2. Create the shared import volume in Dokploy and mount it at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon`. The storage
    arrangement itself is settled — shared volume, `FILESYSTEM_DISK=local`. Never adopt `FILESYSTEM_DISK=s3`: `league/flysystem-aws-s3-v3` is absent from
    `composer.lock` and the import path calls `Storage::disk('local')->path()` directly.
