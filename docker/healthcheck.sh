@@ -1,6 +1,14 @@
 #!/bin/sh
 set -e
 
+# Runs as root: the image declares no USER, so Docker's HEALTHCHECK executes as root even
+# though the horizon and scheduler workloads drop to www-data via su-exec (entrypoint.sh).
+# Verified in a running container that this creates no root-owned files under storage/ or
+# bootstrap/cache/, which would otherwise silently break www-data writes later: LOG_STACK=stderr
+# means a framework boot writes no log file, and the probes are read-only. Re-check if logging
+# is ever pointed back at a file (LOG_STACK=single) or a probe is added that writes to disk;
+# the fix then is to run the probe under `su-exec www-data`. See issue #410.
+
 case "${CONTAINER_ROLE-web}" in
     web)
         exec curl -fsS http://127.0.0.1/up
