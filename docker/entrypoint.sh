@@ -1,6 +1,15 @@
 #!/bin/sh
 set -e
 
+case "${CONTAINER_ROLE:-web}" in
+    web|horizon|scheduler)
+        ;;
+    *)
+        echo "entrypoint: unknown CONTAINER_ROLE '${CONTAINER_ROLE}'; expected web, horizon, or scheduler" >&2
+        exit 1
+        ;;
+esac
+
 mkdir -p \
   storage/app/private \
   storage/app/public \
