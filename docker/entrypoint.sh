@@ -28,7 +28,8 @@ esac
 # treats a present-but-empty APP_ENV as a deliberate non-local signal. When
 # neither source defines it the variable is exported as production, matching
 # Laravel's own default in config/app.php. Precedence: exported var > .env > production.
-# This ensures every codepath yields an exported APP_ENV before any PHP code runs.
+# No codepath now leaves it unset. The literal null/(null) stay the residue:
+# present here, so the fallback skips them, but coerced to null by env().
 if [ -z "${APP_ENV+x}" ] && [ -f .env ]; then
     # Parse .env without sourcing it: values may contain #, $, quotes or backticks
     # that a `.` would execute. The key is anchored whole, so a commented
