@@ -26,10 +26,9 @@ esac
 # An already-exported APP_ENV is authoritative and is never overwritten. When
 # .env defines the key its value is exported even if empty, because ray.php
 # treats a present-but-empty APP_ENV as a deliberate non-local signal. When
-# neither source defines it the variable is left unset rather than invented;
-# resolution then falls back to config('app.env'), which is production unless a
-# cache was baked in some other environment. A stale cache reading local is the
-# one case this cannot cover -- export RAY_ENABLED=false to force Ray off there.
+# neither source defines it the variable is exported as production, matching
+# Laravel's own default in config/app.php. Precedence: exported var > .env > production.
+# This ensures every codepath yields an exported APP_ENV before any PHP code runs.
 if [ -z "${APP_ENV+x}" ] && [ -f .env ]; then
     # Parse .env without sourcing it: values may contain #, $, quotes or backticks
     # that a `.` would execute. The key is anchored whole, so a commented
@@ -52,6 +51,10 @@ if [ -z "${APP_ENV+x}" ] && [ -f .env ]; then
         esac
         export APP_ENV="$app_env_value"
     fi
+fi
+
+if [ -z "${APP_ENV+x}" ]; then
+    export APP_ENV=production
 fi
 
 mkdir -p \
