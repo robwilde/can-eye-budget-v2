@@ -18,18 +18,18 @@ esac
 # env('APP_ENV') resolves and the env-first precedence in ray.php:40 governs.
 # env() only sees exported variables, and once config:cache has run Laravel never
 # reads .env again, so an APP_ENV living only in .env is invisible to env() and
-# resolution falls back to the cached config('app.env'). A cache built at local
-# and then run elsewhere would enable Ray off that stale value (issue #419).
+# resolution falls back to the cached config('app.env'). Absent this block a cache
+# built at local and then run elsewhere would enable Ray off that stale value (#419).
 # This runs ahead of every php artisan call, not merely ahead of config:cache:
 # storage:link and migrate also boot the framework and evaluate ray.php.
 #
 # An already-exported APP_ENV is authoritative and is never overwritten. When
 # .env defines the key its value is exported even if empty, because ray.php
 # treats a present-but-empty APP_ENV as a deliberate non-local signal. When
-# neither source defines it the variable is left unset rather than invented;
-# resolution then falls back to config('app.env'), which is production unless a
-# cache was baked in some other environment. A stale cache reading local is the
-# one case this cannot cover -- export RAY_ENABLED=false to force Ray off there.
+# neither source defines it the variable is exported as production, matching
+# Laravel's own default in config/app.php. Precedence: exported var > .env > production.
+# No codepath now leaves it unset. The literal null/(null) stay the residue:
+# present here, so the fallback skips them, but coerced to null by env().
 if [ -z "${APP_ENV+x}" ] && [ -f .env ]; then
     # Parse .env without sourcing it: values may contain #, $, quotes or backticks
     # that a `.` would execute. The key is anchored whole, so a commented
@@ -52,6 +52,10 @@ if [ -z "${APP_ENV+x}" ] && [ -f .env ]; then
         esac
         export APP_ENV="$app_env_value"
     fi
+fi
+
+if [ -z "${APP_ENV+x}" ]; then
+    export APP_ENV=production
 fi
 
 mkdir -p \
