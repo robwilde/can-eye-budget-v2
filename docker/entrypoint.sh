@@ -1,8 +1,12 @@
 #!/bin/sh
 set -e
 
-case "${CONTAINER_ROLE:-web}" in
+case "${CONTAINER_ROLE-web}" in
     web|horizon|scheduler)
+        ;;
+    "")
+        echo "entrypoint: CONTAINER_ROLE is set but empty; expected web, horizon, or scheduler" >&2
+        exit 1
         ;;
     *)
         echo "entrypoint: unknown CONTAINER_ROLE '${CONTAINER_ROLE}'; expected web, horizon, or scheduler" >&2
