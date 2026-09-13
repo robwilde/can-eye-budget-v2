@@ -41,8 +41,8 @@ Three of the nine were review or correction follow-ups rather than new behaviour
 
 Integrated on `develop` after all nine merges:
 
-- `op test` — 2199 tests passed
-- `op lint` — Pint clean on 445 files
+- `op test.parallel` — 2199 tests passed
+- `op lint.check` — Pint clean on 445 files
 - `op analyse` — PHPStan, no errors
 
 ---
