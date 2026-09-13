@@ -9,8 +9,31 @@ return [
     * This setting controls whether data should be sent to Ray.
     *
     * By default, `ray()` will only transmit data in the local environment.
+    *
+    * `APP_ENV` is resolved env-first with `??`, so any non-null value visible to
+    * `env()` wins over the config cache. "Visible to `env()`" means an exported OS
+    * variable: once `php artisan config:cache` has run, `LoadEnvironmentVariables`
+    * returns early and never reads `.env`, so `.env`-only values are invisible here.
+    * A cache baked at `local` therefore cannot re-enable Ray against an exported
+    * `APP_ENV=production`, but it does win over an `APP_ENV` that lives only in
+    * `.env` — that fallback is exactly what makes Ray work in a local container.
+    *
+    * `??` rather than `?:` is deliberate: `env('APP_ENV')` returns `''` for an
+    * explicitly empty value and boolean `false` for `APP_ENV=false`, both of which
+    * `?:` would discard as absent and hand to the cache. Those values compare
+    * unequal to `'local'`, so Ray stays off.
+    *
+    * `RAY_ENABLED` reaches this file only through `env()`. It has no cached config
+    * key, and adding `config/ray.php` is not an option: Spatie's `SettingsFactory`
+    * searches upward from `config/` and would shadow this file entirely. So to force
+    * Ray off where the cache was baked at `local`, export `RAY_ENABLED=false` as an
+    * OS variable; a `RAY_ENABLED=false` that exists only in `.env` is not read once
+    * the config cache exists.
+    *
+    * On the framework-less `ray()` path no `config` repository is bound, so
+    * resolution falls through to `production` and Ray stays off.
     */
-    'enable' => env('RAY_ENABLED', env('APP_ENV', 'production') === 'local'),
+    'enable' => env('RAY_ENABLED', (env('APP_ENV') ?? (app()->has('config') ? config('app.env', 'production') : 'production')) === 'local'),
 
     /*
     * When enabled, all cache events will automatically be sent to Ray.
