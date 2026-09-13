@@ -310,8 +310,7 @@ MariaDB, or Redis. Attach it **after** the first successful migration — see th
   same root `Dockerfile`; do not select Nixpacks.
 - Use one replica.
 - Override the container command with `php artisan horizon`.
-- Set `CONTAINER_ROLE=horizon`. This suppresses the entrypoint migration and makes `docker/healthcheck.sh` exit 0, so the container reports healthy without an
-  HTTP server.
+- Set `CONTAINER_ROLE=horizon`. This makes `docker/healthcheck.sh` verify Horizon's liveness via `php artisan horizon:status` (#396), so the container reports unhealthy if the Horizon supervisor crashes or loses Redis connectivity.
 - Do not attach a domain or external port.
 - Reuse the same application, database, Redis, and storage environment values as the web service. Set a distinct `HORIZON_NAME`, for example
   `can-eye-staging-horizon`.
@@ -325,9 +324,7 @@ MariaDB, or Redis. Attach it **after** the first successful migration — see th
   same root `Dockerfile`; do not select Nixpacks.
 - Use one replica.
 - Override the container command with `php artisan schedule:work`, matching the reference scheduler service.
-- Set `CONTAINER_ROLE=scheduler`. This suppresses the entrypoint migration and makes `docker/healthcheck.sh` exit 0, so the container reports healthy without an
-  HTTP server.
-- Do not attach a domain or external port.
+- Set `CONTAINER_ROLE=scheduler`. This makes `docker/healthcheck.sh` verify the scheduler's liveness via a timestamped heartbeat file (#396), so the container reports unhealthy if the scheduler stops dispatching or crashes.
 - Reuse the same application, database, Redis, and storage environment values as the web service.
 - Note that two of the three schedules in `routes/console.php` are `Schedule::call()` closures that execute in this container and write to the database directly,
   so this service needs working database credentials, not just Redis.
@@ -365,7 +362,7 @@ Set the common application environment on all three Application services. Values
 | `HORIZON_PATH`                                                           | Optional defence in depth now the gate is an allow-list; the default is `horizon`                                                          |
 | `HORIZON_AUTHORIZED_EMAILS`                                              | Comma-separated allow-list of emails permitted to open the dashboard outside `local`. Empty means nobody can — fails closed                |
 | `FORTIFY_REGISTRATION_ENABLED`                                           | `false` on staging — closes public sign-up on a bank-feed application. Default is `true`, so local and production are unchanged            |
-| `CONTAINER_ROLE`                                                         | `web` on `can-eye-web`, `horizon` on `can-eye-horizon`, `scheduler` on `can-eye-scheduler`. Defaults to `web`. Only the `web` role migrates and only the `web` role is health-checked over HTTP |
+| `CONTAINER_ROLE`                                                         | `web` on `can-eye-web`, `horizon` on `can-eye-horizon`, `scheduler` on `can-eye-scheduler`. Defaults to `web`. Only the `web` role migrates; the `web` role is health-checked over HTTP (`/up`), while `horizon` and `scheduler` roles are health-checked via process-specific liveness probes (#396) |
 | `FILESYSTEM_DISK`                                                        | `local`, paired with the shared volume at `storage/app/private` — see "Storage decision (settled): shared volume". Never set `s3`          |
 | `AWS_*`                                                                  | Not used; leave empty. Only relevant if the rejected S3 refactor is ever revisited                                                        |
 | `MAIL_*`                                                                 | Staging SMTP/sandbox settings; never production mailbox credentials. `log` is fine unless password reset or verification is being tested   |
