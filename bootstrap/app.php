@@ -36,8 +36,7 @@ return Application::configure(basePath: dirname(__DIR__))
             LOCK_EX
         ))
             ->everyMinute()
-            ->name('scheduler:heartbeat')
-            ->withoutOverlapping();
+            ->name('scheduler:heartbeat');
         // Basiq is stood down in favour of the Redbark feed: its commands still exist and
         // can be run by hand, they are just no longer scheduled.
         $schedule->command('app:sync-redbark-feeds')->everySixHours()->withoutOverlapping();
