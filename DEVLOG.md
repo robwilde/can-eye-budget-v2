@@ -1,5 +1,71 @@
 # Dev Log
 
+
+## 2026-09-13 — Issue #396: Worker Liveness Probes — PR #409
+
+### The Change
+
+Implemented role-specific liveness probes for `horizon` and `scheduler` containers, replacing the unconditional `exit 0` that masked crashed workers.
+
+**Files created:**
+- `tests/Feature/Console/SchedulerHeartbeatTest.php` — 47 lines; pins the `scheduler:heartbeat` task is registered and runs every minute
+- `storage/framework/.gitignore` — Excludes `scheduler.heartbeat` from version control
+
+**Files modified:**
+- `docker/healthcheck.sh` (+28, -2) — Added role-specific probes: horizon uses `php artisan horizon:status` (exit 0/1/2 per state), scheduler checks heartbeat file freshness (120s threshold), web unchanged, unknown roles still exit 1 with diagnostics
+- `bootstrap/app.php` (+12) — Scheduled `scheduler:heartbeat` task runs every minute, writes timestamp to `storage/framework/scheduler.heartbeat`
+- `Dockerfile` (+4) — Added 4-line `HEALTHCHECK` documentation explaining probe strategy, detection windows, and acceptable fault tolerance
+- `docs/dokploy-staging-plan.md` (+3, -6) — Updated probe descriptions (lines 313, 327, 365) to reflect new role-specific mechanisms instead of "exit 0"
+
+### The Reasoning
+
+- **Horizon via `php artisan horizon:status`**: Measured at 0.13s boot cost, 51MB peak RSS; 36× timeout margin on the 5s HEALTHCHECK window. Correctly marks unhealthy if Horizon supervisor crashes or Redis becomes unreachable (acceptable behaviour — queue workers need Redis).
+- **Scheduler via filesystem heartbeat**: A `pgrep` check would only detect process existence (scheduler can sit wedged while alive). Heartbeat file proves active dispatch. Writes every 60s, threshold 120s tolerates tick jitter and slow boots without hiding a dead scheduler. Shell `stat` read costs 0.01s (no Laravel boot needed).
+- **Threshold choice (120s)**: Scheduler runs every 60s (framework minimum), HEALTHCHECK probe interval is 15s × 5 retries = 75s worst case. Math: 60s tick + jitter > 120s threshold catches stale. Documented in Dockerfile HEALTHCHECK comment.
+- **Privilege drop safety**: Workers run as `www-data` (from PR #393); heartbeat file location under `storage/` (writable by `www-data` via `docker/entrypoint.sh` chown before privilege drop).
+
+### Verification
+
+**Quality gates (all passing):**
+- Pint: 446 files, 0 issues
+- PHPStan: 0 errors
+- Tests: 2200 passed (5633 assertions, up from 2199)
+
+**Real container testing:**
+- Horizon running → exit 0 (healthy)
+- Horizon killed (t+18s) → exit 2 (unhealthy)
+- Horizon with Redis stopped → exit 1 (unhealthy)
+- Scheduler running → exit 0 after ~43s initial heartbeat
+- Scheduler killed → exit 1 after 120s threshold (measured ~125s)
+- **Scheduler never started → exit 1** (⭐ regression fix for issue #396)
+- Web role: unchanged (no regression of #400/#402)
+
+**Shell syntax:**
+- `sh -n docker/healthcheck.sh` — clean
+- `shellcheck docker/healthcheck.sh` — clean
+
+**Copilot Balanced review:**
+- Status: Changes recommended (5 findings)
+- All addressed in follow-up commit `0a91a71`:
+  1. Added test coverage (`SchedulerHeartbeatTest`)
+  2. Removed `withoutOverlapping()` (would cause 24h stale window if scheduler crashed while holding lock)
+  3. Added `scheduler.heartbeat` to `.gitignore`
+  4. Documented HEALTHCHECK strategy in Dockerfile comment
+  5. Terminology: "Redis key TTL" → "Horizon stale-master cutoff"
+- Effort level: Lite
+
+**Detection latencies (with `--start-period=90s --interval=15s --timeout=5s --retries=5`):**
+- Web: ~75s
+- Horizon: ~90s (14s stale window + 75s probe)
+- Scheduler: ~195s (120s threshold + 75s probe)
+
+All within acceptable bounds for staging deployment.
+
+### The Tech Debt
+
+- None introduced. Scheduled task pattern matches existing `Schedule::call(...)->everyFiveMinutes()->withoutOverlapping()` style in `routes/console.php`.
+
+---
 ## 2026-09-13 — Dokploy staging hardening — PRs #388–#400
 
 ### The Change
@@ -34,7 +100,7 @@ Three of the nine were review or correction follow-ups rather than new behaviour
 ### The Tech Debt
 
 - ~~`CONTAINER_ROLE=""` (empty string) is still accepted as `web` by both `docker/entrypoint.sh` and `docker/healthcheck.sh`, because `${VAR:-default}` substitutes on empty as well as unset. The validation added in #400 catches typos, not blanks.~~ Closed by #402: both validation `case` statements now read `${CONTAINER_ROLE-web}` (no colon), which substitutes only when the variable is *unset*, so an empty value falls through to a dedicated `"")` branch and exits 1 before any side effect. Unset remains the web default — the `Dockerfile` sets no `ENV CONTAINER_ROLE`. Proved by the same differential method as #400: only the empty-string row changed on either script, every other row byte-identical.
-- Issue #396 remains open: the `horizon` and `scheduler` health checks return 0 unconditionally, so those containers carry no worker liveness signal — they are only "not failing the web probe", which is not the same as working.
+- ~~Issue #396 remains open: the `horizon` and `scheduler` health checks return 0 unconditionally, so those containers carry no worker liveness signal — they are only "not failing the web probe", which is not the same as working.~~ Closed by PR #409: `docker/healthcheck.sh` now uses `php artisan horizon:status` for horizon and a filesystem heartbeat for scheduler, with documented latency bounds and comprehensive test coverage.
 - `AGENTS.md:99` mandates squash-merge, but the repo has `allow_squash_merge: false`; all nine landed as merge commits. Related: `delete_branch_on_merge=false` meant GitHub did not auto-retarget stacked PRs, so #393 (stacked on #390) had to be retargeted by hand.
 
 ### Verification
