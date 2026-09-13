@@ -129,10 +129,10 @@ Track project tasks and roadmap at: https://github.com/users/robwilde/projects/2
 Query project items via CLI:
 ```bash
 # List all project items
-gh project item-list 1 --owner robwilde --format json
+gh project item-list 2 --owner robwilde --format json
 
 # View project in browser
-gh project view 1 --owner robwilde --web
+gh project view 2 --owner robwilde --web
 ```
 
 ---
