@@ -136,6 +136,8 @@ test('malformed password reset requests do not consume any address budget', func
         $this->post('/forgot-password', [], ['X-Forwarded-For' => $client])->assertStatus(302);
         $this->post('/forgot-password', ['email' => ''], ['X-Forwarded-For' => $client])->assertStatus(302);
         $this->post('/forgot-password', ['email' => ['array']], ['X-Forwarded-For' => $client])->assertStatus(302);
+        $this->post('/forgot-password', ['email' => str_repeat('a', 255).'@example.com'], ['X-Forwarded-For' => $client])
+            ->assertStatus(302);
     }
 
     foreach (range(1, 3) as $ignored) {

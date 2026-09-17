@@ -83,11 +83,15 @@ final class FortifyServiceProvider extends ServiceProvider
 
             $email = $request->input(Fortify::email());
 
-            // This limiter runs before validation, so the field can be absent, empty or not even
-            // a string. Those requests get the per-client budget only: keying a shared address
-            // budget on the empty string would let a handful of malformed requests exhaust one
-            // bucket that every real address then queues behind.
-            if (is_string($email) && $email !== '') {
+            // This limiter runs before validation, so the field can be absent, empty, oversized
+            // or not even a string. Those requests get the per-client budget only. Keying a
+            // shared address budget on the empty string would let a handful of malformed
+            // requests exhaust one bucket every real address then queues behind, and normalising
+            // an unbounded value would transliterate up to post_max_size (26M) of request body
+            // on every attempt. RFC 5321 caps an address at 254 octets, so a longer value is not
+            // a real reset target; the cap here counts characters, which bounds the work all the
+            // same.
+            if (is_string($email) && $email !== '' && mb_strlen($email) <= 254) {
                 $normalised = Str::transliterate(Str::lower($email));
 
                 if ($normalised !== '') {
