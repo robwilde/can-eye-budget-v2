@@ -92,6 +92,21 @@ php artisan event:cache
 
 chown -R www-data:www-data storage bootstrap/cache
 
+# Dokploy's Application "command" field maps to Swarm ContainerSpec.Command, and Docker
+# replaces the image ENTRYPOINT whenever that is set, so any process written there boots
+# without this script: no role validation, no APP_ENV export, no caches, no chown, no
+# privilege drop. The image therefore declares no CMD and each role's process is resolved
+# here, so the horizon and scheduler services need neither a command nor args -- only
+# CONTAINER_ROLE (#430). An explicit argument list still wins, for `docker run ... php
+# artisan tinker` and the entrypoint tests.
+if [ "$#" -eq 0 ]; then
+    case "${CONTAINER_ROLE:-web}" in
+        web)       set -- supervisord -c /etc/supervisord.conf ;;
+        horizon)   set -- php artisan horizon ;;
+        scheduler) set -- php artisan schedule:work ;;
+    esac
+fi
+
 if [ "${CONTAINER_ROLE:-web}" = "web" ]; then
     exec "$@"
 fi
