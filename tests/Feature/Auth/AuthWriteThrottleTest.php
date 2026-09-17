@@ -1,0 +1,177 @@
+<?php
+
+/** @noinspection PhpUnhandledExceptionInspection */
+
+/** @noinspection StaticClosureCanBeUsedInspection */
+
+declare(strict_types=1);
+
+use App\Models\User;
+use Illuminate\Routing\RouteCollection;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Route;
+
+/**
+ * @return list<string>
+ */
+function throttleMiddleware(string $routeName): array
+{
+    $route = Route::getRoutes()->getByName($routeName);
+
+    return array_values(array_filter(
+        $route->gatherMiddleware(),
+        fn (mixed $middleware): bool => is_string($middleware) && str_starts_with($middleware, 'throttle:'),
+    ));
+}
+
+/**
+ * Rebuild the router's collection the way `route:cache` plus the framework's cached-route
+ * bootstrap does: serialise every route, round-trip the compiled payload, and hand it back as a
+ * CompiledRouteCollection. The entrypoint runs `route:cache`, so this is the collection production
+ * actually dispatches against.
+ */
+function bootCachedRoutes(): void
+{
+    $routes = Route::getRoutes();
+
+    if (! $routes instanceof RouteCollection) {
+        throw new RuntimeException('The router is already serving a compiled route collection.');
+    }
+
+    foreach ($routes as $route) {
+        $route->prepareForSerialization();
+    }
+
+    app('router')->setCompiledRoutes(unserialize(serialize($routes->compile())));
+}
+
+test('the registration and password reset endpoints resolve to throttled routes', function () {
+    expect(throttleMiddleware('register.store'))->toBe(['throttle:register'])
+        ->and(throttleMiddleware('password.email'))->toBe(['throttle:password-reset'])
+        ->and(Route::getRoutes()->getByName('register.store')->gatherMiddleware())->toContain('guest:web')
+        ->and(Route::getRoutes()->getByName('password.email')->gatherMiddleware())->toContain('guest:web');
+});
+
+test('the login limiter is left alone and not double applied', function () {
+    expect(throttleMiddleware('login.store'))->toBe(['throttle:login']);
+});
+
+test('the overrides carry whatever middleware is configured for Fortify routes', function () {
+    config(['fortify.middleware' => ['web', 'signed']]);
+
+    require base_path('routes/fortify.php');
+
+    expect(Route::getRoutes()->getByName('register.store')->gatherMiddleware())->toContain('signed')
+        ->and(Route::getRoutes()->getByName('password.email')->gatherMiddleware())->toContain('signed')
+        ->and(throttleMiddleware('register.store'))->toBe(['throttle:register'])
+        ->and(throttleMiddleware('password.email'))->toBe(['throttle:password-reset']);
+});
+
+test('five registrations from one client all succeed under the limit', function () {
+    // guest:web runs before throttle:register, so a client that stays logged in after the first
+    // success is redirected away before the limiter ever sees the request. Each iteration logs
+    // out so all five genuinely reach the limiter and the registration action.
+    foreach (range(1, 5) as $attempt) {
+        $this->post('/register', [
+            'name' => 'John Doe',
+            'email' => "under-{$attempt}@example.com",
+            'password' => 'password',
+            'password_confirmation' => 'password',
+        ], ['X-Forwarded-For' => '203.0.113.10'])
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('dashboard', absolute: false));
+
+        $this->assertAuthenticated();
+
+        Auth::logout();
+        $this->flushSession();
+        $this->assertGuest();
+    }
+
+    expect(User::query()->where('email', 'like', 'under-%@example.com')->count())->toBe(5);
+});
+
+test('registration returns 429 once one client exceeds the limit', function () {
+    foreach (range(1, 5) as $ignored) {
+        $this->post('/register', [], ['X-Forwarded-For' => '203.0.113.10']);
+    }
+
+    $this->post('/register', [], ['X-Forwarded-For' => '203.0.113.10'])->assertStatus(429);
+});
+
+test('a registration burst from one client leaves other clients unthrottled', function () {
+    foreach (range(1, 6) as $ignored) {
+        $this->post('/register', [], ['X-Forwarded-For' => '203.0.113.10']);
+    }
+
+    $this->post('/register', [], ['X-Forwarded-For' => '203.0.113.10'])->assertStatus(429);
+    $this->post('/register', [], ['X-Forwarded-For' => '198.51.100.7'])->assertStatus(302);
+});
+
+test('password reset returns 429 once one client exceeds the request limit', function () {
+    foreach (range(1, 5) as $attempt) {
+        $this->post('/forgot-password', ['email' => "nobody-{$attempt}@example.com"], ['X-Forwarded-For' => '203.0.113.20'])
+            ->assertStatus(302);
+    }
+
+    $this->post('/forgot-password', ['email' => 'nobody-6@example.com'], ['X-Forwarded-For' => '203.0.113.20'])
+        ->assertStatus(429);
+});
+
+test('password reset mail for one address is capped across clients', function () {
+    foreach (['198.51.100.1', '198.51.100.2', '198.51.100.3'] as $client) {
+        $this->post('/forgot-password', ['email' => 'victim@example.com'], ['X-Forwarded-For' => $client])
+            ->assertStatus(302);
+    }
+
+    $this->post('/forgot-password', ['email' => 'victim@example.com'], ['X-Forwarded-For' => '198.51.100.4'])
+        ->assertStatus(429);
+
+    $this->post('/forgot-password', ['email' => 'bystander@example.com'], ['X-Forwarded-For' => '198.51.100.4'])
+        ->assertStatus(302);
+});
+
+test('malformed password reset requests do not consume any address budget', function () {
+    foreach (['203.0.113.30', '203.0.113.31', '203.0.113.32'] as $client) {
+        $this->post('/forgot-password', [], ['X-Forwarded-For' => $client])->assertStatus(302);
+        $this->post('/forgot-password', ['email' => ''], ['X-Forwarded-For' => $client])->assertStatus(302);
+        $this->post('/forgot-password', ['email' => ['array']], ['X-Forwarded-For' => $client])->assertStatus(302);
+        $this->post('/forgot-password', ['email' => str_repeat('a', 255).'@example.com'], ['X-Forwarded-For' => $client])
+            ->assertStatus(302);
+    }
+
+    foreach (range(1, 3) as $ignored) {
+        $this->post('/forgot-password', ['email' => 'late@example.com'], ['X-Forwarded-For' => '203.0.113.33'])
+            ->assertStatus(302);
+    }
+
+    $this->post('/forgot-password', ['email' => 'late@example.com'], ['X-Forwarded-For' => '203.0.113.34'])
+        ->assertStatus(429);
+});
+
+test('the throttles survive the route cache the entrypoint builds', function () {
+    bootCachedRoutes();
+
+    expect(throttleMiddleware('register.store'))->toBe(['throttle:register'])
+        ->and(throttleMiddleware('password.email'))->toBe(['throttle:password-reset'])
+        ->and(throttleMiddleware('login.store'))->toBe(['throttle:login']);
+});
+
+test('cached route dispatch is throttled for both endpoints', function () {
+    bootCachedRoutes();
+
+    foreach (range(1, 5) as $ignored) {
+        $this->post('/register', [], ['X-Forwarded-For' => '203.0.113.40']);
+    }
+
+    $this->post('/register', [], ['X-Forwarded-For' => '203.0.113.40'])->assertStatus(429);
+    $this->post('/register', [], ['X-Forwarded-For' => '198.51.100.40'])->assertStatus(302);
+
+    foreach (range(1, 5) as $attempt) {
+        $this->post('/forgot-password', ['email' => "cached-{$attempt}@example.com"], ['X-Forwarded-For' => '203.0.113.41'])
+            ->assertStatus(302);
+    }
+
+    $this->post('/forgot-password', ['email' => 'cached-6@example.com'], ['X-Forwarded-For' => '203.0.113.41'])
+        ->assertStatus(429);
+});

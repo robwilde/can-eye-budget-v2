@@ -46,9 +46,10 @@ no error to say so. That gate is now on `develop` (`config/fortify.php:149`), so
 | 3 | #370 | Restrict Horizon dashboard access outside `local`                       | Merged to `develop` (f39fcdd) | Gate is now an explicit allow-list: `config('horizon.authorized_emails')` from `HORIZON_AUTHORIZED_EMAILS`, with `local` short-circuited. Fails closed when unset. Registration is env-gated as of #383 — see "Security exposure decision"                              |
 | 4 | #371 | Configure trusted proxies                                               | Merged to `develop` (94303c5) | `bootstrap/app.php` now calls `$middleware->trustProxies(at: '*')` with the framework's default header set; correct because the container is only reachable through Traefik on the Dokploy network                                                            |
 | 5 | #372 | Add a `DiagnosingHealth` listener that asserts database and Redis       | Merged to `develop` (74ed230) | `app/Listeners/VerifyHealthDependencies.php` runs `select 1` and a Redis `ping`; auto-discovered from `app/Listeners`. `/up` now returns 500 when either dependency is unreachable, making it a usable Dokploy readiness gate                                 |
-| 6 | #383 | Env-gate registration and guard the landing page                        | Merged to `develop` (PR #395, c10c5b4) | `config/fortify.php` gates `Features::registration()` on `FORTIFY_REGISTRATION_ENABLED`, default `true` so local and production are unchanged; set `false` on staging. The three `route('register')` call sites in `resources/views/welcome.blade.php` are guarded with `Route::has('register')` so the landing page still renders once the routes are gone. Registration/password-reset throttling is out of scope — #394 |
+| 6 | #383 | Env-gate registration and guard the landing page                        | Merged to `develop` (PR #395, c10c5b4) | `config/fortify.php` gates `Features::registration()` on `FORTIFY_REGISTRATION_ENABLED`, default `true` so local and production are unchanged; set `false` on staging. The three `route('register')` call sites in `resources/views/welcome.blade.php` are guarded with `Route::has('register')` so the landing page still renders once the routes are gone. Registration/password-reset throttling was split out to #394 — see row 9 |
 | 7 | #373 | Move development-only dependencies out of the production dependency set | Open, non-blocking | `laravel/boost` and `spatie/laravel-ray` sit in `require`, so `composer install --no-dev` still ships them; `playwright` sits in `dependencies` with an empty `devDependencies`, so `npm ci` pulls it into the build stage                                     |
 | 8 | #374 | Decide whether staging deploys are gated on CI                          | Open, non-blocking | `.github/workflows/lint.yml` and `tests.yml` exist but nothing ties a staging deploy to them                                                                                                                                                                  |
+| 9 | #394 | Throttle registration and password-reset requests                       | PR #429 open against `develop` | `routes/fortify.php` re-declares `register.store` and `password.email` against Fortify's own controllers with `throttle:register` and `throttle:password-reset`; limiters live in `app/Providers/FortifyServiceProvider::configureRateLimiting()`. See "Security exposure decision" for the mechanism and the two password-reset budgets |
 
 Rows 1, 3, 4, 5 and 6 (#369, #370, #371, #372, #383) were the release blockers and are all merged to `develop`, the branch every Application service below is
 configured to build, so the code gate on the "Deployment sequence" is satisfied. Row 2 is a Dokploy provisioning step, not a merge gate — but the volume must
@@ -249,11 +250,18 @@ production are unchanged. Set it to `false` on staging and seed accounts instead
 `resources/views/welcome.blade.php` are guarded with `Route::has('register')`, so the landing page still renders once the routes are gone. Covered by
 `tests/Feature/Auth/RegistrationDisabledTest.php`.
 
-Remaining hardening, deliberately out of scope for #370 and #383:
+Addressed in #394, on PR #429 against `develop`: `routes/fortify.php` re-declares the two POST routes Fortify leaves unthrottleable — `register.store` and
+`password.email` — against Fortify's own controllers with `throttle:register` and `throttle:password-reset`, and
+`app/Providers/FortifyServiceProvider::configureRateLimiting()` defines both limiters: 5 registrations per minute per client, and for password reset 5 requests
+per minute per client plus 3 per hour per target address, so a distributed sender cannot mail-bomb one inbox by staying under every per-client ceiling. The
+address budget is only applied to a non-empty normalised address, because the limiter runs before validation and keying a shared bucket on the empty string
+would let a few malformed requests block every real address. The override lands because `Illuminate\Routing\RouteCollection::addToCollections()` keys routes by
+method and URI, so the later declaration replaces Fortify's for dispatch, and because it is an ordinary route declaration it serialises into the `route:cache`
+the entrypoint builds — the provider-side mutation tried during #383 did neither. Only those two routes are owned here; the rest of Fortify's route table stays
+with Fortify. Covered by `tests/Feature/Auth/AuthWriteThrottleTest.php`, including a cached-collection dispatch test.
 
-- Registration and password-reset requests are unthrottled. Fortify resolves a limiter name for `login`, `two-factor` and `verification` only; its
-  `register.store` and `password.email` routes carry no limiter lookup and no `throttle` middleware, so a named limiter alone would never be applied. Needs
-  its own mechanism — tracked in #394.
+Remaining hardening, deliberately out of scope for #370, #383 and #394:
+
 - `HORIZON_PATH` is still the default `horizon`. An unguessable path is optional defence in depth now that the gate is an allow-list.
 
 ## Domain status
