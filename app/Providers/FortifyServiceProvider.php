@@ -70,5 +70,21 @@ final class FortifyServiceProvider extends ServiceProvider
 
             return Limit::perMinute(5)->by($throttleKey);
         });
+
+        RateLimiter::for('register', function (Request $request) {
+            return Limit::perMinute(5)->by('register|'.$request->ip());
+        });
+
+        RateLimiter::for('password-reset', function (Request $request) {
+            $email = Str::transliterate(Str::lower((string) $request->input(Fortify::email())));
+
+            // Two budgets: the client's request rate, and the mail volume any single address can
+            // be made to receive. Without the second one a distributed sender stays under every
+            // per-IP ceiling while still mail-bombing one inbox.
+            return [
+                Limit::perMinute(5)->by('password-reset|ip|'.$request->ip()),
+                Limit::perHour(3)->by('password-reset|email|'.$email),
+            ];
+        });
     }
 }
