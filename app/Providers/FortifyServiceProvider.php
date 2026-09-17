@@ -76,15 +76,26 @@ final class FortifyServiceProvider extends ServiceProvider
         });
 
         RateLimiter::for('password-reset', function (Request $request) {
-            $email = Str::transliterate(Str::lower((string) $request->input(Fortify::email())));
-
             // Two budgets: the client's request rate, and the mail volume any single address can
             // be made to receive. Without the second one a distributed sender stays under every
             // per-IP ceiling while still mail-bombing one inbox.
-            return [
-                Limit::perMinute(5)->by('password-reset|ip|'.$request->ip()),
-                Limit::perHour(3)->by('password-reset|email|'.$email),
-            ];
+            $limits = [Limit::perMinute(5)->by('password-reset|ip|'.$request->ip())];
+
+            $email = $request->input(Fortify::email());
+
+            // This limiter runs before validation, so the field can be absent, empty or not even
+            // a string. Those requests get the per-client budget only: keying a shared address
+            // budget on the empty string would let a handful of malformed requests exhaust one
+            // bucket that every real address then queues behind.
+            if (is_string($email) && $email !== '') {
+                $normalised = Str::transliterate(Str::lower($email));
+
+                if ($normalised !== '') {
+                    $limits[] = Limit::perHour(3)->by('password-reset|email|'.$normalised);
+                }
+            }
+
+            return $limits;
         });
     }
 }

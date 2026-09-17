@@ -82,3 +82,19 @@ test('password reset mail for one address is capped across clients', function ()
     $this->post('/forgot-password', ['email' => 'bystander@example.com'], ['X-Forwarded-For' => '198.51.100.4'])
         ->assertStatus(302);
 });
+
+test('malformed password reset requests do not consume any address budget', function () {
+    foreach (['203.0.113.30', '203.0.113.31', '203.0.113.32'] as $client) {
+        $this->post('/forgot-password', [], ['X-Forwarded-For' => $client])->assertStatus(302);
+        $this->post('/forgot-password', ['email' => ''], ['X-Forwarded-For' => $client])->assertStatus(302);
+        $this->post('/forgot-password', ['email' => ['array']], ['X-Forwarded-For' => $client])->assertStatus(302);
+    }
+
+    foreach (range(1, 3) as $ignored) {
+        $this->post('/forgot-password', ['email' => 'late@example.com'], ['X-Forwarded-For' => '203.0.113.33'])
+            ->assertStatus(302);
+    }
+
+    $this->post('/forgot-password', ['email' => 'late@example.com'], ['X-Forwarded-For' => '203.0.113.34'])
+        ->assertStatus(429);
+});
