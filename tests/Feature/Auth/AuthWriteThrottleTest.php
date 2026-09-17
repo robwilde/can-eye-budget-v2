@@ -6,6 +6,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\Route;
 
 /**
@@ -19,6 +20,27 @@ function throttleMiddleware(string $routeName): array
         $route->gatherMiddleware(),
         fn (mixed $middleware): bool => is_string($middleware) && str_starts_with($middleware, 'throttle:'),
     ));
+}
+
+/**
+ * Rebuild the router's collection the way `route:cache` plus the framework's cached-route
+ * bootstrap does: serialise every route, round-trip the compiled payload, and hand it back as a
+ * CompiledRouteCollection. The entrypoint runs `route:cache`, so this is the collection production
+ * actually dispatches against.
+ */
+function bootCachedRoutes(): void
+{
+    $routes = Route::getRoutes();
+
+    if (! $routes instanceof RouteCollection) {
+        throw new RuntimeException('The router is already serving a compiled route collection.');
+    }
+
+    foreach ($routes as $route) {
+        $route->prepareForSerialization();
+    }
+
+    app('router')->setCompiledRoutes(unserialize(serialize($routes->compile())));
 }
 
 test('the registration and password reset endpoints resolve to throttled routes', function () {
@@ -96,5 +118,32 @@ test('malformed password reset requests do not consume any address budget', func
     }
 
     $this->post('/forgot-password', ['email' => 'late@example.com'], ['X-Forwarded-For' => '203.0.113.34'])
+        ->assertStatus(429);
+});
+
+test('the throttles survive the route cache the entrypoint builds', function () {
+    bootCachedRoutes();
+
+    expect(throttleMiddleware('register.store'))->toBe(['throttle:register'])
+        ->and(throttleMiddleware('password.email'))->toBe(['throttle:password-reset'])
+        ->and(throttleMiddleware('login.store'))->toBe(['throttle:login']);
+});
+
+test('cached route dispatch is throttled for both endpoints', function () {
+    bootCachedRoutes();
+
+    foreach (range(1, 5) as $ignored) {
+        $this->post('/register', [], ['X-Forwarded-For' => '203.0.113.40']);
+    }
+
+    $this->post('/register', [], ['X-Forwarded-For' => '203.0.113.40'])->assertStatus(429);
+    $this->post('/register', [], ['X-Forwarded-For' => '198.51.100.40'])->assertStatus(302);
+
+    foreach (range(1, 5) as $attempt) {
+        $this->post('/forgot-password', ['email' => "cached-{$attempt}@example.com"], ['X-Forwarded-For' => '203.0.113.41'])
+            ->assertStatus(302);
+    }
+
+    $this->post('/forgot-password', ['email' => 'cached-6@example.com'], ['X-Forwarded-For' => '203.0.113.41'])
         ->assertStatus(429);
 });
