@@ -6,7 +6,9 @@
 
 declare(strict_types=1);
 
+use App\Models\User;
 use Illuminate\Routing\RouteCollection;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 
 /**
@@ -65,15 +67,28 @@ test('the overrides carry whatever middleware is configured for Fortify routes',
         ->and(throttleMiddleware('password.email'))->toBe(['throttle:password-reset']);
 });
 
-test('registration requests under the limit are not throttled', function () {
+test('five registrations from one client all succeed under the limit', function () {
+    // guest:web runs before throttle:register, so a client that stays logged in after the first
+    // success is redirected away before the limiter ever sees the request. Each iteration logs
+    // out so all five genuinely reach the limiter and the registration action.
     foreach (range(1, 5) as $attempt) {
         $this->post('/register', [
             'name' => 'John Doe',
             'email' => "under-{$attempt}@example.com",
             'password' => 'password',
             'password_confirmation' => 'password',
-        ], ['X-Forwarded-For' => '203.0.113.10'])->assertRedirect();
+        ], ['X-Forwarded-For' => '203.0.113.10'])
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('dashboard', absolute: false));
+
+        $this->assertAuthenticated();
+
+        Auth::logout();
+        $this->flushSession();
+        $this->assertGuest();
     }
+
+    expect(User::query()->where('email', 'like', 'under-%@example.com')->count())->toBe(5);
 });
 
 test('registration returns 429 once one client exceeds the limit', function () {
