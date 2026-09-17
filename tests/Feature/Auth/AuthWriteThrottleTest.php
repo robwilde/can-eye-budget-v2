@@ -54,6 +54,17 @@ test('the login limiter is left alone and not double applied', function () {
     expect(throttleMiddleware('login.store'))->toBe(['throttle:login']);
 });
 
+test('the overrides carry whatever middleware is configured for Fortify routes', function () {
+    config(['fortify.middleware' => ['web', 'signed']]);
+
+    require base_path('routes/fortify.php');
+
+    expect(Route::getRoutes()->getByName('register.store')->gatherMiddleware())->toContain('signed')
+        ->and(Route::getRoutes()->getByName('password.email')->gatherMiddleware())->toContain('signed')
+        ->and(throttleMiddleware('register.store'))->toBe(['throttle:register'])
+        ->and(throttleMiddleware('password.email'))->toBe(['throttle:password-reset']);
+});
+
 test('registration requests under the limit are not throttled', function () {
     foreach (range(1, 5) as $attempt) {
         $this->post('/register', [

@@ -17,7 +17,11 @@ use Laravel\Fortify\RoutePath;
 // into route:cache like any other. Only these two POSTs are owned here; the rest of Fortify's route
 // table stays with Fortify. Guard, prefix, domain and path overrides mirror Fortify's own reads so
 // the override cannot drift onto a different URI and leave the unthrottled route in front.
+// The group middleware comes from the same config key Fortify's own route group reads, so a
+// project-level addition there reaches these two routes as well; `web` arriving twice, once from
+// routes/web.php and once from the config default, collapses in Router::uniqueMiddleware().
 Route::group([
+    'middleware' => config('fortify.middleware', ['web']),
     'prefix' => config('fortify.prefix'),
     'domain' => config('fortify.domain'),
 ], function (): void {
