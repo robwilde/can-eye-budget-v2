@@ -249,11 +249,16 @@ production are unchanged. Set it to `false` on staging and seed accounts instead
 `resources/views/welcome.blade.php` are guarded with `Route::has('register')`, so the landing page still renders once the routes are gone. Covered by
 `tests/Feature/Auth/RegistrationDisabledTest.php`.
 
-Remaining hardening, deliberately out of scope for #370 and #383:
+Also resolved, in #394: `routes/fortify.php` re-declares the two POST routes Fortify leaves unthrottleable — `register.store` and `password.email` — against
+Fortify's own controllers with `throttle:register` and `throttle:password-reset`, and `app/Providers/FortifyServiceProvider::configureRateLimiting()` defines
+both limiters: 5 registrations per minute per client, and for password reset 5 requests per minute per client plus 3 per hour per target address, so a
+distributed sender cannot mail-bomb one inbox by staying under every per-client ceiling. The override lands because
+`Illuminate\Routing\RouteCollection::addToCollections()` keys routes by method and URI, so the later declaration replaces Fortify's for dispatch, and because
+it is an ordinary route declaration it serialises into the `route:cache` the entrypoint builds — the provider-side mutation tried during #383 did neither.
+Only those two routes are owned here; the rest of Fortify's route table stays with Fortify. Covered by `tests/Feature/Auth/AuthWriteThrottleTest.php`.
 
-- Registration and password-reset requests are unthrottled. Fortify resolves a limiter name for `login`, `two-factor` and `verification` only; its
-  `register.store` and `password.email` routes carry no limiter lookup and no `throttle` middleware, so a named limiter alone would never be applied. Needs
-  its own mechanism — tracked in #394.
+Remaining hardening, deliberately out of scope for #370, #383 and #394:
+
 - `HORIZON_PATH` is still the default `horizon`. An unguessable path is optional defence in depth now that the gate is an allow-list.
 
 ## Domain status
