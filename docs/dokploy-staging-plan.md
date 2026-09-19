@@ -45,7 +45,7 @@ no error to say so. That gate is now on `develop` (`config/fortify.php:149`), so
 | 2 | — | Provision the shared import volume                                      | Provisioning only | Mount one volume at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon`. Settled — see "Storage decision (settled): shared volume". No repository change; `FILESYSTEM_DISK` stays `local`                                          |
 | 3 | #370 | Restrict Horizon dashboard access outside `local`                       | Merged to `develop` (f39fcdd) | Gate is now an explicit allow-list: `config('horizon.authorized_emails')` from `HORIZON_AUTHORIZED_EMAILS`, with `local` short-circuited. Fails closed when unset. Registration is env-gated as of #383 — see "Security exposure decision"                              |
 | 4 | #371 | Configure trusted proxies                                               | Merged to `develop` (94303c5) | `bootstrap/app.php` now calls `$middleware->trustProxies(at: '*')` with the framework's default header set; correct because the container is only reachable through Traefik on the Dokploy network                                                            |
-| 5 | #372 | Add a `DiagnosingHealth` listener that asserts database and Redis       | Merged to `develop` (74ed230) | `app/Listeners/VerifyHealthDependencies.php` runs `select 1` and a Redis `ping`; auto-discovered from `app/Listeners`. `/up` now returns 500 when either dependency is unreachable, which makes it a dependency probe rather than a readiness signal: it sits outside the `web` middleware group, so a real page is still the readiness check |
+| 5 | #372 | Add a `DiagnosingHealth` listener that asserts database and Redis       | Merged to `develop` (74ed230) | `app/Listeners/VerifyHealthDependencies.php` runs `select 1` and a Redis `ping`; auto-discovered from `app/Listeners`. `/up` now returns 500 when either dependency is unreachable — a dependency probe, not a readiness signal; see "`/up` is a dependency probe" |
 | 6 | #383 | Env-gate registration and guard the landing page                        | Merged to `develop` (PR #395, c10c5b4) | `config/fortify.php` gates `Features::registration()` on `FORTIFY_REGISTRATION_ENABLED`, default `true` so local and production are unchanged; set `false` on staging. The three `route('register')` call sites in `resources/views/welcome.blade.php` are guarded with `Route::has('register')` so the landing page still renders once the routes are gone. Registration/password-reset throttling was split out to #394 — see row 9 |
 | 7 | #373 | Move development-only dependencies out of the production dependency set | Open, non-blocking | `laravel/boost` and `spatie/laravel-ray` sit in `require`, so `composer install --no-dev` still ships them; `playwright` sits in `dependencies` with an empty `devDependencies`, so `npm ci` pulls it into the build stage                                     |
 | 8 | #374 | Decide whether staging deploys are gated on CI                          | Open, non-blocking | `.github/workflows/lint.yml` and `tests.yml` exist but nothing ties a staging deploy to them                                                                                                                                                                  |
@@ -61,9 +61,9 @@ outside a developer machine (#381, PR #389) with the Ray enable default itself f
 and `CONTAINER_ROLE` validated before any side effect so an unknown or blank value aborts instead of silently defaulting to `web` (#399, PR #400; #401,
 PR #402). None of this changes the deployment order below; it only means the image and configuration already behave as the later steps expect.
 
-One further change is in flight rather than merged: **#430** drops `CMD` from the `Dockerfile` and has `docker/entrypoint.sh` resolve its process from
-`CONTAINER_ROLE` when it is passed no arguments. The worker-service configuration below — `CONTAINER_ROLE` set, `command` and `args` both empty — depends on
-it, so #430 must be on `develop` before `can-eye-horizon` and `can-eye-scheduler` are deployed.
+#430 drops `CMD` from the `Dockerfile` and has `docker/entrypoint.sh` resolve its process from `CONTAINER_ROLE` when it is passed no arguments. The
+worker-service configuration below — `CONTAINER_ROLE` set, `command` and `args` both empty — relies on it, so before deploying `can-eye-horizon` or
+`can-eye-scheduler` confirm the image Dokploy built carries that entrypoint (`docker image inspect <image> --format '{{.Config.Cmd}}'` prints `[]`).
 
 ## Dokploy inventory
 
@@ -197,9 +197,7 @@ Evidence from the repository:
   `app/Listeners/VerifyHealthDependencies.php` (#372) is that listener: it runs `select 1` on the
   default connection and pings Redis, so `/up` returns 500 when MariaDB or Redis is unreachable instead of reporting healthy on a broken application. Note the
   scope: `select 1` proves connectivity, **not** schema state, so `/up` can still return 200 against a reachable but unmigrated database. Migration ordering is
-  guaranteed by `docker/entrypoint.sh` running `migrate` before `exec`, not by this listener. The scope is narrower still than that, because `/up` is
-  registered outside the `web` middleware group and so exercises no encryption and no session: a container with a missing `APP_KEY` was verified `healthy`
-  with `/up` returning 200 while `/` and `/login` returned 500. `/up` is a dependency probe; the readiness check is a real page plus a session.
+  guaranteed by `docker/entrypoint.sh` running `migrate` before `exec`, not by this listener. See "`/up` is a dependency probe".
 - `app/Models/User.php` does not implement `MustVerifyEmail`, and no class in `app/` or `config/` references it. Although `config/fortify.php` enables
   `Features::emailVerification()`, the `['auth','verified']` group in `routes/web.php:16` is a pass-through, so registration and login do **not** depend on
   outbound mail. Only password reset and any deliberate verification testing need a working mailer.
@@ -320,8 +318,7 @@ MariaDB, or Redis. Attach it **after** the first successful migration — see th
   through the default cache store, which is why `CACHE_STORE` is a first-boot precondition — see step 8 of the deployment sequence.
 - Leave Dokploy's Swarm health-check fields empty so the container inherits the image `HEALTHCHECK`, which has a 90s start period and is applied to the `web`
   role by `docker/healthcheck.sh`. It probes Laravel's `/up` route, which #372 gives a `DiagnosingHealth` listener asserting MariaDB and Redis, so it returns
-  500 when either dependency is unreachable. Treat it as a dependency probe, not as proof the application works: `/up` sits outside the `web` middleware group,
-  so it exercises no encryption and no session and answers 200 on a container with no `APP_KEY`.
+  500 when either dependency is unreachable. Treat it as a dependency probe — see "`/up` is a dependency probe".
 - Attach `can-eye.mrwilde.dev` to port 80 with HTTPS and Let's Encrypt after the first migration succeeds.
 
 ### Service: can-eye-horizon
@@ -388,6 +385,13 @@ Leave `healthCheckSwarm` null. With no Swarm health check sent, the container in
 `docker/healthcheck.sh` is for. Docker merges health-check configuration field by field, so filling in only part of Dokploy's Swarm health-check UI silently
 inherits the remaining fields from the image and produces a probe nobody wrote.
 
+### `/up` is a dependency probe
+
+`bootstrap/app.php` registers `/up` in the `then:` callback of `withRouting()` with only `throttle:60,1`, so it sits outside the `web` middleware group and
+exercises no encryption and no session. #372's `DiagnosingHealth` listener makes it return 500 when MariaDB or Redis is unreachable, which is
+what the image `HEALTHCHECK` needs — but a container with no `APP_KEY` was verified `healthy` with `/up` returning 200 while `/` and `/login` returned
+500. Readiness is therefore a real page plus a session, checked in step 10 of the deployment sequence; `/up` only proves the dependencies answer.
+
 ### Dokploy `done` is not readiness
 
 `deployApplication` flips both the deployment and the application status straight after `mechanizeDockerContainer`, with no convergence or health wait — the
@@ -408,7 +412,7 @@ Set the common application environment on all three Application services. Values
 |--------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------|
 | `APP_NAME`                                                               | `Can Eye Budget (Staging)`                                                                                                               |
 | `APP_ENV`                                                                | `staging`. Load-bearing beyond the Ray/Boost gates: `config/horizon.php` `environments` sizes `production` at `maxProcesses: 10` and `staging` at `3`. If it is unset the entrypoint exports `production` and staging runs ten workers |
-| `APP_KEY`                                                                | Generate a new staging key; never reuse another environment's key. **First-boot precondition:** a missing key still yields a *green* container — verified `healthy` with `/up` 200 while `/` and `/login` returned 500, because `/up` is registered outside the `web` middleware group and so exercises no encryption or session |
+| `APP_KEY`                                                                | Generate a new staging key; never reuse another environment's key. **First-boot precondition:** a missing key still yields a *green* container because `/up` never touches encryption — see "`/up` is a dependency probe" |
 | `APP_DEBUG`                                                              | `false`                                                                                                                                  |
 | `APP_URL`                                                                | `https://can-eye.mrwilde.dev`                                                                                                            |
 | `APP_TIMEZONE`                                                           | `Australia/Brisbane` — already the repository default in `config/app.php`, so this row is redundant but harmless                         |
@@ -487,13 +491,15 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
 10. Confirm readiness from the container, not from Dokploy. The badge reads `done` as soon as Swarm accepts the spec, so a crash-looping container displays
     green and the usual signature of a broken deploy is "green in Dokploy, 502 from Traefik" — see "Dokploy `done` is not readiness". The container log must
     show the migrations completing and the role process starting; `docker service ps --no-trunc <service>` is the other diagnosis surface. `/up` returning 200
-    is not sufficient either: it is registered outside the `web` middleware group, so it exercises no encryption and no session and answers 200 on a container
-    with no `APP_KEY`. Readiness means a real page renders and a session is issued — from inside the container, `http://127.0.0.1/` and `http://127.0.0.1/login`
-    must both return 200 and `/login` must set a session cookie that a second request carries. The credentialed login round trip follows in step 13.
+    is not sufficient either — see "`/up` is a dependency probe". Readiness means a real page renders and a session is issued: from inside the container,
+    `http://127.0.0.1/` and `http://127.0.0.1/login` must both return 200 and `/login` must answer with a `Set-Cookie` for the session. Do not expect a second
+    plain-HTTP request to carry that cookie back: `SESSION_SECURE_COOKIE=true` marks it `Secure`, so a client only resends it over HTTPS. The round trip is
+    step 13's job, over the real domain.
 11. Attach `can-eye.mrwilde.dev` to `can-eye-web` with HTTPS/Let's Encrypt. Traffic reaches the application only from this point, and only against a migrated
     schema. Run any approved staging seed/setup command once, now.
 12. Deploy `can-eye-horizon` and `can-eye-scheduler` so both start against the migrated schema. Never run migrations from these services.
-13. Exercise `/up`, login with a seeded account, database-backed sessions, monthly report aggregation, a queued job, Horizon metrics, scheduler output, a full
+13. Exercise `/up`, then over `https://can-eye.mrwilde.dev` confirm the session cookie issued by `/login` is carried by the next request, login with a seeded
+    account, database-backed sessions, monthly report aggregation, a queued job, Horizon metrics, scheduler output, a full
     bank-import round trip across the web and worker containers, and the approved external integrations. With `FORTIFY_REGISTRATION_ENABLED=false` the check
     for registration is the opposite of the others: `/register` must return **404** and `/` must render with no sign-up link. A reachable registration form
     here means the flag did not take effect, not that the deployment is healthy.
@@ -510,9 +516,9 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
 
 ## Verification checklist
 
-- Readiness is a real page **plus** a session, never `/up` alone. `/up` is registered outside the `web` middleware group, so it exercises no encryption and no
-  session: a container with a missing `APP_KEY` was verified `healthy` with `/up` returning 200 while `/` and `/login` returned 500. Require
-  `https://can-eye.mrwilde.dev/` and `/login` to render over the Let's Encrypt certificate, and a seeded login to persist across requests.
+- Readiness is a real page **plus** a session, never `/up` alone — see "`/up` is a dependency probe". Require `https://can-eye.mrwilde.dev/` and `/login`
+  to render over the Let's Encrypt certificate, the `/login` response to set the session cookie, and a seeded login to persist across requests. The
+  cross-request check only works over HTTPS because `SESSION_SECURE_COOKIE=true` marks the cookie `Secure`.
 - `https://can-eye.mrwilde.dev/up` returns a healthy response and its `DiagnosingHealth` listener actually exercises the database and Redis. Treat this as a
   dependency probe, not as the readiness signal.
 - Dokploy's deployment status is deliberately not on this checklist: it reads `done` once Swarm accepts the spec, so it is green on a crash-looping container —
@@ -535,24 +541,26 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
 
 ### Container-verified behaviour
 
-Observed today on an image built from `develop` @4d5d1a4 against MariaDB 11.8 and Redis 7, with each role exercised in turn. The staging deploy should reproduce
-these results; a divergence is a finding, not noise.
+Observed on 2026-09-19 on an image built from this branch @95cf2cf against MariaDB 11.8 and Redis 7, with all three roles started with **no command and no
+args** — the configuration the provisioning plan prescribes. The staging deploy should reproduce these results; a divergence is a finding, not noise.
 
 | Role / subject                          | Observed                                                                                                                              |
 |-----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| Role argv                               | `docker inspect` reported `Cmd=[]` and `Entrypoint=[/usr/local/bin/entrypoint.sh]` on every role, and `ps` in the `horizon` container showed `php artisan horizon` — the no-argument dispatch path really ran |
 | `web`                                   | Applied 51 migrations, then served `/up` 200, `/` 200, `/login` 200, `/register` 404, `/horizon` 403                                  |
-| `horizon`                               | Master, supervisor and worker all ran as `www-data`; `horizon:liveness` exited 0; consumed a job dispatched from the web container    |
-| `scheduler`                             | `scheduler:heartbeat` beat every 60s, and the container reported healthy after the 90s start period                                   |
-| Shared volume                           | A fresh named volume mounted at `/var/www/html/storage/app/private` came up `www-data`-owned via copy-up and was writable by `www-data` |
-| `APP_DEBUG=true`, `BOOST_ENABLED` unset | Did **not** break `route:cache`: the container booted healthy with routes cached. That earlier concern is disproved. `APP_DEBUG=false` still stands, for stack-trace exposure on a public domain |
+| `web` session cookie                    | `/login` answered with `laravel-session` marked `secure; httponly; samesite=lax`. In-container plain HTTP can only assert that the cookie is *set*; a client never resends a `Secure` cookie over `http://`, so the cross-request check belongs to step 13 over HTTPS |
+| `horizon`                               | Master, supervisor and worker all ran as `www-data`; `horizon:liveness` exited 0 (`master ... is alive`); ran a `RunTransactionAnalysisJob` dispatched from the web container to DONE in 60ms |
+| `scheduler`                             | `scheduler:heartbeat` advanced the heartbeat mtime across a 120s window, and the container reported healthy after the 90s start period |
+| Shared volume                           | A fresh named volume mounted at `/var/www/html/storage/app/private` came up `www-data`-owned via copy-up; a file written by `www-data` in the `horizon` container was visible from `web` |
+| `APP_DEBUG=true`, `BOOST_ENABLED` unset | Did **not** break `route:cache`: the container booted healthy with `bootstrap/cache/routes-v7.php` written, `route:list --json` parsing and `/` serving 200. That earlier concern is disproved. `APP_DEBUG=false` still stands, for stack-trace exposure on a public domain |
 
 ## Open prerequisites
 
-Prerequisite 1 is satisfied apart from the in-flight #430; 2 onward are still outstanding.
+Prerequisite 1 is satisfied; 2 onward are still outstanding.
 
 1. Satisfied: #369, #370, #371, #372 and #383 are merged to `develop`, the branch Dokploy builds. #383 landing is what makes prerequisite 3 effective —
-   without its config gate the variable set there would have nothing to read it. One code item is still open: **#430** must be merged before the two worker
-   services are deployed, because leaving their `command` and `args` fields empty depends on the entrypoint resolving its process from `CONTAINER_ROLE`.
+   without its config gate the variable set there would have nothing to read it. The worker services additionally rely on #430's entrypoint dispatch —
+   verify the built image as described under "Step 0".
 2. Create the shared import volume in Dokploy and mount it at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon`. The storage
    arrangement itself is settled — shared volume, `FILESYSTEM_DISK=local`. Never adopt `FILESYSTEM_DISK=s3`: `league/flysystem-aws-s3-v3` is absent from
    `composer.lock` and the import path calls `Storage::disk('local')->path()` directly.
