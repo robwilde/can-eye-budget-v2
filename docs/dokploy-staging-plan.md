@@ -72,8 +72,8 @@ Captured from the Dokploy project inventory and service details:
 - Dokploy contains 9 projects in the current organization.
 - Reference project: `comparebuild` (`Bc6MlLuvuhhiZ9hVzCstL`), description `this is the doc portal for the project`.
 - Reference staging environment: `staging` (`GtCAOGo5_32kZ0SkazCqp`).
-- Reference staging has four services, all reported `done` — a status that means only that Swarm accepted the spec, not that anything converged (see "Dokploy
-  `done` is not readiness"):
+- Reference staging has four services, all reported `done` — a status that means only that Swarm accepted the spec, not that anything converged
+  (see "Dokploy `done` is not readiness"):
     - Application `backend` (`q6L3rVbJlA35H-GXkuQjA`)
     - Application `frontend` (`Hvb0NgWmza7tE2PiU37Fb`)
     - Application `scheduler` (`de50uCfU75TcCqfihx2Mk`)
@@ -547,8 +547,7 @@ args** — the configuration the provisioning plan prescribes. The staging deplo
 | Role / subject                          | Observed                                                                                                                              |
 |-----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
 | Role argv                               | `docker inspect` reported `Cmd=[]` and `Entrypoint=[/usr/local/bin/entrypoint.sh]` on every role, and `ps` in the `horizon` container showed `php artisan horizon` — the no-argument dispatch path really ran |
-| `web`                                   | Applied 51 migrations, then served `/up` 200, `/` 200, `/login` 200, `/register` 404, `/horizon` 403                                  |
-| `web` session cookie                    | `/login` answered with `laravel-session` marked `secure; httponly; samesite=lax`. In-container plain HTTP can only assert that the cookie is *set*; a client never resends a `Secure` cookie over `http://`, so the cross-request check belongs to step 13 over HTTPS |
+| `web`                                   | Applied 51 migrations, then served `/up` 200, `/` 200, `/login` 200, `/register` 404, `/horizon` 403. `/login` answered with `laravel-session` marked `secure; httponly; samesite=lax`: in-container plain HTTP can only assert the cookie is *set*, because a client never resends a `Secure` cookie over `http://`, so the cross-request check belongs to step 13 over HTTPS |
 | `horizon`                               | Master, supervisor and worker all ran as `www-data`; `horizon:liveness` exited 0 (`master ... is alive`); ran a `RunTransactionAnalysisJob` dispatched from the web container to DONE in 60ms |
 | `scheduler`                             | `scheduler:heartbeat` advanced the heartbeat mtime across a 120s window, and the container reported healthy after the 90s start period |
 | Shared volume                           | A fresh named volume mounted at `/var/www/html/storage/app/private` came up `www-data`-owned via copy-up; a file written by `www-data` in the `horizon` container was visible from `web` |
