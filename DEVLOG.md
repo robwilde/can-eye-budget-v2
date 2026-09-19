@@ -1,6 +1,60 @@
 # Dev Log
 
 
+## 2026-09-19 — Issue #375 closed: staging is provisioned and live on Dokploy
+
+### The Change
+
+`can-eye-budget-v2` now runs at https://can-eye.mrwilde.dev. The code gate for #375 had been complete for two weeks; nothing was deployed because the
+provisioning half had never been performed. It was performed today against project `can-eye-budget-v2` (`NZJGNv9vRX6AcZRjYrnxK`), environment `Staging`
+(`DiISI4cAMucnyj440GORx`), building `develop` @`cc1dc9c` — the first deploy to carry #430's entrypoint role dispatch.
+
+Five services: `can-eye-mariadb` (`mariadb:11.8`), `can-eye-redis` (`redis:7-alpine`), and three Applications differing **only** by `CONTAINER_ROLE`, each
+with `command: null` and `healthCheckSwarm: null`. A shared `can-eye-staging-import` volume is mounted at `/var/www/html/storage/app/private` on web and
+horizon. `can-eye.mrwilde.dev` is attached to the web service on port 80 with Let's Encrypt.
+
+**Files modified:**
+- `docs/dokploy-staging-plan.md` — a "Deployed" banner, a "Staging-verified behaviour" as-built record, and prerequisites 2–5 marked satisfied
+
+No application code changed. The deployment is configuration in Dokploy, not a commit.
+
+### The Reasoning
+
+- **The MCP surface was not the whole API.** The mounted Dokploy MCP tools cover applications, domains, MySQL and Postgres — but not MariaDB, not Redis, and
+  not mounts, which is three of the six things #375 required. The raw Dokploy REST API behind the same credential does cover them; `mariadb.create`,
+  `redis.create` and `mounts.create` were driven directly. Treating the tool list as the capability boundary would have stalled the deploy on tooling.
+- **`server.all` returning `[]` is not "no server".** It reports *remote* servers. Every service already running on this Dokploy — `hindsight`,
+  `hindsight-postgres`, `pwpush`, `MrWilde.dev` — carries `serverId: null` and status `done`, so the local Docker host is the implicit target. That was
+  checked against running services before provisioning, rather than inferred from the empty array.
+- **#430 was exercised for real, not asserted.** All three containers report `Entrypoint=[/usr/local/bin/entrypoint.sh]` with `Cmd=null`, and the horizon
+  container's process table shows `php artisan horizon` although no Dokploy `command` was ever written. The role dispatch chose the process. The gate that
+  matters most held too: `grep -ci migrat` over the horizon and scheduler logs is **0** each, while web applied all 51 migrations.
+- **Readiness was taken over HTTPS, which is stronger than the runbook's in-container check.** Dokploy runs on a remote host with no SSH access and its REST
+  API has no exec endpoint, so the prescribed `curl http://127.0.0.1/login` was unavailable. The domain round trip supersedes it: `POST /login` → 302
+  `/dashboard` and an authed `GET /dashboard` 200 prove the `Secure` cookie is carried across requests — the half that plain HTTP provably cannot show.
+- **In-container verification came from the terminal websocket.** `/docker-container-terminal` accepts the `x-api-key` header, which is how
+  `horizon:liveness`, the process table, the heartbeat mtime and the cross-container volume write were observed first-hand instead of inferred from logs.
+- **The account was created with tinker, not the seeder.** `DatabaseSeeder` builds users through `User::factory()`, and faker is a dev dependency absent
+  under `composer install --no-dev` — the same trap recorded during local container testing. A single account was created with `User::create` and a
+  generated password.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Migrations | 51 applied by `web`; zero `migrat` lines in either worker log |
+| HTTPS surface | `/` 200, `/login` 200, `/up` 200, `/register` **404**, anonymous `/horizon` **403**, `http://` → 301, certificate verifies |
+| Session | `can-eye-budget-staging-session` `secure; httponly; samesite=lax`; login → `/dashboard` 200 on a second request |
+| Queue across containers | `RunTransactionAnalysisJob` dispatched in web, logged `RUNNING` → `83.35ms DONE` in horizon |
+| Horizon | master/supervisor/worker all `www-data`; `horizon:liveness` exit 0; `--max-processes=3`, the `staging` sizing |
+| Scheduler | four schedules firing; heartbeat mtime advanced 179s over 179s |
+| Shared volume | written by `www-data` in horizon, read back from web |
+| Exposure | `3306` and `6379` refuse public connections; `/_boost/browser-logs` 404, `/telescope` 404, `/.env` 403 |
+
+No row of the local "Container-verified behaviour" matrix diverged on staging. The CSV bank-import round trip is the single step-13 item not exercised:
+the database holds one account and no transactions, so there is nothing to import yet.
+
+
 ## 2026-09-13 — Issue #423 hardening: Pin the `env()` Null Coercion — PR #428
 
 ### The Change

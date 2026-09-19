@@ -19,7 +19,8 @@ Redis is an intentional addition to the reference topology. This application exp
 metrics data in Redis. MariaDB is also an intentional divergence from the reference PostgreSQL service: the shipped report aggregation code uses `DATE_FORMAT`
 for every non-SQLite driver, so PostgreSQL would break monthly report aggregation until the code is changed and fully tested.
 
-This document is a provisioning plan, not a request to create or deploy Dokploy resources during this investigation.
+**Deployed.** This document was a provisioning plan; the environment it describes now exists and serves https://can-eye.mrwilde.dev. The as-built record is
+under "Staging-verified behaviour"; #375 is closed. What follows stays written as a runbook, because it is also the rebuild and rollback procedure.
 
 **Step 0 has been implemented and merged to `develop`.** The five blocking code changes are now present: a root production image
 (`Dockerfile`, `.dockerignore`, `docker/`), a trusted-proxy call in `bootstrap/app.php`, an allow-listed Horizon gate
@@ -553,23 +554,50 @@ args** — the configuration the provisioning plan prescribes. The staging deplo
 | Shared volume                           | A fresh named volume mounted at `/var/www/html/storage/app/private` came up `www-data`-owned via copy-up; a file written by `www-data` in the `horizon` container was visible from `web` |
 | `APP_DEBUG=true`, `BOOST_ENABLED` unset | Did **not** break `route:cache`: the container booted healthy with `bootstrap/cache/routes-v7.php` written, `route:list --json` parsing and `/` serving 200. That earlier concern is disproved. `APP_DEBUG=false` still stands, for stack-trace exposure on a public domain |
 
+### Staging-verified behaviour
+
+Provisioned and verified on 2026-09-19 from `develop` @`cc1dc9c` into project `can-eye-budget-v2` (`NZJGNv9vRX6AcZRjYrnxK`), environment `Staging`
+(`DiISI4cAMucnyj440GORx`). Internal hostnames are the Swarm service names Dokploy generated, not the service names: `can-eye-mariadb-yuriat` and
+`can-eye-redis-ltjrpq`.
+
+| Subject | As built |
+|---|---|
+| Services | `can-eye-mariadb` `X4MK_mHK0gMyn9Sg-Xwq1` (`mariadb:11.8`), `can-eye-redis` `OGVmQ-witG-74N7u1rcD7` (`redis:7-alpine`), `can-eye-web` `j8vSCf0xpvvjqZX4qSuvV`, `can-eye-horizon` `Bdm2VXQNOEw3XLTiKifLY`, `can-eye-scheduler` `7uGVD8v6ICPOdOMG47DJ2` |
+| Source and build | All three Applications: `sourceType=git` (public clone, branch `develop`, build path `/`), `buildType=dockerfile`, `dockerfile=Dockerfile`, 1 replica, `healthCheckSwarm: null`, **`command: null`** |
+| Role argv | `docker.getConfig` on all three containers: `Entrypoint=[/usr/local/bin/entrypoint.sh]`, `Cmd=null`, `Health=healthy`. The horizon process table shows `php artisan horizon` with no Dokploy command set — #430's dispatch chose it |
+| Migrations | 51 applied by `web` alone; the horizon and scheduler logs contain zero occurrences of `migrat` |
+| HTTPS surface | `/` 200, `/login` 200, `/up` 200, `/register` 404, anonymous `/horizon` 403, `http://` → 301 `https://`, certificate verifies |
+| Session | `POST /login` → 302 `/dashboard`, authed `GET /dashboard` 200. Cookie `can-eye-budget-staging-session`, `secure; httponly; samesite=lax` — the cross-request half that plain HTTP cannot prove |
+| Queue across containers | `RunTransactionAnalysisJob` dispatched in `can-eye-web` logged `RUNNING` → `83.35ms DONE` in `can-eye-horizon` |
+| Worker identity and sizing | Horizon master, supervisor and worker all `www-data`; `horizon:liveness` exit 0; supervisor started `--max-processes=3`, the `staging` sizing rather than production's 10 |
+| Scheduler | `basiq:fail-stuck-refresh-logs`, `redbark:fail-stuck-sync-logs`, `horizon:snapshot` and `scheduler:heartbeat` all firing; heartbeat mtime advanced 179s over a 179s window |
+| Shared volume | `can-eye-staging-import` mounted on web and horizon; a file written by `www-data` in horizon was read back from web |
+| Exposure | `144.6.123.191:3306` and `:6379` refuse public connections; `/_boost/browser-logs` 404, `/telescope` 404, `/.env` 403; the landing page carries no register link |
+
+No row of "Container-verified behaviour" diverged on staging. The one step-13 item not exercised is the CSV bank-import round trip: the database holds one
+account and no transactions, so there is nothing to import yet. The mount it depends on is proven in both directions.
+
+Operational note: Dokploy's REST API covers applications, domains, MariaDB, Redis and mounts, but exposes no exec endpoint. In-container checks were run
+through the container terminal websocket at `/docker-container-terminal`, which accepts the `x-api-key` header.
+
 ## Open prerequisites
 
-Prerequisite 1 is satisfied; 2 onward are still outstanding.
+Prerequisites 1 through 5 are satisfied by the deployment recorded above. 6 onward remain open.
 
 1. Satisfied: #369, #370, #371, #372 and #383 are merged to `develop`, the branch Dokploy builds. #383 landing is what makes prerequisite 3 effective —
    without its config gate the variable set there would have nothing to read it. The worker services additionally rely on #430's entrypoint dispatch —
    verify the built image as described under "Step 0".
-2. Create the shared import volume in Dokploy and mount it at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon`. The storage
-   arrangement itself is settled — shared volume, `FILESYSTEM_DISK=local`. Never adopt `FILESYSTEM_DISK=s3`: `league/flysystem-aws-s3-v3` is absent from
-   `composer.lock` and the import path calls `Storage::disk('local')->path()` directly.
-3. Set `FORTIFY_REGISTRATION_ENABLED=false` on the staging service. The controls here are not symmetrical, so treat them differently: the Horizon gate
+2. Satisfied: the shared volume `can-eye-staging-import` is mounted at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon` with
+   `FILESYSTEM_DISK=local`. Never adopt `FILESYSTEM_DISK=s3`: `league/flysystem-aws-s3-v3` is absent from `composer.lock` and the import path calls
+   `Storage::disk('local')->path()` directly.
+3. Satisfied: `FORTIFY_REGISTRATION_ENABLED=false` and `SESSION_SECURE_COOKIE=true` are set on all three services, and `HORIZON_AUTHORIZED_EMAILS` carries a
+   single address. The controls here are not symmetrical, so treat them differently when changing them: the Horizon gate
    (#370) **fails closed** — leave `HORIZON_AUTHORIZED_EMAILS` unset and nobody outside `local` gets in, so populating it grants access. The registration
    toggle (#383) **fails open**: it defaults to `true`, so omitting the variable leaves public sign-up enabled on the domain. `SESSION_SECURE_COOKIE` sits in
    that same fail-open class — `config/session.php` carries no default of its own — so both of those must be set explicitly to be safe. `CACHE_STORE` and
    `APP_KEY` are a separate category again: first-boot preconditions, covered in step 8 of the deployment sequence.
-4. Confirm Dokploy's managed MariaDB service version, data-volume path, internal hostname, and authentication fields.
-5. Confirm the Dokploy internal Redis hostname and supported managed Redis version/authentication fields.
+4. Satisfied: the managed MariaDB is `mariadb:11.8` at internal host `can-eye-mariadb-yuriat`, database `can_eye_budget_staging`, no external port.
+5. Satisfied: the managed Redis is `redis:7-alpine` at internal host `can-eye-redis-ltjrpq`, password authentication, no external port.
 6. Choose the mail sandbox and external integration policy, and decide whether staging should exercise Basiq/Redbark/Gmail/GitHub integrations or keep them
    disabled until credentials and callback URLs are approved.
 7. After the source is accessible, inspect the reference `compare-build` Dockerfiles directly in Dokploy or GitHub and reconcile entrypoints, health checks, and
