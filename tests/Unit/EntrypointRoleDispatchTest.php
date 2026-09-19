@@ -8,82 +8,49 @@ declare(strict_types=1);
  * Pin the process each role boots, by running the real `docker/entrypoint.sh`
  * and reporting the command it finally `exec`s.
  *
- * The image declares no `CMD`, so a container started with no override reaches
- * the script with no arguments and the script itself resolves the process from
- * `CONTAINER_ROLE`. That resolution is the contract: a Dokploy Application that
- * sets its command field instead would map to Swarm `ContainerSpec.Command` and
- * replace this ENTRYPOINT, skipping role validation, the caches, the chown and
- * the privilege drop.
- *
  * The script is executed rather than reproduced, so this cannot drift away from
- * the file it pins. `php`, `chown`, `supervisord` and `su-exec` are stubbed onto
- * `PATH`: the stubs echo their own invocation, so the last line of output is
- * whatever the script handed to `exec`. The earlier `php artisan` setup calls
- * appear on earlier lines and are not part of this contract.
+ * the file it pins. What it cannot observe is the premise that makes the
+ * no-argument path reachable at all: the image declares no `CMD`. That is
+ * enforced by the `Dockerfile` alone and is deliberately not covered here --
+ * with a `CMD` restored, every row below would stay green while a `horizon`
+ * container silently booted the web stack. A Dokploy Application that sets its
+ * command field is the same failure by another route: it maps to Swarm
+ * `ContainerSpec.Command` and replaces the ENTRYPOINT, skipping role
+ * validation, the caches, the chown and the privilege drop.
  *
+ * `php`, `chown`, `supervisord` and `su-exec` are stubbed onto `PATH`: the stubs
+ * echo their own invocation, so the last line of output is whatever the script
+ * handed to `exec`. The earlier `php artisan` setup calls appear on earlier
+ * lines and are not part of this contract.
+ */
+
+/**
  * @param  string|null  $role  `CONTAINER_ROLE` in the container environment, or null to leave it unset
  * @param  list<string>  $arguments  an explicit argument list, as a Dokploy `args` override would deliver
+ * @return array{status: int, stdout: list<string>, stderr: string}
+ */
+function entrypointRun(?string $role, array $arguments = []): array
+{
+    $echo = static fn (string $name): string => "printf '%s %s\\n' ".escapeshellarg($name).' "$*"';
+
+    return runEntrypoint(
+        stubs: ['php' => $echo('php'), 'chown' => $echo('chown'), 'supervisord' => $echo('supervisord'), 'su-exec' => $echo('su-exec')],
+        env: ['APP_ENV' => 'staging'] + ($role === null ? [] : ['CONTAINER_ROLE' => $role]),
+        arguments: $arguments,
+    );
+}
+
+/**
+ * @param  list<string>  $arguments
  */
 function entrypointDispatch(?string $role, array $arguments = []): string
 {
-    $root = dirname(__DIR__, 2);
-    $script = $root.'/docker/entrypoint.sh';
+    $run = entrypointRun($role, $arguments);
 
-    $base = sys_get_temp_dir().'/entrypoint-dispatch-'.getmypid().'-'.bin2hex(random_bytes(8));
-    $work = $base.'/work';
+    expect($run['status'])->toBe(0);
+    expect($run['stdout'])->not->toBeEmpty();
 
-    mkdir($base.'/bin', 0o755, true);
-    mkdir($work, 0o755, true);
-
-    foreach (['php', 'chown', 'supervisord', 'su-exec'] as $stub) {
-        file_put_contents($base.'/bin/'.$stub, "#!/bin/sh\nprintf '%s %s\\n' ".escapeshellarg($stub).' "$*"'."\n");
-        chmod($base.'/bin/'.$stub, 0o755);
-    }
-
-    $assignments = 'PATH='.escapeshellarg($base.'/bin:/usr/bin:/bin')
-        .' APP_ENV=staging';
-
-    if ($role !== null) {
-        $assignments .= ' CONTAINER_ROLE='.escapeshellarg($role);
-    }
-
-    $command = 'cd '.escapeshellarg($work)
-        .' && env -i '.$assignments
-        .' sh '.escapeshellarg($script);
-
-    foreach ($arguments as $argument) {
-        $command .= ' '.escapeshellarg($argument);
-    }
-
-    $command .= ' 2>/dev/null';
-
-    $output = [];
-    $status = 0;
-    exec($command, $output, $status);
-
-    deleteDispatchFixture($base);
-
-    expect($status)->toBe(0);
-    expect($output)->not->toBeEmpty();
-
-    return mb_trim((string) array_pop($output));
-}
-
-function deleteDispatchFixture(string $path): void
-{
-    if (! is_dir($path)) {
-        @unlink($path);
-
-        return;
-    }
-
-    foreach (scandir($path) ?: [] as $entry) {
-        if ($entry !== '.' && $entry !== '..') {
-            deleteDispatchFixture($path.'/'.$entry);
-        }
-    }
-
-    @rmdir($path);
+    return mb_trim((string) array_pop($run['stdout']));
 }
 
 test('each role boots its own process with no command override', function (?string $role, string $expected) {
@@ -100,4 +67,17 @@ test('an explicit argument list overrides the role default', function (?string $
 })->with([
     'web keeps root' => ['web', 'php artisan tinker'],
     'horizon still drops privileges' => ['horizon', 'su-exec www-data php artisan tinker'],
+]);
+
+test('a blank or unknown CONTAINER_ROLE aborts before any process is resolved', function (string $role, array $arguments, string $diagnostic) {
+    $run = entrypointRun($role, $arguments);
+
+    expect($run['status'])->toBe(1)
+        ->and($run['stderr'])->toContain($diagnostic)
+        ->and($run['stdout'])->toBe([]);
+})->with([
+    'blank, no arguments' => ['', [], 'entrypoint: CONTAINER_ROLE is set but empty; expected web, horizon, or scheduler'],
+    'unknown, no arguments' => ['worker', [], "entrypoint: unknown CONTAINER_ROLE 'worker'; expected web, horizon, or scheduler"],
+    'blank beats an explicit argument list' => ['', ['php', 'artisan', 'tinker'], 'entrypoint: CONTAINER_ROLE is set but empty; expected web, horizon, or scheduler'],
+    'unknown beats an explicit argument list' => ['worker', ['php', 'artisan', 'tinker'], "entrypoint: unknown CONTAINER_ROLE 'worker'; expected web, horizon, or scheduler"],
 ]);
