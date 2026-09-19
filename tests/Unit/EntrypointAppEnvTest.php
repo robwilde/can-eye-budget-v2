@@ -16,79 +16,30 @@ declare(strict_types=1);
  * `exec "$@"` at the end of the script runs the probe, which reports the value
  * as the first process to inherit it sees it.
  *
- * Every run gets its own directory, so the `storage/` and `bootstrap/cache`
- * trees the script creates cannot collide under `--parallel`.
- *
  * @param  string|null  $exported  `APP_ENV` in the container environment, or null to leave it unset
  * @param  string|null  $dotEnv  value for an `APP_ENV=` line in `.env`, or null to write no `.env`
  */
 function entrypointAppEnv(?string $exported, ?string $dotEnv): string
 {
-    $root = dirname(__DIR__, 2);
-    $script = $root.'/docker/entrypoint.sh';
-
-    $base = sys_get_temp_dir().'/entrypoint-appenv-'.getmypid().'-'.bin2hex(random_bytes(8));
-    $work = $base.'/work';
-
-    mkdir($base.'/bin', 0o755, true);
-    mkdir($work, 0o755, true);
-
-    foreach (['php', 'chown'] as $stub) {
-        file_put_contents($base.'/bin/'.$stub, "#!/bin/sh\nexit 0\n");
-        chmod($base.'/bin/'.$stub, 0o755);
-    }
-
-    if ($dotEnv !== null) {
-        file_put_contents($work.'/.env', 'APP_ENV='.$dotEnv."\n");
-    }
-
-    $assignments = 'PATH='.escapeshellarg($base.'/bin:/usr/bin:/bin');
-
-    if ($exported !== null) {
-        $assignments .= ' APP_ENV='.escapeshellarg($exported);
-    }
-
     // Delimited because exec() strips trailing whitespace from captured lines,
     // which would quietly turn a ' null ' that the script correctly preserved
     // into a passing ' null' and hide the untrimmed-match contract.
     $probe = 'printf "[[%s]]" "${APP_ENV-<unset>}"';
 
-    $command = 'cd '.escapeshellarg($work)
-        .' && env -i '.$assignments
-        .' sh '.escapeshellarg($script)
-        .' sh -c '.escapeshellarg($probe)
-        .' 2>/dev/null';
+    $run = runEntrypoint(
+        stubs: ['php' => 'exit 0', 'chown' => 'exit 0'],
+        env: $exported === null ? [] : ['APP_ENV' => $exported],
+        arguments: ['sh', '-c', $probe],
+        files: $dotEnv === null ? [] : ['.env' => 'APP_ENV='.$dotEnv."\n"],
+    );
 
-    $output = [];
-    $status = 0;
-    exec($command, $output, $status);
+    expect($run['status'])->toBe(0);
 
-    deleteEntrypointFixture($base);
-
-    expect($status)->toBe(0);
-
-    $captured = implode("\n", $output);
+    $captured = implode("\n", $run['stdout']);
 
     expect($captured)->toMatch('/^\[\[.*]]$/s');
 
     return mb_substr($captured, 2, -2);
-}
-
-function deleteEntrypointFixture(string $path): void
-{
-    if (! is_dir($path)) {
-        @unlink($path);
-
-        return;
-    }
-
-    foreach (scandir($path) ?: [] as $entry) {
-        if ($entry !== '.' && $entry !== '..') {
-            deleteEntrypointFixture($path.'/'.$entry);
-        }
-    }
-
-    @rmdir($path);
 }
 
 test('the entrypoint exports an APP_ENV for every container it boots', function (?string $exported, ?string $dotEnv, string $expected) {

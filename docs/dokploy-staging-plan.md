@@ -45,7 +45,7 @@ no error to say so. That gate is now on `develop` (`config/fortify.php:149`), so
 | 2 | — | Provision the shared import volume                                      | Provisioning only | Mount one volume at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon`. Settled — see "Storage decision (settled): shared volume". No repository change; `FILESYSTEM_DISK` stays `local`                                          |
 | 3 | #370 | Restrict Horizon dashboard access outside `local`                       | Merged to `develop` (f39fcdd) | Gate is now an explicit allow-list: `config('horizon.authorized_emails')` from `HORIZON_AUTHORIZED_EMAILS`, with `local` short-circuited. Fails closed when unset. Registration is env-gated as of #383 — see "Security exposure decision"                              |
 | 4 | #371 | Configure trusted proxies                                               | Merged to `develop` (94303c5) | `bootstrap/app.php` now calls `$middleware->trustProxies(at: '*')` with the framework's default header set; correct because the container is only reachable through Traefik on the Dokploy network                                                            |
-| 5 | #372 | Add a `DiagnosingHealth` listener that asserts database and Redis       | Merged to `develop` (74ed230) | `app/Listeners/VerifyHealthDependencies.php` runs `select 1` and a Redis `ping`; auto-discovered from `app/Listeners`. `/up` now returns 500 when either dependency is unreachable, making it a usable Dokploy readiness gate                                 |
+| 5 | #372 | Add a `DiagnosingHealth` listener that asserts database and Redis       | Merged to `develop` (74ed230) | `app/Listeners/VerifyHealthDependencies.php` runs `select 1` and a Redis `ping`; auto-discovered from `app/Listeners`. `/up` now returns 500 when either dependency is unreachable — a dependency probe, not a readiness signal; see "`/up` is a dependency probe" |
 | 6 | #383 | Env-gate registration and guard the landing page                        | Merged to `develop` (PR #395, c10c5b4) | `config/fortify.php` gates `Features::registration()` on `FORTIFY_REGISTRATION_ENABLED`, default `true` so local and production are unchanged; set `false` on staging. The three `route('register')` call sites in `resources/views/welcome.blade.php` are guarded with `Route::has('register')` so the landing page still renders once the routes are gone. Registration/password-reset throttling was split out to #394 — see row 9 |
 | 7 | #373 | Move development-only dependencies out of the production dependency set | Open, non-blocking | `laravel/boost` and `spatie/laravel-ray` sit in `require`, so `composer install --no-dev` still ships them; `playwright` sits in `dependencies` with an empty `devDependencies`, so `npm ci` pulls it into the build stage                                     |
 | 8 | #374 | Decide whether staging deploys are gated on CI                          | Open, non-blocking | `.github/workflows/lint.yml` and `tests.yml` exist but nothing ties a staging deploy to them                                                                                                                                                                  |
@@ -61,6 +61,10 @@ outside a developer machine (#381, PR #389) with the Ray enable default itself f
 and `CONTAINER_ROLE` validated before any side effect so an unknown or blank value aborts instead of silently defaulting to `web` (#399, PR #400; #401,
 PR #402). None of this changes the deployment order below; it only means the image and configuration already behave as the later steps expect.
 
+#430 drops `CMD` from the `Dockerfile` and has `docker/entrypoint.sh` resolve its process from `CONTAINER_ROLE` when it is passed no arguments. The
+worker-service configuration below — `CONTAINER_ROLE` set, `command` and `args` both empty — relies on it, so before deploying `can-eye-horizon` or
+`can-eye-scheduler` confirm the image Dokploy built carries that entrypoint (`docker image inspect <image> --format '{{.Config.Cmd}}'` prints `[]`).
+
 ## Dokploy inventory
 
 Captured from the Dokploy project inventory and service details:
@@ -68,13 +72,15 @@ Captured from the Dokploy project inventory and service details:
 - Dokploy contains 9 projects in the current organization.
 - Reference project: `comparebuild` (`Bc6MlLuvuhhiZ9hVzCstL`), description `this is the doc portal for the project`.
 - Reference staging environment: `staging` (`GtCAOGo5_32kZ0SkazCqp`).
-- Reference staging has four services, all reported `done`:
+- Reference staging has four services, all reported `done` — a status that means only that Swarm accepted the spec, not that anything converged
+  (see "Dokploy `done` is not readiness"):
     - Application `backend` (`q6L3rVbJlA35H-GXkuQjA`)
     - Application `frontend` (`Hvb0NgWmza7tE2PiU37Fb`)
     - Application `scheduler` (`de50uCfU75TcCqfihx2Mk`)
     - Managed PostgreSQL (`eVKzjC2hMINUmlAHRpa1G`)
 - Reference staging has no Redis service and no external PostgreSQL port.
-- No `can-eye` project, environment, application, database, Redis service, or domain was present in the inventory.
+- **Provisioning status: nothing exists yet.** No `can-eye` project, environment, application, database, Redis service, or domain is present in the inventory,
+  so every step of the deployment sequence from step 3 onward is outstanding.
 
 ### Reference application records
 
@@ -119,8 +125,8 @@ The root `Dockerfile`, `.dockerignore`, and `docker/` configs are on `develop` (
 | `can-eye-redis`     | Managed Redis         | Managed Redis 7.x image; neither Nixpacks nor a repository Dockerfile    | Create the managed Redis service                |
 
 This is the cleanest match to the reference records, where all three Application records have `buildType=dockerfile` and `dockerfile=Dockerfile`. The one
-authored Dockerfile should build the Vite assets and provide the PHP 8.4 HTTP runtime; the Horizon and scheduler services reuse that image and override only
-their commands.
+authored Dockerfile builds the Vite assets and provides the PHP 8.4 HTTP runtime; the Horizon and scheduler services reuse that image unchanged and are
+differentiated by `CONTAINER_ROLE` alone, with the Dokploy `command` and `args` fields left empty — see "Dokploy `command` replaces the entrypoint".
 
 ### PHP extension requirements
 
@@ -191,7 +197,7 @@ Evidence from the repository:
   `app/Listeners/VerifyHealthDependencies.php` (#372) is that listener: it runs `select 1` on the
   default connection and pings Redis, so `/up` returns 500 when MariaDB or Redis is unreachable instead of reporting healthy on a broken application. Note the
   scope: `select 1` proves connectivity, **not** schema state, so `/up` can still return 200 against a reachable but unmigrated database. Migration ordering is
-  guaranteed by `docker/entrypoint.sh` running `migrate` before `exec`, not by this listener.
+  guaranteed by `docker/entrypoint.sh` running `migrate` before `exec`, not by this listener. See "`/up` is a dependency probe".
 - `app/Models/User.php` does not implement `MustVerifyEmail`, and no class in `app/` or `config/` references it. Although `config/fortify.php` enables
   `Features::emailVerification()`, the `['auth','verified']` group in `routes/web.php:16` is a pass-through, so registration and login do **not** depend on
   outbound mail. Only password reset and any deliberate verification testing need a working mailer.
@@ -305,11 +311,14 @@ MariaDB, or Redis. Attach it **after** the first successful migration — see th
 - Configure the Laravel environment listed in the environment matrix below.
 - `storage:link` runs in `docker/entrypoint.sh` (`--force`, idempotent), never as a manual step: the container filesystem is ephemeral and a hand-run symlink is
   lost on every redeploy.
+- Leave the `command` and `args` fields **empty** and set `CONTAINER_ROLE=web`; the entrypoint resolves `web` → `supervisord -c /etc/supervisord.conf` on its
+  own since #430. See "Dokploy `command` replaces the entrypoint".
 - Migrations run from the entrypoint before the HTTP server binds, gated on `CONTAINER_ROLE=web` and taking a cache lock via `--isolated`, so the container
-  cannot report ready on an unmigrated schema. `CONTAINER_ROLE` defaults to `web`, so this is the only service that migrates.
-- Define a health check against Laravel's `/up` route. #372 gives `/up` a `DiagnosingHealth` listener asserting MariaDB and Redis, so it is now a real readiness
-  gate: it returns 500 when either dependency is unreachable. The image also declares an equivalent `HEALTHCHECK` with a 90s start period, which
-  `docker/healthcheck.sh` applies to the `web` role only.
+  cannot report ready on an unmigrated schema. `CONTAINER_ROLE` defaults to `web`, so this is the only service that migrates. The `--isolated` lock is taken
+  through the default cache store, which is why `CACHE_STORE` is a first-boot precondition — see step 8 of the deployment sequence.
+- Leave Dokploy's Swarm health-check fields empty so the container inherits the image `HEALTHCHECK`, which has a 90s start period and is applied to the `web`
+  role by `docker/healthcheck.sh`. It probes Laravel's `/up` route, which #372 gives a `DiagnosingHealth` listener asserting MariaDB and Redis, so it returns
+  500 when either dependency is unreachable. Treat it as a dependency probe — see "`/up` is a dependency probe".
 - Attach `can-eye.mrwilde.dev` to port 80 with HTTPS and Let's Encrypt after the first migration succeeds.
 
 ### Service: can-eye-horizon
@@ -317,8 +326,11 @@ MariaDB, or Redis. Attach it **after** the first successful migration — see th
 - Create a second Application service named `can-eye-horizon` from the same repository, owner, branch, root build path/context, `buildType=dockerfile`, and the
   same root `Dockerfile`; do not select Nixpacks.
 - Use one replica.
-- Override the container command with `php artisan horizon`.
-- Set `CONTAINER_ROLE=horizon`. This makes `docker/healthcheck.sh` verify Horizon's liveness via `php artisan horizon:liveness` (#396), a container-local check that
+- Leave both the container `command` and `args` fields **empty** and set `CONTAINER_ROLE=horizon`. Since #430 the image carries no `CMD` and
+  `docker/entrypoint.sh` resolves its own process from `CONTAINER_ROLE` when it is passed no arguments: `horizon` → `php artisan horizon`. Filling in Dokploy's
+  `command` field is a regression rather than a configuration choice — it replaces the image entrypoint outright, so the worker would run as root against an
+  uncached config. See "Dokploy `command` replaces the entrypoint" below.
+- This makes `docker/healthcheck.sh` verify Horizon's liveness via `php artisan horizon:liveness` (#396), a container-local check that
   looks for a master named for this container's hostname within Horizon's 14s expiry window, so the container reports unhealthy if its own Horizon supervisor crashes
   or loses Redis connectivity. It deliberately does not use `horizon:status`: that returns non-zero while Horizon is merely `paused` (which a deploy does), and it
   reads Horizon's fleet-wide `masters` set, so a healthy peer sharing this Redis and `HORIZON_PREFIX` would mask a dead local master. Note that `HORIZON_NAME` does
@@ -336,13 +348,61 @@ MariaDB, or Redis. Attach it **after** the first successful migration — see th
 - Create a third Application service named `can-eye-scheduler` from the same repository, owner, branch, root build path/context, `buildType=dockerfile`, and the
   same root `Dockerfile`; do not select Nixpacks.
 - Use one replica.
-- Override the container command with `php artisan schedule:work`, matching the reference scheduler service.
-- Set `CONTAINER_ROLE=scheduler`. This makes `docker/healthcheck.sh` verify the scheduler's liveness via a timestamped heartbeat file (#396), so the container reports unhealthy if the scheduler stops dispatching or crashes.
+- Leave both the container `command` and `args` fields **empty** and set `CONTAINER_ROLE=scheduler`. Since #430 the entrypoint resolves `scheduler` →
+  `php artisan schedule:work` on its own. The reference `scheduler` service's `php /app/artisan schedule:work` command must **not** be copied here: see
+  "Dokploy `command` replaces the entrypoint" below.
+- `CONTAINER_ROLE=scheduler` also makes `docker/healthcheck.sh` verify the scheduler's liveness via a timestamped heartbeat file (#396), so the container
+  reports unhealthy if the scheduler stops dispatching or crashes.
 - Reuse the same application, database, Redis, and storage environment values as the web service.
 - Note that two of the three schedules in `routes/console.php` are `Schedule::call()` closures that execute in this container and write to the database directly,
   so this service needs working database credentials, not just Redis.
 - Confirm scheduler logs show the five-minute Horizon snapshot and the application schedules, including Redbark synchronization and hold expiry.
 - Deploy this service only after `can-eye-web` is deployed and migrations have run, so scheduled commands never hit an unmigrated schema.
+
+### Dokploy `command` replaces the entrypoint
+
+Dokploy maps an Application's `command` field to Swarm `ContainerSpec.Command`, and Docker treats that as a replacement rather than an addition: in moby's
+`daemon/cluster/executor/container/container.go`, "If Command is provided, we replace the whole invocation with Command by replacing Entrypoint and specifying
+Cmd". A value in that field therefore does not run *through* `docker/entrypoint.sh` — it runs *instead of* it, and the container loses every guarantee the
+entrypoint provides:
+
+- no `CONTAINER_ROLE` validation, so an unknown or blank role no longer aborts (#399, #401);
+- no `APP_ENV` export, so Horizon sizing and the Ray/Boost gates resolve against `production` (see `APP_ENV` in the environment matrix);
+- no `config:cache`, `route:cache`, `view:cache` or `event:cache`, so the runtime variables are read from the environment on every request instead of a cache;
+- no `chown` of the storage tree, so a fresh volume stays root-owned;
+- no `su-exec www-data`, so the worker runs as **root** — reversing #384 outright.
+
+Dokploy's separate `args` field maps to `ContainerSpec.Args`, which *does* preserve the entrypoint. Neither field is needed here: since #430 the image ships no
+`CMD` and `docker/entrypoint.sh` resolves the process from `CONTAINER_ROLE` when it receives no arguments — `web` → `supervisord -c /etc/supervisord.conf`,
+`horizon` → `php artisan horizon`, `scheduler` → `php artisan schedule:work` — while still honouring an explicit argument list when one is given. All three
+Applications are therefore configured with `CONTAINER_ROLE` set and **both** fields empty.
+
+The reference `comparebuild/scheduler` record is the shape to avoid copying: `command: "php /app/artisan schedule:work"`, `args: null`. Its other two fields
+are worth noting because this plan inherits them deliberately — `healthCheckSwarm: null` and
+`restartPolicySwarm: {Condition: on-failure, Delay: 10s, MaxAttempts: 5, Window: 60s}`.
+
+Leave `healthCheckSwarm` null. With no Swarm health check sent, the container inherits the image `HEALTHCHECK`, which is what the role-aware
+`docker/healthcheck.sh` is for. Docker merges health-check configuration field by field, so filling in only part of Dokploy's Swarm health-check UI silently
+inherits the remaining fields from the image and produces a probe nobody wrote.
+
+### `/up` is a dependency probe
+
+`bootstrap/app.php` registers `/up` in the `then:` callback of `withRouting()` with only `throttle:60,1`, so it sits outside the `web` middleware group and
+exercises no encryption and no session. #372's `DiagnosingHealth` listener makes it return 500 when MariaDB or Redis is unreachable, which is
+what the image `HEALTHCHECK` needs — but a container with no `APP_KEY` was verified `healthy` with `/up` returning 200 while `/` and `/login` returned
+500. Readiness is therefore a real page plus a session, checked in step 10 of the deployment sequence; `/up` only proves the dependencies answer.
+
+### Dokploy `done` is not readiness
+
+`deployApplication` flips both the deployment and the application status straight after `mechanizeDockerContainer`, with no convergence or health wait — the
+reference deployments finish in about five seconds. A Dokploy deployment that reads `done` therefore means only that Swarm accepted the service spec. **A
+crash-looping container displays green.**
+
+Swarm's own behaviour completes the illusion: it shuts a container down on the first `unhealthy` event and only adds a task to the service load balancer on the
+`healthy` event. So the signature of a broken deploy is not a red status — it is "green in Dokploy, 502 from Traefik".
+
+Dokploy status is not evidence. The container log and `docker service ps --no-trunc <service>` are the only diagnosis surface; check them at every readiness
+step below rather than the deployment badge.
 
 ## Environment matrix
 
@@ -351,23 +411,25 @@ Set the common application environment on all three Application services. Values
 | Variable                                                                 | Staging value/policy                                                                                                                     |
 |--------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------|
 | `APP_NAME`                                                               | `Can Eye Budget (Staging)`                                                                                                               |
-| `APP_ENV`                                                                | `staging`                                                                                                                                |
-| `APP_KEY`                                                                | Generate a new staging key; never reuse another environment's key                                                                         |
+| `APP_ENV`                                                                | `staging`. Load-bearing beyond the Ray/Boost gates: `config/horizon.php` `environments` sizes `production` at `maxProcesses: 10` and `staging` at `3`. If it is unset the entrypoint exports `production` and staging runs ten workers |
+| `APP_KEY`                                                                | Generate a new staging key; never reuse another environment's key. **First-boot precondition:** a missing key still yields a *green* container because `/up` never touches encryption — see "`/up` is a dependency probe" |
 | `APP_DEBUG`                                                              | `false`                                                                                                                                  |
 | `APP_URL`                                                                | `https://can-eye.mrwilde.dev`                                                                                                            |
-| `APP_TIMEZONE`                                                           | `Australia/Brisbane`                                                                                                                     |
+| `APP_TIMEZONE`                                                           | `Australia/Brisbane` — already the repository default in `config/app.php`, so this row is redundant but harmless                         |
 | `LOG_CHANNEL` / `LOG_STACK`                                              | `stack` / `stderr` on all three services. `single` writes to `storage/logs/laravel.log`, which is ephemeral and invisible to Dokploy      |
 | `LOG_LEVEL`                                                              | `info` on all three services. Set it explicitly: `.env.example` is not deployed and `config/logging.php` falls back to `debug`           |
 | `DB_CONNECTION`                                                          | `mariadb` — must be set explicitly; the repository default is `sqlite`                                                                    |
 | `DB_HOST` / `DB_PORT`                                                    | Dokploy MariaDB internal hostname / `3306`                                                                                               |
 | `DB_DATABASE` / `DB_USERNAME` / `DB_PASSWORD`                            | Staging-only MariaDB values                                                                                                              |
-| `SESSION_DRIVER`                                                         | `database`                                                                                                                               |
-| `SESSION_SECURE_COOKIE`                                                  | `true` — the domain is HTTPS-only                                                                                                        |
-| `TRUSTED_PROXIES`                                                        | Not required: `bootstrap/app.php` calls `trustProxies(at: '*')` (#371). Only set this if the topology stops being Traefik-only              |
+| `SESSION_DRIVER`                                                         | `database`. No separate migration is required: the `sessions` table is created inside `database/migrations/0001_01_01_000000_create_users_table.php` |
+| `SESSION_SECURE_COOKIE`                                                  | `true` — the domain is HTTPS-only. Fail-open: `config/session.php` carries no default, so leaving it unset serves a non-secure session cookie. Same "must be set to be safe" class as `FORTIFY_REGISTRATION_ENABLED` |
+| `TRUSTED_PROXIES`                                                        | Not implemented — nothing in the codebase reads this key. `bootstrap/app.php` hardcodes `trustProxies(at: '*')` (#371), so setting the variable has no effect; a topology that stops being Traefik-only needs a code change, not a variable |
 | `QUEUE_CONNECTION`                                                       | `redis`                                                                                                                                  |
-| `CACHE_STORE`                                                            | `redis`                                                                                                                                  |
+| `REDIS_QUEUE_RETRY_AFTER`                                                | `150`. `config/queue.php` defaults the `redis` connection's `retry_after` to 90 while `config/horizon.php` `defaults.supervisor-1.timeout` is 120, so a job still running at 90s is released and processed a second time — duplicated transactions on a bank-import and reconciliation application |
+| `CACHE_STORE`                                                            | `redis`. **First-boot precondition, not a caching preference.** Unset, it defaults to `database` (`config/cache.php`), and `migrate --force --isolated` takes its mutex through the default cache store: on a virgin schema that fails on a missing `cache_locks` table — the table created by the very migration run that has not happened yet — and the entrypoint exits 1 under `set -e` before port 80 binds. An unreachable Redis therefore fails the *migration*, not merely caching. `CACHE_STORE=file` is the documented escape hatch for migrating before Redis exists |
 | `REDIS_CLIENT`                                                           | `phpredis`; the image must install `ext-redis`                                                                                            |
-| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD`                           | Dokploy Redis internal hostname / `6379` / staging-only credential                                                                        |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD`                           | Dokploy Redis internal hostname / `6379` / staging-only credential                                                                       |
+| `REDIS_USERNAME`                                                         | Required when the Dokploy Redis enforces an ACL user: password-only auth fails against an ACL-user Redis, and that surfaces as a *migration* failure rather than a cache warning |
 | `REDIS_PREFIX`                                                           | Connection-wide key prefix; defaults to `slug(APP_NAME)-database-`. Set explicitly so staging cannot collide with another app             |
 | `CACHE_PREFIX`                                                           | Unique staging prefix, for example `can_eye_staging`                                                                                     |
 | `HORIZON_PREFIX`                                                         | Unique staging prefix, for example `can_eye_staging_horizon:`                                                                             |
@@ -375,8 +437,9 @@ Set the common application environment on all three Application services. Values
 | `HORIZON_PATH`                                                           | Optional defence in depth now the gate is an allow-list; the default is `horizon`                                                          |
 | `HORIZON_AUTHORIZED_EMAILS`                                              | Comma-separated allow-list of emails permitted to open the dashboard outside `local`. Empty means nobody can — fails closed                |
 | `FORTIFY_REGISTRATION_ENABLED`                                           | `false` on staging — closes public sign-up on a bank-feed application. Default is `true`, so local and production are unchanged            |
-| `CONTAINER_ROLE`                                                         | `web` on `can-eye-web`, `horizon` on `can-eye-horizon`, `scheduler` on `can-eye-scheduler`. Defaults to `web`. Only the `web` role migrates; the `web` role is health-checked over HTTP (`/up`), while `horizon` and `scheduler` roles are health-checked via process-specific liveness probes (#396) |
-| `FILESYSTEM_DISK`                                                        | `local`, paired with the shared volume at `storage/app/private` — see "Storage decision (settled): shared volume". Never set `s3`          |
+| `CONTAINER_ROLE`                                                         | `web` on `can-eye-web`, `horizon` on `can-eye-horizon`, `scheduler` on `can-eye-scheduler`. Defaults to `web`. This is the **only** setting that differentiates the three services: since #430 the entrypoint resolves its own process from it, so the Dokploy `command` and `args` fields stay empty on all three. Only the `web` role migrates; the `web` role is health-checked over HTTP (`/up`), while `horizon` and `scheduler` roles are health-checked via process-specific liveness probes (#396) |
+| `FILESYSTEM_DISK`                                                        | `local`, paired with the shared volume at `storage/app/private` — see "Storage decision (settled): shared volume". Never set `s3`        |
+| `LIVEWIRE_TEMPORARY_FILE_UPLOAD_DISK`                                    | `local` on `can-eye-web`. Livewire temporary uploads default to the `local` disk — the shared `storage/app/private` volume — so the CSV import needs that mount on the web service too, not only on `can-eye-horizon` |
 | `AWS_*`                                                                  | Not used; leave empty. Only relevant if the rejected S3 refactor is ever revisited                                                        |
 | `MAIL_*`                                                                 | Staging SMTP/sandbox settings; never production mailbox credentials. `log` is fine unless password reset or verification is being tested   |
 | `BASIQ_*`                                                                | Empty or Basiq sandbox credentials and callback URL only. Note `webhooks/basiq` is CSRF-exempt and publicly reachable regardless          |
@@ -390,8 +453,10 @@ Set the common application environment on all three Application services. Values
 | `RAY_ENABLED`                                                            | `false` on all three services. `ray.php:40` resolves the environment env-first with `??`: any non-null `env('APP_ENV')` wins, and `config('app.env')` is consulted only when it is null — an unset variable, or the literal `null`/`(null)` that Laravel coerces to null — falling back to `production` when no `config` repository is bound. `??` rather than `?:` is deliberate, because `env('APP_ENV')` returns `''` for an explicitly empty value and boolean `false` for `APP_ENV=false`; `?:` would discard both as absent and hand resolution to the cache. A staging container therefore still fails closed on two independent grounds — the real `APP_ENV` is `staging`, and a config cache baked from that same environment also reads `staging`. `docker/entrypoint.sh` runs `php artisan config:cache` on every boot, after which `LoadEnvironmentVariables` returns early and never reads `.env`. `docker/entrypoint.sh:33-71` therefore resolves and exports `APP_ENV` before that cache is built, so `env('APP_ENV')` resolves in any container booted through the entrypoint; an already-exported value is authoritative and is never overwritten, and where neither source supplies one the entrypoint exports `production`, matching Laravel's own default at `config/app.php:31`, so no container boots without an exported `APP_ENV` (#423). The `null`/`(null)` sentinels are dropped before that fallback, case-insensitively and untrimmed to mirror the `strtolower($value)` at `Env.php:256`, because `Env.php:266-268` decodes both as absent — so `env('APP_ENV')` cannot resolve null and no path reaches the cache. `APP_ENV=`, `APP_ENV=false` and the `(empty)`/`(false)` forms are deliberately kept: `env()` reports each as a value and each compares unequal to `local`. Env-first precedence is scoped to exported OS variables and that export is what guarantees one, so a stale cache baked at `local` no longer decides the environment — measured in an Alpine container, a cache reading `local` yields `enable` `false` as soon as `APP_ENV=production` is exported (#419). A `RAY_ENABLED=false` that exists only in `.env` is still invisible to `env()` once the cache exists and cannot countermand a cache baked at `local`; `RAY_ENABLED` has no cached config key, and adding `config/ray.php` would shadow the root `ray.php` via Spatie's upward `SettingsFactory` search. Export `RAY_ENABLED=false` as a real OS variable where that matters. Keep this set as explicit defence in depth rather than the only guard. When Ray is enabled it adds 18 watchers per request and per queued job plus an availability probe to `RAY_HOST:RAY_PORT`, which default to `host.docker.internal` and `23517` (`ray.php:141`, `ray.php:146`). Ray caches an unavailable result for 30s per process (`Client.php:67`), so that probe is per window, not per log line. The 2s `CURLOPT_TIMEOUT` is a ceiling that needs a routable address which silently drops packets; an unresolvable `host.docker.internal` fails DNS in milliseconds |
 | `BOOST_ENABLED`                                                          | `false` on all three services. Boost activates on `local` **or** `APP_DEBUG=true`, and publishes an unauthenticated, CSRF-exempt `POST /_boost/browser-logs` plus a JS-injecting `web` middleware. Setting it `false` removes that route only — it does not make `APP_DEBUG=true` safe on a public domain, where the debug error page still exposes stack traces, configuration and query bindings. `APP_DEBUG` stays `false` |
 
-Repository defaults are adequate for `APP_LOCALE`, `SESSION_LIFETIME`, `BROADCAST_CONNECTION`, and `BCRYPT_ROUNDS`. `LOG_LEVEL` is not among them: set it
-explicitly, as the matrix above requires.
+Repository defaults are adequate for `APP_LOCALE` and `SESSION_LIFETIME`. `BROADCAST_CONNECTION` and `BCRYPT_ROUNDS` are also safe to omit, but not because this
+repository configures them — it ships neither `config/broadcasting.php` nor `config/hashing.php`. Both defaults come from `vendor/laravel/framework/config/`:
+`broadcasting.php` defaults the connection to `null` and `hashing.php` defaults the bcrypt cost to 12. `LOG_LEVEL` is not in that group: set it explicitly, as
+the matrix above requires.
 
 ### Secret handling
 
@@ -407,21 +472,34 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
    migrating before serving, `trustProxies` in `bootstrap/app.php`, the allow-listed Horizon gate, `app/Listeners/VerifyHealthDependencies.php`, and the
    `FORTIFY_REGISTRATION_ENABLED` gate in `config/fortify.php`. Without that last one the staging variable set in step 8 would be inert. #373 and #374 do
    not gate the deploy.
-3. Confirm the GitHub repository is accessible to Dokploy.
+3. Nothing needs arranging for source access: `robwilde/can-eye-budget-v2` is public (`"private": false` from an unauthenticated GitHub API call), so a
+   git-source clone of `develop` needs no credential and no connected GitHub provider.
 4. Create project `can-eye-budget-v2` and environment `staging`.
 5. Create and deploy MariaDB and Redis; wait for both services to report ready and record their internal hostnames.
 6. Create the shared import volume (settled decision) before any Application is deployed.
 7. Create `can-eye-web`, `can-eye-horizon`, and `can-eye-scheduler` from the same source and Dockerfile. Keep one replica for each initially and do not deploy
    any Application yet. Mount the shared volume on `can-eye-web` and `can-eye-horizon`.
-8. Set common environment variables and service-specific command/name values. Set `APP_DEBUG=false`, `DB_CONNECTION=mariadb`, `CONTAINER_ROLE` per service (`web`, `horizon`, `scheduler`), and `HORIZON_AUTHORIZED_EMAILS` before the first deployment.
+8. Set the common environment variables. Leave the `command` **and** `args` fields empty on all three services and differentiate them with `CONTAINER_ROLE`
+   alone (`web`, `horizon`, `scheduler`) — see "Dokploy `command` replaces the entrypoint". Set `APP_DEBUG=false`, `DB_CONNECTION=mariadb`,
+   `HORIZON_AUTHORIZED_EMAILS`, `FORTIFY_REGISTRATION_ENABLED=false` and a distinct `HORIZON_NAME` before the first deployment. Two variables are **first-boot
+   preconditions** rather than preferences, and getting either wrong costs a deploy: `CACHE_STORE`, because `migrate --force --isolated` takes its mutex
+   through the default cache store and the unset default is `database` — on a virgin schema the `cache_locks` table does not exist yet, so the entrypoint exits
+   1 under `set -e` before port 80 binds (set `redis`, or `file` to migrate before Redis exists); and `APP_KEY`, because without it the container still reports
+   `healthy` and only real pages fail.
 9. Deploy `can-eye-web` with **no domain attached**. The entrypoint runs `php artisan migrate --force` before binding the HTTP port, so the service only reports
    ready once the schema exists. Take a MariaDB snapshot before this first migration.
-10. Confirm readiness genuinely: `/up` must be green *with* the database/Redis listener active, and the container log must show the migration completing. `/up`
-    returning 200 on its own proves only that PHP booted.
+10. Confirm readiness from the container, not from Dokploy. The badge reads `done` as soon as Swarm accepts the spec, so a crash-looping container displays
+    green and the usual signature of a broken deploy is "green in Dokploy, 502 from Traefik" — see "Dokploy `done` is not readiness". The container log must
+    show the migrations completing and the role process starting; `docker service ps --no-trunc <service>` is the other diagnosis surface. `/up` returning 200
+    is not sufficient either — see "`/up` is a dependency probe". Readiness means a real page renders and a session is issued: from inside the container,
+    `http://127.0.0.1/` and `http://127.0.0.1/login` must both return 200 and `/login` must answer with a `Set-Cookie` for the session. Do not expect a second
+    plain-HTTP request to carry that cookie back: `SESSION_SECURE_COOKIE=true` marks it `Secure`, so a client only resends it over HTTPS. The round trip is
+    step 13's job, over the real domain.
 11. Attach `can-eye.mrwilde.dev` to `can-eye-web` with HTTPS/Let's Encrypt. Traffic reaches the application only from this point, and only against a migrated
     schema. Run any approved staging seed/setup command once, now.
 12. Deploy `can-eye-horizon` and `can-eye-scheduler` so both start against the migrated schema. Never run migrations from these services.
-13. Exercise `/up`, login with a seeded account, database-backed sessions, monthly report aggregation, a queued job, Horizon metrics, scheduler output, a full
+13. Exercise `/up`, then over `https://can-eye.mrwilde.dev` confirm the session cookie issued by `/login` is carried by the next request, login with a seeded
+    account, database-backed sessions, monthly report aggregation, a queued job, Horizon metrics, scheduler output, a full
     bank-import round trip across the web and worker containers, and the approved external integrations. With `FORTIFY_REGISTRATION_ENABLED=false` the check
     for registration is the opposite of the others: `/register` must return **404** and `/` must render with no sign-up link. A reachable registration form
     here means the flag did not take effect, not that the deployment is healthy.
@@ -438,8 +516,13 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
 
 ## Verification checklist
 
-- `https://can-eye.mrwilde.dev/up` returns a healthy response over the Let's Encrypt certificate, **and** its `DiagnosingHealth` listener actually exercises the
-  database and Redis.
+- Readiness is a real page **plus** a session, never `/up` alone — see "`/up` is a dependency probe". Require `https://can-eye.mrwilde.dev/` and `/login`
+  to render over the Let's Encrypt certificate, the `/login` response to set the session cookie, and a seeded login to persist across requests. The
+  cross-request check only works over HTTPS because `SESSION_SECURE_COOKIE=true` marks the cookie `Secure`.
+- `https://can-eye.mrwilde.dev/up` returns a healthy response and its `DiagnosingHealth` listener actually exercises the database and Redis. Treat this as a
+  dependency probe, not as the readiness signal.
+- Dokploy's deployment status is deliberately not on this checklist: it reads `done` once Swarm accepts the spec, so it is green on a crash-looping container —
+  see "Dokploy `done` is not readiness". Evidence comes from the container log and `docker service ps --no-trunc`.
 - Laravel reports `staging` and debug mode is disabled.
 - Database migrations completed from the web container's entrypoint before it accepted traffic, and the web service can create and read a session.
 - The application saw a real client IP and treated the request as secure — confirm trusted proxies are effective rather than assuming.
@@ -456,19 +539,35 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
 - MariaDB and Redis have no external ports and no public domain.
 - The service count is five: three Applications, one MariaDB/MySQL service, and one Redis.
 
+### Container-verified behaviour
+
+Observed on 2026-09-19 on an image built from this branch @95cf2cf against MariaDB 11.8 and Redis 7, with all three roles started with **no command and no
+args** — the configuration the provisioning plan prescribes. The staging deploy should reproduce these results; a divergence is a finding, not noise.
+
+| Role / subject                          | Observed                                                                                                                              |
+|-----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| Role argv                               | `docker inspect` reported `Cmd=[]` and `Entrypoint=[/usr/local/bin/entrypoint.sh]` on every role, and `ps` in the `horizon` container showed `php artisan horizon` — the no-argument dispatch path really ran |
+| `web`                                   | Applied 51 migrations, then served `/up` 200, `/` 200, `/login` 200, `/register` 404, `/horizon` 403. `/login` answered with `laravel-session` marked `secure; httponly; samesite=lax`: in-container plain HTTP can only assert the cookie is *set*, because a client never resends a `Secure` cookie over `http://`, so the cross-request check belongs to step 13 over HTTPS |
+| `horizon`                               | Master, supervisor and worker all ran as `www-data`; `horizon:liveness` exited 0 (`master ... is alive`); ran a `RunTransactionAnalysisJob` dispatched from the web container to DONE in 60ms |
+| `scheduler`                             | `scheduler:heartbeat` advanced the heartbeat mtime across a 120s window, and the container reported healthy after the 90s start period |
+| Shared volume                           | A fresh named volume mounted at `/var/www/html/storage/app/private` came up `www-data`-owned via copy-up; a file written by `www-data` in the `horizon` container was visible from `web` |
+| `APP_DEBUG=true`, `BOOST_ENABLED` unset | Did **not** break `route:cache`: the container booted healthy with `bootstrap/cache/routes-v7.php` written, `route:list --json` parsing and `/` serving 200. That earlier concern is disproved. `APP_DEBUG=false` still stands, for stack-trace exposure on a public domain |
+
 ## Open prerequisites
 
-Prerequisite 1 is satisfied and retained for context; 2 onward are still outstanding.
+Prerequisite 1 is satisfied; 2 onward are still outstanding.
 
 1. Satisfied: #369, #370, #371, #372 and #383 are merged to `develop`, the branch Dokploy builds. #383 landing is what makes prerequisite 3 effective —
-   without its config gate the variable set there would have nothing to read it.
+   without its config gate the variable set there would have nothing to read it. The worker services additionally rely on #430's entrypoint dispatch —
+   verify the built image as described under "Step 0".
 2. Create the shared import volume in Dokploy and mount it at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon`. The storage
    arrangement itself is settled — shared volume, `FILESYSTEM_DISK=local`. Never adopt `FILESYSTEM_DISK=s3`: `league/flysystem-aws-s3-v3` is absent from
    `composer.lock` and the import path calls `Storage::disk('local')->path()` directly.
-3. Set `FORTIFY_REGISTRATION_ENABLED=false` on the staging service. The two controls here are not symmetrical, so treat them differently: the Horizon gate
+3. Set `FORTIFY_REGISTRATION_ENABLED=false` on the staging service. The controls here are not symmetrical, so treat them differently: the Horizon gate
    (#370) **fails closed** — leave `HORIZON_AUTHORIZED_EMAILS` unset and nobody outside `local` gets in, so populating it grants access. The registration
-   toggle (#383) **fails open**: it defaults to `true`, so omitting the variable leaves public sign-up enabled on the domain. It is the one control on this
-   list that must be set explicitly to be safe.
+   toggle (#383) **fails open**: it defaults to `true`, so omitting the variable leaves public sign-up enabled on the domain. `SESSION_SECURE_COOKIE` sits in
+   that same fail-open class — `config/session.php` carries no default of its own — so both of those must be set explicitly to be safe. `CACHE_STORE` and
+   `APP_KEY` are a separate category again: first-boot preconditions, covered in step 8 of the deployment sequence.
 4. Confirm Dokploy's managed MariaDB service version, data-volume path, internal hostname, and authentication fields.
 5. Confirm the Dokploy internal Redis hostname and supported managed Redis version/authentication fields.
 6. Choose the mail sandbox and external integration policy, and decide whether staging should exercise Basiq/Redbark/Gmail/GitHub integrations or keep them

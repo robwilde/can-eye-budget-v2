@@ -55,5 +55,8 @@ EXPOSE 80
 HEALTHCHECK --start-period=90s --interval=15s --timeout=5s --retries=5 \
   CMD /usr/local/bin/healthcheck.sh
 
+# No CMD: docker/entrypoint.sh resolves each role's process from CONTAINER_ROLE, so a
+# Dokploy Application needs neither its command nor its args field. A command written there
+# maps to Swarm ContainerSpec.Command and replaces this ENTRYPOINT outright; args map to
+# ContainerSpec.Args and reach the entrypoint as operands, overriding the role default (#430).
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]

@@ -49,7 +49,79 @@ expect()->extend('toBeOne', function () {
 |
 */
 
-function something()
+/**
+ * Run the real `docker/entrypoint.sh` in a throwaway directory with the named
+ * binaries stubbed onto PATH, and report what happened. The script is executed
+ * rather than reproduced so a test cannot drift from the file it pins.
+ *
+ * Every run gets its own directory, so the `storage/` and `bootstrap/cache`
+ * trees the script creates cannot collide under `--parallel`.
+ *
+ * @param  array<string, string>  $stubs  binary name => sh body written after `#!/bin/sh`
+ * @param  array<string, string>  $env  the whole environment; PATH is prepended automatically
+ * @param  list<string>  $arguments  argv handed to the script
+ * @param  array<string, string>  $files  relative path => contents, written into the working directory first
+ * @return array{status: int, stdout: list<string>, stderr: string}
+ */
+function runEntrypoint(array $stubs, array $env = [], array $arguments = [], array $files = []): array
 {
-    // ..
+    $script = dirname(__DIR__).'/docker/entrypoint.sh';
+
+    $base = sys_get_temp_dir().'/entrypoint-'.getmypid().'-'.bin2hex(random_bytes(8));
+    $work = $base.'/work';
+
+    mkdir($base.'/bin', 0o755, true);
+    mkdir($work, 0o755, true);
+
+    foreach ($stubs as $name => $body) {
+        file_put_contents($base.'/bin/'.$name, "#!/bin/sh\n".$body."\n");
+        chmod($base.'/bin/'.$name, 0o755);
+    }
+
+    foreach ($files as $path => $contents) {
+        file_put_contents($work.'/'.$path, $contents);
+    }
+
+    $assignments = 'PATH='.escapeshellarg($base.'/bin:/usr/bin:/bin');
+
+    foreach ($env as $name => $value) {
+        $assignments .= ' '.$name.'='.escapeshellarg($value);
+    }
+
+    $command = 'cd '.escapeshellarg($work)
+        .' && env -i '.$assignments
+        .' sh '.escapeshellarg($script);
+
+    foreach ($arguments as $argument) {
+        $command .= ' '.escapeshellarg($argument);
+    }
+
+    $command .= ' 2>'.escapeshellarg($base.'/stderr');
+
+    $stdout = [];
+    $status = 0;
+    exec($command, $stdout, $status);
+
+    $stderr = (string) file_get_contents($base.'/stderr');
+
+    deleteEntrypointFixture($base);
+
+    return ['status' => $status, 'stdout' => $stdout, 'stderr' => $stderr];
+}
+
+function deleteEntrypointFixture(string $path): void
+{
+    if (! is_dir($path)) {
+        @unlink($path);
+
+        return;
+    }
+
+    foreach (scandir($path) ?: [] as $entry) {
+        if ($entry !== '.' && $entry !== '..') {
+            deleteEntrypointFixture($path.'/'.$entry);
+        }
+    }
+
+    @rmdir($path);
 }
