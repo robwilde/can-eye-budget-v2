@@ -98,12 +98,18 @@ chown -R www-data:www-data storage bootstrap/cache
 # privilege drop. The image therefore declares no CMD and each role's process is resolved
 # here, so the horizon and scheduler services need neither a command nor args -- only
 # CONTAINER_ROLE (#430). An explicit argument list still wins, for `docker run ... php
-# artisan tinker` and the entrypoint tests.
+# artisan tinker` and the entrypoint tests. The default arm is unreachable while the
+# validation at the top of this file holds; it exists so a regression there fails here with
+# a named role instead of an empty exec.
 if [ "$#" -eq 0 ]; then
-    case "${CONTAINER_ROLE:-web}" in
+    case "${CONTAINER_ROLE-web}" in
         web)       set -- supervisord -c /etc/supervisord.conf ;;
         horizon)   set -- php artisan horizon ;;
         scheduler) set -- php artisan schedule:work ;;
+        *)
+            echo "entrypoint: no process for CONTAINER_ROLE '${CONTAINER_ROLE}'; expected web, horizon, or scheduler" >&2
+            exit 1
+            ;;
     esac
 fi
 
