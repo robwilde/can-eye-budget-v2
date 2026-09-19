@@ -19,7 +19,8 @@ Redis is an intentional addition to the reference topology. This application exp
 metrics data in Redis. MariaDB is also an intentional divergence from the reference PostgreSQL service: the shipped report aggregation code uses `DATE_FORMAT`
 for every non-SQLite driver, so PostgreSQL would break monthly report aggregation until the code is changed and fully tested.
 
-This document is a provisioning plan, not a request to create or deploy Dokploy resources during this investigation.
+**Deployed.** This document was a provisioning plan; the environment it describes now exists and serves https://can-eye.mrwilde.dev. The as-built record is
+under "Staging-verified behaviour"; #375 is closed. What follows stays written as a runbook, because it is also the rebuild and rollback procedure.
 
 **Step 0 has been implemented and merged to `develop`.** The five blocking code changes are now present: a root production image
 (`Dockerfile`, `.dockerignore`, `docker/`), a trusted-proxy call in `bootstrap/app.php`, an allow-listed Horizon gate
@@ -35,7 +36,7 @@ tracks the children below via a task list. Every blocking child is now merged to
 provisioned and verified.
 
 Children: #369 (production image), #370 (Horizon gate), #371 (trusted proxies), #372 (`/up` dependencies) and #383 (registration env gate) were the blocking
-set and are all merged to `develop`; #373 (dev-only dependencies) is also merged, and #374 (CI gating for staging deploys) is non-blocking and remains open. #383 blocked
+set and are all merged to `develop`; #373 (dev-only dependencies) and #374 (CI gating for staging deploys) are non-blocking and remain open. #383 blocked
 because `FORTIFY_REGISTRATION_ENABLED` does nothing without its config gate: setting the variable on the service beforehand would leave sign-up open with
 no error to say so. That gate is now on `develop` (`config/fortify.php:149`), so the staging variable is read.
 
@@ -47,7 +48,7 @@ no error to say so. That gate is now on `develop` (`config/fortify.php:149`), so
 | 4 | #371 | Configure trusted proxies                                               | Merged to `develop` (94303c5) | `bootstrap/app.php` now calls `$middleware->trustProxies(at: '*')` with the framework's default header set; correct because the container is only reachable through Traefik on the Dokploy network                                                            |
 | 5 | #372 | Add a `DiagnosingHealth` listener that asserts database and Redis       | Merged to `develop` (74ed230) | `app/Listeners/VerifyHealthDependencies.php` runs `select 1` and a Redis `ping`; auto-discovered from `app/Listeners`. `/up` now returns 500 when either dependency is unreachable — a dependency probe, not a readiness signal; see "`/up` is a dependency probe" |
 | 6 | #383 | Env-gate registration and guard the landing page                        | Merged to `develop` (PR #395, c10c5b4) | `config/fortify.php` gates `Features::registration()` on `FORTIFY_REGISTRATION_ENABLED`, default `true` so local and production are unchanged; set `false` on staging. The three `route('register')` call sites in `resources/views/welcome.blade.php` are guarded with `Route::has('register')` so the landing page still renders once the routes are gone. Registration/password-reset throttling was split out to #394 — see row 9 |
-| 7 | #373 | Move development-only dependencies out of the production dependency set | Merged to `develop` (PR #447, bc2f0f8) | `laravel/boost` and `spatie/laravel-ray` moved from `require` to `require-dev`, taking `spatie/ray` with them; `composer.lock` now carries all three under `packages-dev` rather than `packages`, which is the authoritative check. `playwright` moved to `devDependencies` (previously empty) and the assets-stage `npm ci` gained `--omit=dev`, without which npm installs dev dependencies however they are declared; that drops `playwright` and `playwright-core` while every asset-pipeline package stays a runtime `dependencies` entry, so `npm run build` is unaffected. The stale `bootstrap/cache/packages.php` that `COPY . .` carries in is not a hazard: `composer dump-autoload` runs `ComposerScripts::postAutoloadDump`, which deletes it before `package:discover` rebuilds it from the `--no-dev` tree. Two incidental version bumps rode along with the reclassification and were not intended — `laravel/boost` v2.4.2 → v2.4.8 and `spatie/laravel-ray` 1.43.7 → 1.43.9. Both are dev-only from this commit onward, so neither reaches an image; recorded here rather than left to be discovered in a lock diff |
+| 7 | #373 | Move development-only dependencies out of the production dependency set | Open, non-blocking | `laravel/boost` and `spatie/laravel-ray` sit in `require`, so `composer install --no-dev` still ships them; `playwright` sits in `dependencies` with an empty `devDependencies`, so `npm ci` pulls it into the build stage                                     |
 | 8 | #374 | Decide whether staging deploys are gated on CI                          | Open, non-blocking | `.github/workflows/lint.yml` and `tests.yml` exist but nothing ties a staging deploy to them                                                                                                                                                                  |
 | 9 | #394 | Throttle registration and password-reset requests                       | PR #429 open against `develop` | `routes/fortify.php` re-declares `register.store` and `password.email` against Fortify's own controllers with `throttle:register` and `throttle:password-reset`; limiters live in `app/Providers/FortifyServiceProvider::configureRateLimiting()`. See "Security exposure decision" for the mechanism and the two password-reset budgets |
 
@@ -451,13 +452,7 @@ Set the common application environment on all three Application services. Values
 | `FEEDBACK_SCREENSHOT_URL`                                                | Empty/disabled unless a separately hosted screenshot service is provided; the local `host.docker.internal` value is not valid on Dokploy |
 | `BUDGET_RECURRING_DETECTION` / `BUDGET_BNPL_EMAIL_IMPORT`                | Set deliberately for staging; retain the repository defaults until those flows are approved                                               |
 | `RAY_ENABLED`                                                            | `false` on all three services. `ray.php:40` resolves the environment env-first with `??`: any non-null `env('APP_ENV')` wins, and `config('app.env')` is consulted only when it is null — an unset variable, or the literal `null`/`(null)` that Laravel coerces to null — falling back to `production` when no `config` repository is bound. `??` rather than `?:` is deliberate, because `env('APP_ENV')` returns `''` for an explicitly empty value and boolean `false` for `APP_ENV=false`; `?:` would discard both as absent and hand resolution to the cache. A staging container therefore still fails closed on two independent grounds — the real `APP_ENV` is `staging`, and a config cache baked from that same environment also reads `staging`. `docker/entrypoint.sh` runs `php artisan config:cache` on every boot, after which `LoadEnvironmentVariables` returns early and never reads `.env`. `docker/entrypoint.sh:33-71` therefore resolves and exports `APP_ENV` before that cache is built, so `env('APP_ENV')` resolves in any container booted through the entrypoint; an already-exported value is authoritative and is never overwritten, and where neither source supplies one the entrypoint exports `production`, matching Laravel's own default at `config/app.php:31`, so no container boots without an exported `APP_ENV` (#423). The `null`/`(null)` sentinels are dropped before that fallback, case-insensitively and untrimmed to mirror the `strtolower($value)` at `Env.php:256`, because `Env.php:266-268` decodes both as absent — so `env('APP_ENV')` cannot resolve null and no path reaches the cache. `APP_ENV=`, `APP_ENV=false` and the `(empty)`/`(false)` forms are deliberately kept: `env()` reports each as a value and each compares unequal to `local`. Env-first precedence is scoped to exported OS variables and that export is what guarantees one, so a stale cache baked at `local` no longer decides the environment — measured in an Alpine container, a cache reading `local` yields `enable` `false` as soon as `APP_ENV=production` is exported (#419). A `RAY_ENABLED=false` that exists only in `.env` is still invisible to `env()` once the cache exists and cannot countermand a cache baked at `local`; `RAY_ENABLED` has no cached config key, and adding `config/ray.php` would shadow the root `ray.php` via Spatie's upward `SettingsFactory` search. Export `RAY_ENABLED=false` as a real OS variable where that matters. Keep this set as explicit defence in depth rather than the only guard. When Ray is enabled it adds 18 watchers per request and per queued job plus an availability probe to `RAY_HOST:RAY_PORT`, which default to `host.docker.internal` and `23517` (`ray.php:141`, `ray.php:146`). Ray caches an unavailable result for 30s per process (`Client.php:67`), so that probe is per window, not per log line. The 2s `CURLOPT_TIMEOUT` is a ceiling that needs a routable address which silently drops packets; an unresolvable `host.docker.internal` fails DNS in milliseconds |
-| `BOOST_ENABLED`                                                          | `false` on all three services. Boost activates on `local` **or** `APP_DEBUG=true`, and publishes an unauthenticated, CSRF-exempt `POST /_boost/browser-logs` plus a JS-injecting `web` middleware. Setting it `false` removes that route only — it does not make `APP_DEBUG=true` safe on a public domain, where the debug error page still exposes stack traces, configuration and query bindings. `APP_DEBUG` stays `false`. As of #373 the package is `require-dev`, so a `--no-dev` image no longer contains it at all and this variable is defence in depth rather than the only barrier |
-| `SENTRY_DSN`                                                             | Same project DSN on all three services. The `environment` tag is derived from `APP_ENV`, so every event in the project is a staging event: since #445 `config/sentry.php` resolves the DSN to `null` when `APP_ENV=local`, so local development no longer reports at all. Empty disables the SDK — errors then exist only in the container log |
-
-Two rows above describe packages that a production image no longer contains. Since #373 both `laravel/boost` and `spatie/laravel-ray` are `require-dev`, so a
-`composer install --no-dev` build resolves neither and their service providers are never discovered. `RAY_ENABLED=false` and `BOOST_ENABLED=false` stay in the
-matrix deliberately: they remain correct for any environment built with dev dependencies present, and they cost nothing where the packages are absent. Read the
-reasoning in those rows as the behaviour being guarded against, not as the last line of defence.
+| `BOOST_ENABLED`                                                          | `false` on all three services. Boost activates on `local` **or** `APP_DEBUG=true`, and publishes an unauthenticated, CSRF-exempt `POST /_boost/browser-logs` plus a JS-injecting `web` middleware. Setting it `false` removes that route only — it does not make `APP_DEBUG=true` safe on a public domain, where the debug error page still exposes stack traces, configuration and query bindings. `APP_DEBUG` stays `false` |
 
 Repository defaults are adequate for `APP_LOCALE` and `SESSION_LIFETIME`. `BROADCAST_CONNECTION` and `BCRYPT_ROUNDS` are also safe to omit, but not because this
 repository configures them — it ships neither `config/broadcasting.php` nor `config/hashing.php`. Both defaults come from `vendor/laravel/framework/config/`:
@@ -476,8 +471,8 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
 1. Done: parent issue #375 and children #369–#374 plus #383 exist in `robwilde/can-eye-budget-v2`.
 2. Done: #369, #370, #371, #372 and #383 are merged to `develop`. If in doubt, confirm the branch contains the root `Dockerfile`, `docker/entrypoint.sh`
    migrating before serving, `trustProxies` in `bootstrap/app.php`, the allow-listed Horizon gate, `app/Listeners/VerifyHealthDependencies.php`, and the
-   `FORTIFY_REGISTRATION_ENABLED` gate in `config/fortify.php`. Without that last one the staging variable set in step 8 would be inert. #373 is merged too,
-   though it never gated the deploy; #374 still does not.
+   `FORTIFY_REGISTRATION_ENABLED` gate in `config/fortify.php`. Without that last one the staging variable set in step 8 would be inert. #373 and #374 do
+   not gate the deploy.
 3. Nothing needs arranging for source access: `robwilde/can-eye-budget-v2` is public (`"private": false` from an unauthenticated GitHub API call), so a
    git-source clone of `develop` needs no credential and no connected GitHub provider.
 4. Create project `can-eye-budget-v2` and environment `staging`.
@@ -559,43 +554,50 @@ args** — the configuration the provisioning plan prescribes. The staging deplo
 | Shared volume                           | A fresh named volume mounted at `/var/www/html/storage/app/private` came up `www-data`-owned via copy-up; a file written by `www-data` in the `horizon` container was visible from `web` |
 | `APP_DEBUG=true`, `BOOST_ENABLED` unset | Did **not** break `route:cache`: the container booted healthy with `bootstrap/cache/routes-v7.php` written, `route:list --json` parsing and `/` serving 200. That earlier concern is disproved. `APP_DEBUG=false` still stands, for stack-trace exposure on a public domain |
 
-### Staging-verified behaviour: Sentry (#433)
+### Staging-verified behaviour
 
-Observed on 2026-09-20 on the live staging deployment, image built from `develop` @`2ee98d6`, all three services carrying the same `SENTRY_DSN`.
+Provisioned and verified on 2026-09-19 from `develop` @`cc1dc9c` into project `can-eye-budget-v2` (`NZJGNv9vRX6AcZRjYrnxK`), environment `Staging`
+(`DiISI4cAMucnyj440GORx`). Internal hostnames are the Swarm service names Dokploy generated, not the service names: `can-eye-mariadb-yuriat` and
+`can-eye-redis-ltjrpq`.
 
-| Subject                     | Observed                                                                                                                              |
-|-----------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
-| Environment tag             | The SDK resolved `environment='staging'` in both the `web` and `horizon` containers with no `SENTRY_ENVIRONMENT` set anywhere — `APP_ENV`, exported by `docker/entrypoint.sh`, is the only source. Local events tagged `local` from the same DSN, so the two environments separated themselves. Superseded by #445: local no longer reports at all, so every event in the project is now a staging event |
-| `web` — SDK reachable       | `php artisan sentry:test` reported `DSN discovered` and sent event `efde8019aa5b4fc9b026b6dd1addf69e`                                  |
-| `web` — real exception path | `report(new RuntimeException(...))` through the new `withExceptions` hook produced event `0e8fdca7ca2c4c93809293a1149d22c9`. This is the load-bearing check: it exercises the handler, not merely the transport |
-| `horizon` — worker path     | A closure job dispatched to `redis@default` was picked up by the live Horizon worker and recorded in `queue:failed`. An in-process `queue:work --once` run of the same failing job then returned event `0f878f05e25348b0ada74cbe91e583c7` with `environment='staging'`, proving the worker's exception path reaches Sentry rather than only failing the job |
-| Policy switches at runtime  | `send_default_pii=false`, `traces_sample_rate=NULL`, `breadcrumbs.sql_bindings=false`, `tracing.sql_bindings=false`, `enable_logs=false` — read back from the resolved SDK options inside the container, not from the repository file |
-| Healthchecks unaffected     | All three containers stayed `running (healthy)` through the rollout; `/up` 200, `/` 200, `/login` 200, `/register` 404, `/horizon` 403 |
-| Probe cleanup               | Both probe failures were removed with `queue:flush` (`No failed jobs found` afterwards) and no probe files remain in any container. The baseline was zero failed jobs, so nothing real was discarded |
+| Subject | As built |
+|---|---|
+| Services | `can-eye-mariadb` `X4MK_mHK0gMyn9Sg-Xwq1` (`mariadb:11.8`), `can-eye-redis` `OGVmQ-witG-74N7u1rcD7` (`redis:7-alpine`), `can-eye-web` `j8vSCf0xpvvjqZX4qSuvV`, `can-eye-horizon` `Bdm2VXQNOEw3XLTiKifLY`, `can-eye-scheduler` `7uGVD8v6ICPOdOMG47DJ2` |
+| Source and build | All three Applications: `sourceType=git` (public clone, branch `develop`, build path `/`), `buildType=dockerfile`, `dockerfile=Dockerfile`, 1 replica, `healthCheckSwarm: null`, **`command: null`** |
+| Role argv | `docker.getConfig` on all three containers: `Entrypoint=[/usr/local/bin/entrypoint.sh]`, `Cmd=null`, `Health=healthy`. The horizon process table shows `php artisan horizon` with no Dokploy command set — #430's dispatch chose it |
+| Migrations | 51 applied by `web` alone; the horizon and scheduler logs contain zero occurrences of `migrat` |
+| HTTPS surface | `/` 200, `/login` 200, `/up` 200, `/register` 404, anonymous `/horizon` 403, `http://` → 301 `https://`, certificate verifies |
+| Session | `POST /login` → 302 `/dashboard`, authed `GET /dashboard` 200. Cookie `can-eye-budget-staging-session`, `secure; httponly; samesite=lax` — the cross-request half that plain HTTP cannot prove |
+| Queue across containers | `RunTransactionAnalysisJob` dispatched in `can-eye-web` logged `RUNNING` → `83.35ms DONE` in `can-eye-horizon` |
+| Worker identity and sizing | Horizon master, supervisor and worker all `www-data`; `horizon:liveness` exit 0; supervisor started `--max-processes=3`, the `staging` sizing rather than production's 10 |
+| Scheduler | `basiq:fail-stuck-refresh-logs`, `redbark:fail-stuck-sync-logs`, `horizon:snapshot` and `scheduler:heartbeat` all firing; heartbeat mtime advanced 179s over a 179s window |
+| Shared volume | `can-eye-staging-import` mounted on web and horizon; a file written by `www-data` in horizon was read back from web |
+| Exposure | `144.6.123.191:3306` and `:6379` refuse public connections; `/_boost/browser-logs` 404, `/telescope` 404, `/.env` 403; the landing page carries no register link |
 
-`SENTRY_DSN` was applied through the `application.saveEnvironment` API endpoint. The Dokploy **MCP** wrapper for that endpoint returns HTTP 400 for every
-payload — it omits the `buildArgs`, `buildSecrets` and `createEnvFile` fields the endpoint requires — so the call was made directly against the API with those
-three fields echoed back verbatim from each application's current record. `application.update` was deliberately **not** used: it rewrites the whole
-application record, and a nulled `command`/`args` would replace the image `ENTRYPOINT` and bypass the role dispatch #430 introduced. After the write, each
-service was confirmed to have gained exactly one variable, with every other variable byte-identical and `command`/`args` still empty.
+No row of "Container-verified behaviour" diverged on staging. The one step-13 item not exercised is the CSV bank-import round trip: the database holds one
+account and no transactions, so there is nothing to import yet. The mount it depends on is proven in both directions.
+
+Operational note: Dokploy's REST API covers applications, domains, MariaDB, Redis and mounts, but exposes no exec endpoint. In-container checks were run
+through the container terminal websocket at `/docker-container-terminal`, which accepts the `x-api-key` header.
 
 ## Open prerequisites
 
-Prerequisite 1 is satisfied; 2 onward are still outstanding.
+Prerequisites 1 through 5 are satisfied by the deployment recorded above. 6 onward remain open.
 
 1. Satisfied: #369, #370, #371, #372 and #383 are merged to `develop`, the branch Dokploy builds. #383 landing is what makes prerequisite 3 effective —
    without its config gate the variable set there would have nothing to read it. The worker services additionally rely on #430's entrypoint dispatch —
    verify the built image as described under "Step 0".
-2. Create the shared import volume in Dokploy and mount it at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon`. The storage
-   arrangement itself is settled — shared volume, `FILESYSTEM_DISK=local`. Never adopt `FILESYSTEM_DISK=s3`: `league/flysystem-aws-s3-v3` is absent from
-   `composer.lock` and the import path calls `Storage::disk('local')->path()` directly.
-3. Set `FORTIFY_REGISTRATION_ENABLED=false` on the staging service. The controls here are not symmetrical, so treat them differently: the Horizon gate
+2. Satisfied: the shared volume `can-eye-staging-import` is mounted at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon` with
+   `FILESYSTEM_DISK=local`. Never adopt `FILESYSTEM_DISK=s3`: `league/flysystem-aws-s3-v3` is absent from `composer.lock` and the import path calls
+   `Storage::disk('local')->path()` directly.
+3. Satisfied: `FORTIFY_REGISTRATION_ENABLED=false` and `SESSION_SECURE_COOKIE=true` are set on all three services, and `HORIZON_AUTHORIZED_EMAILS` carries a
+   single address. The controls here are not symmetrical, so treat them differently when changing them: the Horizon gate
    (#370) **fails closed** — leave `HORIZON_AUTHORIZED_EMAILS` unset and nobody outside `local` gets in, so populating it grants access. The registration
    toggle (#383) **fails open**: it defaults to `true`, so omitting the variable leaves public sign-up enabled on the domain. `SESSION_SECURE_COOKIE` sits in
    that same fail-open class — `config/session.php` carries no default of its own — so both of those must be set explicitly to be safe. `CACHE_STORE` and
    `APP_KEY` are a separate category again: first-boot preconditions, covered in step 8 of the deployment sequence.
-4. Confirm Dokploy's managed MariaDB service version, data-volume path, internal hostname, and authentication fields.
-5. Confirm the Dokploy internal Redis hostname and supported managed Redis version/authentication fields.
+4. Satisfied: the managed MariaDB is `mariadb:11.8` at internal host `can-eye-mariadb-yuriat`, database `can_eye_budget_staging`, no external port.
+5. Satisfied: the managed Redis is `redis:7-alpine` at internal host `can-eye-redis-ltjrpq`, password authentication, no external port.
 6. Choose the mail sandbox and external integration policy, and decide whether staging should exercise Basiq/Redbark/Gmail/GitHub integrations or keep them
    disabled until credentials and callback URLs are approved.
 7. After the source is accessible, inspect the reference `compare-build` Dockerfiles directly in Dokploy or GitHub and reconcile entrypoints, health checks, and
