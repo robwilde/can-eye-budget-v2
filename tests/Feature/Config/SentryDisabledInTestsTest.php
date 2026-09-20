@@ -19,9 +19,9 @@ use Sentry\SentrySdk;
 test('the sentry client has no dsn while the suite runs', function (): void {
     expect(config('sentry.dsn'))->toBeEmpty();
 
-    $client = SentrySdk::getCurrentHub()->getClient();
-
-    if ($client !== null) {
-        expect($client->getOptions()->getDsn())->toBeNull();
-    }
+    // Unconditional on purpose. sentry-laravel binds a client whether or not a DSN is
+    // configured, so an empty DSN gives a real Sentry\Client whose getDsn() is null —
+    // not a null client. The null-safe operator keeps the assertion honest if a future
+    // SDK stops binding one, without letting a guard silently skip the check.
+    expect(SentrySdk::getCurrentHub()->getClient()?->getOptions()->getDsn())->toBeNull();
 });
