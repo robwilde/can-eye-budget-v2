@@ -20,6 +20,7 @@
     "livewire/blaze": "1.0.7",
     "livewire/flux": "^2.13.2",
     "livewire/livewire": "^4.2.4",
+    "sentry/sentry-laravel": "^4.27",
     "spatie/laravel-data": "^4.21",
     "spatie/laravel-ray": "^1.43.7",
     "webklex/laravel-imap": "^6.2"

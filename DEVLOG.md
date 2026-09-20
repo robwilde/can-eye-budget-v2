@@ -1,6 +1,47 @@
 # Dev Log
 
 
+## 2026-09-20 — Issue #433: Sentry error monitoring — PR pending
+
+### The Change
+
+Nothing in this application reported exceptions to an error tracker. `bootstrap/app.php` carried an empty `withExceptions()` closure and `LOG_STACK=stderr` hands logs to the Docker json-file driver, so a staging failure was visible only by reading a container log and vanished with the container. `sentry/sentry-laravel` is now a runtime dependency — `require`, not `require-dev`, because it has to run in the production image — and `Integration::handles($exceptions)` in `bootstrap/app.php` routes every exception Laravel decides to report through to Sentry. Registering through `Integration::handles()` rather than a bespoke `reportable` callback keeps Laravel's own `shouldntReport` list authoritative, so validation, authentication and 4xx HTTP exceptions never reach Sentry and no custom ignore list exists to drift. One hook covers all three container roles: web requests, Horizon queue workers and scheduled commands all report through the same handler.
+
+A single project DSN serves every environment. Events separate themselves through the `environment` tag, which is deliberately left unset in config so the SDK derives it from `APP_ENV` — `local` under DDEV, `staging` in the Dokploy containers, where `docker/entrypoint.sh` already exports `APP_ENV` before any artisan call. No per-environment Sentry variable exists to be forgotten or set wrong. A blank `SENTRY_DSN` disables the SDK outright rather than failing at boot.
+
+Three things are off on purpose. `send_default_pii` stays `false` because this is a finance application and user identities and IP addresses must not leave it. SQL bindings stay `false` in both breadcrumbs and tracing, because those parameters carry transaction amounts and narrations. `enable_logs` stays `false`: stderr into the container log remains the log surface, and Sentry receives exceptions only, not the log stream. Tracing and profiling are env-gated and off by default, so `SENTRY_TRACES_SAMPLE_RATE` can enable them per environment later with no code change.
+
+**Files modified:**
+- `composer.json` / `composer.lock` — `sentry/sentry-laravel ^4.27` in `require`, pulling `sentry/sentry 4.31.0`
+- `config/sentry.php` (new) — published unmodified from the SDK, then a policy docblock prepended and `declare(strict_types=1)` added by Pint
+- `bootstrap/app.php` (+9/-2) — `use Sentry\Laravel\Integration;` and the `withExceptions` body
+- `.env.example` (+4) — commented `SENTRY_DSN=` block after the `GMAIL_*` lines
+- `docs/dokploy-staging-plan.md` (+1) — `SENTRY_DSN` row in the environment matrix
+
+### The Reasoning
+
+- **The published config was already the policy.** Every key this change depends on ships at the required default in `sentry/sentry-laravel` 4.27: `dsn` already reads `env('SENTRY_LARAVEL_DSN', env('SENTRY_DSN'))`, `environment` and `release` are already null, both sample rates are already `env(...) === null ? null : (float) env(...)`, `send_default_pii` and `enable_logs` are already `false`, `ignore_transactions` already holds `/up`, and both `sql_bindings` switches are already `false`. So the file was published and verified rather than rewritten, and the only edits are a docblock explaining *why* those defaults are being relied on and the `declare(strict_types=1)` this repository requires. Restating defaults as explicit values would have created a second copy to drift against the SDK for no behavioural gain.
+- **`SENTRY_LARAVEL_DSN` is deliberately unused.** It exists in the published config's fallback chain, but introducing it would mean two variables meaning the same thing, with the more obscure one silently winning. Only `SENTRY_DSN` is documented and only `SENTRY_DSN` is set.
+- **No frontend SDK, no user context.** The UI is server-rendered Livewire, so `@sentry/browser` would add an npm dependency and publish the DSN to every visitor for little signal. User identity is a deliberate omission that follows from `send_default_pii=false`, not an oversight. Handled per-phase Redbark errors continue to land in `redbark_sync_logs` via `SyncRedbarkFeedJob::appendError` — they are not exceptions and are out of scope.
+- **No new test.** The change is a framework hook with no branch of its own; a test would assert that a vendor method was called, which is implementation, not observable behaviour. The proof is live events, recorded below.
+
+### Verification
+
+Local, against the real DSN:
+
+| check | result |
+|---|---|
+| `ddev artisan sentry:test` | `DSN discovered` → test event `f68145bae8f14e30aa7bc31b52d34a14` |
+| `report(new RuntimeException('sentry-plan-local-probe'))` through the new hook | event `9e7abb5a96944c83ba8ea244cb7e62ac` |
+| resolved SDK options at runtime | `environment='local'`, `send_default_pii=false`, `traces_sample_rate=NULL`, `release=NULL` |
+| both SQL-binding switches and `enable_logs` | `false` |
+| `ddev exec env SENTRY_DSN= php artisan sentry:test` | `Could not discover DSN!`, exit 1 — blank disables rather than breaking boot |
+
+The second row is the one that matters: `report()` producing an event ID proves the `withExceptions` hook is wired, not merely that the SDK can reach Sentry.
+
+**Quality gates:** Pint 455 files pass, PHPStan `No errors`, Pest 2280 passed (5849 assertions).
+
+
 ## 2026-09-13 — Issue #423 hardening: Pin the `env()` Null Coercion — PR #428
 
 ### The Change
