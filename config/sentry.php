@@ -23,8 +23,9 @@ declare(strict_types=1);
  * transaction amounts and narrations. `enable_logs` stays false because stderr into
  * the container log remains the log surface; Sentry receives exceptions only.
  *
- * Tracing and profiling are env-gated and off by default: setting
- * SENTRY_TRACES_SAMPLE_RATE enables them per environment with no code change.
+ * Tracing and profiling are env-gated and off by default, each behind its own
+ * variable: SENTRY_TRACES_SAMPLE_RATE for tracing, SENTRY_PROFILES_SAMPLE_RATE for
+ * profiling. Either can be enabled per environment with no code change.
  */
 return [
 
