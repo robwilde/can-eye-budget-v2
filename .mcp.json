@@ -10,6 +10,10 @@
     "phpstorm": {
       "url": "http://127.0.0.1:64442/stream",
       "type": "http"
+    },
+    "sentry": {
+      "type": "http",
+      "url": "https://mcp.sentry.dev/mcp/justww/justww"
     }
   }
 }
