@@ -37,5 +37,10 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!-- Blank rather than absent: bootstrap/app.php reports every exception to Sentry
+             (#433), so a developer's real SENTRY_DSN would send deliberately thrown test
+             failures to the production project. An empty DSN disables the SDK outright
+             instead of erroring at boot. -->
+        <env name="SENTRY_DSN" value=""/>
     </php>
 </phpunit>
