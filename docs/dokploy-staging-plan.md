@@ -35,7 +35,7 @@ tracks the children below via a task list. Every blocking child is now merged to
 provisioned and verified.
 
 Children: #369 (production image), #370 (Horizon gate), #371 (trusted proxies), #372 (`/up` dependencies) and #383 (registration env gate) were the blocking
-set and are all merged to `develop`; #373 (dev-only dependencies) and #374 (CI gating for staging deploys) are non-blocking and remain open. #383 blocked
+set and are all merged to `develop`; #373 (dev-only dependencies) is also merged, and #374 (CI gating for staging deploys) is non-blocking and remains open. #383 blocked
 because `FORTIFY_REGISTRATION_ENABLED` does nothing without its config gate: setting the variable on the service beforehand would leave sign-up open with
 no error to say so. That gate is now on `develop` (`config/fortify.php:149`), so the staging variable is read.
 
@@ -47,7 +47,7 @@ no error to say so. That gate is now on `develop` (`config/fortify.php:149`), so
 | 4 | #371 | Configure trusted proxies                                               | Merged to `develop` (94303c5) | `bootstrap/app.php` now calls `$middleware->trustProxies(at: '*')` with the framework's default header set; correct because the container is only reachable through Traefik on the Dokploy network                                                            |
 | 5 | #372 | Add a `DiagnosingHealth` listener that asserts database and Redis       | Merged to `develop` (74ed230) | `app/Listeners/VerifyHealthDependencies.php` runs `select 1` and a Redis `ping`; auto-discovered from `app/Listeners`. `/up` now returns 500 when either dependency is unreachable — a dependency probe, not a readiness signal; see "`/up` is a dependency probe" |
 | 6 | #383 | Env-gate registration and guard the landing page                        | Merged to `develop` (PR #395, c10c5b4) | `config/fortify.php` gates `Features::registration()` on `FORTIFY_REGISTRATION_ENABLED`, default `true` so local and production are unchanged; set `false` on staging. The three `route('register')` call sites in `resources/views/welcome.blade.php` are guarded with `Route::has('register')` so the landing page still renders once the routes are gone. Registration/password-reset throttling was split out to #394 — see row 9 |
-| 7 | #373 | Move development-only dependencies out of the production dependency set | Open, non-blocking | `laravel/boost` and `spatie/laravel-ray` sit in `require`, so `composer install --no-dev` still ships them; `playwright` sits in `dependencies` with an empty `devDependencies`, so `npm ci` pulls it into the build stage                                     |
+| 7 | #373 | Move development-only dependencies out of the production dependency set | Merged to `develop` | `laravel/boost` and `spatie/laravel-ray` moved to `require-dev`, so `composer install --no-dev` no longer resolves them — verified by dry run, which now removes `laravel/boost`, `spatie/laravel-ray` and `spatie/ray`. `playwright` moved to `devDependencies` (previously empty) and `Dockerfile` line 22 gained `--omit=dev`, which drops `playwright` and `playwright-core` from the asset stage; every asset-pipeline package is a runtime `dependencies` entry, so `npm run build` is unaffected. The stale `bootstrap/cache/packages.php` that `COPY . .` carries in is not a hazard: `composer dump-autoload` runs `ComposerScripts::postAutoloadDump`, which deletes it before `package:discover` rebuilds it from the `--no-dev` tree |
 | 8 | #374 | Decide whether staging deploys are gated on CI                          | Open, non-blocking | `.github/workflows/lint.yml` and `tests.yml` exist but nothing ties a staging deploy to them                                                                                                                                                                  |
 | 9 | #394 | Throttle registration and password-reset requests                       | PR #429 open against `develop` | `routes/fortify.php` re-declares `register.store` and `password.email` against Fortify's own controllers with `throttle:register` and `throttle:password-reset`; limiters live in `app/Providers/FortifyServiceProvider::configureRateLimiting()`. See "Security exposure decision" for the mechanism and the two password-reset budgets |
 
@@ -471,8 +471,8 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
 1. Done: parent issue #375 and children #369–#374 plus #383 exist in `robwilde/can-eye-budget-v2`.
 2. Done: #369, #370, #371, #372 and #383 are merged to `develop`. If in doubt, confirm the branch contains the root `Dockerfile`, `docker/entrypoint.sh`
    migrating before serving, `trustProxies` in `bootstrap/app.php`, the allow-listed Horizon gate, `app/Listeners/VerifyHealthDependencies.php`, and the
-   `FORTIFY_REGISTRATION_ENABLED` gate in `config/fortify.php`. Without that last one the staging variable set in step 8 would be inert. #373 and #374 do
-   not gate the deploy.
+   `FORTIFY_REGISTRATION_ENABLED` gate in `config/fortify.php`. Without that last one the staging variable set in step 8 would be inert. #373 is merged too,
+   though it never gated the deploy; #374 still does not.
 3. Nothing needs arranging for source access: `robwilde/can-eye-budget-v2` is public (`"private": false` from an unauthenticated GitHub API call), so a
    git-source clone of `develop` needs no credential and no connected GitHub provider.
 4. Create project `can-eye-budget-v2` and environment `staging`.
