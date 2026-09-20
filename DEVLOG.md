@@ -1,7 +1,7 @@
 # Dev Log
 
 
-## 2026-09-20 — Issue #433: Sentry error monitoring — PR pending
+## 2026-09-20 — Issue #433: Sentry error monitoring — PR #434
 
 ### The Change
 
@@ -40,6 +40,20 @@ Local, against the real DSN:
 The second row is the one that matters: `report()` producing an event ID proves the `withExceptions` hook is wired, not merely that the SDK can reach Sentry.
 
 **Quality gates:** Pint 455 files pass, PHPStan `No errors`, Pest 2280 passed (5849 assertions).
+
+### Staging
+
+Merged as `2ee98d6` and deployed to all three staging services. `SENTRY_DSN` went on via the `application.saveEnvironment` API endpoint; the Dokploy **MCP** wrapper for it returns HTTP 400 for every payload, including a byte-identical re-save, because it omits the `buildArgs`, `buildSecrets` and `createEnvFile` fields the endpoint requires. The call was made directly against the API with those three echoed back verbatim from each record. `application.update` was deliberately not used — it rewrites the whole application record, and a nulled `command`/`args` would replace the image `ENTRYPOINT` and bypass #430's role dispatch. Each service was then confirmed to hold exactly one extra variable, every other variable byte-identical, `command`/`args` still empty.
+
+| check | result |
+|---|---|
+| `sentry:test` in `can-eye-web` | event `efde8019aa5b4fc9b026b6dd1addf69e` |
+| `report()` through the hook in `can-eye-web` | event `0e8fdca7ca2c4c93809293a1149d22c9`, `environment='staging'` |
+| failing closure job on `redis@default` | picked up by the live Horizon worker, recorded in `queue:failed` |
+| in-process `queue:work --once` of the same failing job | event `0f878f05e25348b0ada74cbe91e583c7`, `environment='staging'` |
+| container health through the rollout | all three `running (healthy)`; `/up` 200, `/` 200, `/login` 200, `/register` 404, `/horizon` 403 |
+
+No `SENTRY_ENVIRONMENT` is set anywhere: `local` and `staging` both derive from `APP_ENV`, so one DSN keeps the two environments apart by itself. Probe failures were flushed (`No failed jobs found` afterwards, from a zero baseline) and no probe files remain in any container.
 
 
 ## 2026-09-13 — Issue #423 hardening: Pin the `env()` Null Coercion — PR #428

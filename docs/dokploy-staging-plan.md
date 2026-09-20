@@ -554,6 +554,26 @@ args** — the configuration the provisioning plan prescribes. The staging deplo
 | Shared volume                           | A fresh named volume mounted at `/var/www/html/storage/app/private` came up `www-data`-owned via copy-up; a file written by `www-data` in the `horizon` container was visible from `web` |
 | `APP_DEBUG=true`, `BOOST_ENABLED` unset | Did **not** break `route:cache`: the container booted healthy with `bootstrap/cache/routes-v7.php` written, `route:list --json` parsing and `/` serving 200. That earlier concern is disproved. `APP_DEBUG=false` still stands, for stack-trace exposure on a public domain |
 
+### Staging-verified behaviour: Sentry (#433)
+
+Observed on 2026-09-20 on the live staging deployment, image built from `develop` @`2ee98d6`, all three services carrying the same `SENTRY_DSN`.
+
+| Subject                     | Observed                                                                                                                              |
+|-----------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| Environment tag             | The SDK resolved `environment='staging'` in both the `web` and `horizon` containers with no `SENTRY_ENVIRONMENT` set anywhere — `APP_ENV`, exported by `docker/entrypoint.sh`, is the only source. Local events tag `local` from the same DSN, so the two environments separate themselves |
+| `web` — SDK reachable       | `php artisan sentry:test` reported `DSN discovered` and sent event `efde8019aa5b4fc9b026b6dd1addf69e`                                  |
+| `web` — real exception path | `report(new RuntimeException(...))` through the new `withExceptions` hook produced event `0e8fdca7ca2c4c93809293a1149d22c9`. This is the load-bearing check: it exercises the handler, not merely the transport |
+| `horizon` — worker path     | A closure job dispatched to `redis@default` was picked up by the live Horizon worker and recorded in `queue:failed`. An in-process `queue:work --once` run of the same failing job then returned event `0f878f05e25348b0ada74cbe91e583c7` with `environment='staging'`, proving the worker's exception path reaches Sentry rather than only failing the job |
+| Policy switches at runtime  | `send_default_pii=false`, `traces_sample_rate=NULL`, `breadcrumbs.sql_bindings=false`, `tracing.sql_bindings=false`, `enable_logs=false` — read back from the resolved SDK options inside the container, not from the repository file |
+| Healthchecks unaffected     | All three containers stayed `running (healthy)` through the rollout; `/up` 200, `/` 200, `/login` 200, `/register` 404, `/horizon` 403 |
+| Probe cleanup               | Both probe failures were removed with `queue:flush` (`No failed jobs found` afterwards) and no probe files remain in any container. The baseline was zero failed jobs, so nothing real was discarded |
+
+`SENTRY_DSN` was applied through the `application.saveEnvironment` API endpoint. The Dokploy **MCP** wrapper for that endpoint returns HTTP 400 for every
+payload — it omits the `buildArgs`, `buildSecrets` and `createEnvFile` fields the endpoint requires — so the call was made directly against the API with those
+three fields echoed back verbatim from each application's current record. `application.update` was deliberately **not** used: it rewrites the whole
+application record, and a nulled `command`/`args` would replace the image `ENTRYPOINT` and bypass the role dispatch #430 introduced. After the write, each
+service was confirmed to have gained exactly one variable, with every other variable byte-identical and `command`/`args` still empty.
+
 ## Open prerequisites
 
 Prerequisite 1 is satisfied; 2 onward are still outstanding.
