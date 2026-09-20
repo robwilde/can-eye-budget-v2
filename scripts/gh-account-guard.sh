@@ -59,8 +59,29 @@ done
 say() { [ "$quiet" -eq 1 ] || printf '%s\n' "$*"; }
 err() { printf 'gh-account-guard: %s\n' "$*" >&2; }
 
+# gh is frequently installed somewhere a non-login shell never sees. Git hooks
+# inherit the environment of whatever invoked the push — an IDE, a file
+# manager, a cron job, a bare `sh -c` — and those do not source the profile
+# that runs `brew shellenv`, so a perfectly working gh disappears and this
+# guard blocks the push with a misleading "not installed". Look in the usual
+# install roots before believing PATH.
+if ! command -v gh >/dev/null 2>&1; then
+	for candidate in \
+		/home/linuxbrew/.linuxbrew/bin \
+		/opt/homebrew/bin \
+		/usr/local/bin \
+		"$HOME/.local/bin" \
+		/var/lib/flatpak/exports/bin \
+		/snap/bin; do
+		if [ -x "$candidate/gh" ]; then
+			PATH="$candidate:$PATH"
+			export PATH
+			break
+		fi
+	done
+fi
 command -v gh >/dev/null 2>&1 || {
-	err "gh CLI not found on PATH; install it or skip with GH_ACCOUNT_GUARD=0"
+	err "gh CLI not found on PATH or in any known install root; install it or skip with GH_ACCOUNT_GUARD=0"
 	exit 1
 }
 command -v git >/dev/null 2>&1 || {
