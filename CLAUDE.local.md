@@ -137,31 +137,16 @@ gh project view 2 --owner robwilde --web
 
 ---
 
-## Dev Log Requirement
+## Session History
 
-Since context resets between sessions, we use devlogs to track our work. Devlogs are saved as individual Obsidian-flavoured Markdown files in the Obsidian
-vault.
+Context resets between sessions, so session history is recorded in **Hindsight memory**, not in devlog files. Retain the durable facts — decisions, the
+reasoning behind them, and what was verified — as memories; they surface automatically in later sessions without anyone having to find and read a file.
 
-**Vault Path:** `/var/home/mrwilde/Projects/Obsidian/ClaudeCodeVault`
-**Devlog Directory:** `DevLogs/CanEyeBudget/`
-**Full Path:** `/var/home/mrwilde/Projects/Obsidian/ClaudeCodeVault/DevLogs/CanEyeBudget/`
+Do **not** write devlog files, and do not append to `DEVLOG.md`. Both are retired. The existing `DevLogs/CanEyeBudget/` vault directory and `DEVLOG.md` are
+kept as historical record only.
 
-### Devlog File Format
-
-Each devlog entry is a separate `.md` file using the naming convention: `YYYY-MM-DD_short-description.md`
-
-Example: `2026-03-17_add-builder-avatar-upload.md`
-
-Every devlog file **must** include YAML frontmatter and use Obsidian syntax (wikilinks, callouts, tags):
-
-```markdown
----
-date: 2026-03-17
-project: Can Eye Budget v2
-tags:
-  - devlog
-  - can-eye-budget-v2
----
+Durable technical state that belongs to the project rather than to a session — as-built infrastructure, environment matrices, settled decisions — still goes
+in the repository docs it concerns, such as `docs/dokploy-staging-plan.md`. Hindsight replaces the session narrative, not the runbooks.
 
 ---
 
@@ -174,14 +159,6 @@ Every session should improve the codebase, not just add to it. Actively refactor
 - **Leverage:** Use battle-tested packages over custom implementations. Do not reinvent the wheel unless the wheel is broken.
 - **Readable:** Code must be self-documenting. Comments should explain *why*, not *what*.
 - **Safety:** If a refactor carries high risk of breaking functionality, flag it for user review rather than applying it silently.
-
----
-
-### Operational Rule
-
-After every interaction that includes a code change, you **must** create a devlog file at the vault path before finishing. This is mandatory.
-
-**Goal:** If a new developer (or a new AI session) joins tomorrow, they should be able to browse `DevLogs/CanEyeBudget/` in Obsidian and understand the full state and history of the project immediately.
 
 ---
 
