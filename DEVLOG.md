@@ -1,108 +1,58 @@
 # Dev Log
 
 
-## 2026-09-20 — Issue #373: Dev-only dependencies out of the production set — PR #447
+## 2026-09-19 — Issue #375 closed: staging is provisioned and live on Dokploy
 
 ### The Change
 
-`laravel/boost` and `spatie/laravel-ray` sat in `require`, so `composer install --no-dev` resolved and shipped both into the runtime image. `playwright` sat in `dependencies` against an empty `devDependencies`, so the asset stage pulled it and `playwright-core` on every build. All three are now in their dev sections, and `Dockerfile` line 22 gained `--omit=dev` so the npm move actually bites — without it `npm ci` installs dev dependencies regardless of how they are declared.
+`can-eye-budget-v2` now runs at https://can-eye.mrwilde.dev. The code gate for #375 had been complete for two weeks; nothing was deployed because the
+provisioning half had never been performed. It was performed today against project `can-eye-budget-v2` (`NZJGNv9vRX6AcZRjYrnxK`), environment `Staging`
+(`DiISI4cAMucnyj440GORx`), building `develop` @`cc1dc9c` — the first deploy to carry #430's entrypoint role dispatch.
 
-Boost is the reason this matters rather than being tidiness. It activates on `local` **or** `APP_DEBUG=true` and publishes an unauthenticated, CSRF-exempt `POST /_boost/browser-logs` plus a JS-injecting `web` middleware. `BOOST_ENABLED=false` on all three staging services removes that route, but the package itself was still present in the image and one wrong `APP_DEBUG` away from mattering. Removing it from the production dependency set removes the class of problem, not one instance of it.
+Five services: `can-eye-mariadb` (`mariadb:11.8`), `can-eye-redis` (`redis:7-alpine`), and three Applications differing **only** by `CONTAINER_ROLE`, each
+with `command: null` and `healthCheckSwarm: null`. A shared `can-eye-staging-import` volume is mounted at `/var/www/html/storage/app/private` on web and
+horizon. `can-eye.mrwilde.dev` is attached to the web service on port 80 with Let's Encrypt.
 
 **Files modified:**
-- `composer.json` / `composer.lock` — `laravel/boost ^2.4.2` and `spatie/laravel-ray ^1.43.7` moved from `require` to `require-dev`
-- `package.json` / `package-lock.json` — `playwright ^1.58.2` moved from `dependencies` to a previously empty `devDependencies`; lock entry now carries `"dev": true`
-- `Dockerfile` (+4/-1) — `npm ci --omit=dev` in the assets stage, with a comment recording why the asset pipeline is unaffected
-- `docs/dokploy-staging-plan.md` — row 7 and the two prose references updated from open to merged
+- `docs/dokploy-staging-plan.md` — a "Deployed" banner, a "Staging-verified behaviour" as-built record, and prerequisites 2–5 marked satisfied
+
+No application code changed. The deployment is configuration in Dokploy, not a commit.
 
 ### The Reasoning
 
-- **The stale provider manifest is not a hazard, and this was checked rather than assumed.** `.dockerignore` does not exclude `bootstrap/cache`, so `COPY . .` carries a locally generated `packages.php` listing `Laravel\Boost\BoostServiceProvider` into an image that no longer installs it — which reads like a guaranteed boot fatal. It is not, because `composer dump-autoload` runs `post-autoload-dump`, whose first entry `Illuminate\Foundation\ComposerScripts::postAutoloadDump` deletes `bootstrap/cache/packages.php` and `services.php` before `package:discover` rebuilds them from the actual `--no-dev` tree. The same mechanism is why builds already tolerated `spatie/boost-spatie-guidelines` being dev-only. No `.dockerignore` change was made, because none is needed.
-- **`--omit=dev` is safe precisely because the asset pipeline was never dev-scoped.** `vite`, `@tailwindcss/vite`, `tailwindcss`, `laravel-vite-plugin` and `autoprefixer` are all `dependencies` entries, so omitting dev leaves the build inputs intact. Had they been moved to `devDependencies` as "correct" npm hygiene, `--omit=dev` would have broken `npm run build` outright.
-- **`laravel/tinker` was left in `require` deliberately.** It is a `require` entry in the stock Laravel skeleton and `artisan tinker` is a legitimate production diagnostic. Moving it would have been scope this issue did not ask for.
-- **No new test.** Dependency placement is not application behaviour; there is no branch to exercise. The proof is the resolver's own output, recorded below.
+- **The MCP surface was not the whole API.** The mounted Dokploy MCP tools cover applications, domains, MySQL and Postgres — but not MariaDB, not Redis, and
+  not mounts, which is three of the six things #375 required. The raw Dokploy REST API behind the same credential does cover them; `mariadb.create`,
+  `redis.create` and `mounts.create` were driven directly. Treating the tool list as the capability boundary would have stalled the deploy on tooling.
+- **`server.all` returning `[]` is not "no server".** It reports *remote* servers. Every service already running on this Dokploy — `hindsight`,
+  `hindsight-postgres`, `pwpush`, `MrWilde.dev` — carries `serverId: null` and status `done`, so the local Docker host is the implicit target. That was
+  checked against running services before provisioning, rather than inferred from the empty array.
+- **#430 was exercised for real, not asserted.** All three containers report `Entrypoint=[/usr/local/bin/entrypoint.sh]` with `Cmd=null`, and the horizon
+  container's process table shows `php artisan horizon` although no Dokploy `command` was ever written. The role dispatch chose the process. The gate that
+  matters most held too: `grep -ci migrat` over the horizon and scheduler logs is **0** each, while web applied all 51 migrations.
+- **Readiness was taken over HTTPS, which is stronger than the runbook's in-container check.** Dokploy runs on a remote host with no SSH access and its REST
+  API has no exec endpoint, so the prescribed `curl http://127.0.0.1/login` was unavailable. The domain round trip supersedes it: `POST /login` → 302
+  `/dashboard` and an authed `GET /dashboard` 200 prove the `Secure` cookie is carried across requests — the half that plain HTTP provably cannot show.
+- **In-container verification came from the terminal websocket.** `/docker-container-terminal` accepts the `x-api-key` header, which is how
+  `horizon:liveness`, the process table, the heartbeat mtime and the cross-container volume write were observed first-hand instead of inferred from logs.
+- **The account was created with tinker, not the seeder.** `DatabaseSeeder` builds users through `User::factory()`, and faker is a dev dependency absent
+  under `composer install --no-dev` — the same trap recorded during local container testing. A single account was created with `User::create` and a
+  generated password.
 
 ### Verification
 
-`composer install --no-dev --dry-run` after the move:
-
-```
-- Removing spatie/ray (1.48.0)
-- Removing spatie/laravel-ray (1.43.9)
-- Removing laravel/boost (v2.4.8)
-```
-
-`npm ci --omit=dev --dry-run`:
-
-```
-remove playwright-core 1.58.2
-remove playwright 1.58.2
-```
-
-The asset stage was verified against a clean tree built from the committed manifests in a scratch directory, so the repository's own `node_modules` was never disturbed:
-
-| check | result |
+| Check | Result |
 |---|---|
-| `vite`, `@tailwindcss/vite`, `tailwindcss`, `laravel-vite-plugin`, `autoprefixer` | all present |
-| `playwright`, `playwright-core` | both absent |
-| `./node_modules/.bin/vite --version` | `vite/7.3.1 linux-x64 node-v26.9.0` |
+| Migrations | 51 applied by `web`; zero `migrat` lines in either worker log |
+| HTTPS surface | `/` 200, `/login` 200, `/up` 200, `/register` **404**, anonymous `/horizon` **403**, `http://` → 301, certificate verifies |
+| Session | `can-eye-budget-staging-session` `secure; httponly; samesite=lax`; login → `/dashboard` 200 on a second request |
+| Queue across containers | `RunTransactionAnalysisJob` dispatched in web, logged `RUNNING` → `83.35ms DONE` in horizon |
+| Horizon | master/supervisor/worker all `www-data`; `horizon:liveness` exit 0; `--max-processes=3`, the `staging` sizing |
+| Scheduler | four schedules firing; heartbeat mtime advanced 179s over 179s |
+| Shared volume | written by `www-data` in horizon, read back from web |
+| Exposure | `3306` and `6379` refuse public connections; `/_boost/browser-logs` 404, `/telescope` 404, `/.env` 403 |
 
-Gates: Pint 457 files, PHPStan `No errors`, Pest 2286 passed / 5856 assertions — unchanged from the pre-change baseline, which is the point: the dev suite still has every tool it needs.
-
-
-## 2026-09-20 — Issue #433: Sentry error monitoring — PR #434
-
-### The Change
-
-Nothing in this application reported exceptions to an error tracker. `bootstrap/app.php` carried an empty `withExceptions()` closure and `LOG_STACK=stderr` hands logs to the Docker json-file driver, so a staging failure was visible only by reading a container log and vanished with the container. `sentry/sentry-laravel` is now a runtime dependency — `require`, not `require-dev`, because it has to run in the production image — and `Integration::handles($exceptions)` in `bootstrap/app.php` routes every exception Laravel decides to report through to Sentry. Registering through `Integration::handles()` rather than a bespoke `reportable` callback keeps Laravel's own `shouldntReport` list authoritative, so validation, authentication and 4xx HTTP exceptions never reach Sentry and no custom ignore list exists to drift. One hook covers all three container roles: web requests, Horizon queue workers and scheduled commands all report through the same handler.
-
-A single project DSN serves every environment. Events separate themselves through the `environment` tag, which is deliberately left unset in config so the SDK derives it from `APP_ENV` — `local` under DDEV, `staging` in the Dokploy containers, where `docker/entrypoint.sh` already exports `APP_ENV` before any artisan call. No per-environment Sentry variable exists to be forgotten or set wrong. A blank `SENTRY_DSN` disables the SDK outright rather than failing at boot.
-
-Three things are off on purpose. `send_default_pii` stays `false` because this is a finance application and user identities and IP addresses must not leave it. SQL bindings stay `false` in both breadcrumbs and tracing, because those parameters carry transaction amounts and narrations. `enable_logs` stays `false`: stderr into the container log remains the log surface, and Sentry receives exceptions only, not the log stream. Tracing and profiling are env-gated and off by default, each behind its own variable — `SENTRY_TRACES_SAMPLE_RATE` for tracing and `SENTRY_PROFILES_SAMPLE_RATE` for profiling — so either can be enabled per environment later with no code change.
-
-**Files modified:**
-- `composer.json` / `composer.lock` — `sentry/sentry-laravel ^4.27` in `require`, pulling `sentry/sentry 4.31.0`
-- `config/sentry.php` (new) — published unmodified from the SDK, then a policy docblock prepended and `declare(strict_types=1)` added by Pint
-- `bootstrap/app.php` (+9/-2) — `use Sentry\Laravel\Integration;` and the `withExceptions` body
-- `.env.example` (+4) — commented `SENTRY_DSN=` block after the `GMAIL_*` lines
-- `docs/dokploy-staging-plan.md` (+1) — `SENTRY_DSN` row in the environment matrix
-
-### The Reasoning
-
-- **The published config was already the policy.** Every key this change depends on ships at the required default in `sentry/sentry-laravel` 4.27: `dsn` already reads `env('SENTRY_LARAVEL_DSN', env('SENTRY_DSN'))`, `environment` and `release` are already null, both sample rates are already `env(...) === null ? null : (float) env(...)`, `send_default_pii` and `enable_logs` are already `false`, `ignore_transactions` already holds `/up`, and both `sql_bindings` switches are already `false`. So the file was published and verified rather than rewritten, and the only edits are a docblock explaining *why* those defaults are being relied on and the `declare(strict_types=1)` this repository requires. Restating defaults as explicit values would have created a second copy to drift against the SDK for no behavioural gain.
-- **`SENTRY_LARAVEL_DSN` is deliberately unused.** It exists in the published config's fallback chain, but introducing it would mean two variables meaning the same thing, with the more obscure one silently winning. Only `SENTRY_DSN` is documented and only `SENTRY_DSN` is set.
-- **No frontend SDK, no user context.** The UI is server-rendered Livewire, so `@sentry/browser` would add an npm dependency and publish the DSN to every visitor for little signal. User identity is a deliberate omission that follows from `send_default_pii=false`, not an oversight. Handled per-phase Redbark errors continue to land in `redbark_sync_logs` via `SyncRedbarkFeedJob::appendError` — they are not exceptions and are out of scope.
-- **No new test.** The change is a framework hook with no branch of its own; a test would assert that a vendor method was called, which is implementation, not observable behaviour. The proof is live events, recorded below.
-
-### Verification
-
-Local, against the real DSN:
-
-| check | result |
-|---|---|
-| `ddev artisan sentry:test` | `DSN discovered` → test event `f68145bae8f14e30aa7bc31b52d34a14` |
-| `report(new RuntimeException('sentry-plan-local-probe'))` through the new hook | event `9e7abb5a96944c83ba8ea244cb7e62ac` |
-| resolved SDK options at runtime | `environment='local'`, `send_default_pii=false`, `traces_sample_rate=NULL`, `release=NULL` |
-| both SQL-binding switches and `enable_logs` | `false` |
-| `ddev exec env SENTRY_DSN= php artisan sentry:test` | `Could not discover DSN!`, exit 1 — blank disables rather than breaking boot |
-
-The second row is the one that matters: `report()` producing an event ID proves the `withExceptions` hook is wired, not merely that the SDK can reach Sentry.
-
-**Quality gates:** Pint 455 files pass, PHPStan `No errors`, Pest 2280 passed (5849 assertions).
-
-### Staging
-
-Merged as `2ee98d6` and deployed to all three staging services. `SENTRY_DSN` went on via the `application.saveEnvironment` API endpoint; the Dokploy **MCP** wrapper for it returns HTTP 400 for every payload, including a byte-identical re-save, because it omits the `buildArgs`, `buildSecrets` and `createEnvFile` fields the endpoint requires. The call was made directly against the API with those three echoed back verbatim from each record. `application.update` was deliberately not used — it rewrites the whole application record, and a nulled `command`/`args` would replace the image `ENTRYPOINT` and bypass #430's role dispatch. Each service was then confirmed to hold exactly one extra variable, every other variable byte-identical, `command`/`args` still empty.
-
-| check | result |
-|---|---|
-| `sentry:test` in `can-eye-web` | event `efde8019aa5b4fc9b026b6dd1addf69e` |
-| `report()` through the hook in `can-eye-web` | event `0e8fdca7ca2c4c93809293a1149d22c9`, `environment='staging'` |
-| failing closure job on `redis@default` | picked up by the live Horizon worker, recorded in `queue:failed` |
-| in-process `queue:work --once` of the same failing job | event `0f878f05e25348b0ada74cbe91e583c7`, `environment='staging'` |
-| container health through the rollout | all three `running (healthy)`; `/up` 200, `/` 200, `/login` 200, `/register` 404, `/horizon` 403 |
-
-No `SENTRY_ENVIRONMENT` is set anywhere: `local` and `staging` both derive from `APP_ENV`, so one DSN keeps the two environments apart by itself. Probe failures were flushed (`No failed jobs found` afterwards, from a zero baseline) and no probe files remain in any container.
+No row of the local "Container-verified behaviour" matrix diverged on staging. The CSV bank-import round trip is the single step-13 item not exercised:
+the database holds one account and no transactions, so there is nothing to import yet.
 
 
 ## 2026-09-13 — Issue #423 hardening: Pin the `env()` Null Coercion — PR #428
