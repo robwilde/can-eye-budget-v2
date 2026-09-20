@@ -40,7 +40,18 @@
         <!-- Blank rather than absent: bootstrap/app.php reports every exception to Sentry
              (#433), so a developer's real SENTRY_DSN would send deliberately thrown test
              failures to the production project. An empty DSN disables the SDK outright
-             instead of erroring at boot. -->
-        <env name="SENTRY_DSN" value=""/>
+             instead of erroring at boot.
+
+             Both lines are required, and neither is redundant. An exported SENTRY_DSN
+             reaches PHP through three channels: getenv(), $_ENV and $_SERVER. The forced
+             <env> blanks the first two but leaves $_SERVER intact, and Laravel's Env
+             repository reads $_SERVER — so without the <server> line an exported DSN still
+             wins and the suite still transmits. Verified by probing all three sources.
+
+             force="true" on <env> is likewise load-bearing: without it PHPUnit leaves an
+             already-exported value untouched. Reading .env is not the only way the
+             variable arrives — a shell, CI job or direnv profile can export it. -->
+        <env name="SENTRY_DSN" value="" force="true"/>
+        <server name="SENTRY_DSN" value=""/>
     </php>
 </phpunit>
