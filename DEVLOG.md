@@ -1,6 +1,55 @@
 # Dev Log
 
 
+## 2026-09-20 — Issue #373: Dev-only dependencies out of the production set — PR #447
+
+### The Change
+
+`laravel/boost` and `spatie/laravel-ray` sat in `require`, so `composer install --no-dev` resolved and shipped both into the runtime image. `playwright` sat in `dependencies` against an empty `devDependencies`, so the asset stage pulled it and `playwright-core` on every build. All three are now in their dev sections, and `Dockerfile` line 22 gained `--omit=dev` so the npm move actually bites — without it `npm ci` installs dev dependencies regardless of how they are declared.
+
+Boost is the reason this matters rather than being tidiness. It activates on `local` **or** `APP_DEBUG=true` and publishes an unauthenticated, CSRF-exempt `POST /_boost/browser-logs` plus a JS-injecting `web` middleware. `BOOST_ENABLED=false` on all three staging services removes that route, but the package itself was still present in the image and one wrong `APP_DEBUG` away from mattering. Removing it from the production dependency set removes the class of problem, not one instance of it.
+
+**Files modified:**
+- `composer.json` / `composer.lock` — `laravel/boost ^2.4.2` and `spatie/laravel-ray ^1.43.7` moved from `require` to `require-dev`
+- `package.json` / `package-lock.json` — `playwright ^1.58.2` moved from `dependencies` to a previously empty `devDependencies`; lock entry now carries `"dev": true`
+- `Dockerfile` (+4/-1) — `npm ci --omit=dev` in the assets stage, with a comment recording why the asset pipeline is unaffected
+- `docs/dokploy-staging-plan.md` — row 7 and the two prose references updated from open to merged
+
+### The Reasoning
+
+- **The stale provider manifest is not a hazard, and this was checked rather than assumed.** `.dockerignore` does not exclude `bootstrap/cache`, so `COPY . .` carries a locally generated `packages.php` listing `Laravel\Boost\BoostServiceProvider` into an image that no longer installs it — which reads like a guaranteed boot fatal. It is not, because `composer dump-autoload` runs `post-autoload-dump`, whose first entry `Illuminate\Foundation\ComposerScripts::postAutoloadDump` deletes `bootstrap/cache/packages.php` and `services.php` before `package:discover` rebuilds them from the actual `--no-dev` tree. The same mechanism is why builds already tolerated `spatie/boost-spatie-guidelines` being dev-only. No `.dockerignore` change was made, because none is needed.
+- **`--omit=dev` is safe precisely because the asset pipeline was never dev-scoped.** `vite`, `@tailwindcss/vite`, `tailwindcss`, `laravel-vite-plugin` and `autoprefixer` are all `dependencies` entries, so omitting dev leaves the build inputs intact. Had they been moved to `devDependencies` as "correct" npm hygiene, `--omit=dev` would have broken `npm run build` outright.
+- **`laravel/tinker` was left in `require` deliberately.** It is a `require` entry in the stock Laravel skeleton and `artisan tinker` is a legitimate production diagnostic. Moving it would have been scope this issue did not ask for.
+- **No new test.** Dependency placement is not application behaviour; there is no branch to exercise. The proof is the resolver's own output, recorded below.
+
+### Verification
+
+`composer install --no-dev --dry-run` after the move:
+
+```
+- Removing spatie/ray (1.48.0)
+- Removing spatie/laravel-ray (1.43.9)
+- Removing laravel/boost (v2.4.8)
+```
+
+`npm ci --omit=dev --dry-run`:
+
+```
+remove playwright-core 1.58.2
+remove playwright 1.58.2
+```
+
+The asset stage was verified against a clean tree built from the committed manifests in a scratch directory, so the repository's own `node_modules` was never disturbed:
+
+| check | result |
+|---|---|
+| `vite`, `@tailwindcss/vite`, `tailwindcss`, `laravel-vite-plugin`, `autoprefixer` | all present |
+| `playwright`, `playwright-core` | both absent |
+| `./node_modules/.bin/vite --version` | `vite/7.3.1 linux-x64 node-v26.9.0` |
+
+Gates: Pint 457 files, PHPStan `No errors`, Pest 2286 passed / 5856 assertions — unchanged from the pre-change baseline, which is the point: the dev suite still has every tool it needs.
+
+
 ## 2026-09-20 — Issue #433: Sentry error monitoring — PR #434
 
 ### The Change

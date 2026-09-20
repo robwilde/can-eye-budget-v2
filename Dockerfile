@@ -19,7 +19,10 @@ FROM node:22-alpine AS assets
 
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+# --omit=dev keeps playwright (and its browser-core payload) out of the build stage.
+# Every asset-pipeline package is a runtime `dependencies` entry, so `npm run build`
+# below is unaffected; verified against a clean --omit=dev tree.
+RUN npm ci --omit=dev --no-audit --no-fund
 COPY . .
 COPY --from=vendor /app/vendor ./vendor
 RUN npm run build
