@@ -11,11 +11,13 @@ declare(strict_types=1);
 /**
  * Local policy for this application, layered on the SDK defaults above.
  *
- * A single Sentry project key (SENTRY_DSN) is shared by every environment. Events
- * separate themselves through the `environment` tag, which is left unset here so the
- * SDK derives it from APP_ENV — `local` under DDEV, `staging` in the Dokploy
- * containers, where docker/entrypoint.sh exports APP_ENV before any artisan call.
- * Leaving SENTRY_DSN blank disables the SDK outright rather than failing at boot.
+ * A single Sentry project key (SENTRY_DSN) is shared by every reporting environment.
+ * Events separate themselves through the `environment` tag, which is left unset here so
+ * the SDK derives it from APP_ENV — `staging` in the Dokploy containers, where
+ * docker/entrypoint.sh exports APP_ENV before any artisan call. `local` is excluded
+ * from reporting altogether; see the dsn entry below. Leaving SENTRY_DSN blank disables
+ * the SDK outright rather than failing at boot, which is also how the test suite keeps
+ * itself silent (phpunit.xml sets it empty through both <env> and <server>).
  *
  * Three things are deliberately off. `send_default_pii` stays false because this is a
  * finance application and user identities and IP addresses must not leave it. SQL
@@ -29,8 +31,22 @@ declare(strict_types=1);
  */
 return [
 
+    // Local development shares this DSN with staging, so crashes from host-side tooling
+    // land beside real staging incidents — JUSTWW-C was laravel/boost's MCP server
+    // writing to a stdout pipe whose client had gone, which is no fault of this
+    // application. Local behaviour is observable on the machine itself, so nothing is
+    // lost by keeping it out of Sentry entirely.
+    //
+    // Nulling the DSN disables the transport outright rather than filtering at send
+    // time, which covers transactions, logs and metrics and not merely error events.
+    // A before_send callback cannot do this job here: docker/entrypoint.sh runs
+    // `php artisan config:cache`, and Laravel refuses to serialise a closure held in
+    // config. Verified rather than assumed — config:cache exits 1 with one present.
+    //
     // @see https://docs.sentry.io/concepts/key-terms/dsn-explainer/
-    'dsn' => env('SENTRY_LARAVEL_DSN', env('SENTRY_DSN')),
+    'dsn' => env('APP_ENV') === 'local'
+        ? null
+        : env('SENTRY_LARAVEL_DSN', env('SENTRY_DSN')),
 
     // @see https://spotlightjs.com/
     // 'spotlight' => env('SENTRY_SPOTLIGHT', false),
