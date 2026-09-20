@@ -8,6 +8,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Support\Facades\Route;
+use Sentry\Laravel\Integration;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -44,5 +45,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('app:sync-redbark-feeds')->everySixHours()->withoutOverlapping();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // Route every exception Laravel decides to report through to Sentry. Registering
+        // via Integration::handles() (rather than a bespoke reportable callback) keeps
+        // Laravel's own shouldntReport list authoritative, so validation, authentication
+        // and 4xx HTTP exceptions stay out of Sentry. All three container roles share this
+        // hook: web requests, Horizon queue workers and scheduled commands all report
+        // through the same handler.
+        Integration::handles($exceptions);
     })->create();
