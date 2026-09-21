@@ -49,6 +49,12 @@ final class TransactionList extends Component
 
     private const array VALID_CATEGORISED_FILTERS = ['all', 'categorised', 'uncategorised'];
 
+    /**
+     * Provenance filter. 'rule' surfaces everything automation decided, which
+     * is what makes accepting automation reversible rather than a one-way door.
+     */
+    private const array VALID_SOURCE_FILTERS = ['all', 'manual', 'rule'];
+
     private const array VALID_GROUP_MODES = ['date', 'merchant'];
 
     /**
@@ -65,6 +71,9 @@ final class TransactionList extends Component
 
     #[Url]
     public string $categorised = 'all';
+
+    #[Url]
+    public string $source = 'all';
 
     #[Url]
     public ?int $account = null;
@@ -234,6 +243,10 @@ final class TransactionList extends Component
 
         if (! in_array($this->categorised, self::VALID_CATEGORISED_FILTERS, true)) {
             $this->categorised = 'all';
+        }
+
+        if (! in_array($this->source, self::VALID_SOURCE_FILTERS, true)) {
+            $this->source = 'all';
         }
 
         if (! in_array($this->groupMode, self::VALID_GROUP_MODES, true)) {
@@ -509,6 +522,51 @@ final class TransactionList extends Component
         $this->bulkNotice = $updated === 1
             ? 'Categorised 1 transaction.'
             : sprintf('Categorised %d transactions.', $updated);
+
+        $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * Undo machine-set categories across the selection.
+     *
+     * This is what stops automation being a one-way door: everything a rule
+     * decided is stamped CategorySource::Rule, so it can be found and undone in
+     * one action. Rows a human categorised are never touched, which is the
+     * whole point of tracking provenance.
+     */
+    public function revertMachineCategories(): void
+    {
+        $this->bulkError = null;
+        $this->bulkNotice = null;
+
+        $query = $this->selectionQuery();
+
+        if ($query === null) {
+            $this->bulkError = 'Nothing is selected.';
+
+            return;
+        }
+
+        $reverted = 0;
+
+        DB::transaction(function () use ($query, &$reverted): void {
+            $query->where('category_source', CategorySource::Rule->value)
+                ->chunkById(200, function (EloquentCollection $chunk) use (&$reverted): void {
+                    foreach ($chunk as $transaction) {
+                        // Clearing category_id nulls category_source through the
+                        // model's invariant hook, so provenance cannot be left
+                        // claiming a source for an absent category.
+                        $transaction->category_id = null;
+                        $transaction->save();
+                        $reverted++;
+                    }
+                });
+        });
+
+        $this->clearSelection();
+        $this->bulkNotice = $reverted === 1
+            ? 'Reverted 1 rule-set category.'
+            : sprintf('Reverted %d rule-set categories.', $reverted);
 
         $this->dispatch('transaction-saved');
     }
@@ -968,6 +1026,15 @@ final class TransactionList extends Component
         if ($this->categorised !== 'uncategorised') {
             $this->groupMode = 'date';
             $this->expandedKey = null;
+        }
+
+        $this->resetPage();
+    }
+
+    public function updatedSource(): void
+    {
+        if (! in_array($this->source, self::VALID_SOURCE_FILTERS, true)) {
+            $this->source = 'all';
         }
 
         $this->resetPage();
@@ -1458,6 +1525,7 @@ final class TransactionList extends Component
             'category' => $this->category,
             'planned' => $this->planned,
             'categorised' => $this->categorised,
+            'source' => $this->source,
             'period' => $this->period,
             'from' => $this->from,
             'to' => $this->to,
@@ -1512,6 +1580,10 @@ final class TransactionList extends Component
             ->when(($filters['categorised'] ?? null) === 'uncategorised', fn ($q) => $q
                 ->whereNull('category_id')
                 ->whereDoesntHave('splits'))
+            ->when(($filters['source'] ?? null) === 'manual', fn ($q) => $q
+                ->where('category_source', CategorySource::Manual->value))
+            ->when(($filters['source'] ?? null) === 'rule', fn ($q) => $q
+                ->where('category_source', CategorySource::Rule->value))
             ->when($filters['search'] ?? null, fn ($q, $term) => $q->where(function ($q) use ($term) {
                 $q->where('description', 'like', "%{$term}%")
                     ->orWhere('clean_description', 'like', "%{$term}%")

@@ -894,7 +894,12 @@ test('account filter renders via x-cib.filter-toggle when multiple accounts', fu
         ->test(TransactionList::class)
         ->html();
 
-    expect(mb_substr_count($html, 'class="type-toggle'))->toBe(4);
+    // Assert the account filter itself rather than counting every toggle on the
+    // page: the old count broke the moment an unrelated filter was added.
+    expect($html)->toContain('class="type-toggle')
+        ->and($html)->toContain('All Accounts')
+        ->and($html)->toContain('Everyday')
+        ->and($html)->toContain('Savings');
 });
 
 test('account filter hidden when only one account', function () {
@@ -905,7 +910,7 @@ test('account filter hidden when only one account', function () {
         ->test(TransactionList::class)
         ->html();
 
-    expect(mb_substr_count($html, 'class="type-toggle'))->toBe(3);
+    expect($html)->not->toContain('All Accounts');
 });
 
 test('empty state uses x-cib.empty-state primitive with banknotes icon', function () {

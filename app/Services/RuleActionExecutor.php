@@ -60,11 +60,57 @@ final readonly class RuleActionExecutor
     }
 
     /**
-     * A rule fills gaps; it never overrides a person.
+     * The category these actions would assign to this transaction, or null if
+     * they would leave it alone.
      *
-     * A Manual source — or a categorised row that never declared one, which
-     * saving() would default to Manual — is protected, and reports handled
-     * (true) so the pipeline audits the row and stops retrying it.
+     * Read-only: it mutates nothing and saves nothing. This exists so a preview
+     * can ask "what would happen" without going anywhere near execute(), which
+     * ends in $transaction->save(). Sharing the decision with setCategory()
+     * below means a preview cannot disagree with the write.
+     *
+     * @param  array<int, array<string, string>>  $actions
+     */
+    public function categoryItWouldSet(Transaction $transaction, array $actions): ?int
+    {
+        foreach ($actions as $action) {
+            if (($action['type'] ?? null) !== RuleActionType::SetCategory->value) {
+                continue;
+            }
+
+            $categoryId = (int) ($action['value'] ?? 0);
+
+            if (! $this->maySetCategory($transaction)) {
+                return null;
+            }
+
+            return Category::visible()->where('id', $categoryId)->exists() ? $categoryId : null;
+        }
+
+        return null;
+    }
+
+    /**
+     * A rule fills gaps; it never overrides a person, a split's parts, or a
+     * transfer. A categorised row that never declared a source counts as a
+     * person's: saving() would default it to Manual.
+     */
+    private function maySetCategory(Transaction $transaction): bool
+    {
+        if ($transaction->categoryProtectedFromRules()) {
+            return false;
+        }
+
+        if ($transaction->isSplit()) {
+            return false;
+        }
+
+        return $transaction->transfer_pair_id === null;
+    }
+
+    /**
+     * The return value reports "this action was handled", not "the row
+     * changed". A protected row reports handled (true) so the pipeline audits
+     * it and stops retrying it.
      *
      * A split reports not-applied (false): the skip is transient, because
      * un-splitting restores the same row id, and an audit entry would suppress
@@ -74,19 +120,13 @@ final readonly class RuleActionExecutor
      */
     private function setCategory(Transaction $transaction, string $value): bool
     {
+        if (! $this->maySetCategory($transaction)) {
+            // Precedence mirrors maySetCategory(): protection is decided before
+            // the split test, so a protected split still reports handled.
+            return $transaction->categoryProtectedFromRules() || ! $transaction->isSplit();
+        }
+
         $categoryId = (int) $value;
-
-        if ($transaction->categoryProtectedFromRules()) {
-            return true;
-        }
-
-        if ($transaction->isSplit()) {
-            return false;
-        }
-
-        if ($transaction->transfer_pair_id !== null) {
-            return true;
-        }
 
         if (Category::visible()->where('id', $categoryId)->exists()) {
             $transaction->category_id = $categoryId;
