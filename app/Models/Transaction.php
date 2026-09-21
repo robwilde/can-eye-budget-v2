@@ -262,6 +262,15 @@ final class Transaction extends Model
 
         $attributes['parent_transaction_id'] = $this->id;
 
+        // A caller that changes category_id is choosing a new category. Carrying the
+        // parent's provenance onto that choice would let a rule's stamp survive a
+        // human's edit, so drop it and let saving() re-derive it.
+        if (array_key_exists('category_id', $overrides)
+            && ! array_key_exists('category_source', $overrides)
+            && $overrides['category_id'] !== $this->category_id) {
+            unset($attributes['category_source']);
+        }
+
         return self::query()->create(array_merge($attributes, $overrides));
     }
 

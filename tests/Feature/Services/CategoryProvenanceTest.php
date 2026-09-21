@@ -212,3 +212,34 @@ it('stamps a category accepted from a recurring suggestion as manual', function 
 
     expect($transaction->fresh()->category_id)->toBe($category->id);
 });
+
+it('re-derives provenance when a child is created with a different category', function () {
+    $ruleGuess = Category::factory()->create(['is_hidden' => false]);
+    $userPick = Category::factory()->create(['is_hidden' => false]);
+
+    $transaction = provenanceTransaction($this->user, $this->account, [
+        'category_id' => $ruleGuess->id,
+        'category_source' => CategorySource::Rule,
+    ]);
+
+    $child = $transaction->createChild(['category_id' => $userPick->id]);
+
+    expect($child->fresh()->category_id)->toBe($userPick->id)
+        ->and($child->fresh()->category_source)->toBe(CategorySource::Manual);
+});
+
+it('keeps a rule stamp when a child is created with the same category', function () {
+    $ruleGuess = Category::factory()->create(['is_hidden' => false]);
+
+    $transaction = provenanceTransaction($this->user, $this->account, [
+        'category_id' => $ruleGuess->id,
+        'category_source' => CategorySource::Rule,
+    ]);
+
+    $child = $transaction->createChild([
+        'category_id' => $ruleGuess->id,
+        'notes' => 'x',
+    ]);
+
+    expect($child->fresh()->category_source)->toBe(CategorySource::Rule);
+});
