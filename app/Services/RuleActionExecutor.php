@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\CategorySource;
 use App\Enums\RuleActionType;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
@@ -58,12 +59,34 @@ final readonly class RuleActionExecutor
         return $applied && ! $foldPending;
     }
 
+    /**
+     * A rule fills gaps; it never overrides a person.
+     *
+     * Returns true regardless of whether the category was written, because the
+     * return value reports "this action was handled", not "the row changed".
+     * Reporting false on a protected row would leave the transaction unaudited
+     * and the pipeline would retry it on every run.
+     */
     private function setCategory(Transaction $transaction, string $value): bool
     {
         $categoryId = (int) $value;
 
+        if ($transaction->category_id !== null
+            && $transaction->category_source?->isOverwritableByRule() === false) {
+            return true;
+        }
+
+        if ($transaction->isSplit()) {
+            return true;
+        }
+
+        if ($transaction->transfer_pair_id !== null) {
+            return true;
+        }
+
         if (Category::visible()->where('id', $categoryId)->exists()) {
             $transaction->category_id = $categoryId;
+            $transaction->category_source = CategorySource::Rule;
         }
 
         return true;

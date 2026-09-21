@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Listeners;
 
+use App\Enums\CategorySource;
 use App\Events\TransactionCategoryUpdated;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
@@ -25,10 +26,20 @@ final class PropagateTransactionCategory
 
         $newCategoryId = $transaction->category_id;
 
+        // These are mass updates, so they bypass model events and the saving()
+        // hook that normally maintains the provenance invariant — category_source
+        // has to be written explicitly here or the propagated rows would keep a
+        // stale source, or none at all.
+        //
+        // The propagated category originates from a user's own choice, so it
+        // carries Manual and is protected from later rule overwrites.
         Transaction::query()
             ->where('planned_transaction_id', $plannedId)
             ->where('id', '!=', $transaction->id)
-            ->update(['category_id' => $newCategoryId]);
+            ->update([
+                'category_id' => $newCategoryId,
+                'category_source' => $newCategoryId === null ? null : CategorySource::Manual->value,
+            ]);
 
         PlannedTransaction::query()
             ->where('id', $plannedId)

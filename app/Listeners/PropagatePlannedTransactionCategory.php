@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Listeners;
 
+use App\Enums\CategorySource;
 use App\Events\PlannedTransactionCategoryUpdated;
 use App\Models\Transaction;
 
@@ -17,8 +18,16 @@ final class PropagatePlannedTransactionCategory
             return;
         }
 
+        // Mass update: bypasses model events, so the provenance invariant must
+        // be written by hand. A planned transaction's category is user-chosen,
+        // hence Manual.
         Transaction::query()
             ->where('planned_transaction_id', $plannedTransaction->id)
-            ->update(['category_id' => $plannedTransaction->category_id]);
+            ->update([
+                'category_id' => $plannedTransaction->category_id,
+                'category_source' => $plannedTransaction->category_id === null
+                    ? null
+                    : CategorySource::Manual->value,
+            ]);
     }
 }
