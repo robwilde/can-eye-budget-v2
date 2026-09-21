@@ -9,6 +9,7 @@ declare(strict_types=1);
 use App\Enums\TransactionDirection;
 use App\Livewire\TransactionList;
 use App\Models\Account;
+use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -45,7 +46,7 @@ it('orders clusters by size and collapses reference numbers into one cluster', f
     clusterTxn($this->user, $this->account, 'NETFLIX.COM');
 
     $clusters = Livewire::actingAs($this->user)
-        ->test(TransactionList::class, ['categorised' => 'uncategorised'])
+        ->test(TransactionList::class)
         ->set('categorised', 'uncategorised')
         ->set('groupMode', 'merchant')
         ->viewData('clusters');
@@ -143,7 +144,7 @@ it('never clusters another users transactions', function () {
 });
 
 it('excludes categorised rows from clusters when filtering uncategorised', function () {
-    $category = App\Models\Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->create(['is_hidden' => false]);
 
     clusterTxn($this->user, $this->account, 'NETFLIX.COM');
     clusterTxn($this->user, $this->account, 'ALREADY DONE', ['category_id' => $category->id]);
@@ -170,28 +171,38 @@ it('keeps the date-grouped view untouched in date mode', function () {
 });
 
 it('does not issue a query per cluster when rendering a page of clusters', function () {
+    $render = function (): int {
+        $component = Livewire::actingAs($this->user)
+            ->test(TransactionList::class)
+            ->set('categorised', 'uncategorised')
+            ->set('groupMode', 'merchant');
+
+        DB::flushQueryLog();
+        $component->call('$refresh');
+
+        return count(DB::getQueryLog());
+    };
+
+    DB::enableQueryLog();
+
     foreach (['NETFLIX.COM', 'SPOTIFY AB', 'AFTERPAY', 'UBER TRIP', 'COLES SUPERMARKET'] as $merchant) {
         clusterTxn($this->user, $this->account, $merchant);
         clusterTxn($this->user, $this->account, $merchant);
     }
 
-    $component = Livewire::actingAs($this->user)
-        ->test(TransactionList::class)
-        ->set('categorised', 'uncategorised')
-        ->set('groupMode', 'merchant');
+    $withFive = $render();
 
-    DB::enableQueryLog();
-    DB::flushQueryLog();
+    foreach (clusterMerchantNames() as $merchant) {
+        clusterTxn($this->user, $this->account, $merchant.' STORE');
+    }
 
-    $component->call('$refresh');
-
-    $queries = count(DB::getQueryLog());
+    $withThirtyOne = $render();
     DB::disableQueryLog();
 
-    // Five clusters render. A per-cluster query would push this well past the
-    // fixed set of page queries; the point is that cluster count does not
-    // drive query count.
-    expect($queries)->toBeLessThan(15);
+    // The invariant is that cluster count does not drive query count. A ceiling
+    // cannot express that: a render costs a handful of queries, so a per-cluster
+    // query at five clusters would still sit far below any plausible budget.
+    expect($withThirtyOne)->toBe($withFive);
 });
 
 it('falls back to date mode for an unknown group mode and clears a stale expansion', function () {
@@ -218,4 +229,114 @@ it('clears the expanded cluster when switching modes', function () {
     $component->set('groupMode', 'date');
 
     expect($component->get('expandedKey'))->toBeNull();
+});
+
+/**
+ * 26 payee names that survive MerchantSignature normalisation as distinct
+ * keys — digits are stripped as reference numbers, so numbered names collapse
+ * into one cluster.
+ *
+ * @return list<string>
+ */
+function clusterMerchantNames(): array
+{
+    return [
+        'ALPHA', 'BRAVO', 'CHARLIE', 'DELTA', 'ECHO', 'FOXTROT', 'GOLF',
+        'HOTEL', 'INDIA', 'JULIET', 'KILO', 'LIMA', 'MIKE', 'NOVEMBER',
+        'OSCAR', 'PAPA', 'QUEBEC', 'ROMEO', 'SIERRA', 'TANGO', 'UNIFORM',
+        'VICTOR', 'WHISKEY', 'XRAY', 'YANKEE', 'ZULU',
+    ];
+}
+
+it('paginates clusters and keeps the total consistent with the rows', function () {
+    foreach (clusterMerchantNames() as $name) {
+        clusterTxn($this->user, $this->account, $name.' STORE');
+    }
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->set('groupMode', 'merchant');
+
+    $firstPage = $component->viewData('clusters');
+
+    expect($firstPage->total())->toBe(26)
+        ->and($firstPage->lastPage())->toBe(2)
+        ->and($firstPage->items())->toHaveCount(25)
+        ->and($firstPage->hasMorePages())->toBeTrue();
+
+    $secondPage = $component->call('gotoPage', 2)->viewData('clusters');
+
+    expect(collect($secondPage->items())->pluck('merchant_key')->all())->toBe(['ZULU STORE']);
+});
+
+it('leaves rows without a merchant key out of the clusters entirely', function () {
+    // The column is nullable and the backfill is a deploy step, so NULL rows
+    // are a real state. A NULL group cannot be clustered: COUNT(DISTINCT) skips
+    // it while GROUP BY emits it, so letting it through desynchronises the
+    // paginator total from the rows and yields a cluster with no identity.
+    foreach (array_slice(clusterMerchantNames(), 0, 25) as $name) {
+        clusterTxn($this->user, $this->account, $name.' STORE');
+    }
+
+    $orphan = clusterTxn($this->user, $this->account, 'LEGACY ROW');
+    DB::table('transactions')->where('id', $orphan->id)->update(['merchant_key' => null]);
+
+    $clusters = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->set('groupMode', 'merchant')
+        ->viewData('clusters');
+
+    $keys = collect($clusters->items())->pluck('merchant_key');
+
+    expect($clusters->total())->toBe(25)
+        ->and($clusters->lastPage())->toBe(1)
+        ->and($keys)->toHaveCount(25)
+        ->and($keys->contains(null))->toBeFalse();
+});
+
+it('returns to date mode when the categorised filter leaves uncategorised', function () {
+    clusterTxn($this->user, $this->account, 'NETFLIX.COM');
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->set('groupMode', 'merchant')
+        ->call('toggleCluster', 'NETFLIX.COM');
+
+    expect($component->viewData('inMerchantMode'))->toBeTrue();
+
+    // The mode toggle is only rendered while triaging uncategorised rows, so
+    // staying in merchant mode here would leave no way back to the date list.
+    $component->set('categorised', 'all');
+
+    expect($component->get('groupMode'))->toBe('date')
+        ->and($component->get('expandedKey'))->toBeNull()
+        ->and($component->viewData('inMerchantMode'))->toBeFalse();
+});
+
+it('does not restore merchant mode from the url under another filter', function () {
+    clusterTxn($this->user, $this->account, 'NETFLIX.COM');
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class, ['categorised' => 'all', 'groupMode' => 'merchant']);
+
+    expect($component->get('groupMode'))->toBe('date')
+        ->and($component->viewData('inMerchantMode'))->toBeFalse();
+});
+
+it('never expands another users cluster', function () {
+    $otherUser = User::factory()->create();
+    $otherAccount = Account::factory()->for($otherUser)->create();
+    clusterTxn($otherUser, $otherAccount, 'NETFLIX.COM');
+    clusterTxn($this->user, $this->account, 'SPOTIFY AB');
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->set('groupMode', 'merchant')
+        ->call('toggleCluster', 'NETFLIX.COM');
+
+    expect($component->viewData('clusterRows'))->toHaveCount(0);
 });

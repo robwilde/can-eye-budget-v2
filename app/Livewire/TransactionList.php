@@ -140,6 +140,14 @@ final class TransactionList extends Component
             $this->groupMode = 'date';
         }
 
+        // Clustering only exists while triaging uncategorised rows, and the
+        // toggle that leaves it is rendered only there. Any other filter would
+        // strand the user in merchant mode with no visible way back, including
+        // on a direct ?groupMode=merchant&categorised=all load.
+        if ($this->categorised !== 'uncategorised') {
+            $this->groupMode = 'date';
+        }
+
         // An expanded cluster only means anything in merchant mode; carrying a
         // stale key into date mode would leave a dead query-string parameter.
         if ($this->groupMode !== 'merchant') {
@@ -156,20 +164,6 @@ final class TransactionList extends Component
         if (! TransactionPeriod::tryFrom($this->period)) {
             $this->period = 'this-month';
         }
-    }
-
-    /**
-     * Switch between the reverse-chronological list and merchant clusters.
-     */
-    public function setGroupMode(string $mode): void
-    {
-        if (! in_array($mode, self::VALID_GROUP_MODES, true)) {
-            return;
-        }
-
-        $this->groupMode = $mode;
-        $this->expandedKey = null;
-        $this->resetPage();
     }
 
     /**
@@ -510,6 +504,13 @@ final class TransactionList extends Component
             $this->categorised = 'all';
         }
 
+        // Same coherence rule as mount(): leaving uncategorised hides the mode
+        // toggle, so the mode itself has to come back to date.
+        if ($this->categorised !== 'uncategorised') {
+            $this->groupMode = 'date';
+            $this->expandedKey = null;
+        }
+
         $this->resetPage();
     }
 
@@ -654,18 +655,34 @@ final class TransactionList extends Component
      * `direction_count` are raw attributes, deliberately named apart from
      * `amount` so the MoneyCast on that column does not apply to them.
      *
+     * Rows whose merchant_key has not been populated yet are excluded. The
+     * column is nullable and the backfill is a deploy step, so a NULL group is
+     * a real possibility — and it cannot be clustered: COUNT(DISTINCT) skips
+     * NULL while GROUP BY emits it, so the total and the rows would disagree,
+     * and `$expandedKey === null` is already this component's sentinel for
+     * "nothing expanded", making a null cluster key unrepresentable. The guard
+     * lives here rather than in filtered() because the date list must keep
+     * showing every row.
+     *
      * @param  array{start: mixed, end: mixed}  $dates
      * @return LengthAwarePaginator<int, Transaction>
      */
     private function merchantClusters(array $dates, ?TransactionDirection $directionEnum): LengthAwarePaginator
     {
-        $page = $this->getPage();
+        // Cast before max(): Livewire stores the raw ?page query value, and
+        // max(1, 'abc') returns the string, which forPage() cannot subtract.
+        $page = max(1, (int) $this->getPage());
 
-        $total = $this->filtered($dates, $directionEnum)
+        // One closure for both queries so the count and the rows can never
+        // disagree about which rows are clusterable.
+        $clusterable = fn (): Builder => $this->filtered($dates, $directionEnum)
+            ->whereNotNull('merchant_key');
+
+        $total = $clusterable()
             ->distinct()
             ->count('merchant_key');
 
-        $rows = $this->filtered($dates, $directionEnum)
+        $rows = $clusterable()
             ->selectRaw(implode(', ', [
                 'merchant_key',
                 'COUNT(*) as row_count',
