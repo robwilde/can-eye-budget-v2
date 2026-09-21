@@ -361,10 +361,81 @@
                         Clear
                     </flux:button>
 
+                    {{-- A second, separate action. "Apply to these N" is
+                         bounded; this one creates an auto-apply rule that
+                         sweeps all history and every future import, so it
+                         gets its own button and its own confirmation. --}}
+                    <flux:button variant="ghost" size="sm"
+                                 wire:click="openRulePanel"
+                                 data-testid="rule-open">
+                        Create rule…
+                    </flux:button>
+
                     @if($bulkError)
                         <span class="text-sm text-red-600 dark:text-red-400" data-testid="bulk-error">{{ $bulkError }}</span>
                     @endif
                 </div>
+
+                {{-- Pre-commit preview. Numbers come from a dry-run of the
+                     real RuleEvaluator against the same trigger the commit
+                     path builds, so what is shown is what will happen. --}}
+                @if($rulePanelOpen)
+                    <div class="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-700" data-testid="rule-panel">
+                        <div class="flex flex-wrap items-end gap-3">
+                            <div class="min-w-64">
+                                <flux:input
+                                    wire:model.live.debounce.500ms="ruleMatchValue"
+                                    label="Rule matches descriptions containing"
+                                    size="sm"
+                                    data-testid="rule-match-value"
+                                />
+                            </div>
+
+                            <flux:button variant="danger" size="sm"
+                                         wire:click="createRuleFromSelection"
+                                         wire:loading.attr="disabled" wire:target="createRuleFromSelection"
+                                         data-testid="rule-confirm">
+                                Create rule + apply to past and future
+                            </flux:button>
+
+                            <flux:button variant="ghost" size="sm" wire:click="closeRulePanel" data-testid="rule-cancel">
+                                Cancel
+                            </flux:button>
+                        </div>
+
+                        @if($rulePreview)
+                            <div class="mt-3 space-y-1 text-sm" data-testid="rule-preview">
+                                <div>
+                                    Matches <strong data-testid="rule-preview-total">{{ $rulePreview->totalMatches() }}</strong>
+                                    transaction{{ $rulePreview->totalMatches() === 1 ? '' : 's' }},
+                                    of which <strong data-testid="rule-preview-beyond">{{ $rulePreview->beyondSelection }}</strong>
+                                    {{ $rulePreview->beyondSelection === 1 ? 'is' : 'are' }} outside your selection.
+                                </div>
+                                <div>
+                                    <strong data-testid="rule-preview-change">{{ $rulePreview->wouldChange }}</strong>
+                                    will be categorised.
+                                </div>
+                                @if($rulePreview->protectedByManual > 0)
+                                    <div class="text-emerald-700 dark:text-emerald-400" data-testid="rule-preview-protected">
+                                        {{ $rulePreview->protectedByManual }} will be left alone because you set their category yourself.
+                                    </div>
+                                @endif
+                                @if($rulePreview->existingCategories !== [])
+                                    <div class="text-amber-700 dark:text-amber-500" data-testid="rule-preview-existing">
+                                        Outside your selection these already have categories:
+                                        @foreach($rulePreview->existingCategories as $name => $count)
+                                            {{ $name }} ({{ $count }}){{ ! $loop->last ? ', ' : '' }}
+                                        @endforeach
+                                    </div>
+                                @endif
+                            </div>
+                        @else
+                            <p class="mt-3 text-sm text-zinc-500" data-testid="rule-preview-empty">
+                                Choose a category and a match value to see what this rule would do.
+                            </p>
+                        @endif
+                    </div>
+                @endif
             </x-cib.card>
         </div>
     @endif

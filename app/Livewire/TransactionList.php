@@ -6,6 +6,7 @@ namespace App\Livewire;
 
 use App\Casts\MoneyCast;
 use App\Contracts\GmailServiceContract;
+use App\DTOs\CategoryRulePreview;
 use App\DTOs\EmailSearchResult;
 use App\Enums\CategorySource;
 use App\Enums\TransactionDirection;
@@ -16,6 +17,7 @@ use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\TransactionEmail;
 use App\Models\TransactionSplit;
+use App\Services\CategoryRuleGenerator;
 use App\Services\GmailService;
 use App\Support\AmountParser;
 use Illuminate\Database\Eloquent\Builder;
@@ -163,6 +165,21 @@ final class TransactionList extends Component
 
     #[Locked]
     public ?string $bulkNotice = null;
+
+    /**
+     * The editable `description contains` value the generated rule will carry.
+     * Defaulted from CategoryRuleGenerator::suggestMatchValue(), then the
+     * user's to change before anything is created.
+     */
+    public string $ruleMatchValue = '';
+
+    /**
+     * Set while the rule preview panel is open. The rule is created only on a
+     * second, explicit confirmation, because unlike "apply to these N" a rule
+     * is auto-apply and sweeps the user's whole history.
+     */
+    #[Locked]
+    public bool $rulePanelOpen = false;
 
     #[Locked]
     public ?int $emailPanelTxnId = null;
@@ -482,6 +499,97 @@ final class TransactionList extends Component
         $this->bulkNotice = $updated === 1
             ? 'Categorised 1 transaction.'
             : sprintf('Categorised %d transactions.', $updated);
+
+        $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * Open the rule preview. Nothing is created here — this exists so the user
+     * sees how far the rule reaches *before* committing, since unlike "apply to
+     * these N" a generated rule is auto-apply and sweeps all history.
+     */
+    public function openRulePanel(CategoryRuleGenerator $generator): void
+    {
+        $this->bulkError = null;
+        $this->bulkNotice = null;
+
+        $source = $this->ruleSourceTransaction();
+
+        if ($source === null) {
+            $this->bulkError = 'Nothing is selected.';
+
+            return;
+        }
+
+        if ($this->ruleMatchValue === '') {
+            // In cluster mode the merchant key is the natural default; otherwise
+            // fall back to the generator's own suggestion.
+            $this->ruleMatchValue = $this->bulkScope['merchantKey'] ?? $generator->suggestMatchValue($source);
+        }
+
+        $this->rulePanelOpen = true;
+    }
+
+    public function closeRulePanel(): void
+    {
+        $this->rulePanelOpen = false;
+        $this->ruleMatchValue = '';
+    }
+
+    /**
+     * Create one rule from the selection and sweep past and future.
+     *
+     * One rule, not one per selected row: N rules would be near-duplicates and
+     * would each trigger their own full-history sweep.
+     */
+    public function createRuleFromSelection(CategoryRuleGenerator $generator): void
+    {
+        $this->bulkError = null;
+        $this->bulkNotice = null;
+
+        $categoryId = (int) $this->bulkCategoryId;
+
+        if ($categoryId <= 0) {
+            $this->bulkError = 'Choose a category first.';
+
+            return;
+        }
+
+        if (! Category::visible()->whereKey($categoryId)->exists()) {
+            $this->bulkError = 'That category is not available.';
+
+            return;
+        }
+
+        if (mb_trim($this->ruleMatchValue) === '') {
+            $this->bulkError = 'Give the rule something to match on.';
+
+            return;
+        }
+
+        $source = $this->ruleSourceTransaction();
+
+        if ($source === null) {
+            $this->bulkError = 'Nothing is selected.';
+
+            return;
+        }
+
+        $preview = $generator->preview($source, $categoryId, $this->ruleMatchValue, $this->selectedIds());
+
+        $generator->generateAndApply($source, $categoryId, $this->ruleMatchValue);
+
+        $this->clearSelection();
+        $this->closeRulePanel();
+
+        $this->bulkNotice = sprintf(
+            'Rule created. %d transaction%s categorised%s.',
+            $preview->wouldChange,
+            $preview->wouldChange === 1 ? '' : 's',
+            $preview->protectedByManual > 0
+                ? sprintf(', %d left alone because you set them yourself', $preview->protectedByManual)
+                : '',
+        );
 
         $this->dispatch('transaction-saved');
     }
@@ -948,6 +1056,7 @@ final class TransactionList extends Component
             'selectionCount' => $this->selectionCount(),
             'pageEligibleIds' => $pageEligibleIds,
             'matchingCount' => $this->matchingEligibleCount(),
+            'rulePreview' => $this->rulePanelOpen ? $this->currentRulePreview() : null,
         ]);
     }
 
@@ -1123,6 +1232,33 @@ final class TransactionList extends Component
     private function scopeCoversVisibleRows(): bool
     {
         return $this->scopeCoversScreen($this->expandedOnPageNow());
+    }
+
+    /**
+     * One representative transaction for the selection, used as the rule's
+     * source. A transfer can never be one: TransactionModal already refuses to
+     * build a rule from a transfer and the same holds here.
+     */
+    private function ruleSourceTransaction(): ?Transaction
+    {
+        return $this->selectionQuery()?->orderBy('id')->first();
+    }
+
+    /**
+     * The live preview for the panel, recomputed on each render so editing the
+     * match value updates the numbers before anything is committed.
+     */
+    private function currentRulePreview(): ?CategoryRulePreview
+    {
+        $categoryId = (int) $this->bulkCategoryId;
+        $source = $this->ruleSourceTransaction();
+
+        if ($source === null || mb_trim($this->ruleMatchValue) === '') {
+            return null;
+        }
+
+        return app(CategoryRuleGenerator::class)
+            ->preview($source, $categoryId, $this->ruleMatchValue, $this->selectedIds());
     }
 
     /**
