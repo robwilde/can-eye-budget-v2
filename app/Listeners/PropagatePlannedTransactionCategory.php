@@ -19,8 +19,8 @@ final class PropagatePlannedTransactionCategory
         }
 
         // Mass update: bypasses model events, so the provenance invariant must
-        // be written by hand. A planned transaction's category is user-chosen,
-        // hence Manual.
+        // be written by hand. Planned transactions are user-managed and carry no
+        // provenance of their own, so a category coming from one is Manual.
         Transaction::query()
             ->where('planned_transaction_id', $plannedTransaction->id)
             ->update([

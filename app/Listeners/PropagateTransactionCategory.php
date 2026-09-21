@@ -31,14 +31,18 @@ final class PropagateTransactionCategory
         // has to be written explicitly here or the propagated rows would keep a
         // stale source, or none at all.
         //
-        // The propagated category originates from a user's own choice, so it
-        // carries Manual and is protected from later rule overwrites.
+        // The event fires from Transaction::updated() for any writer, including
+        // the save in RuleActionExecutor::execute(), so siblings inherit the
+        // originating row's provenance instead of being asserted Manual — a
+        // rule's guess must stay rule-correctable everywhere it lands.
         Transaction::query()
             ->where('planned_transaction_id', $plannedId)
             ->where('id', '!=', $transaction->id)
             ->update([
                 'category_id' => $newCategoryId,
-                'category_source' => $newCategoryId === null ? null : CategorySource::Manual->value,
+                'category_source' => $newCategoryId === null
+                    ? null
+                    : ($transaction->category_source ?? CategorySource::Manual)->value,
             ]);
 
         PlannedTransaction::query()
