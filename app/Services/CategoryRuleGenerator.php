@@ -89,17 +89,9 @@ final readonly class CategoryRuleGenerator
     {
         // Stream by id rather than loading the whole history into memory. Keying
         // on the (unchanging) id keeps paging stable even though we mutate rows.
-        //
-        // Splits and transfers are excluded at the query level as well as in the
-        // executor: a split transaction's category is decided by its parts, and
-        // a transfer is not spending at all. Note whereDoesntHave('splits') is
-        // the split test — parent_transaction_id is createChild() lineage and
-        // means something entirely different.
         Transaction::query()
             ->where('user_id', $userId)
             ->current()
-            ->whereNull('transfer_pair_id')
-            ->whereDoesntHave('splits')
             ->lazyById()
             ->each(function (Transaction $transaction) use ($rule): void {
                 if ($this->evaluator->matches($transaction, $rule)) {
