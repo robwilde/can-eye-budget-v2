@@ -1,8 +1,5 @@
 @php
-    use App\Enums\TransactionDirection;
-    use App\Services\GmailService;
     use Carbon\CarbonImmutable;
-    use App\Support\AmountParser;
 @endphp
 <div class="space-y-6">
     <div class="flex flex-wrap items-center justify-between gap-4">
@@ -146,26 +143,48 @@
                             $minAmount = (int) $cluster->min_amount;
                             $maxAmount = (int) $cluster->max_amount;
                             $isWideSpread = $minAmount > 0 && $maxAmount >= $minAmount * 5;
+                            // Named from content, the button would read as a run
+                            // of four unlabelled numbers, and the badge meanings
+                            // and the wide-spread colour would never reach it.
+                            $clusterLabel = implode(', ', array_filter([
+                                $cluster->merchant_key,
+                                $cluster->row_count.' transactions',
+                                'total '.$formatMoney((int) $cluster->total_amount),
+                                'amounts '.$formatMoney($minAmount).' to '.$formatMoney($maxAmount),
+                                $isWideSpread ? 'wide range' : null,
+                                $isMixedDirection ? 'money in and money out' : null,
+                                $isMultiAccount ? $cluster->account_count.' accounts' : null,
+                                $spanStart->format('j M').' to '.$spanEnd->format('j M'),
+                            ]));
                         @endphp
                         <section wire:key="cluster-{{ md5($cluster->merchant_key) }}" class="agenda-group">
                             <button type="button"
                                     wire:click="toggleCluster(@js($cluster->merchant_key))"
                                     class="flex w-full items-center gap-4 px-4 py-3 text-left"
                                     data-testid="cluster-{{ md5($cluster->merchant_key) }}"
-                                    aria-expanded="{{ $isExpanded ? 'true' : 'false' }}">
+                                    aria-controls="cluster-rows-{{ md5($cluster->merchant_key) }}"
+                                    aria-expanded="{{ $isExpanded ? 'true' : 'false' }}"
+                                    aria-label="{{ $clusterLabel }}">
                                 <span class="flex min-w-0 flex-1 items-center gap-2">
                                     <flux:icon :name="$isExpanded ? 'chevron-down' : 'chevron-right'" class="size-4 shrink-0 text-zinc-400"/>
                                     <span class="min-w-0 truncate font-medium">{{ $cluster->merchant_key }}</span>
-                                    <span class="pill">{{ $cluster->row_count }}</span>
-                                    @if($isMixedDirection)
-                                        <span class="pill split" title="This cluster holds both money in and money out">in + out</span>
-                                    @endif
-                                    @if($isMultiAccount)
-                                        <span class="pill split" title="Rows in this cluster come from more than one account">{{ $cluster->account_count }} accounts</span>
-                                    @endif
+                                    {{-- .pill is styled as a descendant of .tx-meta, so the badges need
+                                         that container here just as the row partial gets it from
+                                         x-cib.tx-row's meta slot. --}}
+                                    <span class="tx-meta shrink-0">
+                                        <span class="pill">{{ $cluster->row_count }}</span>
+                                        @if($isMixedDirection)
+                                            <span class="pill split">in + out</span>
+                                        @endif
+                                        @if($isMultiAccount)
+                                            <span class="pill split">{{ $cluster->account_count }} accounts</span>
+                                        @endif
+                                    </span>
                                 </span>
-                                <span @class(['w-32 text-sm', 'text-amber-600 dark:text-amber-500' => $isWideSpread])
-                                      title="Smallest to largest amount in this cluster">
+                                <span @class(['w-32 text-sm', 'font-semibold text-cib-yellow-600' => $isWideSpread])>
+                                    @if($isWideSpread)
+                                        <flux:icon.exclamation-triangle class="mr-1 inline size-3.5 align-text-bottom"/>
+                                    @endif
                                     {{ $formatMoney($minAmount) }}–{{ $formatMoney($maxAmount) }}
                                 </span>
                                 <span class="w-24 text-sm text-zinc-500">
@@ -175,7 +194,7 @@
                             </button>
 
                             @if($isExpanded)
-                                <div class="day-card" data-testid="cluster-rows">
+                                <div id="cluster-rows-{{ md5($cluster->merchant_key) }}" class="day-card" data-testid="cluster-rows">
                                     @foreach($clusterRows as $transaction)
                                         @include('livewire.partials.transaction-row', ['transaction' => $transaction])
                                     @endforeach

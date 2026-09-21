@@ -340,3 +340,17 @@ it('never expands another users cluster', function () {
 
     expect($component->viewData('clusterRows'))->toHaveCount(0);
 });
+
+it('labels the cluster toggle instead of leaving it named from content', function () {
+    clusterTxn($this->user, $this->account, 'NETFLIX.COM');
+    clusterTxn($this->user, $this->account, 'NETFLIX.COM');
+
+    // Flux icons are aria-hidden, so without an explicit label the button reads
+    // as a run of unlabelled numbers.
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->set('groupMode', 'merchant')
+        ->assertSeeHtml('aria-label="NETFLIX.COM, 2 transactions, total')
+        ->assertSeeHtml('aria-controls="cluster-rows-'.md5('NETFLIX.COM').'"');
+});
