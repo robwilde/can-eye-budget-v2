@@ -65,6 +65,12 @@ final readonly class RuleActionExecutor
      * A Manual source — or a categorised row that never declared one, which
      * saving() would default to Manual — is protected, and reports handled
      * (true) so the pipeline audits the row and stops retrying it.
+     *
+     * A split reports not-applied (false): the skip is transient, because
+     * un-splitting restores the same row id, and an audit entry would suppress
+     * this rule on that row forever. A transfer reports handled (true):
+     * converting away from a transfer mints a new row id, so the audit cannot
+     * strand it.
      */
     private function setCategory(Transaction $transaction, string $value): bool
     {
@@ -76,7 +82,7 @@ final readonly class RuleActionExecutor
         }
 
         if ($transaction->isSplit()) {
-            return true;
+            return false;
         }
 
         if ($transaction->transfer_pair_id !== null) {

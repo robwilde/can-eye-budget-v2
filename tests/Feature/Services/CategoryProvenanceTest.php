@@ -92,11 +92,12 @@ it('skips a split transaction', function () {
         'position' => 1,
     ]);
 
-    $this->executor->execute($transaction->fresh(), [
+    $applied = $this->executor->execute($transaction->fresh(), [
         ['type' => 'set_category', 'value' => (string) $category->id],
     ]);
 
-    expect($transaction->fresh()->category_id)->toBeNull();
+    expect($transaction->fresh()->category_id)->toBeNull()
+        ->and($applied)->toBeFalse();
 });
 
 it('skips a transfer', function () {
@@ -107,11 +108,12 @@ it('skips a transfer', function () {
         'transfer_pair_id' => $other->id,
     ]);
 
-    $this->executor->execute($transaction, [
+    $applied = $this->executor->execute($transaction, [
         ['type' => 'set_category', 'value' => (string) $category->id],
     ]);
 
-    expect($transaction->fresh()->category_id)->toBeNull();
+    expect($transaction->fresh()->category_id)->toBeNull()
+        ->and($applied)->toBeTrue();
 });
 
 it('clears the source when a category is removed', function () {
