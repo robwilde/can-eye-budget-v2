@@ -5,13 +5,17 @@
 declare(strict_types=1);
 
 use App\Enums\CategorySource;
+use App\Enums\RecurrenceFrequency;
+use App\Enums\SuggestionType;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Models\Account;
+use App\Models\AnalysisSuggestion;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\RuleActionExecutor;
+use App\Services\SuggestionApplier;
 use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
@@ -174,4 +178,37 @@ it('protects a categorised row whose source is missing, treating it as manual', 
 
     expect($row->category_id)->toBe($chosen->id)
         ->and($row->category_source)->toBeNull();
+});
+
+it('stamps a category accepted from a recurring suggestion as manual', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $ruleTarget = Category::factory()->create(['is_hidden' => false]);
+    $transaction = provenanceTransaction($this->user, $this->account);
+
+    $suggestion = AnalysisSuggestion::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => SuggestionType::RecurringTransaction,
+        'payload' => [
+            'account_id' => $this->account->id,
+            'amount' => 1000,
+            'direction' => TransactionDirection::Debit->value,
+            'clean_description' => 'NETFLIX.COM',
+            'start_date' => now()->toDateString(),
+            'frequency' => RecurrenceFrequency::EveryMonth->value,
+            'matched_transaction_ids' => [$transaction->id],
+        ],
+    ]);
+
+    app(SuggestionApplier::class)->applyRecurringTransaction($suggestion, $this->user, $category->id);
+
+    $row = DB::table('transactions')->where('id', $transaction->id)->first();
+
+    expect($row->category_id)->toBe($category->id)
+        ->and($row->category_source)->toBe(CategorySource::Manual->value);
+
+    $this->executor->execute($transaction->fresh(), [
+        ['type' => 'set_category', 'value' => (string) $ruleTarget->id],
+    ]);
+
+    expect($transaction->fresh()->category_id)->toBe($category->id);
 });
