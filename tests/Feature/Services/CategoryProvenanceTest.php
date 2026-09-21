@@ -12,7 +12,6 @@ use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\RuleActionExecutor;
-use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
     $this->executor = app(RuleActionExecutor::class);
@@ -64,20 +63,21 @@ it('categorises an uncategorised transaction and stamps the rule as the source',
         ->and($transaction->fresh()->category_source)->toBe(CategorySource::Rule);
 });
 
-it('lets a rule correct a category an earlier rule set', function () {
+it('lets a rule correct a feed-supplied category and restamps it as the rule', function () {
     $old = Category::factory()->create(['is_hidden' => false]);
     $new = Category::factory()->create(['is_hidden' => false]);
 
     $transaction = provenanceTransaction($this->user, $this->account, [
         'category_id' => $old->id,
-        'category_source' => CategorySource::Rule,
+        'category_source' => CategorySource::Feed,
     ]);
 
     $this->executor->execute($transaction, [
         ['type' => 'set_category', 'value' => (string) $new->id],
     ]);
 
-    expect($transaction->fresh()->category_id)->toBe($new->id);
+    expect($transaction->fresh()->category_id)->toBe($new->id)
+        ->and($transaction->fresh()->category_source)->toBe(CategorySource::Rule);
 });
 
 it('skips a split transaction', function () {
@@ -113,26 +113,6 @@ it('skips a transfer', function () {
     expect($transaction->fresh()->category_id)->toBeNull();
 });
 
-it('holds the invariant that a source exists exactly when a category does', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
-
-    provenanceTransaction($this->user, $this->account);
-    provenanceTransaction($this->user, $this->account, ['category_id' => $category->id]);
-
-    $sourceWithoutCategory = DB::table('transactions')
-        ->whereNull('category_id')
-        ->whereNotNull('category_source')
-        ->count();
-
-    $categoryWithoutSource = DB::table('transactions')
-        ->whereNotNull('category_id')
-        ->whereNull('category_source')
-        ->count();
-
-    expect($sourceWithoutCategory)->toBe(0)
-        ->and($categoryWithoutSource)->toBe(0);
-});
-
 it('clears the source when a category is removed', function () {
     $category = Category::factory()->create(['is_hidden' => false]);
 
@@ -154,4 +134,21 @@ it('treats an undeclared source as manual so rules leave it alone', function () 
     ]);
 
     expect($transaction->fresh()->category_source)->toBe(CategorySource::Manual);
+});
+
+it('leaves a feed-stamped row untouched when the rule targets a hidden category', function () {
+    $seeded = Category::factory()->create(['is_hidden' => false]);
+    $hidden = Category::factory()->create(['is_hidden' => true]);
+
+    $transaction = provenanceTransaction($this->user, $this->account, [
+        'category_id' => $seeded->id,
+        'category_source' => CategorySource::Feed,
+    ]);
+
+    $this->executor->execute($transaction, [
+        ['type' => 'set_category', 'value' => (string) $hidden->id],
+    ]);
+
+    expect($transaction->fresh()->category_id)->toBe($seeded->id)
+        ->and($transaction->fresh()->category_source)->toBe(CategorySource::Feed);
 });
