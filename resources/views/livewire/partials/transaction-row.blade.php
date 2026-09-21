@@ -22,7 +22,26 @@
         $account === null ? $transaction->account?->name : null,
     ]);
     $isPlanned = $transaction->planned_transaction_id !== null;
+    $bulkExcluded = $this->isBulkExcluded($transaction);
+    $bulkReason = $this->bulkExclusionReason($transaction);
 @endphp
+<div wire:key="txn-wrap-{{ $transaction->id }}" class="flex items-start gap-2">
+    @if($bulkExcluded)
+        <flux:checkbox
+            disabled
+            class="mt-5 shrink-0"
+            :title="$bulkReason"
+            data-testid="select-excluded-{{ $transaction->id }}"
+        />
+    @else
+        <flux:checkbox
+            wire:model.live="selected.{{ $transaction->id }}"
+            class="mt-5 shrink-0"
+            aria-label="Select transaction"
+            data-testid="select-{{ $transaction->id }}"
+        />
+    @endif
+    <div class="min-w-0 flex-1">
 <x-cib.tx-row
     wire:key="txn-{{ $transaction->id }}"
     :name="$transaction->description"
@@ -156,3 +175,5 @@
         </div>
     </div>
 @endif
+    </div>
+</div>

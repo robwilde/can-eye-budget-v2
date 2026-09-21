@@ -1,5 +1,6 @@
 @php
     use Carbon\CarbonImmutable;
+    use Illuminate\Support\Js;
     use Illuminate\Support\Str;
 @endphp
 <div class="space-y-6">
@@ -116,6 +117,31 @@
             </x-slot:action>
         </x-cib.empty-state>
     @else
+        @php
+            // Three-state: none / some / all of the eligible rows on screen.
+            $eligibleOnScreen = count($pageEligibleIds);
+            $selectedOnScreen = collect($pageEligibleIds)->filter(fn (int $id): bool => ! empty($selected[$id]))->count();
+            $allOnScreenSelected = $eligibleOnScreen > 0 && $selectedOnScreen === $eligibleOnScreen;
+        @endphp
+
+        <div class="flex flex-wrap items-center gap-3 px-1">
+            @if($eligibleOnScreen > 0)
+                <flux:button size="sm" variant="ghost"
+                             wire:click="toggleVisible({{ Js::from($pageEligibleIds) }}, {{ $allOnScreenSelected ? 'false' : 'true' }})"
+                             data-testid="select-visible">
+                    {{ $allOnScreenSelected ? 'Clear these' : ($inMerchantMode ? 'Select these ' . $eligibleOnScreen : 'Select this page (' . $eligibleOnScreen . ')') }}
+                </flux:button>
+            @endif
+
+            {{-- Deliberately a separate control from the on-screen checkbox, and
+                 it states the real number, so "all" can never be mistaken for
+                 "this page". --}}
+            @if($matchingCount > $eligibleOnScreen)
+                <flux:button size="sm" variant="ghost" wire:click="selectAllMatching" data-testid="select-all-matching">
+                    Select all {{ $matchingCount }} matching this filter
+                </flux:button>
+            @endif
+        </div>
         <div class="relative">
             <div wire:loading class="absolute inset-0 z-10 flex items-center justify-center bg-white/60 dark:bg-zinc-900/60">
                 <flux:icon.arrow-path class="size-6 animate-spin text-zinc-400"/>
@@ -201,6 +227,18 @@
                                 <span class="w-28 text-right font-medium">{{ $formatMoney((int) $cluster->total_amount) }}</span>
                             </button>
 
+                            {{-- Selecting a whole cluster is the point of this
+                                 view: one click stands in for however many rows
+                                 the cluster holds, stored as a scope rather
+                                 than an id list. --}}
+                            <div class="px-4 pb-2">
+                                <flux:button size="sm" variant="ghost"
+                                             wire:click="selectCluster(@js($cluster->merchant_key))"
+                                             data-testid="select-cluster-{{ md5($cluster->merchant_key) }}">
+                                    Select all {{ $cluster->row_count }} in this merchant
+                                </flux:button>
+                            </div>
+
                             @if($isExpanded)
                                 <div id="cluster-rows-{{ md5($cluster->merchant_key) }}" class="day-card" data-testid="cluster-rows">
                                     @foreach($clusterRows as $transaction)
@@ -259,5 +297,48 @@
                 {{ $inMerchantMode ? $clusters->links() : $transactions->links() }}
             </div>
         </x-cib.card>
+
+        {{-- Sticky bulk bar. Appears only with a selection, and always states
+             the true resolved count — a scope selection is counted in the
+             database, so the number on the button is the number written. --}}
+        @if($selectionCount > 0)
+            <div class="sticky bottom-4 z-20 mt-4" data-testid="bulk-bar">
+                <x-cib.card class="border-2 border-amber-400 shadow-lg dark:border-amber-500">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <span class="font-medium" data-testid="bulk-count">
+                            {{ $selectionCount }} selected
+                        </span>
+
+                        <div class="min-w-56">
+                            <x-category-combobox
+                                wire:model="bulkCategoryId"
+                                :categories="$splitCategories"
+                                placeholder="Category"
+                                size="sm"
+                            />
+                        </div>
+
+                        <flux:button variant="primary" size="sm"
+                                     wire:click="applyCategoryToSelection"
+                                     wire:loading.attr="disabled" wire:target="applyCategoryToSelection"
+                                     data-testid="bulk-apply">
+                            Apply to these {{ $selectionCount }}
+                        </flux:button>
+
+                        <flux:button variant="ghost" size="sm" wire:click="clearSelection" data-testid="bulk-clear">
+                            Clear
+                        </flux:button>
+
+                        @if($bulkError)
+                            <span class="text-sm text-red-600 dark:text-red-400" data-testid="bulk-error">{{ $bulkError }}</span>
+                        @endif
+                    </div>
+                </x-cib.card>
+            </div>
+        @endif
+
+        @if($bulkNotice)
+            <div class="mt-3 text-sm text-emerald-700 dark:text-emerald-400" data-testid="bulk-notice">{{ $bulkNotice }}</div>
+        @endif
     @endif
 </div>

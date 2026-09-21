@@ -7,6 +7,7 @@ namespace App\Livewire;
 use App\Casts\MoneyCast;
 use App\Contracts\GmailServiceContract;
 use App\DTOs\EmailSearchResult;
+use App\Enums\CategorySource;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionPeriod;
 use App\Exceptions\GmailSearchException;
@@ -96,6 +97,40 @@ final class TransactionList extends Component
      */
     #[Url]
     public ?string $expandedKey = null;
+
+    /**
+     * Hand-picked row selection, keyed by transaction id.
+     *
+     * Deliberately NOT #[Locked]: a locked property throws
+     * CannotUpdateLockedPropertyException on any client update, so it cannot
+     * back a checkbox wire:model. Locking is not the security mechanism here —
+     * every bulk write re-scopes to where('user_id', auth()->id()), so forged
+     * ids resolve to nothing.
+     *
+     * @var array<int|string, bool>
+     */
+    public array $selected = [];
+
+    /**
+     * A frozen filter snapshot standing in for "everything matching this",
+     * optionally narrowed to one merchant_key.
+     *
+     * Storing the snapshot rather than hundreds of ids keeps the component
+     * payload small and means the set is re-resolved at commit time. It is a
+     * snapshot, not live filters, so the number shown on the button is the
+     * number that gets written even if the user changes a filter afterwards.
+     *
+     * @var array<string, mixed>|null
+     */
+    public ?array $bulkScope = null;
+
+    public string $bulkCategoryId = '';
+
+    #[Locked]
+    public ?string $bulkError = null;
+
+    #[Locked]
+    public ?string $bulkNotice = null;
 
     #[Locked]
     public ?int $emailPanelTxnId = null;
@@ -192,6 +227,152 @@ final class TransactionList extends Component
 
         $this->expandedKey = null;
         $this->resetPage();
+    }
+
+    /**
+     * Hand-picking a row means the user is no longer working from a filter-wide
+     * scope, so the scope is dropped rather than silently widening the write.
+     */
+    public function updatedSelected(): void
+    {
+        $this->bulkScope = null;
+        $this->bulkError = null;
+        $this->bulkNotice = null;
+    }
+
+    /**
+     * Tick or untick every eligible row currently on screen: the page in date
+     * mode, the expanded cluster in merchant mode.
+     *
+     * @param  list<int>  $ids
+     */
+    public function toggleVisible(array $ids, bool $select): void
+    {
+        $this->bulkScope = null;
+
+        foreach ($ids as $id) {
+            if ($select) {
+                $this->selected[(int) $id] = true;
+            } else {
+                unset($this->selected[(int) $id]);
+            }
+        }
+    }
+
+    /**
+     * Select everything matching the current filters — an explicitly separate
+     * action from the on-screen checkbox, so "all" never silently means
+     * something other than what the user clicked.
+     */
+    public function selectAllMatching(): void
+    {
+        $this->selected = [];
+        $this->bulkScope = ['filters' => $this->currentFilters(), 'merchantKey' => null];
+        $this->bulkError = null;
+        $this->bulkNotice = null;
+    }
+
+    /**
+     * Select every eligible row in one cluster, however many pages it spans.
+     * Stored as a scope rather than an id list: a big cluster would otherwise
+     * push hundreds of ids through every subsequent request.
+     */
+    public function selectCluster(string $merchantKey): void
+    {
+        $this->selected = [];
+        $this->bulkScope = ['filters' => $this->currentFilters(), 'merchantKey' => $merchantKey];
+        $this->bulkError = null;
+        $this->bulkNotice = null;
+    }
+
+    public function clearSelection(): void
+    {
+        $this->selected = [];
+        $this->bulkScope = null;
+        $this->bulkCategoryId = '';
+        $this->bulkError = null;
+        $this->bulkNotice = null;
+    }
+
+    /**
+     * Apply one category to the current selection. Bounded by construction:
+     * it writes only what the selection resolves to and creates no rule, so
+     * nothing outside the selection and no future import is affected.
+     */
+    public function applyCategoryToSelection(): void
+    {
+        $this->bulkError = null;
+        $this->bulkNotice = null;
+
+        $categoryId = (int) $this->bulkCategoryId;
+
+        if ($categoryId <= 0) {
+            $this->bulkError = 'Choose a category first.';
+
+            return;
+        }
+
+        if (! Category::visible()->whereKey($categoryId)->exists()) {
+            $this->bulkError = 'That category is not available.';
+
+            return;
+        }
+
+        $query = $this->selectionQuery();
+
+        if ($query === null) {
+            $this->bulkError = 'Nothing is selected.';
+
+            return;
+        }
+
+        $updated = 0;
+
+        // Chunked model saves, never a mass UPDATE: a mass update bypasses
+        // Eloquent events, so TransactionCategoryUpdated would not fire and
+        // PropagateTransactionCategory would never run.
+        DB::transaction(function () use ($query, $categoryId, &$updated): void {
+            $query->chunkById(200, function (EloquentCollection $chunk) use ($categoryId, &$updated): void {
+                foreach ($chunk as $transaction) {
+                    $transaction->category_id = $categoryId;
+                    // A direct human choice, so it is protected from later rule
+                    // overwrites by the provenance guard.
+                    $transaction->category_source = CategorySource::Manual;
+                    $transaction->save();
+                    $updated++;
+                }
+            });
+        });
+
+        $this->clearSelection();
+        $this->bulkNotice = $updated === 1
+            ? 'Categorised 1 transaction.'
+            : sprintf('Categorised %d transactions.', $updated);
+
+        $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * Whether a row may be bulk-categorised. Mirrors eligibleForBulk() for a
+     * single already-loaded model so the view can disable the checkbox and say
+     * why, instead of silently ignoring the tick.
+     */
+    public function isBulkExcluded(Transaction $transaction): bool
+    {
+        return $transaction->transfer_pair_id !== null || $transaction->isSplit();
+    }
+
+    public function bulkExclusionReason(Transaction $transaction): ?string
+    {
+        if ($transaction->transfer_pair_id !== null) {
+            return 'Transfers are not spending, so they are not categorised here.';
+        }
+
+        if ($transaction->isSplit()) {
+            return 'This transaction is split; its category comes from its split lines.';
+        }
+
+        return null;
     }
 
     public function sort(string $column): void
@@ -559,13 +740,7 @@ final class TransactionList extends Component
     public function render(): View
     {
         $periodEnum = TransactionPeriod::tryFrom($this->period) ?? TransactionPeriod::ThisMonth;
-        $dates = $periodEnum->dateRange(auth()->user(), $this->from, $this->to);
-
-        $directionEnum = match ($this->direction) {
-            'incoming' => TransactionDirection::Credit,
-            'outgoing' => TransactionDirection::Debit,
-            default => null,
-        };
+        $filters = $this->currentFilters();
 
         $inMerchantMode = $this->inMerchantMode();
 
@@ -574,7 +749,7 @@ final class TransactionList extends Component
         // it holds a paginator or a plain collection.
         $transactions = $inMerchantMode
             ? null
-            : $this->filtered($dates, $directionEnum)
+            : $this->queryFor($filters)
                 ->withRelations()
                 ->with(['emails', 'splits.category'])
                 ->orderBy(
@@ -593,12 +768,27 @@ final class TransactionList extends Component
             : $transactions->getCollection()
                 ->groupBy(static fn (Transaction $t): string => $t->post_date->format('Y-m-d'));
 
+        $clusterRows = $inMerchantMode ? $this->clusterMembers($filters) : null;
+
+        // The rows a page-level "select all" would affect: the current page in
+        // date mode, the expanded cluster in merchant mode.
+        $visibleRows = $transactions === null
+            ? ($clusterRows ?? new EloquentCollection)
+            : $transactions->getCollection();
+
+        $pageEligibleIds = $visibleRows
+            ->reject(fn (Transaction $t): bool => $this->isBulkExcluded($t))
+            ->pluck('id')
+            ->map(static fn ($id): int => (int) $id)
+            ->values()
+            ->all();
+
         return view('livewire.transaction-list', [
             'transactions' => $transactions,
             'grouped' => $grouped,
             'inMerchantMode' => $inMerchantMode,
-            'clusters' => $inMerchantMode ? $this->merchantClusters($dates, $directionEnum) : null,
-            'clusterRows' => $inMerchantMode ? $this->clusterMembers($dates, $directionEnum) : null,
+            'clusters' => $inMerchantMode ? $this->merchantClusters($filters) : null,
+            'clusterRows' => $clusterRows,
             'accounts' => $accounts,
             'categoryName' => $this->category
                 ? Category::query()->whereKey($this->category)->value('name')
@@ -609,6 +799,9 @@ final class TransactionList extends Component
             'showCustomRange' => $periodEnum === TransactionPeriod::Custom,
             'gmailEnabled' => app(GmailServiceContract::class)->isConfigured(),
             'splitCategories' => Category::visibleSortedByFullPath(),
+            'selectionCount' => $this->selectionCount(),
+            'pageEligibleIds' => $pageEligibleIds,
+            'matchingCount' => $this->matchingEligibleCount(),
         ]);
     }
 
@@ -624,38 +817,161 @@ final class TransactionList extends Component
     }
 
     /**
-     * Every filter the page exposes, with no ordering or eager loading, so the
-     * row list and the cluster aggregate cannot drift apart. Returns a fresh
-     * builder per call because the two modes consume it differently.
+     * The resolved selection, re-authorised against the signed-in user.
      *
-     * @param  array{start: mixed, end: mixed}  $dates
+     * Returns null when nothing is selected. Ids arriving from the wire are
+     * never trusted: the user_id scope in queryFor() means a forged id from
+     * another account simply matches no rows.
+     *
+     * @return Builder<Transaction>|null
+     */
+    private function selectionQuery(): ?Builder
+    {
+        if ($this->bulkScope !== null) {
+            $filters = is_array($this->bulkScope['filters'] ?? null) ? $this->bulkScope['filters'] : [];
+            $merchantKey = $this->bulkScope['merchantKey'] ?? null;
+
+            return $this->eligibleForBulk($this->queryFor($filters))
+                ->when(is_string($merchantKey), fn (Builder $q): Builder => $q->where('merchant_key', $merchantKey));
+        }
+
+        $ids = $this->selectedIds();
+
+        if ($ids === []) {
+            return null;
+        }
+
+        return $this->eligibleForBulk(
+            Transaction::query()->where('user_id', auth()->id())->current(),
+        )->whereIn('id', $ids);
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function selectedIds(): array
+    {
+        $ids = [];
+
+        foreach ($this->selected as $id => $isSelected) {
+            if ($isSelected) {
+                $ids[] = (int) $id;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * How many rows the current selection would actually write. Counted from
+     * the database for a scope so the button never overstates its reach.
+     */
+    private function selectionCount(): int
+    {
+        if ($this->bulkScope !== null) {
+            return (int) ($this->selectionQuery()?->count() ?? 0);
+        }
+
+        return count($this->selectedIds());
+    }
+
+    /**
+     * How many rows "select all matching this filter" would cover, shown on the
+     * affordance itself so the user sees the real number before clicking.
+     */
+    private function matchingEligibleCount(): int
+    {
+        return (int) $this->eligibleForBulk($this->queryFor($this->currentFilters()))->count();
+    }
+
+    /**
+     * The filter values currently bound to the component, as a plain array that
+     * can be frozen into a bulk-selection scope and re-resolved later.
+     *
+     * @return array<string, mixed>
+     */
+    private function currentFilters(): array
+    {
+        return [
+            'direction' => $this->direction,
+            'account' => $this->account,
+            'category' => $this->category,
+            'planned' => $this->planned,
+            'categorised' => $this->categorised,
+            'period' => $this->period,
+            'from' => $this->from,
+            'to' => $this->to,
+            'search' => $this->search,
+        ];
+    }
+
+    /**
+     * Every filter the page exposes, with no ordering or eager loading, so the
+     * row list, the cluster aggregate and a bulk write cannot drift apart.
+     *
+     * Takes the filter set explicitly rather than reading $this, because a
+     * "select all matching this filter" action stores a snapshot and must be
+     * re-resolved against that snapshot at commit time — not against whatever
+     * the user has since changed the filters to.
+     *
+     * @param  array<string, mixed>  $filters
      * @return Builder<Transaction>
      */
-    private function filtered(array $dates, ?TransactionDirection $directionEnum): Builder
+    private function queryFor(array $filters): Builder
     {
+        $period = is_string($filters['period'] ?? null) ? $filters['period'] : 'this-month';
+        $periodEnum = TransactionPeriod::tryFrom($period) ?? TransactionPeriod::ThisMonth;
+        $from = is_string($filters['from'] ?? null) ? $filters['from'] : null;
+        $to = is_string($filters['to'] ?? null) ? $filters['to'] : null;
+        $dates = $periodEnum->dateRange(auth()->user(), $from, $to);
+
+        $directionEnum = match ($filters['direction'] ?? 'all') {
+            'incoming' => TransactionDirection::Credit,
+            'outgoing' => TransactionDirection::Debit,
+            default => null,
+        };
+
         return Transaction::query()
             ->where('user_id', auth()->id())
             ->current()
             ->when($directionEnum, fn ($q, $dir) => $q->where('direction', $dir))
-            ->when($this->account, fn ($q, $id) => $q->where('account_id', $id))
-            ->when($this->category, fn ($q, $id) => $q->where(fn ($q) => $q
+            ->when($filters['account'] ?? null, fn ($q, $id) => $q->where('account_id', $id))
+            ->when($filters['category'] ?? null, fn ($q, $id) => $q->where(fn ($q) => $q
                 ->where('category_id', $id)
                 ->orWhereHas('splits', fn ($s) => $s->where('category_id', $id))))
-            ->when($this->planned === 'planned', fn ($q) => $q->whereNotNull('planned_transaction_id'))
-            ->when($this->planned === 'unplanned', fn ($q) => $q->whereNull('planned_transaction_id'))
-            ->when($this->categorised === 'categorised', fn ($q) => $q->where(fn ($q) => $q
+            ->when(($filters['planned'] ?? null) === 'planned', fn ($q) => $q->whereNotNull('planned_transaction_id'))
+            ->when(($filters['planned'] ?? null) === 'unplanned', fn ($q) => $q->whereNull('planned_transaction_id'))
+            ->when(($filters['categorised'] ?? null) === 'categorised', fn ($q) => $q->where(fn ($q) => $q
                 ->whereNotNull('category_id')
                 ->orWhereHas('splits')))
-            ->when($this->categorised === 'uncategorised', fn ($q) => $q
+            ->when(($filters['categorised'] ?? null) === 'uncategorised', fn ($q) => $q
                 ->whereNull('category_id')
                 ->whereDoesntHave('splits'))
-            ->when($this->search, fn ($q, $term) => $q->where(function ($q) use ($term) {
+            ->when($filters['search'] ?? null, fn ($q, $term) => $q->where(function ($q) use ($term) {
                 $q->where('description', 'like', "%{$term}%")
                     ->orWhere('clean_description', 'like', "%{$term}%")
                     ->orWhere('merchant_name', 'like', "%{$term}%");
             }))
             ->when($dates['start'], fn ($q, $s) => $q->where('post_date', '>=', $s))
             ->when($dates['end'], fn ($q, $e) => $q->where('post_date', '<=', $e));
+    }
+
+    /**
+     * Rows a bulk categorisation may legally touch.
+     *
+     * A split transaction's category is decided by its parts, and a transfer is
+     * not spending at all. Two separate predicates on purpose: isSplit() checks
+     * the splits relation, while parent_transaction_id is createChild() lineage
+     * and would be the wrong test entirely.
+     *
+     * @param  Builder<Transaction>  $query
+     * @return Builder<Transaction>
+     */
+    private function eligibleForBulk(Builder $query): Builder
+    {
+        return $query
+            ->whereNull('transfer_pair_id')
+            ->whereDoesntHave('splits');
     }
 
     /**
@@ -681,13 +997,13 @@ final class TransactionList extends Component
      * NULL while GROUP BY emits it, so the total and the rows would disagree,
      * and `$expandedKey === null` is already this component's sentinel for
      * "nothing expanded", making a null cluster key unrepresentable. The guard
-     * lives here rather than in filtered() because the date list must keep
+     * lives here rather than in queryFor() because the date list must keep
      * showing every row.
      *
-     * @param  array{start: mixed, end: mixed}  $dates
+     * @param  array<string, mixed>  $filters
      * @return LengthAwarePaginator<int, Transaction>
      */
-    private function merchantClusters(array $dates, ?TransactionDirection $directionEnum): LengthAwarePaginator
+    private function merchantClusters(array $filters): LengthAwarePaginator
     {
         // Cast before max(): Livewire stores the raw ?page query value, and
         // max(1, 'abc') returns the string, which forPage() cannot subtract.
@@ -695,7 +1011,7 @@ final class TransactionList extends Component
 
         // One closure for both queries so the count and the rows can never
         // disagree about which rows are clusterable.
-        $clusterable = fn (): Builder => $this->filtered($dates, $directionEnum)
+        $clusterable = fn (): Builder => $this->queryFor($filters)
             ->whereNotNull('merchant_key');
 
         $total = $clusterable()
@@ -735,17 +1051,17 @@ final class TransactionList extends Component
      * Member rows of the one expanded cluster. Nothing is loaded for collapsed
      * clusters — a page of 25 clusters could otherwise pull thousands of rows.
      *
-     * @param  array{start: mixed, end: mixed}  $dates
+     * @param  array<string, mixed>  $filters
      * @return EloquentCollection<int, Transaction>
      */
-    private function clusterMembers(array $dates, ?TransactionDirection $directionEnum): EloquentCollection
+    private function clusterMembers(array $filters): EloquentCollection
     {
         if ($this->expandedKey === null) {
             // No query at all: nothing is expanded, so there is nothing to load.
             return new EloquentCollection;
         }
 
-        return $this->filtered($dates, $directionEnum)
+        return $this->queryFor($filters)
             ->where('merchant_key', $this->expandedKey)
             ->withRelations()
             ->with(['emails', 'splits.category'])
