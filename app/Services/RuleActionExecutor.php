@@ -62,17 +62,16 @@ final readonly class RuleActionExecutor
     /**
      * A rule fills gaps; it never overrides a person.
      *
-     * Returns true regardless of whether the category was written, because the
-     * return value reports "this action was handled", not "the row changed".
-     * Reporting false on a protected row would leave the transaction unaudited
-     * and the pipeline would retry it on every run.
+     * A Manual source — or a categorised row that never declared one, which
+     * saving() would default to Manual — is protected, and reports handled
+     * (true) so the pipeline audits the row and stops retrying it.
      */
     private function setCategory(Transaction $transaction, string $value): bool
     {
         $categoryId = (int) $value;
+        $source = $transaction->category_source ?? CategorySource::Manual;
 
-        if ($transaction->category_id !== null
-            && $transaction->category_source?->isOverwritableByRule() === false) {
+        if ($transaction->category_id !== null && ! $source->isOverwritableByRule()) {
             return true;
         }
 

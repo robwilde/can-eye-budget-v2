@@ -12,6 +12,7 @@ use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\RuleActionExecutor;
+use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
     $this->executor = app(RuleActionExecutor::class);
@@ -151,4 +152,24 @@ it('leaves a feed-stamped row untouched when the rule targets a hidden category'
 
     expect($transaction->fresh()->category_id)->toBe($seeded->id)
         ->and($transaction->fresh()->category_source)->toBe(CategorySource::Feed);
+});
+
+it('protects a categorised row whose source is missing, treating it as manual', function () {
+    $chosen = Category::factory()->create(['is_hidden' => false]);
+    $ruleTarget = Category::factory()->create(['is_hidden' => false]);
+
+    $transaction = provenanceTransaction($this->user, $this->account, [
+        'category_id' => $chosen->id,
+    ]);
+
+    DB::table('transactions')->where('id', $transaction->id)->update(['category_source' => null]);
+
+    $this->executor->execute($transaction->fresh(), [
+        ['type' => 'set_category', 'value' => (string) $ruleTarget->id],
+    ]);
+
+    $row = DB::table('transactions')->where('id', $transaction->id)->first();
+
+    expect($row->category_id)->toBe($chosen->id)
+        ->and($row->category_source)->toBeNull();
 });
