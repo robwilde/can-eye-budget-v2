@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\CategorySource;
 use App\Events\PlannedTransactionCategoryUpdated;
 use App\Events\TransactionCategoryUpdated;
 use App\Models\Account;
@@ -11,6 +12,7 @@ use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\RuleActionExecutor;
 use Illuminate\Support\Facades\Event;
 
 test('changing category on a linked transaction propagates to siblings', function () {
@@ -171,4 +173,90 @@ test('propagation does not affect transactions linked to a different PlannedTran
 
     expect($unrelated->fresh()->category_id)->toBe($oldCategory->id)
         ->and($planned2->fresh()->category_id)->toBe($oldCategory->id);
+});
+
+test('a rule-set category propagates to siblings as rule, not manual', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $sibling = Transaction::factory()->for($user)->for($account)->create([
+        'planned_transaction_id' => $planned->id,
+        'category_id' => null,
+    ]);
+    $target = Transaction::factory()->for($user)->for($account)->create([
+        'planned_transaction_id' => $planned->id,
+        'category_id' => null,
+    ]);
+
+    app(RuleActionExecutor::class)->execute($target, [
+        ['type' => 'set_category', 'value' => (string) $category->id],
+    ]);
+
+    expect($sibling->fresh()->category_id)->toBe($category->id)
+        ->and($sibling->fresh()->category_source)->toBe(CategorySource::Rule);
+});
+
+test('a user-set category propagates to siblings as manual', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->create();
+    $newCategory = Category::factory()->create();
+
+    $sibling = Transaction::factory()->for($user)->for($account)->create([
+        'planned_transaction_id' => $planned->id,
+        'category_id' => null,
+    ]);
+    $target = Transaction::factory()->for($user)->for($account)->create([
+        'planned_transaction_id' => $planned->id,
+        'category_id' => null,
+    ]);
+
+    $target->update(['category_id' => $newCategory->id]);
+
+    expect($sibling->fresh()->category_source)->toBe(CategorySource::Manual);
+});
+
+test('clearing a category clears the siblings source too', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->create();
+    $oldCategory = Category::factory()->create();
+
+    $sibling = Transaction::factory()->for($user)->for($account)->create([
+        'planned_transaction_id' => $planned->id,
+        'category_id' => $oldCategory->id,
+    ]);
+    $target = Transaction::factory()->for($user)->for($account)->create([
+        'planned_transaction_id' => $planned->id,
+        'category_id' => $oldCategory->id,
+    ]);
+
+    $target->update(['category_id' => null]);
+
+    expect($sibling->fresh()->category_id)->toBeNull()
+        ->and($sibling->fresh()->category_source)->toBeNull();
+});
+
+test('a planned transaction category propagates as manual and clears with the category', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->create();
+    $newCategory = Category::factory()->create();
+
+    $transaction = Transaction::factory()->for($user)->for($account)->create([
+        'planned_transaction_id' => $planned->id,
+        'category_id' => null,
+    ]);
+
+    $planned->update(['category_id' => $newCategory->id]);
+
+    expect($transaction->fresh()->category_id)->toBe($newCategory->id)
+        ->and($transaction->fresh()->category_source)->toBe(CategorySource::Manual);
+
+    $planned->update(['category_id' => null]);
+
+    expect($transaction->fresh()->category_id)->toBeNull()
+        ->and($transaction->fresh()->category_source)->toBeNull();
 });

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Casts\MoneyCast;
+use App\Enums\CategorySource;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
@@ -24,6 +25,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property int $user_id
  * @property int $account_id
  * @property int|null $category_id
+ * @property CategorySource|null $category_source
  * @property int $amount
  * @property TransactionDirection $direction
  * @property string $description
@@ -71,6 +73,7 @@ final class Transaction extends Model
         'user_id',
         'account_id',
         'category_id',
+        'category_source',
         'amount',
         'direction',
         'description',
@@ -259,6 +262,15 @@ final class Transaction extends Model
 
         $attributes['parent_transaction_id'] = $this->id;
 
+        // A caller that changes category_id is choosing a new category. Carrying the
+        // parent's provenance onto that choice would let a rule's stamp survive a
+        // human's edit, so drop it and let saving() re-derive it.
+        if (array_key_exists('category_id', $overrides)
+            && ! array_key_exists('category_source', $overrides)
+            && $overrides['category_id'] !== $this->category_id) {
+            unset($attributes['category_source']);
+        }
+
         return self::query()->create(array_merge($attributes, $overrides));
     }
 
@@ -317,6 +329,20 @@ final class Transaction extends Model
             $transaction->merchant_key = $transaction->resolveMerchantKey();
         });
 
+        // Keep the provenance invariant: category_source is set exactly when
+        // category_id is. Defaulting an undeclared source to Manual is the
+        // conservative choice — a writer that does not say "a rule did this"
+        // gets treated as a human, so rules err towards leaving it alone.
+        self::saving(static function (Transaction $transaction): void {
+            if ($transaction->category_id === null) {
+                $transaction->category_source = null;
+
+                return;
+            }
+
+            $transaction->category_source ??= CategorySource::Manual;
+        });
+
         self::updated(static function (Transaction $transaction): void {
             if ($transaction->wasChanged('category_id')) {
                 event(new TransactionCategoryUpdated(
@@ -334,6 +360,7 @@ final class Transaction extends Model
     {
         return [
             'source' => TransactionSource::class,
+            'category_source' => CategorySource::class,
             'direction' => TransactionDirection::class,
             'status' => TransactionStatus::class,
             'amount' => MoneyCast::class,

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\CategorySource;
 use App\Enums\PayFrequency;
 use App\Enums\SuggestionStatus;
 use App\Models\AnalysisSuggestion;
@@ -87,7 +88,11 @@ final readonly class SuggestionApplier
                 $updateData = ['planned_transaction_id' => $planned->id];
 
                 if ($categoryId !== null) {
+                    // This mass update bypasses Transaction::saving(), so the
+                    // provenance has to be written by hand; the user picked this
+                    // category in the suggestion UI, hence Manual.
                     $updateData['category_id'] = $categoryId;
+                    $updateData['category_source'] = CategorySource::Manual->value;
                 }
 
                 Transaction::whereIn('id', $matchedIds)
