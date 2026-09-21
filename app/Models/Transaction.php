@@ -9,6 +9,7 @@ use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Events\TransactionCategoryUpdated;
+use App\Support\Recurring\MerchantSignature;
 use Carbon\CarbonImmutable;
 use Database\Factories\TransactionFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -35,6 +36,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string|null $redbark_id
  * @property string|null $csv_hash
  * @property string|null $merchant_name
+ * @property string|null $merchant_key
  * @property string|null $anzsic_code
  * @property array<string, mixed>|null $enrich_data
  * @property TransactionSource $source
@@ -56,6 +58,13 @@ final class Transaction extends Model
     use SoftDeletes;
 
     /**
+     * Bucket for rows whose description fields are all empty. An explicit
+     * sentinel keeps them together under one obvious label instead of grouping
+     * them under '' alongside anything else that normalises to nothing.
+     */
+    public const string UNKNOWN_MERCHANT_KEY = '(Unknown)';
+
+    /**
      * @var list<string>
      */
     protected $fillable = [
@@ -74,6 +83,7 @@ final class Transaction extends Model
         'redbark_id',
         'csv_hash',
         'merchant_name',
+        'merchant_key',
         'anzsic_code',
         'enrich_data',
         'source',
@@ -261,8 +271,52 @@ final class Transaction extends Model
         return $query->with(['account', 'category.parent.parent']);
     }
 
+    /**
+     * The persisted payee signature used to cluster transactions on the
+     * transactions list. Derived from the most specific description the feed
+     * gave us, falling back through clean_description to the raw description.
+     *
+     * Feeds emit empty strings as readily as nulls, so the fallback tests for
+     * blankness rather than null — otherwise a merchant_name of '' would pin
+     * the row to the unknown bucket while a perfectly good description sat
+     * unused one field below.
+     *
+     * Returns UNKNOWN_MERCHANT_KEY rather than an empty string when all three
+     * are blank, so descriptionless rows stay in one explicit bucket instead of
+     * silently colliding under ''.
+     */
+    public function resolveMerchantKey(): string
+    {
+        foreach ([$this->merchant_name, $this->clean_description, $this->description] as $candidate) {
+            if (mb_trim((string) $candidate) === '') {
+                continue;
+            }
+
+            $key = MerchantSignature::for((string) $candidate);
+
+            if ($key !== '') {
+                return $key;
+            }
+        }
+
+        return self::UNKNOWN_MERCHANT_KEY;
+    }
+
     protected static function booted(): void
     {
+        // Derive the merchant key on every write rather than only at ingest, so
+        // edited descriptions and createChild() revisions cannot leave a stale
+        // key pointing at the previous payee's cluster.
+        self::saving(static function (Transaction $transaction): void {
+            $sourcesChanged = $transaction->isDirty(['merchant_name', 'clean_description', 'description']);
+
+            if ($transaction->merchant_key !== null && ! $sourcesChanged) {
+                return;
+            }
+
+            $transaction->merchant_key = $transaction->resolveMerchantKey();
+        });
+
         self::updated(static function (Transaction $transaction): void {
             if ($transaction->wasChanged('category_id')) {
                 event(new TransactionCategoryUpdated(
