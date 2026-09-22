@@ -41,21 +41,48 @@ Run `cat op.conf` or read the file if you need to check available aliases.
 
 ## Commit Messages
 
-Process (issue first): create the GitHub issue, then branch from it. The issue
-number then exists up front and gets reused everywhere — branch name, commit
-scope, PR, and the `Closes #NNN` footer. This keeps one number threaded through
-the whole change.
+Process (issue first): for issue-backed work — which is the default for any
+feature or bug — create the GitHub issue, then branch from it. The issue number
+then exists up front and gets reused throughout that change — branch name,
+commit scope, PR, and the `Closes #NNN` footer — keeping one number threaded
+through it. Small self-contained work that warrants no issue skips this and
+takes a module or `repo` scope instead, per the fallback below.
 
-Format: `type(scope): subject`
+Format: `type(scope): subject` — the scope is REQUIRED on every authored
+(non-merge) commit. A bare `type: subject` is invalid.
 
 - type: feat | fix | test | refactor | docs | chore | perf | ci | build
-- scope: the issue number when the commit is genuinely part of that issue's work (e.g. `#249`); otherwise a module name (e.g. `pay-cycle`).
-  Do NOT tag an unrelated change with an issue number just because it rides on the same branch.
+- scope, in order of preference:
+  1. the issue number (e.g. `#249`) when the commit is genuinely part of that
+     issue's work. On a `type/<issue>-slug` branch the branch name may help you
+     identify that issue, but it is not proof — confirm the commit really
+     belongs to that issue's work before using its number;
+  2. a module name (e.g. `pay-cycle`, `transactions`) for work with no issue;
+  3. `repo` for a cross-cutting chore with neither.
+
+  Do NOT tag an unrelated change with an issue number just because it rides on
+  the same branch — give it its own module scope instead.
 - subject: imperative mood, lowercase, no trailing period, <= 72 chars.
 
 Body (optional, wrap at 72): explain WHY, not what. Note what was verified (test/command run). Separate from subject with a blank line.
 
 Footer (optional): `Refs #249`, `Closes #249`.
+
+Generated merge commits are exceptions, because their subjects are produced by
+a tool rather than authored. There are exactly two:
+
+- **PR merges via `gh pr merge --merge`.** `gh` derives the merge subject from
+  the PR title and appends the PR number, e.g.
+  `feat(#449): persist a normalised merchant_key (#455)`. The trailing number
+  is the **PR**; the scope stays the **issue**. Because of this, PR titles must
+  themselves follow `type(scope): subject` — a scopeless or capitalised PR
+  title becomes a non-conforming merge commit on `develop`.
+- **Local merges via `git merge`.** Git's default `Merge branch 'x' into y`
+  subject stands as written.
+
+Leave both generated subjects as-is. Nothing else is exempt: a merge subject
+you write yourself follows the rules above, and never hand-write either
+generated shape for an ordinary commit.
 
 Rules:
 
