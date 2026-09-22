@@ -1,8 +1,6 @@
 @php
-    use App\Enums\TransactionDirection;
-    use App\Services\GmailService;
     use Carbon\CarbonImmutable;
-    use App\Support\AmountParser;
+    use Illuminate\Support\Str;
 @endphp
 <div class="space-y-6">
     <div class="flex flex-wrap items-center justify-between gap-4">
@@ -87,11 +85,25 @@
             :selected="$categorised"
             wire-model="categorised"
         />
+
+        {{-- Clustering only pays off while triaging uncategorised rows, so the
+             toggle is offered exactly there rather than adding a permanent
+             control that is usually the wrong choice. --}}
+        @if($categorised === 'uncategorised')
+            <x-cib.filter-toggle
+                :options="[
+                    ['value' => 'date', 'label' => 'By date'],
+                    ['value' => 'merchant', 'label' => 'By merchant'],
+                ]"
+                :selected="$groupMode"
+                wire-model="groupMode"
+            />
+        @endif
     </div>
 
     <flux:input wire:model.live.debounce.300ms="search" placeholder="Search transactions..." icon="magnifying-glass" size="sm"/>
 
-    @if($transactions->isEmpty())
+    @if($inMerchantMode ? $clusters->isEmpty() : $transactions->isEmpty())
         <x-cib.empty-state
             icon="banknotes"
             title="No transactions found"
@@ -109,193 +121,142 @@
                 <flux:icon.arrow-path class="size-6 animate-spin text-zinc-400"/>
             </div>
 
-            <div class="flex items-center gap-4 px-4 py-2">
-                <button wire:click="sort('description')"
-                        class="cib-label flex min-w-0 flex-1 items-center gap-1 text-left">
-                    Description
-                    @if($sortBy === 'description')
-                        <flux:icon :name="$sortDir === 'asc' ? 'chevron-up' : 'chevron-down'" class="size-3"/>
-                    @endif
-                </button>
-                @if($account === null)
-                    <span class="cib-label w-32">Account</span>
-                @endif
-                <button wire:click="sort('post_date')"
-                        class="cib-label flex w-24 items-center gap-1">
-                    Date
-                    @if($sortBy === 'post_date')
-                        <flux:icon :name="$sortDir === 'asc' ? 'chevron-up' : 'chevron-down'" class="size-3"/>
-                    @endif
-                </button>
-                <button wire:click="sort('amount')"
-                        class="cib-label flex w-28 items-center justify-end gap-1">
-                    Amount
-                    @if($sortBy === 'amount')
-                        <flux:icon :name="$sortDir === 'asc' ? 'chevron-up' : 'chevron-down'" class="size-3"/>
-                    @endif
-                </button>
-            </div>
+            @if($inMerchantMode)
+                <div class="flex items-center gap-4 px-4 py-2">
+                    <span class="cib-label flex min-w-0 flex-1 items-center gap-1">Merchant</span>
+                    <span class="cib-label w-32">Spread</span>
+                    <span class="cib-label w-24">Dates</span>
+                    <span class="cib-label w-28 text-right">Total</span>
+                </div>
 
-            <div class="agenda">
-                @foreach($grouped as $dateKey => $dayTxns)
-                    <section wire:key="group-{{ $dateKey }}" class="agenda-group">
-                        <x-cib.sec-head :title="CarbonImmutable::parse($dateKey)->format('j D M')"/>
-                        <div class="day-card">
-                            @foreach($dayTxns as $transaction)
-                                @php
-                                    $tone = $transaction->direction === TransactionDirection::Credit ? 'inc' : 'out';
-                                    $splitCategoryLabel = $transaction->isSplit()
-                                        ? $transaction->splits->map(fn ($s) => $s->category?->name)->filter()->unique()->join(' · ')
-                                        : null;
-                                    $metaParts = array_filter([
-                                        $splitCategoryLabel !== null && $splitCategoryLabel !== '' ? $splitCategoryLabel : $transaction->category?->name,
-                                        $account === null ? $transaction->account?->name : null,
-                                    ]);
-                                    $isPlanned = $transaction->planned_transaction_id !== null;
-                                @endphp
-                                <x-cib.tx-row
-                                    wire:key="txn-{{ $transaction->id }}"
-                                    :name="$transaction->description"
-                                    :amount="$transaction->amount"
-                                    :tone="$tone"
-                                    :icon="$transaction->category?->resolveIcon()"
-                                    :click="'$dispatch(\'edit-transaction\', { id: ' . $transaction->id . ' })'"
-                                >
-                                    @if(! empty($metaParts) || $isPlanned || $transaction->emails->isNotEmpty() || $transaction->isSplit())
-                                        <x-slot:meta>{{ implode(' · ', $metaParts) }}@if($isPlanned) <span class="pill plan">Planned</span>@endif@if($transaction->isSplit()) <span class="pill split">Split ({{ $transaction->splits->count() }})</span>@endif@if($transaction->emails->isNotEmpty()) <span class="pill email">{{ $transaction->emails->count() }} email{{ $transaction->emails->count() > 1 ? 's' : '' }}</span>@endif</x-slot:meta>
+                <div class="agenda" data-testid="merchant-clusters">
+                    @foreach($clusters as $cluster)
+                        @php
+                            $isExpanded = $expandedKey === $cluster->merchant_key;
+                            $spanStart = CarbonImmutable::parse($cluster->first_date);
+                            $spanEnd = CarbonImmutable::parse($cluster->last_date);
+                            // A cluster is "mixed" when its rows disagree about
+                            // what they are: different accounts, both directions,
+                            // or an amount range wide enough that one category
+                            // almost certainly does not fit all of them.
+                            $isMixedDirection = (int) $cluster->direction_count > 1;
+                            $isMultiAccount = (int) $cluster->account_count > 1;
+                            $minAmount = (int) $cluster->min_amount;
+                            $maxAmount = (int) $cluster->max_amount;
+                            // A zero amount is a real row — the CSV parser emits
+                            // one for an empty credit column — and the ratio test
+                            // divides it away: min 0 against max $900 is the
+                            // widest possible range, so it is treated as one.
+                            $isWideSpread = $minAmount === 0
+                                ? $maxAmount > 0
+                                : $maxAmount >= $minAmount * 5;
+                            // Named from content, the button would read as a run
+                            // of four unlabelled numbers, and the badge meanings
+                            // and the wide-spread colour would never reach it.
+                            $clusterLabel = implode(', ', array_filter([
+                                $cluster->merchant_key,
+                                $cluster->row_count.' '.Str::plural('transaction', (int) $cluster->row_count),
+                                'total '.$formatMoney((int) $cluster->total_amount),
+                                'amounts '.$formatMoney($minAmount).' to '.$formatMoney($maxAmount),
+                                $isWideSpread ? 'wide range' : null,
+                                $isMixedDirection ? 'money in and money out' : null,
+                                $isMultiAccount ? $cluster->account_count.' accounts' : null,
+                                $spanStart->format('j M').' to '.$spanEnd->format('j M'),
+                            ]));
+                        @endphp
+                        <section wire:key="cluster-{{ md5($cluster->merchant_key) }}" class="agenda-group">
+                            <button type="button"
+                                    wire:click="toggleCluster(@js($cluster->merchant_key))"
+                                    class="flex w-full items-center gap-4 px-4 py-3 text-left"
+                                    data-testid="cluster-{{ md5($cluster->merchant_key) }}"
+                                    aria-controls="cluster-rows-{{ md5($cluster->merchant_key) }}"
+                                    aria-expanded="{{ $isExpanded ? 'true' : 'false' }}"
+                                    aria-label="{{ $clusterLabel }}">
+                                <span class="flex min-w-0 flex-1 items-center gap-2">
+                                    <flux:icon :name="$isExpanded ? 'chevron-down' : 'chevron-right'" class="size-4 shrink-0 text-zinc-400"/>
+                                    <span class="min-w-0 truncate font-medium">{{ $cluster->merchant_key }}</span>
+                                    {{-- .pill carries no styles of its own; app.css
+                                         scopes it per container. cluster-head is this
+                                         header's scope, so the badges do not inherit
+                                         .tx-meta's row typography and margin. --}}
+                                    <span class="cluster-head shrink-0">
+                                        <span class="pill">{{ $cluster->row_count }}</span>
+                                        @if($isMixedDirection)
+                                            <span class="pill split">in + out</span>
+                                        @endif
+                                        @if($isMultiAccount)
+                                            <span class="pill split">{{ $cluster->account_count }} accounts</span>
+                                        @endif
+                                    </span>
+                                </span>
+                                <span @class(['w-32 text-sm', 'font-semibold text-cib-yellow-600' => $isWideSpread])>
+                                    @if($isWideSpread)
+                                        <flux:icon.exclamation-triangle class="mr-1 inline size-3.5 align-text-bottom"/>
                                     @endif
-                                    <x-slot:actions>
-                                        @if($transaction->transfer_pair_id === null)
-                                            <flux:button variant="ghost" size="sm" icon="scissors"
-                                                         wire:click="toggleSplit({{ $transaction->id }})"
-                                                         wire:loading.attr="disabled" wire:target="toggleSplit({{ $transaction->id }})"
-                                                         data-testid="split-{{ $transaction->id }}" aria-label="Split transaction"/>
-                                        @endif
-                                        @if($gmailEnabled)
-                                            <flux:button variant="ghost" size="sm" icon="envelope"
-                                                         wire:click="scanEmail({{ $transaction->id }})"
-                                                         wire:loading.attr="disabled" wire:target="scanEmail({{ $transaction->id }})"
-                                                         data-testid="scan-email-{{ $transaction->id }}" aria-label="Scan email"/>
-                                        @endif
-                                    </x-slot:actions>
-                                </x-cib.tx-row>
-                                @if($emailPanelTxnId === $transaction->id)
-                                    @php
-                                        $linkedMessageIds = $transaction->emails->pluck('gmail_message_id');
-                                        $newResults = collect($emailResults)->reject(fn (array $r): bool => $linkedMessageIds->contains($r['messageId']));
-                                    @endphp
-                                    <div wire:key="email-panel-{{ $transaction->id }}" class="email-scan-panel" data-testid="email-panel-{{ $transaction->id }}">
-                                        @if($emailScanError)
-                                            <p class="email-scan-error">{{ $emailScanError }}</p>
-                                        @endif
+                                    {{ $formatMoney($minAmount) }}–{{ $formatMoney($maxAmount) }}
+                                </span>
+                                <span class="w-24 text-sm text-zinc-500">
+                                    {{ $spanStart->format('j M') }}@if(! $spanStart->isSameDay($spanEnd))–{{ $spanEnd->format('j M') }}@endif
+                                </span>
+                                <span class="w-28 text-right font-medium">{{ $formatMoney((int) $cluster->total_amount) }}</span>
+                            </button>
 
-                                        @if($transaction->emails->isNotEmpty())
-                                            <div class="email-scan-section">
-                                                <span class="cib-label">Linked emails</span>
-                                                @foreach($transaction->emails as $email)
-                                                    <div wire:key="linked-email-{{ $email->id }}" class="email-row">
-                                                        <div class="email-row-body">
-                                                            <div class="email-subject">{{ $email->subject }}</div>
-                                                            <div class="email-meta">{{ $email->from_name ?? $email->from_address }}@if($email->email_date) · {{ $email->email_date->format('j M Y') }}@endif</div>
-                                                            @if(is_array($email->details))
-                                                                <x-cib.receipt-summary :receipt="$email->details"/>
-                                                            @elseif($email->snippet)
-                                                                <div class="email-snippet">{{ $email->snippet }}</div>
-                                                            @endif
-                                                            <a href="{{ GmailService::deepLink($email->gmail_message_id) }}" target="_blank" rel="noopener" class="email-link">Open in Gmail</a>
-                                                        </div>
-                                                        <flux:button variant="ghost" size="sm" icon="x-mark"
-                                                                     wire:click="unlinkEmail({{ $email->id }})"
-                                                                     data-testid="unlink-email-{{ $email->id }}" aria-label="Unlink email"/>
-                                                    </div>
-                                                @endforeach
-                                            </div>
-                                        @endif
+                            @if($isExpanded)
+                                <div id="cluster-rows-{{ md5($cluster->merchant_key) }}" class="day-card" data-testid="cluster-rows">
+                                    @foreach($clusterRows as $transaction)
+                                        @include('livewire.partials.transaction-row', ['transaction' => $transaction])
+                                    @endforeach
+                                </div>
+                            @endif
+                        </section>
+                    @endforeach
+                </div>
+            @else
+                <div class="flex items-center gap-4 px-4 py-2">
+                    <button wire:click="sort('description')"
+                            class="cib-label flex min-w-0 flex-1 items-center gap-1 text-left">
+                        Description
+                        @if($sortBy === 'description')
+                            <flux:icon :name="$sortDir === 'asc' ? 'chevron-up' : 'chevron-down'" class="size-3"/>
+                        @endif
+                    </button>
+                    @if($account === null)
+                        <span class="cib-label w-32">Account</span>
+                    @endif
+                    <button wire:click="sort('post_date')"
+                            class="cib-label flex w-24 items-center gap-1">
+                        Date
+                        @if($sortBy === 'post_date')
+                            <flux:icon :name="$sortDir === 'asc' ? 'chevron-up' : 'chevron-down'" class="size-3"/>
+                        @endif
+                    </button>
+                    <button wire:click="sort('amount')"
+                            class="cib-label flex w-28 items-center justify-end gap-1">
+                        Amount
+                        @if($sortBy === 'amount')
+                            <flux:icon :name="$sortDir === 'asc' ? 'chevron-up' : 'chevron-down'" class="size-3"/>
+                        @endif
+                    </button>
+                </div>
 
-                                        @if($newResults->isNotEmpty())
-                                            <div class="email-scan-section">
-                                                <span class="cib-label">Search results</span>
-                                                @foreach($newResults as $index => $result)
-                                                    <div wire:key="result-email-{{ $transaction->id }}-{{ $index }}" class="email-row">
-                                                        <div class="email-row-body">
-                                                            <div class="email-subject">{{ $result['subject'] }}</div>
-                                                            <div class="email-meta">{{ $result['fromName'] ?? $result['fromAddress'] }}@if($result['date']) · {{ CarbonImmutable::parse($result['date'])->format('j M Y') }}@endif</div>
-                                                            @if(is_array($result['details'] ?? null))
-                                                                <x-cib.receipt-summary :receipt="$result['details']"/>
-                                                            @elseif($result['snippet'])
-                                                                <div class="email-snippet">{{ $result['snippet'] }}</div>
-                                                            @endif
-                                                            @php $resultMessageId = $result['messageId'] ?? null; @endphp
-                                                            @if(is_string($resultMessageId) && trim($resultMessageId) !== '')
-                                                                <a href="{{ GmailService::deepLink(trim($resultMessageId)) }}" target="_blank" rel="noopener" class="email-link">Open in Gmail</a>
-                                                            @endif
-                                                        </div>
-                                                        <flux:button variant="ghost" size="sm" icon="link"
-                                                                     wire:click="linkEmail({{ $transaction->id }}, {{ $index }})"
-                                                                     data-testid="link-email-{{ $transaction->id }}-{{ $index }}">Link</flux:button>
-                                                    </div>
-                                                @endforeach
-                                            </div>
-                                        @endif
-
-                                        @if(! $emailScanError && $transaction->emails->isEmpty() && $newResults->isEmpty())
-                                            <p class="email-empty">No matching emails found.</p>
-                                        @endif
-                                    </div>
-                                @endif
-                                @if($splitPanelTxnId === $transaction->id)
-                                    @php
-                                        $splitRemainderCents = abs((int) $transaction->amount) - collect($splitLines)->sum(fn (array $l): int => AmountParser::parse((string) ($l['amount'] ?? ''))->amount);
-                                    @endphp
-                                    <div wire:key="split-panel-{{ $transaction->id }}" class="split-panel" data-testid="split-panel-{{ $transaction->id }}">
-                                        @if($splitError)
-                                            <p class="split-error" data-testid="split-error-{{ $transaction->id }}">{{ $splitError }}</p>
-                                        @endif
-
-                                        <div class="split-lines">
-                                            @foreach($splitLines as $index => $line)
-                                                <div wire:key="split-line-{{ $transaction->id }}-{{ $index }}" class="split-line">
-                                                    <x-category-combobox
-                                                        wire:model="splitLines.{{ $index }}.category_id"
-                                                        :categories="$splitCategories"
-                                                        placeholder="Category"
-                                                        size="sm"
-                                                    />
-                                                    <flux:input wire:model.live.debounce.400ms="splitLines.{{ $index }}.amount" size="sm" class="split-amount" inputmode="decimal" placeholder="0.00"/>
-                                                    <flux:input wire:model.blur="splitLines.{{ $index }}.notes" size="sm" class="split-notes" placeholder="Note (optional)"/>
-                                                    <flux:button variant="ghost" size="sm" icon="x-mark"
-                                                                 wire:click="removeSplitLine({{ $index }})"
-                                                                 data-testid="remove-split-line-{{ $transaction->id }}-{{ $index }}" aria-label="Remove line"/>
-                                                </div>
-                                            @endforeach
-                                        </div>
-
-                                        <div class="split-foot">
-                                            <div class="split-remainder">
-                                                <span class="cib-label">Remainder</span>
-                                                <span @class(['split-remainder-value', 'is-zero' => $splitRemainderCents === 0]) data-testid="split-remainder-{{ $transaction->id }}">{{ $formatMoney($splitRemainderCents) }}</span>
-                                            </div>
-                                            <div class="split-buttons">
-                                                <flux:button variant="ghost" size="sm" icon="plus" wire:click="addSplitLine" data-testid="add-split-line-{{ $transaction->id }}">Add line</flux:button>
-                                                <flux:button variant="ghost" size="sm" wire:click="assignRemainderToLast" data-testid="assign-remainder-{{ $transaction->id }}">Assign remainder</flux:button>
-                                                @if($transaction->isSplit())
-                                                    <flux:button variant="ghost" size="sm" icon="arrow-uturn-left" wire:click="unsplit({{ $transaction->id }})" data-testid="unsplit-{{ $transaction->id }}">Unsplit</flux:button>
-                                                @endif
-                                                <flux:button variant="primary" size="sm" wire:click="saveSplit" :disabled="$splitRemainderCents !== 0 || count($splitLines) < 2" data-testid="save-split-{{ $transaction->id }}">Save split</flux:button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                @endif
-                            @endforeach
-                        </div>
-                    </section>
-                @endforeach
-            </div>
+                <div class="agenda">
+                    @foreach($grouped as $dateKey => $dayTxns)
+                        <section wire:key="group-{{ $dateKey }}" class="agenda-group">
+                            <x-cib.sec-head :title="CarbonImmutable::parse($dateKey)->format('j D M')"/>
+                            <div class="day-card">
+                                @foreach($dayTxns as $transaction)
+                                    @include('livewire.partials.transaction-row', ['transaction' => $transaction])
+                                @endforeach
+                            </div>
+                        </section>
+                    @endforeach
+                </div>
+            @endif
         </div>
 
         <x-cib.card class="mt-4">
             <div class="flex items-center justify-between gap-4">
-                {{ $transactions->links() }}
+                {{ $inMerchantMode ? $clusters->links() : $transactions->links() }}
             </div>
         </x-cib.card>
     @endif

@@ -17,6 +17,10 @@ use App\Models\TransactionEmail;
 use App\Models\TransactionSplit;
 use App\Services\GmailService;
 use App\Support\AmountParser;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
@@ -40,6 +44,14 @@ final class TransactionList extends Component
     private const array VALID_PLANNED_FILTERS = ['all', 'planned', 'unplanned'];
 
     private const array VALID_CATEGORISED_FILTERS = ['all', 'categorised', 'uncategorised'];
+
+    private const array VALID_GROUP_MODES = ['date', 'merchant'];
+
+    /**
+     * Clusters are a coarser unit than rows, and each expands in place, so a
+     * page of 25 clusters is already a long scroll.
+     */
+    private const int CLUSTERS_PER_PAGE = 25;
 
     #[Url]
     public string $direction = 'all';
@@ -73,6 +85,17 @@ final class TransactionList extends Component
 
     #[Url]
     public string $sortDir = 'desc';
+
+    #[Url]
+    public string $groupMode = 'date';
+
+    /**
+     * The one expanded cluster, mirroring the exclusive-panel pattern the split
+     * and email panels already use. Not #[Locked]: it is set from the client.
+     * Safety comes from the user_id scope on every query, never from locking.
+     */
+    #[Url]
+    public ?string $expandedKey = null;
 
     #[Locked]
     public ?int $emailPanelTxnId = null;
@@ -113,6 +136,24 @@ final class TransactionList extends Component
             $this->categorised = 'all';
         }
 
+        if (! in_array($this->groupMode, self::VALID_GROUP_MODES, true)) {
+            $this->groupMode = 'date';
+        }
+
+        // Clustering only exists while triaging uncategorised rows, and the
+        // toggle that leaves it is rendered only there. Any other filter would
+        // strand the user in merchant mode with no visible way back, including
+        // on a direct ?groupMode=merchant&categorised=all load.
+        if ($this->categorised !== 'uncategorised') {
+            $this->groupMode = 'date';
+        }
+
+        // An expanded cluster only means anything in merchant mode; carrying a
+        // stale key into date mode would leave a dead query-string parameter.
+        if ($this->groupMode !== 'merchant') {
+            $this->expandedKey = null;
+        }
+
         $this->period = match ($this->period) {
             '30d' => 'this-month',
             '90d' => '3m',
@@ -123,6 +164,34 @@ final class TransactionList extends Component
         if (! TransactionPeriod::tryFrom($this->period)) {
             $this->period = 'this-month';
         }
+    }
+
+    /**
+     * Expand one cluster, collapsing whatever was open. Re-clicking the open
+     * cluster closes it.
+     */
+    public function toggleCluster(string $merchantKey): void
+    {
+        $this->expandedKey = $this->expandedKey === $merchantKey ? null : $merchantKey;
+    }
+
+    public function updatedGroupMode(): void
+    {
+        if (! in_array($this->groupMode, self::VALID_GROUP_MODES, true)) {
+            $this->groupMode = 'date';
+        }
+
+        // Same coherence rule as mount() and updatedCategorised(): the toggle
+        // that leaves merchant mode is rendered only while triaging, so the
+        // mode cannot be entered from anywhere else. A client update can set
+        // this property directly, which is why the clamp lives on every path
+        // rather than only where the UI can reach it.
+        if ($this->categorised !== 'uncategorised') {
+            $this->groupMode = 'date';
+        }
+
+        $this->expandedKey = null;
+        $this->resetPage();
     }
 
     public function sort(string $column): void
@@ -444,6 +513,13 @@ final class TransactionList extends Component
             $this->categorised = 'all';
         }
 
+        // Same coherence rule as mount(): leaving uncategorised hides the mode
+        // toggle, so the mode itself has to come back to date.
+        if ($this->categorised !== 'uncategorised') {
+            $this->groupMode = 'date';
+            $this->expandedKey = null;
+        }
+
         $this->resetPage();
     }
 
@@ -491,7 +567,73 @@ final class TransactionList extends Component
             default => null,
         };
 
-        $transactions = Transaction::query()
+        $inMerchantMode = $this->inMerchantMode();
+
+        // Merchant mode paginates clusters, date mode paginates rows. Keeping
+        // them in separate variables means the view never has to guess whether
+        // it holds a paginator or a plain collection.
+        $transactions = $inMerchantMode
+            ? null
+            : $this->filtered($dates, $directionEnum)
+                ->withRelations()
+                ->with(['emails', 'splits.category'])
+                ->orderBy(
+                    in_array($this->sortBy, self::SORTABLE_COLUMNS, true) ? $this->sortBy : 'post_date',
+                    in_array($this->sortDir, ['asc', 'desc'], true) ? $this->sortDir : 'desc',
+                )
+                ->paginate(25);
+
+        $accounts = Account::query()
+            ->where('user_id', auth()->id())
+            ->active()
+            ->get(['id', 'name']);
+
+        $grouped = $transactions === null
+            ? collect()
+            : $transactions->getCollection()
+                ->groupBy(static fn (Transaction $t): string => $t->post_date->format('Y-m-d'));
+
+        return view('livewire.transaction-list', [
+            'transactions' => $transactions,
+            'grouped' => $grouped,
+            'inMerchantMode' => $inMerchantMode,
+            'clusters' => $inMerchantMode ? $this->merchantClusters($dates, $directionEnum) : null,
+            'clusterRows' => $inMerchantMode ? $this->clusterMembers($dates, $directionEnum) : null,
+            'accounts' => $accounts,
+            'categoryName' => $this->category
+                ? Category::query()->whereKey($this->category)->value('name')
+                : null,
+            'formatMoney' => MoneyCast::format(...),
+            'periodLabel' => $periodEnum->label(),
+            'hasPayCycle' => auth()->user()->hasPayCycleConfigured(),
+            'showCustomRange' => $periodEnum === TransactionPeriod::Custom,
+            'gmailEnabled' => app(GmailServiceContract::class)->isConfigured(),
+            'splitCategories' => Category::visibleSortedByFullPath(),
+        ]);
+    }
+
+    /**
+     * Merchant clustering is a sub-mode of uncategorised triage, never an
+     * independent axis. Deriving it from both properties means no single
+     * missed mutation path can put the page into a mode whose toggle the view
+     * is not rendering.
+     */
+    private function inMerchantMode(): bool
+    {
+        return $this->groupMode === 'merchant' && $this->categorised === 'uncategorised';
+    }
+
+    /**
+     * Every filter the page exposes, with no ordering or eager loading, so the
+     * row list and the cluster aggregate cannot drift apart. Returns a fresh
+     * builder per call because the two modes consume it differently.
+     *
+     * @param  array{start: mixed, end: mixed}  $dates
+     * @return Builder<Transaction>
+     */
+    private function filtered(array $dates, ?TransactionDirection $directionEnum): Builder
+    {
+        return Transaction::query()
             ->where('user_id', auth()->id())
             ->current()
             ->when($directionEnum, fn ($q, $dir) => $q->where('direction', $dir))
@@ -513,37 +655,103 @@ final class TransactionList extends Component
                     ->orWhere('merchant_name', 'like', "%{$term}%");
             }))
             ->when($dates['start'], fn ($q, $s) => $q->where('post_date', '>=', $s))
-            ->when($dates['end'], fn ($q, $e) => $q->where('post_date', '<=', $e))
+            ->when($dates['end'], fn ($q, $e) => $q->where('post_date', '<=', $e));
+    }
+
+    /**
+     * One page of merchant clusters, biggest first.
+     *
+     * Aggregating in SQL is the whole point of persisting merchant_key: grouping
+     * in PHP would either split a cluster across pages (group after paginate) or
+     * load every matching row into memory on each render (group before it).
+     *
+     * The paginator is constructed by hand because the unit of pagination here
+     * is a cluster, not a row — and because Collection has no paginate().
+     *
+     * Items are Transaction models hydrated with only the aggregate columns,
+     * which is what Eloquent returns for a grouped selectRaw. They are read-only
+     * cluster summaries, never saved: `row_count`, `total_amount`, `min_amount`,
+     * `max_amount`, `first_date`, `last_date`, `account_count` and
+     * `direction_count` are raw attributes, deliberately named apart from
+     * `amount` so the MoneyCast on that column does not apply to them.
+     *
+     * Rows whose merchant_key has not been populated yet are excluded. The
+     * column is nullable and the backfill is a deploy step, so a NULL group is
+     * a real possibility — and it cannot be clustered: COUNT(DISTINCT) skips
+     * NULL while GROUP BY emits it, so the total and the rows would disagree,
+     * and `$expandedKey === null` is already this component's sentinel for
+     * "nothing expanded", making a null cluster key unrepresentable. The guard
+     * lives here rather than in filtered() because the date list must keep
+     * showing every row.
+     *
+     * @param  array{start: mixed, end: mixed}  $dates
+     * @return LengthAwarePaginator<int, Transaction>
+     */
+    private function merchantClusters(array $dates, ?TransactionDirection $directionEnum): LengthAwarePaginator
+    {
+        // Cast before max(): Livewire stores the raw ?page query value, and
+        // max(1, 'abc') returns the string, which forPage() cannot subtract.
+        $page = max(1, (int) $this->getPage());
+
+        // One closure for both queries so the count and the rows can never
+        // disagree about which rows are clusterable.
+        $clusterable = fn (): Builder => $this->filtered($dates, $directionEnum)
+            ->whereNotNull('merchant_key');
+
+        $total = $clusterable()
+            ->distinct()
+            ->count('merchant_key');
+
+        $rows = $clusterable()
+            ->selectRaw(implode(', ', [
+                'merchant_key',
+                'COUNT(*) as row_count',
+                'SUM(amount) as total_amount',
+                // Spread is measured on magnitudes so a cluster holding both a
+                // refund and a purchase reports a real range, not a sign flip.
+                'MIN(ABS(amount)) as min_amount',
+                'MAX(ABS(amount)) as max_amount',
+                'MIN(post_date) as first_date',
+                'MAX(post_date) as last_date',
+                'COUNT(DISTINCT account_id) as account_count',
+                'COUNT(DISTINCT direction) as direction_count',
+            ]))
+            ->groupBy('merchant_key')
+            ->orderByDesc('row_count')
+            ->orderBy('merchant_key')
+            ->forPage($page, self::CLUSTERS_PER_PAGE)
+            ->get();
+
+        return new LengthAwarePaginator(
+            $rows,
+            $total,
+            self::CLUSTERS_PER_PAGE,
+            $page,
+            ['path' => Paginator::resolveCurrentPath(), 'pageName' => 'page'],
+        );
+    }
+
+    /**
+     * Member rows of the one expanded cluster. Nothing is loaded for collapsed
+     * clusters — a page of 25 clusters could otherwise pull thousands of rows.
+     *
+     * @param  array{start: mixed, end: mixed}  $dates
+     * @return EloquentCollection<int, Transaction>
+     */
+    private function clusterMembers(array $dates, ?TransactionDirection $directionEnum): EloquentCollection
+    {
+        if ($this->expandedKey === null) {
+            // No query at all: nothing is expanded, so there is nothing to load.
+            return new EloquentCollection;
+        }
+
+        return $this->filtered($dates, $directionEnum)
+            ->where('merchant_key', $this->expandedKey)
             ->withRelations()
             ->with(['emails', 'splits.category'])
-            ->orderBy(
-                in_array($this->sortBy, self::SORTABLE_COLUMNS, true) ? $this->sortBy : 'post_date',
-                in_array($this->sortDir, ['asc', 'desc'], true) ? $this->sortDir : 'desc',
-            )
-            ->paginate(25);
-
-        $accounts = Account::query()
-            ->where('user_id', auth()->id())
-            ->active()
-            ->get(['id', 'name']);
-
-        $grouped = $transactions->getCollection()
-            ->groupBy(static fn (Transaction $t): string => $t->post_date->format('Y-m-d'));
-
-        return view('livewire.transaction-list', [
-            'transactions' => $transactions,
-            'grouped' => $grouped,
-            'accounts' => $accounts,
-            'categoryName' => $this->category
-                ? Category::query()->whereKey($this->category)->value('name')
-                : null,
-            'formatMoney' => MoneyCast::format(...),
-            'periodLabel' => $periodEnum->label(),
-            'hasPayCycle' => auth()->user()->hasPayCycleConfigured(),
-            'showCustomRange' => $periodEnum === TransactionPeriod::Custom,
-            'gmailEnabled' => app(GmailServiceContract::class)->isConfigured(),
-            'splitCategories' => Category::visibleSortedByFullPath(),
-        ]);
+            ->orderByDesc('post_date')
+            ->orderByDesc('id')
+            ->get();
     }
 
     private function closeSplitPanel(): void
