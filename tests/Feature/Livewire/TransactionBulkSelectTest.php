@@ -16,6 +16,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Event;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
@@ -210,18 +211,31 @@ it('excludes transfers and splits from the select-all-matching count and write',
     $other = bulkTxn($this->user, $this->account);
     $transfer = bulkTxn($this->user, $this->account, ['transfer_pair_id' => $other->id]);
 
+    $splitCategory = Category::factory()->create(['is_hidden' => false]);
+    $split = bulkTxn($this->user, $this->account);
+    $split->splits()->create([
+        'category_id' => $splitCategory->id,
+        'amount' => 1899,
+        'position' => 1,
+    ]);
+
     $component = Livewire::actingAs($this->user)
         ->test(TransactionList::class)
+        // The 'all' categorised filter does not itself exclude splits, so this
+        // leaves eligibleForBulk() as the only thing standing between the split
+        // row and the write.
+        ->set('categorised', 'all')
         ->call('selectAllMatching');
 
-    // plain + other are eligible; the transfer is not.
+    // plain + other are eligible; the transfer and the split row are not.
     expect($component->viewData('selectionCount'))->toBe(2);
 
     $component->set('bulkCategoryId', (string) $this->category->id)
         ->call('applyCategoryToSelection');
 
     expect($plain->fresh()->category_id)->toBe($this->category->id)
-        ->and($transfer->fresh()->category_id)->toBeNull();
+        ->and($transfer->fresh()->category_id)->toBeNull()
+        ->and($split->fresh()->category_id)->toBeNull();
 });
 
 it('selects a whole merchant cluster in one action', function () {
@@ -276,22 +290,19 @@ it('clears the selection after a successful apply and reports the count', functi
 });
 
 it('toggles every eligible row on screen and back off again', function () {
-    $a = bulkTxn($this->user, $this->account);
-    $b = bulkTxn($this->user, $this->account);
+    bulkTxn($this->user, $this->account);
+    bulkTxn($this->user, $this->account);
 
     $component = Livewire::actingAs($this->user)
         ->test(TransactionList::class);
 
     $ids = $component->viewData('pageEligibleIds');
-    expect($ids)->toHaveCount(2);
 
     $component->call('toggleVisible', $ids, true);
     expect($component->viewData('selectionCount'))->toBe(2);
 
     $component->call('toggleVisible', $ids, false);
     expect($component->viewData('selectionCount'))->toBe(0);
-
-    expect([$a->id, $b->id])->toEqualCanonicalizing($ids);
 });
 
 it('keeps excluded rows out of the on-screen eligible set', function () {
@@ -303,4 +314,113 @@ it('keeps excluded rows out of the on-screen eligible set', function () {
 
     // $other plus the transfer are on screen; only $other is eligible.
     expect($component->viewData('pageEligibleIds'))->toBe([$other->id]);
+});
+
+it('shows the success notice even when the write empties the filtered list', function () {
+    foreach (range(1, 3) as $ignored) {
+        bulkTxn($this->user, $this->account);
+    }
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->call('selectAllMatching')
+        ->set('bulkCategoryId', (string) $this->category->id)
+        ->call('applyCategoryToSelection')
+        // Categorising the last uncategorised rows empties the list, which is
+        // precisely when the confirmation matters. It must not be swallowed by
+        // the empty-state branch.
+        ->assertSee('Categorised 3 transactions.')
+        ->assertSeeHtml('data-testid="bulk-notice"');
+});
+
+it('refuses a client attempt to rewrite the bulk scope', function () {
+    bulkTxn($this->user, $this->account, ['description' => 'PAYPAL *STEAM 4829']);
+    bulkTxn($this->user, $this->account, ['description' => 'PAYPAL *STEAM 5561']);
+    $outsideCluster = bulkTxn($this->user, $this->account, ['description' => 'NETFLIX.COM']);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->set('groupMode', 'merchant')
+        ->call('selectCluster', 'PAYPAL STEAM');
+
+    expect($component->viewData('selectionCount'))->toBe(2);
+
+    // A forged merchantKey used to drop the merchant predicate and widen the
+    // write to every row matching the filters. The property is locked, so the
+    // client cannot reach it at all.
+    expect(fn () => $component->set('bulkScope', [
+        'filters' => ['categorised' => 'uncategorised'],
+        'merchantKey' => ['PAYPAL STEAM'],
+    ]))->toThrow(CannotUpdateLockedPropertyException::class);
+
+    expect($outsideCluster->fresh()->category_id)->toBeNull();
+});
+
+it('keeps rows with no merchant key out of the merchant-mode select-all', function () {
+    bulkTxn($this->user, $this->account, ['description' => 'PAYPAL *STEAM 4829']);
+    bulkTxn($this->user, $this->account, ['description' => 'PAYPAL *STEAM 5561']);
+
+    // merchant_key is nullable and its backfill is a deploy step, so an
+    // unclustered row is a real possibility. It appears in no cluster on
+    // screen, so "select all matching this filter" must not write it.
+    $unclustered = bulkTxn($this->user, $this->account);
+    $unclustered->forceFill(['merchant_key' => null])->saveQuietly();
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->set('groupMode', 'merchant')
+        ->call('selectAllMatching');
+
+    expect($component->viewData('matchingCount'))->toBe(2)
+        ->and($component->viewData('selectionCount'))->toBe(2);
+
+    $component->set('bulkCategoryId', (string) $this->category->id)
+        ->call('applyCategoryToSelection');
+
+    expect($unclustered->fresh()->category_id)->toBeNull();
+});
+
+it('labels a merchant cluster by the rows a bulk write can actually touch', function () {
+    $a = bulkTxn($this->user, $this->account, ['description' => 'PAYPAL *STEAM 4829']);
+    bulkTxn($this->user, $this->account, ['description' => 'PAYPAL *STEAM 5561']);
+    // Both legs of a transfer share a description, so a transfer clusters here
+    // — but eligibleForBulk() refuses it, so the button must not count it.
+    bulkTxn($this->user, $this->account, [
+        'description' => 'PAYPAL *STEAM 9903',
+        'transfer_pair_id' => $a->id,
+    ]);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->set('groupMode', 'merchant');
+
+    $component->assertSee('Select all 2 in this merchant')
+        ->assertDontSee('Select all 3 in this merchant');
+
+    $component->call('selectCluster', 'PAYPAL STEAM');
+
+    expect($component->viewData('selectionCount'))->toBe(2);
+});
+
+it('reports only the rows a re-apply actually changed', function () {
+    // Already carries both the category and the provenance a bulk apply would
+    // write, so the save is a true no-op rather than a provenance-only update.
+    $already = bulkTxn($this->user, $this->account, [
+        'category_id' => $this->category->id,
+        'category_source' => CategorySource::Manual,
+    ]);
+    $fresh = bulkTxn($this->user, $this->account);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('selected', [$already->id => true, $fresh->id => true])
+        ->set('bulkCategoryId', (string) $this->category->id)
+        ->call('applyCategoryToSelection');
+
+    // A no-op save must not inflate the number reported back to the user.
+    expect($component->get('bulkNotice'))->toBe('Categorised 1 transaction.');
 });

@@ -120,8 +120,21 @@ final class TransactionList extends Component
      * snapshot, not live filters, so the number shown on the button is the
      * number that gets written even if the user changes a filter afterwards.
      *
+     * #[Locked] unlike $selected: nothing binds this property, it is written
+     * only by selectAllMatching(), selectCluster(), clearSelection(),
+     * toggleVisible() and updatedSelected(). Locking it keeps an arbitrary
+     * client-supplied array out of the query builder entirely.
+     *
+     * Typed loosely on purpose. The shape this class writes is
+     * array{filters: array<string, mixed>, merchantKey: string|null}, but
+     * declaring that would make the shape checks in selectionQuery() statically
+     * dead — and those checks are what makes a malformed scope fail closed
+     * rather than widen a bulk write to every matching row. The guards are the
+     * guarantee; the lock is defence in depth in front of them.
+     *
      * @var array<string, mixed>|null
      */
+    #[Locked]
     public ?array $bulkScope = null;
 
     public string $bulkCategoryId = '';
@@ -150,6 +163,12 @@ final class TransactionList extends Component
 
     #[Locked]
     public ?string $splitError = null;
+
+    /**
+     * Per-request memo for matchingEligibleCount(). Private, so Livewire never
+     * serialises it and it cannot survive into the next request.
+     */
+    private ?int $matchingCountCache = null;
 
     /**
      * @throws ContainerExceptionInterface
@@ -295,9 +314,18 @@ final class TransactionList extends Component
     }
 
     /**
-     * Apply one category to the current selection. Bounded by construction:
-     * it writes only what the selection resolves to and creates no rule, so
-     * nothing outside the selection and no future import is affected.
+     * Apply one category to the current selection, creating no rule, so no
+     * future import is affected.
+     *
+     * The write is NOT confined to the selected rows. Each row is saved
+     * individually so TransactionCategoryUpdated fires, and
+     * PropagateTransactionCategory then rewrites every sibling sharing the
+     * row's planned_transaction_id plus the PlannedTransaction itself. Those
+     * propagated writes are not filtered by eligibleForBulk(), so a planned
+     * sibling that is a transfer or a split can be recategorised even though
+     * the list renders it with a disabled checkbox. That fan-out is the
+     * documented behaviour of planned-transaction grouping, not an oversight
+     * here — but it is the real boundary of this method.
      */
     public function applyCategoryToSelection(): void
     {
@@ -331,6 +359,10 @@ final class TransactionList extends Component
         // Chunked model saves, never a mass UPDATE: a mass update bypasses
         // Eloquent events, so TransactionCategoryUpdated would not fire and
         // PropagateTransactionCategory would never run.
+        //
+        // chunkById is a keyset cursor (id > lastId), not an offset, so rows
+        // dropping out of the filter predicate as the loop writes them stay
+        // behind the cursor and cannot be skipped.
         DB::transaction(function () use ($query, $categoryId, &$updated): void {
             $query->chunkById(200, function (EloquentCollection $chunk) use ($categoryId, &$updated): void {
                 foreach ($chunk as $transaction) {
@@ -338,6 +370,14 @@ final class TransactionList extends Component
                     // A direct human choice, so it is protected from later rule
                     // overwrites by the provenance guard.
                     $transaction->category_source = CategorySource::Manual;
+
+                    // Count rows that actually changed. Re-applying a category
+                    // a row already carries is a no-op save, and counting it
+                    // would inflate the number reported back to the user.
+                    if (! $transaction->isDirty()) {
+                        continue;
+                    }
+
                     $transaction->save();
                     $updated++;
                 }
@@ -819,9 +859,16 @@ final class TransactionList extends Component
     /**
      * The resolved selection, re-authorised against the signed-in user.
      *
-     * Returns null when nothing is selected. Ids arriving from the wire are
-     * never trusted: the user_id scope in queryFor() means a forged id from
-     * another account simply matches no rows.
+     * Both branches are independently user-scoped: the snapshot branch through
+     * queryFor(), the hand-picked branch through its own
+     * where('user_id', auth()->id())->current(). A forged id therefore matches
+     * no rows rather than reaching another account.
+     *
+     * Returns null when the selection cannot be resolved to a definite set:
+     * nothing hand-picked, or a scope whose merchantKey is present but not a
+     * string. A malformed scope is refused rather than silently widened —
+     * dropping the merchant predicate would turn "this cluster" into "every
+     * row matching the filters".
      *
      * @return Builder<Transaction>|null
      */
@@ -831,8 +878,12 @@ final class TransactionList extends Component
             $filters = is_array($this->bulkScope['filters'] ?? null) ? $this->bulkScope['filters'] : [];
             $merchantKey = $this->bulkScope['merchantKey'] ?? null;
 
+            if ($merchantKey !== null && ! is_string($merchantKey)) {
+                return null;
+            }
+
             return $this->eligibleForBulk($this->queryFor($filters))
-                ->when(is_string($merchantKey), fn (Builder $q): Builder => $q->where('merchant_key', $merchantKey));
+                ->when($merchantKey !== null, fn (Builder $q): Builder => $q->where('merchant_key', $merchantKey));
         }
 
         $ids = $this->selectedIds();
@@ -863,30 +914,47 @@ final class TransactionList extends Component
     }
 
     /**
-     * How many rows the current selection would actually write. Counted from
-     * the database for a scope so the button never overstates its reach.
+     * How many rows the current selection would actually write.
+     *
+     * Always counted from the database, including for hand-picked ids: a row
+     * that was ticked and then split becomes ineligible while its id stays in
+     * $selected, so counting ticks would overstate the reach.
      */
     private function selectionCount(): int
     {
-        if ($this->bulkScope !== null) {
-            return (int) ($this->selectionQuery()?->count() ?? 0);
+        // A whole-filter scope resolves to exactly the query matchingCount
+        // already ran this render, so reuse it instead of repeating the
+        // aggregate with its two NOT EXISTS subqueries.
+        if ($this->bulkScope !== null
+            && ($this->bulkScope['merchantKey'] ?? null) === null
+            && ($this->bulkScope['filters'] ?? null) === $this->currentFilters()) {
+            return $this->matchingEligibleCount();
         }
 
-        return count($this->selectedIds());
+        return (int) ($this->selectionQuery()?->count() ?? 0);
     }
 
     /**
      * How many rows "select all matching this filter" would cover, shown on the
      * affordance itself so the user sees the real number before clicking.
+     *
+     * Memoised for the render pass: render() needs it for the affordance and
+     * selectionCount() reuses it for a whole-filter scope.
      */
     private function matchingEligibleCount(): int
     {
-        return (int) $this->eligibleForBulk($this->queryFor($this->currentFilters()))->count();
+        return $this->matchingCountCache ??= (int) $this->eligibleForBulk(
+            $this->queryFor($this->currentFilters()),
+        )->count();
     }
 
     /**
      * The filter values currently bound to the component, as a plain array that
      * can be frozen into a bulk-selection scope and re-resolved later.
+     *
+     * clusterableOnly rides along so a snapshot taken in merchant mode keeps
+     * excluding rows that no cluster can render, exactly as the on-screen
+     * aggregate does.
      *
      * @return array<string, mixed>
      */
@@ -902,6 +970,7 @@ final class TransactionList extends Component
             'from' => $this->from,
             'to' => $this->to,
             'search' => $this->search,
+            'clusterableOnly' => $this->inMerchantMode(),
         ];
     }
 
@@ -935,8 +1004,12 @@ final class TransactionList extends Component
             ->where('user_id', auth()->id())
             ->current()
             ->when($directionEnum, fn ($q, $dir) => $q->where('direction', $dir))
-            ->when($filters['account'] ?? null, fn ($q, $id) => $q->where('account_id', $id))
-            ->when($filters['category'] ?? null, fn ($q, $id) => $q->where(fn ($q) => $q
+            // Merchant mode renders clusters, and a NULL merchant_key can never
+            // be one, so a count or a bulk write taken in that mode must not
+            // reach rows the page is incapable of showing.
+            ->when(($filters['clusterableOnly'] ?? false) === true, fn ($q) => $q->whereNotNull('merchant_key'))
+            ->when(is_scalar($filters['account'] ?? null) ? $filters['account'] : null, fn ($q, $id) => $q->where('account_id', $id))
+            ->when(is_scalar($filters['category'] ?? null) ? $filters['category'] : null, fn ($q, $id) => $q->where(fn ($q) => $q
                 ->where('category_id', $id)
                 ->orWhereHas('splits', fn ($s) => $s->where('category_id', $id))))
             ->when(($filters['planned'] ?? null) === 'planned', fn ($q) => $q->whereNotNull('planned_transaction_id'))
@@ -960,9 +1033,11 @@ final class TransactionList extends Component
      * Rows a bulk categorisation may legally touch.
      *
      * A split transaction's category is decided by its parts, and a transfer is
-     * not spending at all. Two separate predicates on purpose: isSplit() checks
-     * the splits relation, while parent_transaction_id is createChild() lineage
-     * and would be the wrong test entirely.
+     * not spending at all. The transfer test is transfer_pair_id (the pairing
+     * column); parent_transaction_id is createChild() lineage, a different
+     * relationship that would exclude the wrong rows entirely. The split test
+     * is the splits relation, mirrored for an already-loaded model by
+     * isBulkExcluded().
      *
      * @param  Builder<Transaction>  $query
      * @return Builder<Transaction>
@@ -986,19 +1061,24 @@ final class TransactionList extends Component
      *
      * Items are Transaction models hydrated with only the aggregate columns,
      * which is what Eloquent returns for a grouped selectRaw. They are read-only
-     * cluster summaries, never saved: `row_count`, `total_amount`, `min_amount`,
-     * `max_amount`, `first_date`, `last_date`, `account_count` and
-     * `direction_count` are raw attributes, deliberately named apart from
-     * `amount` so the MoneyCast on that column does not apply to them.
+     * cluster summaries, never saved: `row_count`, `eligible_count`,
+     * `total_amount`, `min_amount`, `max_amount`, `first_date`, `last_date`,
+     * `account_count` and `direction_count` are raw attributes, deliberately
+     * named apart from `amount` so the MoneyCast on that column does not apply
+     * to them.
      *
      * Rows whose merchant_key has not been populated yet are excluded. The
      * column is nullable and the backfill is a deploy step, so a NULL group is
      * a real possibility — and it cannot be clustered: COUNT(DISTINCT) skips
      * NULL while GROUP BY emits it, so the total and the rows would disagree,
      * and `$expandedKey === null` is already this component's sentinel for
-     * "nothing expanded", making a null cluster key unrepresentable. The guard
-     * lives here rather than in queryFor() because the date list must keep
-     * showing every row.
+     * "nothing expanded", making a null cluster key unrepresentable.
+     *
+     * queryFor() already applies the same guard whenever the filter set carries
+     * clusterableOnly, which is how the bulk count and a frozen scope stay in
+     * step with what is on screen. It is repeated here unconditionally so the
+     * aggregate is correct even if called with a filter set that lacks the
+     * flag; the date list, whose filters never carry it, keeps every row.
      *
      * @param  array<string, mixed>  $filters
      * @return LengthAwarePaginator<int, Transaction>
@@ -1022,6 +1102,14 @@ final class TransactionList extends Component
             ->selectRaw(implode(', ', [
                 'merchant_key',
                 'COUNT(*) as row_count',
+                // What "select all in this merchant" can actually write.
+                // row_count counts everything in the cluster, but transfers
+                // cluster too (both legs share a description, so they share a
+                // merchant_key) and eligibleForBulk() refuses them, so a button
+                // labelled from row_count would promise rows it cannot touch.
+                // Splits are already excluded upstream by the uncategorised
+                // filter's whereDoesntHave('splits').
+                'SUM(CASE WHEN transfer_pair_id IS NULL THEN 1 ELSE 0 END) as eligible_count',
                 'SUM(amount) as total_amount',
                 // Spread is measured on magnitudes so a cluster holding both a
                 // refund and a purchase reports a real range, not a sign flip.
