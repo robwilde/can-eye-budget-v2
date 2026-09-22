@@ -118,33 +118,35 @@
     @else
         @php
             // Three-state: none / some / all of the eligible rows on screen.
-            // A filter-wide or cluster scope leaves $selected empty by design,
-            // so it is folded in here — otherwise the page would render every
-            // box unticked while the bulk bar reports hundreds selected, and
-            // the button would invite a click that silently narrows the
-            // selection to this page (toggleVisible() clears the scope).
+            //
+            // A scope leaves $selected empty by design, so it has to be folded
+            // in or the page would render every box unticked while the bulk bar
+            // reports hundreds selected. $scopeCoversScreen is decided by the
+            // component: a scope whose merchant or whose frozen filters no
+            // longer match what is rendered does NOT count, because clicking
+            // this control calls toggleVisible(), which nulls the scope and
+            // would destroy a selection the user still holds.
             $eligibleOnScreen = count($pageEligibleIds);
             $selectedOnScreen = collect($pageEligibleIds)->filter(fn (int $id): bool => ! empty($selected[$id]))->count();
-            $allOnScreenSelected = $bulkScope !== null
+            $allOnScreenSelected = $scopeCoversScreen
                 || ($eligibleOnScreen > 0 && $selectedOnScreen === $eligibleOnScreen);
-
-            // The control is a tri-state toggle, so it has to say so. Without
-            // aria-pressed a screen reader hears a plain button and cannot tell
-            // none from some from all; "mixed" is the ARIA value for a partial
-            // selection, and the label carries the same information visually.
-            $pageSelectionState = $allOnScreenSelected
-                ? 'true'
-                : ($selectedOnScreen > 0 ? 'mixed' : 'false');
         @endphp
 
         <div class="flex flex-wrap items-center gap-3 px-1">
             @if($eligibleOnScreen > 0)
+                {{-- No aria-pressed. The WAI-ARIA APG button pattern requires a
+                     toggle's name to stay fixed while its state changes; this
+                     label deliberately does the opposite, naming the action and
+                     stating the partial count. Carrying both would announce the
+                     selection twice, in different words, and pair an action name
+                     with a contradictory state. The label reaches sighted and
+                     screen-reader users alike, and is more specific than
+                     none/mixed/all. --}}
                 <flux:button size="sm" variant="ghost"
                              wire:click="toggleVisible(@js($pageEligibleIds), @js(! $allOnScreenSelected))"
-                             aria-pressed="{{ $pageSelectionState }}"
                              data-testid="select-visible">
                     @if($allOnScreenSelected)
-                        Clear these
+                        Clear these {{ $eligibleOnScreen }}
                     @elseif($selectedOnScreen > 0)
                         Select the other {{ $eligibleOnScreen - $selectedOnScreen }} ({{ $selectedOnScreen }} of {{ $eligibleOnScreen }} selected)
                     @else

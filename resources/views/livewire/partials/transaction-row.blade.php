@@ -40,13 +40,20 @@
     @if($bulkExcluded)
         {{-- The reason is not left to title alone: a disabled control is out of
              the tab order and title never fires on touch, so it is also given
-             an accessible name and an sr-only description. --}}
+             an accessible name and an sr-only description.
+
+             aria-disabled MUST be bound, not written as a literal. Flux folds a
+             static `aria-disabled="true"` into the valueless-attribute form and
+             emits aria-disabled="aria-disabled", which is not a valid ARIA
+             value, so the state would be silently dropped by assistive tech.
+             ui-checkbox is a role=checkbox custom element that never sets it
+             itself, so this attribute is the only thing conveying the state. --}}
         <flux:checkbox
             wire:key="select-{{ $transaction->id }}-off"
             disabled
-            aria-disabled="true"
+            :aria-disabled="'true'"
             class="mt-5 shrink-0"
-            aria-label="Cannot select transaction"
+            :aria-label="'Cannot select ' . $transaction->description"
             aria-describedby="select-reason-{{ $transaction->id }}"
             :title="$bulkReason"
             data-testid="select-excluded-{{ $transaction->id }}"

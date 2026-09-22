@@ -76,6 +76,12 @@ final class Transaction extends Model
      * false; TransactionCategoryUpdated still fires, PropagateTransactionCategory
      * just declines to act on it. Defaults true so every other writer keeps the
      * grouping behaviour unchanged.
+     *
+     * Sticky for the life of the instance: nothing resets it after save(), and
+     * refresh() preserves it because that only rewrites the attribute bag.
+     * replicate() and every fresh hydration start from the default, so the two
+     * directions are not symmetric — set it as late as possible, on a model you
+     * are about to save and then discard.
      */
     public bool $propagateCategoryChange = true;
 

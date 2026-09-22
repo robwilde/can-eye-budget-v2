@@ -357,7 +357,13 @@ it('refuses a client attempt to rewrite the bulk scope', function () {
         'merchantKey' => ['PAYPAL STEAM'],
     ]))->toThrow(CannotUpdateLockedPropertyException::class);
 
-    expect($outsideCluster->fresh()->category_id)->toBeNull();
+    // Then actually write, so this asserts containment rather than the absence
+    // of a write that never happened.
+    $component->set('bulkCategoryId', (string) $this->category->id)
+        ->call('applyCategoryToSelection');
+
+    expect($outsideCluster->fresh()->category_id)->toBeNull()
+        ->and(Transaction::where('merchant_key', 'PAYPAL STEAM')->whereNull('category_id')->count())->toBe(0);
 });
 
 it('keeps rows with no merchant key out of the merchant-mode select-all', function () {
@@ -427,6 +433,31 @@ it('reports only the rows a re-apply actually changed', function () {
     expect($component->get('bulkNotice'))->toBe('Categorised 1 transaction.');
 });
 
+it('counts a re-apply that only relocks rule-assigned rows as manual', function () {
+    // The "lock these in so rules stop overwriting them" workflow: filter to a
+    // category, select all, apply that same category. No category_id changes,
+    // but every rule-assigned row is restamped Manual — a real write that must
+    // not report "Categorised 0 transactions."
+    $ruleAssigned = collect(range(1, 3))->map(fn (): Transaction => bulkTxn($this->user, $this->account, [
+        'category_id' => $this->category->id,
+        'category_source' => CategorySource::Rule,
+    ]));
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'categorised')
+        ->set('category', $this->category->id)
+        ->call('selectAllMatching')
+        ->set('bulkCategoryId', (string) $this->category->id)
+        ->call('applyCategoryToSelection');
+
+    expect($component->get('bulkNotice'))->toBe('Categorised 3 transactions.');
+
+    $ruleAssigned->each(function (Transaction $transaction): void {
+        expect($transaction->fresh()->category_source)->toBe(CategorySource::Manual);
+    });
+});
+
 it('leaves an unselected planned sibling untouched while a single edit still propagates', function () {
     $planned = PlannedTransaction::factory()->for($this->user)->for($this->account)->create();
 
@@ -475,7 +506,10 @@ it('does not re-run the planned fan-out once per selected sibling', function () 
 
     $writes = 0;
     DB::listen(function ($query) use (&$writes): void {
-        if (str_starts_with(mb_strtolower($query->sql), 'update')) {
+        // Scoped to the transactions table so an unrelated write elsewhere in
+        // the request cannot be misattributed to the planned fan-out.
+        if (str_starts_with(mb_strtolower($query->sql), 'update')
+            && str_contains($query->sql, 'transactions')) {
             $writes++;
         }
     });
@@ -512,23 +546,102 @@ it('returns to the first page so the remaining rows stay visible after a write',
         ->and($transactions->total())->toBe(29);
 });
 
-it('announces a partial page selection as mixed rather than as an untouched page', function () {
+it('states the partial page selection in the control label', function () {
     $a = bulkTxn($this->user, $this->account);
     bulkTxn($this->user, $this->account);
 
     $component = Livewire::actingAs($this->user)
         ->test(TransactionList::class);
 
-    $component->assertSeeHtml('aria-pressed="false"');
+    $component->assertSee('Select this page (2)');
 
     $component->set('selected', [$a->id => true]);
 
     // Some but not all: the control must not read as an untouched page.
-    $component->assertSeeHtml('aria-pressed="mixed"')
-        ->assertSee('1 of 2 selected');
+    $component->assertSee('Select the other 1 (1 of 2 selected)')
+        ->assertDontSee('Select this page (2)');
 
     $component->call('toggleVisible', $component->viewData('pageEligibleIds'), true);
 
-    $component->assertSeeHtml('aria-pressed="true"')
-        ->assertSee('Clear these');
+    $component->assertSee('Clear these 2');
+});
+
+it('does not claim a cluster selection over a different expanded cluster', function () {
+    foreach ([4829, 5561] as $ref) {
+        bulkTxn($this->user, $this->account, ['description' => "PAYPAL *STEAM {$ref}"]);
+    }
+    bulkTxn($this->user, $this->account, ['description' => 'NETFLIX.COM']);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->set('groupMode', 'merchant')
+        ->call('selectCluster', 'PAYPAL STEAM')
+        ->call('toggleCluster', 'PAYPAL STEAM');
+
+    expect($component->viewData('scopeCoversScreen'))->toBeTrue();
+    $component->assertSee('Clear these 2');
+
+    // Expanding a different cluster does not clear the scope, so the control
+    // must stop claiming the rows on screen are selected — clicking it calls
+    // toggleVisible(), which would silently discard the real selection.
+    $component->call('toggleCluster', 'NETFLIX.COM');
+
+    expect($component->viewData('scopeCoversScreen'))->toBeFalse()
+        ->and($component->viewData('selectionCount'))->toBe(2);
+    $component->assertSee('Select these 1');
+});
+
+it('stops claiming a filter-wide selection once the filters move off the snapshot', function () {
+    bulkTxn($this->user, $this->account, ['direction' => TransactionDirection::Debit]);
+    bulkTxn($this->user, $this->account, ['direction' => TransactionDirection::Debit]);
+    bulkTxn($this->user, $this->account, ['direction' => TransactionDirection::Credit]);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('direction', 'outgoing')
+        ->call('selectAllMatching');
+
+    expect($component->viewData('scopeCoversScreen'))->toBeTrue();
+
+    $component->set('direction', 'incoming');
+
+    // The snapshot still governs the write — that is deliberate — but the
+    // on-screen control must not report those unrelated rows as selected.
+    expect($component->viewData('scopeCoversScreen'))->toBeFalse()
+        ->and($component->viewData('selectionCount'))->toBe(2);
+    $component->assertSee('Select this page (1)');
+});
+
+it('leaves an unselected ordinary planned sibling untouched', function () {
+    $planned = PlannedTransaction::factory()->for($this->user)->for($this->account)->create();
+
+    $selected = bulkTxn($this->user, $this->account, ['planned_transaction_id' => $planned->id]);
+    // Fully eligible and rendered with an ENABLED checkbox — the user simply
+    // chose not to tick it. This is the dominant containment case, not the
+    // transfer/split one.
+    $unticked = bulkTxn($this->user, $this->account, ['planned_transaction_id' => $planned->id]);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('selected', [$selected->id => true])
+        ->set('bulkCategoryId', (string) $this->category->id)
+        ->call('applyCategoryToSelection');
+
+    expect($selected->fresh()->category_id)->toBe($this->category->id)
+        ->and($unticked->fresh()->category_id)->toBeNull()
+        ->and($planned->fresh()->category_id)->toBeNull();
+});
+
+it('marks an excluded row as disabled with a valid aria value', function () {
+    $other = bulkTxn($this->user, $this->account);
+    $transfer = bulkTxn($this->user, $this->account, ['transfer_pair_id' => $other->id]);
+
+    $html = Livewire::actingAs($this->user)->test(TransactionList::class)->html();
+
+    // Flux folds a static aria-disabled="true" into aria-disabled="aria-disabled",
+    // which is not a valid ARIA value and is silently ignored by assistive tech.
+    expect($html)->toContain('aria-disabled="true"')
+        ->and($html)->not->toContain('aria-disabled="aria-disabled"')
+        ->and($html)->toContain('data-testid="select-excluded-'.$transfer->id.'"');
 });

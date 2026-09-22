@@ -268,6 +268,12 @@ final class TransactionList extends Component
     public function toggleVisible(array $ids, bool $select): void
     {
         $this->bulkScope = null;
+        // Same reset as updatedSelected(): the notice is a persistent inline
+        // element, not a toast, so without this a fresh selection renders
+        // directly beneath "Categorised 25 transactions." from the previous
+        // apply and reads as though it has already been written.
+        $this->bulkError = null;
+        $this->bulkNotice = null;
 
         foreach ($ids as $id) {
             if ($select) {
@@ -318,15 +324,20 @@ final class TransactionList extends Component
      * future import is affected.
      *
      * Bounded to exactly the rows the selection resolves to. Each row is saved
-     * individually rather than through a mass UPDATE so
-     * TransactionCategoryUpdated still fires for every write, but the models
-     * carry propagateCategoryChange = false, so PropagateTransactionCategory
-     * declines to fan the change out across planned_transaction_id. Without
-     * that opt-out a bulk apply would rewrite planned siblings the list had
-     * just rendered with a disabled checkbox and a stated reason — the very
-     * transfers and splits eligibleForBulk() refuses. Every other writer,
-     * including a single-row edit and RuleActionExecutor, keeps the grouping
-     * behaviour untouched.
+     * individually rather than through a mass UPDATE so a category change still
+     * dispatches TransactionCategoryUpdated — Transaction::booted() gates that
+     * event on wasChanged('category_id'), so a save that only restamps
+     * provenance is written but fires nothing, which is correct.
+     *
+     * The models carry propagateCategoryChange = false, so
+     * PropagateTransactionCategory declines to fan the change out across
+     * planned_transaction_id. That fan-out is scoped by planned group, not by
+     * what the user ticked, so without the opt-out a bulk apply would rewrite
+     * any unselected sibling sharing the plan: ordinary rows the list offered
+     * with an enabled checkbox and the user deliberately left alone, and the
+     * transfers and splits eligibleForBulk() renders disabled with a stated
+     * reason. Every other writer, including a single-row edit and
+     * RuleActionExecutor, keeps the grouping behaviour untouched.
      */
     public function applyCategoryToSelection(): void
     {
@@ -357,11 +368,21 @@ final class TransactionList extends Component
 
         // Counted from the database before the write rather than tallied in
         // the loop, so the number shown is the number of rows the write
-        // changes regardless of how the loop skips no-ops.
+        // changes.
+        //
+        // The predicate is the negation of the loop's isDirty() test, spelled
+        // out rather than expressed as NOT (a AND b) because SQL's three-valued
+        // logic would drop NULL rows out of a negated conjunction. Counting on
+        // category_id alone would under-report: re-applying a category rows
+        // already hold still restamps rule-assigned rows as Manual — the whole
+        // "lock these in so rules stop overwriting them" workflow — and would
+        // have reported "Categorised 0 transactions." while doing it.
         $updated = (int) (clone $query)
             ->where(fn (Builder $q): Builder => $q
                 ->whereNull('category_id')
-                ->orWhere('category_id', '!=', $categoryId))
+                ->orWhere('category_id', '!=', $categoryId)
+                ->orWhereNull('category_source')
+                ->orWhere('category_source', '!=', CategorySource::Manual->value))
             ->count();
 
         // Chunked model saves, never a mass UPDATE: a mass update bypasses
@@ -856,6 +877,7 @@ final class TransactionList extends Component
             'selectionCount' => $this->selectionCount(),
             'pageEligibleIds' => $pageEligibleIds,
             'matchingCount' => $this->matchingEligibleCount(),
+            'scopeCoversScreen' => $this->scopeCoversScreen(),
         ]);
     }
 
@@ -871,6 +893,38 @@ final class TransactionList extends Component
     }
 
     /**
+     * Whether the held selection scope actually covers the rows on screen.
+     *
+     * A scope stores $selected = [] by design, so the view has to fold it into
+     * its none/some/all state or every checkbox would render unticked beside a
+     * bulk bar reporting hundreds. Folding it in unconditionally is wrong in
+     * two reachable ways, because nothing clears a scope when the view moves:
+     * toggleCluster() can expand a different merchant, and any filter change
+     * leaves the frozen snapshot standing (deliberately — the snapshot is what
+     * gets written). In both cases the control would claim a selection over
+     * rows that are not in it, and the click would call toggleVisible(), which
+     * nulls the scope and destroys the real selection.
+     *
+     * Lives here rather than in Blade so the snapshot comparison stays next to
+     * the one in selectionCount() and the view does not reach into the shape of
+     * $bulkScope.
+     */
+    private function scopeCoversScreen(): bool
+    {
+        if ($this->bulkScope === null) {
+            return false;
+        }
+
+        if (($this->bulkScope['filters'] ?? null) !== $this->currentFilters()) {
+            return false;
+        }
+
+        $merchantKey = $this->bulkScope['merchantKey'] ?? null;
+
+        return $merchantKey === null || $merchantKey === $this->expandedKey;
+    }
+
+    /**
      * The resolved selection, re-authorised against the signed-in user.
      *
      * Both branches are independently user-scoped: the snapshot branch through
@@ -879,20 +933,21 @@ final class TransactionList extends Component
      * no rows rather than reaching another account.
      *
      * Returns null when the selection cannot be resolved to a definite set:
-     * nothing hand-picked, or a scope whose merchantKey is present but not a
-     * string. A malformed scope is refused rather than silently widened —
-     * dropping the merchant predicate would turn "this cluster" into "every
-     * row matching the filters".
+     * nothing hand-picked, or a scope whose filters are not an array or whose
+     * merchantKey is present but not a string. A malformed scope is refused
+     * rather than silently widened — dropping the merchant predicate would turn
+     * "this cluster" into "every row matching the filters", and falling back to
+     * an empty filter set would turn it into "every row this month".
      *
      * @return Builder<Transaction>|null
      */
     private function selectionQuery(): ?Builder
     {
         if ($this->bulkScope !== null) {
-            $filters = is_array($this->bulkScope['filters'] ?? null) ? $this->bulkScope['filters'] : [];
+            $filters = $this->bulkScope['filters'] ?? null;
             $merchantKey = $this->bulkScope['merchantKey'] ?? null;
 
-            if ($merchantKey !== null && ! is_string($merchantKey)) {
+            if (! is_array($filters) || ($merchantKey !== null && ! is_string($merchantKey))) {
                 return null;
             }
 
