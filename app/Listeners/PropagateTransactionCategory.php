@@ -13,6 +13,16 @@ final class PropagateTransactionCategory
 {
     public function handle(TransactionCategoryUpdated $event): void
     {
+        // A writer that means "exactly this row" opts out. The bulk apply on
+        // the transactions list does: this fan-out is scoped by planned group,
+        // not by what the user ticked, so it would rewrite any unselected
+        // sibling sharing the plan — ordinary rows the list offered with an
+        // enabled checkbox and the user deliberately left alone, and the
+        // transfers and splits it renders disabled with a stated reason.
+        if (! $event->propagate) {
+            return;
+        }
+
         $transaction = $event->transaction;
         $plannedId = $transaction->planned_transaction_id;
 
