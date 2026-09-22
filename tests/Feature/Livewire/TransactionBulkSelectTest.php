@@ -12,6 +12,7 @@ use App\Events\TransactionCategoryUpdated;
 use App\Livewire\TransactionList;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -423,4 +424,40 @@ it('reports only the rows a re-apply actually changed', function () {
 
     // A no-op save must not inflate the number reported back to the user.
     expect($component->get('bulkNotice'))->toBe('Categorised 1 transaction.');
+});
+
+it('propagates to an excluded planned sibling exactly as a single-row edit does', function () {
+    $planned = PlannedTransaction::factory()->for($this->user)->for($this->account)->create();
+
+    $selected = bulkTxn($this->user, $this->account, ['planned_transaction_id' => $planned->id]);
+    $other = bulkTxn($this->user, $this->account);
+    $excludedSibling = bulkTxn($this->user, $this->account, [
+        'planned_transaction_id' => $planned->id,
+        'transfer_pair_id' => $other->id,
+    ]);
+
+    // The list renders the transfer with a disabled checkbox, and the write
+    // itself refuses it: it is not in the selection.
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('selected', [$selected->id => true, $excludedSibling->id => true])
+        ->set('bulkCategoryId', (string) $this->category->id)
+        ->call('applyCategoryToSelection');
+
+    expect($component->get('bulkNotice'))->toBe('Categorised 1 transaction.');
+
+    // It is still recategorised — by PropagateTransactionCategory, because it
+    // shares a planned_transaction_id with a row that did change. That fan-out
+    // is planned-transaction grouping working as designed and is deliberately
+    // NOT suppressed for bulk: a planned group is one recurring expense, so
+    // letting a bulk apply leave it half-categorised would be the anomaly.
+    expect($excludedSibling->fresh()->category_id)->toBe($this->category->id)
+        ->and($planned->fresh()->category_id)->toBe($this->category->id);
+
+    // Identical on the single-row path, which proves this is the listener's
+    // behaviour for every writer rather than anything the bulk apply adds.
+    $secondCategory = Category::factory()->create(['is_hidden' => false]);
+    $selected->fresh()->update(['category_id' => $secondCategory->id]);
+
+    expect($excludedSibling->fresh()->category_id)->toBe($secondCategory->id);
 });
