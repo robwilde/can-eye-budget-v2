@@ -13,6 +13,15 @@ final class PropagateTransactionCategory
 {
     public function handle(TransactionCategoryUpdated $event): void
     {
+        // A writer that means "exactly this row" opts out. The bulk apply on
+        // the transactions list does: it renders transfers and splits with a
+        // disabled checkbox and a stated reason, so fanning out through
+        // planned_transaction_id would rewrite the very rows the page just
+        // refused to select.
+        if (! $event->propagate) {
+            return;
+        }
+
         $transaction = $event->transaction;
         $plannedId = $transaction->planned_transaction_id;
 

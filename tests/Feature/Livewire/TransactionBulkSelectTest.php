@@ -16,6 +16,7 @@ use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
@@ -426,18 +427,18 @@ it('reports only the rows a re-apply actually changed', function () {
     expect($component->get('bulkNotice'))->toBe('Categorised 1 transaction.');
 });
 
-it('propagates to an excluded planned sibling exactly as a single-row edit does', function () {
+it('leaves an unselected planned sibling untouched while a single edit still propagates', function () {
     $planned = PlannedTransaction::factory()->for($this->user)->for($this->account)->create();
 
     $selected = bulkTxn($this->user, $this->account, ['planned_transaction_id' => $planned->id]);
     $other = bulkTxn($this->user, $this->account);
+    // Shares the planned group with $selected, and is a transfer — the list
+    // renders it with a disabled checkbox and a stated reason.
     $excludedSibling = bulkTxn($this->user, $this->account, [
         'planned_transaction_id' => $planned->id,
         'transfer_pair_id' => $other->id,
     ]);
 
-    // The list renders the transfer with a disabled checkbox, and the write
-    // itself refuses it: it is not in the selection.
     $component = Livewire::actingAs($this->user)
         ->test(TransactionList::class)
         ->set('selected', [$selected->id => true, $excludedSibling->id => true])
@@ -446,18 +447,88 @@ it('propagates to an excluded planned sibling exactly as a single-row edit does'
 
     expect($component->get('bulkNotice'))->toBe('Categorised 1 transaction.');
 
-    // It is still recategorised — by PropagateTransactionCategory, because it
-    // shares a planned_transaction_id with a row that did change. That fan-out
-    // is planned-transaction grouping working as designed and is deliberately
-    // NOT suppressed for bulk: a planned group is one recurring expense, so
-    // letting a bulk apply leave it half-categorised would be the anomaly.
-    expect($excludedSibling->fresh()->category_id)->toBe($this->category->id)
-        ->and($planned->fresh()->category_id)->toBe($this->category->id);
+    // Exactly the ticked, eligible row. The fan-out across
+    // planned_transaction_id is opted out of for bulk, so the row the page
+    // refused to select is not rewritten behind the user's back.
+    expect($selected->fresh()->category_id)->toBe($this->category->id)
+        ->and($excludedSibling->fresh()->category_id)->toBeNull()
+        ->and($planned->fresh()->category_id)->toBeNull();
 
-    // Identical on the single-row path, which proves this is the listener's
-    // behaviour for every writer rather than anything the bulk apply adds.
+    // The opt-out is scoped to the bulk write: a single-row edit still fans
+    // out, so planned grouping is unchanged for every other writer.
+    $selected->fresh()->update(['category_id' => $this->category->id, 'category_source' => null]);
+    $sibling = bulkTxn($this->user, $this->account, ['planned_transaction_id' => $planned->id]);
     $secondCategory = Category::factory()->create(['is_hidden' => false]);
+
     $selected->fresh()->update(['category_id' => $secondCategory->id]);
 
-    expect($excludedSibling->fresh()->category_id)->toBe($secondCategory->id);
+    expect($sibling->fresh()->category_id)->toBe($secondCategory->id)
+        ->and($planned->fresh()->category_id)->toBe($secondCategory->id);
+});
+
+it('does not re-run the planned fan-out once per selected sibling', function () {
+    $planned = PlannedTransaction::factory()->for($this->user)->for($this->account)->create();
+
+    $rows = collect(range(1, 5))->map(fn (): Transaction => bulkTxn($this->user, $this->account, [
+        'planned_transaction_id' => $planned->id,
+    ]));
+
+    $writes = 0;
+    DB::listen(function ($query) use (&$writes): void {
+        if (str_starts_with(mb_strtolower($query->sql), 'update')) {
+            $writes++;
+        }
+    });
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('selected', $rows->mapWithKeys(fn (Transaction $t): array => [$t->id => true])->all())
+        ->set('bulkCategoryId', (string) $this->category->id)
+        ->call('applyCategoryToSelection');
+
+    // One UPDATE per selected row. With the fan-out live each save also
+    // mass-updated the other four plus the planned row, which is O(N²).
+    expect($writes)->toBe(5);
+});
+
+it('returns to the first page so the remaining rows stay visible after a write', function () {
+    // 30 uncategorised rows: two pages of 25. Categorise the second page and
+    // the paginator would otherwise stay on a page that no longer exists.
+    $rows = collect(range(1, 30))->map(fn (): Transaction => bulkTxn($this->user, $this->account));
+    $lastPageRow = $rows->last();
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->call('gotoPage', 2)
+        ->set('selected', [$lastPageRow->id => true])
+        ->set('bulkCategoryId', (string) $this->category->id)
+        ->call('applyCategoryToSelection');
+
+    $transactions = $component->viewData('transactions');
+
+    expect($transactions->currentPage())->toBe(1)
+        ->and($transactions->count())->toBe(25)
+        ->and($transactions->total())->toBe(29);
+});
+
+it('announces a partial page selection as mixed rather than as an untouched page', function () {
+    $a = bulkTxn($this->user, $this->account);
+    bulkTxn($this->user, $this->account);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class);
+
+    $component->assertSeeHtml('aria-pressed="false"');
+
+    $component->set('selected', [$a->id => true]);
+
+    // Some but not all: the control must not read as an untouched page.
+    $component->assertSeeHtml('aria-pressed="mixed"')
+        ->assertSee('1 of 2 selected');
+
+    $component->call('toggleVisible', $component->viewData('pageEligibleIds'), true);
+
+    $component->assertSeeHtml('aria-pressed="true"')
+        ->assertSee('Clear these');
 });

@@ -127,14 +127,29 @@
             $selectedOnScreen = collect($pageEligibleIds)->filter(fn (int $id): bool => ! empty($selected[$id]))->count();
             $allOnScreenSelected = $bulkScope !== null
                 || ($eligibleOnScreen > 0 && $selectedOnScreen === $eligibleOnScreen);
+
+            // The control is a tri-state toggle, so it has to say so. Without
+            // aria-pressed a screen reader hears a plain button and cannot tell
+            // none from some from all; "mixed" is the ARIA value for a partial
+            // selection, and the label carries the same information visually.
+            $pageSelectionState = $allOnScreenSelected
+                ? 'true'
+                : ($selectedOnScreen > 0 ? 'mixed' : 'false');
         @endphp
 
         <div class="flex flex-wrap items-center gap-3 px-1">
             @if($eligibleOnScreen > 0)
                 <flux:button size="sm" variant="ghost"
                              wire:click="toggleVisible(@js($pageEligibleIds), @js(! $allOnScreenSelected))"
+                             aria-pressed="{{ $pageSelectionState }}"
                              data-testid="select-visible">
-                    {{ $allOnScreenSelected ? 'Clear these' : ($inMerchantMode ? 'Select these ' . $eligibleOnScreen : 'Select this page (' . $eligibleOnScreen . ')') }}
+                    @if($allOnScreenSelected)
+                        Clear these
+                    @elseif($selectedOnScreen > 0)
+                        Select the other {{ $eligibleOnScreen - $selectedOnScreen }} ({{ $selectedOnScreen }} of {{ $eligibleOnScreen }} selected)
+                    @else
+                        {{ $inMerchantMode ? 'Select these ' . $eligibleOnScreen : 'Select this page (' . $eligibleOnScreen . ')' }}
+                    @endif
                 </flux:button>
             @endif
 

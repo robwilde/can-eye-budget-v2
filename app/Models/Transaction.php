@@ -67,6 +67,19 @@ final class Transaction extends Model
     public const string UNKNOWN_MERCHANT_KEY = '(Unknown)';
 
     /**
+     * Transient, per-instance: whether a category change on this model should
+     * fan out to its planned group.
+     *
+     * A real declared property, never an attribute, so it is not persisted, not
+     * fillable and not reachable from mass assignment. Writers that mean
+     * "exactly this row" — the bulk apply on the transactions list — set it
+     * false; TransactionCategoryUpdated still fires, PropagateTransactionCategory
+     * just declines to act on it. Defaults true so every other writer keeps the
+     * grouping behaviour unchanged.
+     */
+    public bool $propagateCategoryChange = true;
+
+    /**
      * @var list<string>
      */
     protected $fillable = [
@@ -348,6 +361,7 @@ final class Transaction extends Model
                 event(new TransactionCategoryUpdated(
                     $transaction,
                     $transaction->getOriginal('category_id'),
+                    $transaction->propagateCategoryChange,
                 ));
             }
         });

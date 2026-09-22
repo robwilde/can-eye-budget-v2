@@ -317,15 +317,16 @@ final class TransactionList extends Component
      * Apply one category to the current selection, creating no rule, so no
      * future import is affected.
      *
-     * The write is NOT confined to the selected rows. Each row is saved
-     * individually so TransactionCategoryUpdated fires, and
-     * PropagateTransactionCategory then rewrites every sibling sharing the
-     * row's planned_transaction_id plus the PlannedTransaction itself. Those
-     * propagated writes are not filtered by eligibleForBulk(), so a planned
-     * sibling that is a transfer or a split can be recategorised even though
-     * the list renders it with a disabled checkbox. That fan-out is the
-     * documented behaviour of planned-transaction grouping, not an oversight
-     * here — but it is the real boundary of this method.
+     * Bounded to exactly the rows the selection resolves to. Each row is saved
+     * individually rather than through a mass UPDATE so
+     * TransactionCategoryUpdated still fires for every write, but the models
+     * carry propagateCategoryChange = false, so PropagateTransactionCategory
+     * declines to fan the change out across planned_transaction_id. Without
+     * that opt-out a bulk apply would rewrite planned siblings the list had
+     * just rendered with a disabled checkbox and a stated reason — the very
+     * transfers and splits eligibleForBulk() refuses. Every other writer,
+     * including a single-row edit and RuleActionExecutor, keeps the grouping
+     * behaviour untouched.
      */
     public function applyCategoryToSelection(): void
     {
@@ -354,37 +355,50 @@ final class TransactionList extends Component
             return;
         }
 
-        $updated = 0;
+        // Counted from the database before the write rather than tallied in
+        // the loop, so the number shown is the number of rows the write
+        // changes regardless of how the loop skips no-ops.
+        $updated = (int) (clone $query)
+            ->where(fn (Builder $q): Builder => $q
+                ->whereNull('category_id')
+                ->orWhere('category_id', '!=', $categoryId))
+            ->count();
 
         // Chunked model saves, never a mass UPDATE: a mass update bypasses
-        // Eloquent events, so TransactionCategoryUpdated would not fire and
-        // PropagateTransactionCategory would never run.
+        // Eloquent events, so TransactionCategoryUpdated would not fire at all.
         //
         // chunkById is a keyset cursor (id > lastId), not an offset, so rows
         // dropping out of the filter predicate as the loop writes them stay
         // behind the cursor and cannot be skipped.
-        DB::transaction(function () use ($query, $categoryId, &$updated): void {
-            $query->chunkById(200, function (EloquentCollection $chunk) use ($categoryId, &$updated): void {
+        DB::transaction(function () use ($query, $categoryId): void {
+            $query->chunkById(200, function (EloquentCollection $chunk) use ($categoryId): void {
                 foreach ($chunk as $transaction) {
                     $transaction->category_id = $categoryId;
                     // A direct human choice, so it is protected from later rule
                     // overwrites by the provenance guard.
                     $transaction->category_source = CategorySource::Manual;
+                    // This row and no other. Also removes the O(N²) write a
+                    // fan-out would cause for a selection spanning one planned
+                    // group: N saves each mass-updating the same N siblings.
+                    $transaction->propagateCategoryChange = false;
 
-                    // Count rows that actually changed. Re-applying a category
-                    // a row already carries is a no-op save, and counting it
-                    // would inflate the number reported back to the user.
+                    // Re-applying a category a row already carries is a no-op
+                    // save; skip it rather than firing a pointless event.
                     if (! $transaction->isDirty()) {
                         continue;
                     }
 
                     $transaction->save();
-                    $updated++;
                 }
             });
         });
 
         $this->clearSelection();
+        // The write can shrink the result set past the current page — applying
+        // on the last page of an uncategorised filter removes that page
+        // entirely — and an out-of-range page renders the empty state while
+        // rows still match. Go back to page one so the remainder is visible.
+        $this->resetPage();
         $this->bulkNotice = $updated === 1
             ? 'Categorised 1 transaction.'
             : sprintf('Categorised %d transactions.', $updated);
