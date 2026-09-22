@@ -1,5 +1,6 @@
 @php
     use Carbon\CarbonImmutable;
+    use Illuminate\Support\Str;
 @endphp
 <div class="space-y-6">
     <div class="flex flex-wrap items-center justify-between gap-4">
@@ -142,13 +143,19 @@
                             $isMultiAccount = (int) $cluster->account_count > 1;
                             $minAmount = (int) $cluster->min_amount;
                             $maxAmount = (int) $cluster->max_amount;
-                            $isWideSpread = $minAmount > 0 && $maxAmount >= $minAmount * 5;
+                            // A zero amount is a real row — the CSV parser emits
+                            // one for an empty credit column — and the ratio test
+                            // divides it away: min 0 against max $900 is the
+                            // widest possible range, so it is treated as one.
+                            $isWideSpread = $minAmount === 0
+                                ? $maxAmount > 0
+                                : $maxAmount >= $minAmount * 5;
                             // Named from content, the button would read as a run
                             // of four unlabelled numbers, and the badge meanings
                             // and the wide-spread colour would never reach it.
                             $clusterLabel = implode(', ', array_filter([
                                 $cluster->merchant_key,
-                                $cluster->row_count.' transactions',
+                                $cluster->row_count.' '.Str::plural('transaction', (int) $cluster->row_count),
                                 'total '.$formatMoney((int) $cluster->total_amount),
                                 'amounts '.$formatMoney($minAmount).' to '.$formatMoney($maxAmount),
                                 $isWideSpread ? 'wide range' : null,
@@ -168,10 +175,11 @@
                                 <span class="flex min-w-0 flex-1 items-center gap-2">
                                     <flux:icon :name="$isExpanded ? 'chevron-down' : 'chevron-right'" class="size-4 shrink-0 text-zinc-400"/>
                                     <span class="min-w-0 truncate font-medium">{{ $cluster->merchant_key }}</span>
-                                    {{-- .pill is styled as a descendant of .tx-meta, so the badges need
-                                         that container here just as the row partial gets it from
-                                         x-cib.tx-row's meta slot. --}}
-                                    <span class="tx-meta shrink-0">
+                                    {{-- .pill carries no styles of its own; app.css
+                                         scopes it per container. cluster-head is this
+                                         header's scope, so the badges do not inherit
+                                         .tx-meta's row typography and margin. --}}
+                                    <span class="cluster-head shrink-0">
                                         <span class="pill">{{ $cluster->row_count }}</span>
                                         @if($isMixedDirection)
                                             <span class="pill split">in + out</span>

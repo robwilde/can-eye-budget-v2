@@ -266,7 +266,8 @@ select:focus[data-flux-control] {
     .tx-amt.out { color: var(--color-money-owed); }
     .tx-amt.inc { color: var(--color-cib-green-600); }
     .tx-amt.plan { color: var(--color-money-planned); }
-    .tx-meta .pill {
+    .tx-meta .pill,
+    .cluster-head .pill {
         display: inline-block;
         background: var(--color-cib-n-100);
         color: var(--color-fg-2);
@@ -280,7 +281,8 @@ select:focus[data-flux-control] {
 
     .tx-meta .pill.email { background: var(--color-cib-teal-50); color: var(--color-cib-teal-600); }
 
-    .tx-meta .pill.split { background: var(--color-cib-cream-50); color: var(--color-cib-yellow-600); }
+    .tx-meta .pill.split,
+    .cluster-head .pill.split { background: var(--color-cib-cream-50); color: var(--color-cib-yellow-600); }
 
     /* ---------- Email scan panel (Ticket #340) ---------- */
     .email-scan-panel {
