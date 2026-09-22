@@ -645,3 +645,69 @@ it('marks an excluded row as disabled with a valid aria value', function () {
         ->and($html)->not->toContain('aria-disabled="aria-disabled"')
         ->and($html)->toContain('data-testid="select-excluded-'.$transfer->id.'"');
 });
+
+it('drops an expanded cluster the paginator has moved past out of the page-level selection', function () {
+    $expanded = collect(range(1, 3))
+        ->map(fn (): Transaction => bulkTxn($this->user, $this->account, ['description' => 'AAA MERCHANT']));
+
+    // 30 single-row clusters push the cluster paginator past its 25-per-page
+    // limit. merchant_key strips digits, so the suffixes have to be letters or
+    // the fillers collapse into one cluster.
+    for ($i = 0; $i < 30; $i++) {
+        bulkTxn($this->user, $this->account, [
+            'description' => sprintf('FILLER %s%s', chr(65 + intdiv($i, 5)), chr(65 + $i % 5)),
+        ]);
+    }
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class, ['groupMode' => 'merchant', 'categorised' => 'uncategorised'])
+        ->call('toggleCluster', 'AAA MERCHANT');
+
+    expect($component->viewData('pageEligibleIds'))
+        ->toEqualCanonicalizing($expanded->pluck('id')->all());
+
+    // $expandedKey is a URL property and nothing clears it when the cluster
+    // paginator moves, so the expansion outlives the page it was made on.
+    $component->call('gotoPage', 2);
+
+    expect($component->viewData('pageEligibleIds'))->toBe([])
+        ->and($component->viewData('clusterRows')->count())->toBe(0)
+        ->and($component->viewData('scopeCoversScreen'))->toBeFalse();
+
+    // No checkboxes are rendered for those rows, so nothing may offer to
+    // select them: the control would write to rows the user cannot see.
+    $component->assertDontSee('data-testid="select-visible"', false);
+});
+
+it('ticks the rows a cluster selection covers so a later hand-pick drops only that row', function () {
+    $rows = collect(range(1, 4))->map(fn (): Transaction => bulkTxn($this->user, $this->account));
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class, ['groupMode' => 'merchant', 'categorised' => 'uncategorised'])
+        ->call('toggleCluster', 'NETFLIX.COM')
+        ->call('selectCluster', 'NETFLIX.COM');
+
+    expect(array_keys(array_filter($component->get('selected'))))
+        ->toEqualCanonicalizing($rows->pluck('id')->all())
+        ->and($component->viewData('selectionCount'))->toBe(4);
+
+    // One checkbox unticked. Before the rows were materialised the client sent
+    // the only key it knew about and the selection collapsed from four to one.
+    $component->set('selected.'.$rows->first()->id, false);
+
+    expect($component->viewData('selectionCount'))->toBe(3)
+        ->and($component->get('bulkScope'))->toBeNull();
+});
+
+it('materialises nothing when the selected cluster is collapsed', function () {
+    collect(range(1, 4))->map(fn (): Transaction => bulkTxn($this->user, $this->account));
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class, ['groupMode' => 'merchant', 'categorised' => 'uncategorised'])
+        ->call('selectCluster', 'NETFLIX.COM');
+
+    // Nothing is on screen to tick, and the scope still carries the write.
+    expect($component->get('selected'))->toBe([])
+        ->and($component->viewData('selectionCount'))->toBe(4)
+        ->and($component->viewData('scopeCoversScreen'))->toBeFalse();
+});

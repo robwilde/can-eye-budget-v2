@@ -291,21 +291,34 @@ final class TransactionList extends Component
      */
     public function selectAllMatching(): void
     {
-        $this->selected = [];
         $this->bulkScope = ['filters' => $this->currentFilters(), 'merchantKey' => null];
+        // The scope is what gets written, but the rows on screen still have to
+        // look selected: a checkbox binds to $selected, so leaving it empty
+        // renders every box unticked beside a bar reporting hundreds, and the
+        // first tick then reads as "one row selected" while silently dropping
+        // the rest. Materialising only the visible ids keeps the payload
+        // bounded by what is rendered while the scope carries the remainder.
+        $this->selected = array_fill_keys($this->visibleEligibleIds(), true);
         $this->bulkError = null;
         $this->bulkNotice = null;
     }
 
     /**
      * Select every eligible row in one cluster, however many pages it spans.
-     * Stored as a scope rather than an id list: a big cluster would otherwise
-     * push hundreds of ids through every subsequent request.
+     * The write set is the scope, not an id list, so a cluster spanning more
+     * than the screen costs one string rather than hundreds of ids; only the
+     * rows actually rendered are materialised into $selected so their
+     * checkboxes read as ticked.
      */
     public function selectCluster(string $merchantKey): void
     {
-        $this->selected = [];
         $this->bulkScope = ['filters' => $this->currentFilters(), 'merchantKey' => $merchantKey];
+        // Only the expanded cluster has rows on screen. Selecting a collapsed
+        // one renders no checkboxes, so there is nothing to materialise and
+        // scopeCoversScreen() correctly reports that the scope is off screen.
+        $this->selected = $merchantKey === $this->expandedKey
+            ? array_fill_keys($this->visibleEligibleIds(), true)
+            : [];
         $this->bulkError = null;
         $this->bulkNotice = null;
     }
@@ -822,16 +835,7 @@ final class TransactionList extends Component
         // Merchant mode paginates clusters, date mode paginates rows. Keeping
         // them in separate variables means the view never has to guess whether
         // it holds a paginator or a plain collection.
-        $transactions = $inMerchantMode
-            ? null
-            : $this->queryFor($filters)
-                ->withRelations()
-                ->with(['emails', 'splits.category'])
-                ->orderBy(
-                    in_array($this->sortBy, self::SORTABLE_COLUMNS, true) ? $this->sortBy : 'post_date',
-                    in_array($this->sortDir, ['asc', 'desc'], true) ? $this->sortDir : 'desc',
-                )
-                ->paginate(25);
+        $transactions = $inMerchantMode ? null : $this->paginatedRows($filters);
 
         $accounts = Account::query()
             ->where('user_id', auth()->id())
@@ -843,7 +847,19 @@ final class TransactionList extends Component
             : $transactions->getCollection()
                 ->groupBy(static fn (Transaction $t): string => $t->post_date->format('Y-m-d'));
 
-        $clusterRows = $inMerchantMode ? $this->clusterMembers($filters) : null;
+        $clusters = $inMerchantMode ? $this->merchantClusters($filters) : null;
+
+        // An expansion outlives the page it was made on: $expandedKey is a URL
+        // property and nothing clears it when the cluster paginator moves. The
+        // cluster loop renders rows only for a cluster on the current page, so
+        // members loaded for an off-page expansion would hand the page-level
+        // control a set of ids with no checkboxes behind them — "Select these
+        // 3" over rows the user cannot see, writing off screen when clicked.
+        $expandedOnPage = $clusters !== null && $this->expandedOnPage($clusters);
+
+        $clusterRows = $inMerchantMode
+            ? ($expandedOnPage ? $this->clusterMembers($filters) : new EloquentCollection)
+            : null;
 
         // The rows a page-level "select all" would affect: the current page in
         // date mode, the expanded cluster in merchant mode.
@@ -851,18 +867,13 @@ final class TransactionList extends Component
             ? ($clusterRows ?? new EloquentCollection)
             : $transactions->getCollection();
 
-        $pageEligibleIds = $visibleRows
-            ->reject(fn (Transaction $t): bool => $this->isBulkExcluded($t))
-            ->pluck('id')
-            ->map(static fn ($id): int => (int) $id)
-            ->values()
-            ->all();
+        $pageEligibleIds = $this->eligibleIds($visibleRows);
 
         return view('livewire.transaction-list', [
             'transactions' => $transactions,
             'grouped' => $grouped,
             'inMerchantMode' => $inMerchantMode,
-            'clusters' => $inMerchantMode ? $this->merchantClusters($filters) : null,
+            'clusters' => $clusters,
             'clusterRows' => $clusterRows,
             'accounts' => $accounts,
             'categoryName' => $this->category
@@ -877,7 +888,7 @@ final class TransactionList extends Component
             'selectionCount' => $this->selectionCount(),
             'pageEligibleIds' => $pageEligibleIds,
             'matchingCount' => $this->matchingEligibleCount(),
-            'scopeCoversScreen' => $this->scopeCoversScreen(),
+            'scopeCoversScreen' => $this->scopeCoversScreen($expandedOnPage),
         ]);
     }
 
@@ -895,21 +906,25 @@ final class TransactionList extends Component
     /**
      * Whether the held selection scope actually covers the rows on screen.
      *
-     * A scope stores $selected = [] by design, so the view has to fold it into
-     * its none/some/all state or every checkbox would render unticked beside a
-     * bulk bar reporting hundreds. Folding it in unconditionally is wrong in
-     * two reachable ways, because nothing clears a scope when the view moves:
-     * toggleCluster() can expand a different merchant, and any filter change
-     * leaves the frozen snapshot standing (deliberately — the snapshot is what
-     * gets written). In both cases the control would claim a selection over
-     * rows that are not in it, and the click would call toggleVisible(), which
-     * nulls the scope and destroys the real selection.
+     * A scope is resolved from a snapshot rather than an id list, so the view
+     * has to fold it into its none/some/all state. Folding it in
+     * unconditionally is wrong in three reachable ways, because nothing clears
+     * a scope when the view moves: toggleCluster() can expand a different
+     * merchant, the cluster paginator can move off the expanded cluster
+     * entirely, and any filter change leaves the frozen snapshot standing
+     * (deliberately — the snapshot is what gets written). In each case the
+     * control would claim a selection over rows that are not in it, and the
+     * click would call toggleVisible(), which nulls the scope and destroys the
+     * real selection.
      *
      * Lives here rather than in Blade so the snapshot comparison stays next to
      * the one in selectionCount() and the view does not reach into the shape of
      * $bulkScope.
+     *
+     * @param  bool  $expandedOnPage  whether the expanded cluster is among the
+     *                                clusters the current page renders
      */
-    private function scopeCoversScreen(): bool
+    private function scopeCoversScreen(bool $expandedOnPage): bool
     {
         if ($this->bulkScope === null) {
             return false;
@@ -921,7 +936,83 @@ final class TransactionList extends Component
 
         $merchantKey = $this->bulkScope['merchantKey'] ?? null;
 
-        return $merchantKey === null || $merchantKey === $this->expandedKey;
+        return $merchantKey === null
+            || ($merchantKey === $this->expandedKey && $expandedOnPage);
+    }
+
+    /**
+     * Whether the expanded cluster is one of the clusters this page renders.
+     *
+     * The rows are aggregate projections hydrated as Transaction models, which
+     * is what merchantClusters() returns and what PHPStan infers from it.
+     *
+     * @param  LengthAwarePaginator<int, Transaction>  $clusters
+     */
+    private function expandedOnPage(LengthAwarePaginator $clusters): bool
+    {
+        if ($this->expandedKey === null) {
+            return false;
+        }
+
+        foreach ($clusters->items() as $cluster) {
+            if ($cluster->merchant_key === $this->expandedKey) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The ordered, paginated rows date mode renders.
+     *
+     * Extracted so the page definition has one home: selectAllMatching() has to
+     * resolve the same rows to materialise a scope, and a second copy of the
+     * ordering would let the two drift.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return LengthAwarePaginator<int, Transaction>
+     */
+    private function paginatedRows(array $filters): LengthAwarePaginator
+    {
+        return $this->queryFor($filters)
+            ->withRelations()
+            ->with(['emails', 'splits.category'])
+            ->orderBy(
+                in_array($this->sortBy, self::SORTABLE_COLUMNS, true) ? $this->sortBy : 'post_date',
+                in_array($this->sortDir, ['asc', 'desc'], true) ? $this->sortDir : 'desc',
+            )
+            ->paginate(25);
+    }
+
+    /**
+     * @param  EloquentCollection<int, Transaction>  $rows
+     * @return list<int>
+     */
+    private function eligibleIds(EloquentCollection $rows): array
+    {
+        return $rows
+            ->reject(fn (Transaction $t): bool => $this->isBulkExcluded($t))
+            ->pluck('id')
+            ->map(static fn ($id): int => (int) $id)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The eligible row ids currently rendered, resolved outside render().
+     *
+     * @return list<int>
+     */
+    private function visibleEligibleIds(): array
+    {
+        $filters = $this->currentFilters();
+
+        $rows = $this->inMerchantMode()
+            ? $this->clusterMembers($filters)
+            : $this->paginatedRows($filters)->getCollection();
+
+        return $this->eligibleIds($rows);
     }
 
     /**
