@@ -181,6 +181,15 @@ final class TransactionList extends Component
             $this->groupMode = 'date';
         }
 
+        // Same coherence rule as mount() and updatedCategorised(): the toggle
+        // that leaves merchant mode is rendered only while triaging, so the
+        // mode cannot be entered from anywhere else. A client update can set
+        // this property directly, which is why the clamp lives on every path
+        // rather than only where the UI can reach it.
+        if ($this->categorised !== 'uncategorised') {
+            $this->groupMode = 'date';
+        }
+
         $this->expandedKey = null;
         $this->resetPage();
     }
@@ -558,7 +567,7 @@ final class TransactionList extends Component
             default => null,
         };
 
-        $inMerchantMode = $this->groupMode === 'merchant';
+        $inMerchantMode = $this->inMerchantMode();
 
         // Merchant mode paginates clusters, date mode paginates rows. Keeping
         // them in separate variables means the view never has to guess whether
@@ -601,6 +610,17 @@ final class TransactionList extends Component
             'gmailEnabled' => app(GmailServiceContract::class)->isConfigured(),
             'splitCategories' => Category::visibleSortedByFullPath(),
         ]);
+    }
+
+    /**
+     * Merchant clustering is a sub-mode of uncategorised triage, never an
+     * independent axis. Deriving it from both properties means no single
+     * missed mutation path can put the page into a mode whose toggle the view
+     * is not rendering.
+     */
+    private function inMerchantMode(): bool
+    {
+        return $this->groupMode === 'merchant' && $this->categorised === 'uncategorised';
     }
 
     /**

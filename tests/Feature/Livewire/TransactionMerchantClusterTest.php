@@ -354,3 +354,41 @@ it('labels the cluster toggle instead of leaving it named from content', functio
         ->assertSeeHtml('aria-label="NETFLIX.COM, 2 transactions, total')
         ->assertSeeHtml('aria-controls="cluster-rows-'.md5('NETFLIX.COM').'"');
 });
+
+it('does not enter merchant mode when the mode property is set under another filter', function () {
+    clusterTxn($this->user, $this->account, 'NETFLIX.COM');
+
+    // The toggle is hidden outside uncategorised, but the property is public
+    // and a client update can set it directly.
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'all')
+        ->set('groupMode', 'merchant');
+
+    expect($component->get('groupMode'))->toBe('date')
+        ->and($component->viewData('inMerchantMode'))->toBeFalse();
+});
+
+it('flags a wide spread when the smallest amount in the cluster is zero', function () {
+    // A zero amount is a real row — the CSV parser emits one for an empty
+    // credit column — and a ratio test divides it away, hiding the warning on
+    // the widest possible cluster.
+    clusterTxn($this->user, $this->account, 'AFTERPAY', ['amount' => 0]);
+    clusterTxn($this->user, $this->account, 'AFTERPAY', ['amount' => 90000]);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->set('groupMode', 'merchant')
+        ->assertSeeHtml('wide range');
+});
+
+it('says one transaction for a single-row cluster', function () {
+    clusterTxn($this->user, $this->account, 'NETFLIX.COM');
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->set('groupMode', 'merchant')
+        ->assertSeeHtml('NETFLIX.COM, 1 transaction,');
+});
