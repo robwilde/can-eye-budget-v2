@@ -41,10 +41,12 @@ Run `cat op.conf` or read the file if you need to check available aliases.
 
 ## Commit Messages
 
-Process (issue first): create the GitHub issue, then branch from it. The issue
-number then exists up front and gets reused everywhere — branch name, commit
-scope, PR, and the `Closes #NNN` footer. This keeps one number threaded through
-the whole change.
+Process (issue first): for issue-backed work — which is the default for any
+feature or bug — create the GitHub issue, then branch from it. The issue number
+then exists up front and gets reused throughout that change — branch name,
+commit scope, PR, and the `Closes #NNN` footer — keeping one number threaded
+through it. Small self-contained work that warrants no issue skips this and
+takes a module or `repo` scope instead, per the fallback below.
 
 Format: `type(scope): subject` — the scope is REQUIRED on every authored
 (non-merge) commit. A bare `type: subject` is invalid.
