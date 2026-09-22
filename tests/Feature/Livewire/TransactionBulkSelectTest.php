@@ -261,8 +261,8 @@ it('selects a whole merchant cluster in one action', function () {
         ->and($unrelated->fresh()->category_id)->toBeNull();
 });
 
-it('drops a filter-wide scope as soon as the user hand-picks a row', function () {
-    bulkTxn($this->user, $this->account);
+it('narrows a filter-wide scope on hand-pick instead of discarding the rows it covers', function () {
+    $keep = bulkTxn($this->user, $this->account);
     $one = bulkTxn($this->user, $this->account);
 
     $component = Livewire::actingAs($this->user)
@@ -271,10 +271,74 @@ it('drops a filter-wide scope as soon as the user hand-picks a row', function ()
 
     expect($component->viewData('selectionCount'))->toBe(2);
 
-    $component->set('selected', [$one->id => true]);
+    // Unticking one row of "everything matching this" means the others, not
+    // "only whatever the current screen happened to hold".
+    $component->set('selected.'.$one->id, false);
+
+    expect($component->get('bulkScope'))->not->toBeNull()
+        ->and($component->get('bulkExcluded'))->toBe([$one->id])
+        ->and($component->viewData('selectionCount'))->toBe(1);
+
+    $component->set('bulkCategoryId', (string) $this->category->id)
+        ->call('applyCategoryToSelection');
+
+    expect($keep->fresh()->category_id)->toBe($this->category->id)
+        ->and($one->fresh()->category_id)->toBeNull();
+});
+
+it('keeps off-page rows in a filter-wide scope when one visible row is unticked', function () {
+    // 30 rows paginate to 25 on screen and 5 off it.
+    collect(range(1, 30))->each(fn () => bulkTxn($this->user, $this->account));
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->call('selectAllMatching');
+
+    $visible = $component->viewData('pageEligibleIds');
+
+    expect($component->viewData('selectionCount'))->toBe(30)
+        ->and($visible)->toHaveCount(25);
+
+    $component->set('selected.'.$visible[0], false);
+
+    // 29, not 24: the five rows the screen never showed are still selected.
+    expect($component->viewData('selectionCount'))->toBe(29);
+
+    $component->set('bulkCategoryId', (string) $this->category->id)
+        ->call('applyCategoryToSelection');
+
+    expect(Transaction::whereNotNull('category_id')->count())->toBe(29)
+        ->and(Transaction::find($visible[0])->category_id)->toBeNull();
+});
+
+it('subtracts only the visible rows when the on-screen control clears them under a filter-wide scope', function () {
+    collect(range(1, 30))->each(fn () => bulkTxn($this->user, $this->account));
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->call('selectAllMatching');
+
+    $visible = $component->viewData('pageEligibleIds');
+
+    // "Clear these 25" under a 30-row scope means the 25 on screen.
+    $component->call('toggleVisible', $visible, false);
+
+    expect($component->get('bulkScope'))->not->toBeNull()
+        ->and($component->viewData('selectionCount'))->toBe(5);
+});
+
+it('clears the selection when the last row is subtracted from a scope', function () {
+    collect(range(1, 4))->each(fn () => bulkTxn($this->user, $this->account));
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->call('selectAllMatching');
+
+    $component->call('toggleVisible', $component->viewData('pageEligibleIds'), false);
 
     expect($component->get('bulkScope'))->toBeNull()
-        ->and($component->viewData('selectionCount'))->toBe(1);
+        ->and($component->get('bulkExcluded'))->toBe([])
+        ->and($component->viewData('selectionCount'))->toBe(0);
 });
 
 it('clears the selection after a successful apply and reports the count', function () {
@@ -579,7 +643,7 @@ it('does not claim a cluster selection over a different expanded cluster', funct
         ->call('selectCluster', 'PAYPAL STEAM')
         ->call('toggleCluster', 'PAYPAL STEAM');
 
-    expect($component->viewData('scopeCoversScreen'))->toBeTrue();
+    expect(array_filter($component->get('selected')))->toHaveCount(2);
     $component->assertSee('Clear these 2');
 
     // Expanding a different cluster does not clear the scope, so the control
@@ -587,7 +651,7 @@ it('does not claim a cluster selection over a different expanded cluster', funct
     // toggleVisible(), which would silently discard the real selection.
     $component->call('toggleCluster', 'NETFLIX.COM');
 
-    expect($component->viewData('scopeCoversScreen'))->toBeFalse()
+    expect(array_filter($component->get('selected')))->toBe([])
         ->and($component->viewData('selectionCount'))->toBe(2);
     $component->assertSee('Select these 1');
 });
@@ -602,13 +666,13 @@ it('stops claiming a filter-wide selection once the filters move off the snapsho
         ->set('direction', 'outgoing')
         ->call('selectAllMatching');
 
-    expect($component->viewData('scopeCoversScreen'))->toBeTrue();
+    expect(array_filter($component->get('selected')))->toHaveCount(2);
 
     $component->set('direction', 'incoming');
 
     // The snapshot still governs the write — that is deliberate — but the
     // on-screen control must not report those unrelated rows as selected.
-    expect($component->viewData('scopeCoversScreen'))->toBeFalse()
+    expect(array_filter($component->get('selected')))->toBe([])
         ->and($component->viewData('selectionCount'))->toBe(2);
     $component->assertSee('Select this page (1)');
 });
@@ -672,14 +736,14 @@ it('drops an expanded cluster the paginator has moved past out of the page-level
 
     expect($component->viewData('pageEligibleIds'))->toBe([])
         ->and($component->viewData('clusterRows')->count())->toBe(0)
-        ->and($component->viewData('scopeCoversScreen'))->toBeFalse();
+        ->and($component->get('selected'))->toBe([]);
 
     // No checkboxes are rendered for those rows, so nothing may offer to
     // select them: the control would write to rows the user cannot see.
     $component->assertDontSee('data-testid="select-visible"', false);
 });
 
-it('ticks the rows a cluster selection covers so a later hand-pick drops only that row', function () {
+it('ticks the rows a cluster selection covers so a later hand-pick subtracts only that row', function () {
     $rows = collect(range(1, 4))->map(fn (): Transaction => bulkTxn($this->user, $this->account));
 
     $component = Livewire::actingAs($this->user)
@@ -691,15 +755,46 @@ it('ticks the rows a cluster selection covers so a later hand-pick drops only th
         ->toEqualCanonicalizing($rows->pluck('id')->all())
         ->and($component->viewData('selectionCount'))->toBe(4);
 
-    // One checkbox unticked. Before the rows were materialised the client sent
-    // the only key it knew about and the selection collapsed from four to one.
+    // One checkbox unticked. Before the scope carried exclusions the client
+    // sent the only key it knew about and the selection collapsed to one row.
     $component->set('selected.'.$rows->first()->id, false);
 
     expect($component->viewData('selectionCount'))->toBe(3)
-        ->and($component->get('bulkScope'))->toBeNull();
+        ->and($component->get('bulkScope'))->not->toBeNull()
+        ->and($component->get('bulkExcluded'))->toBe([$rows->first()->id])
+        ->and(array_keys(array_filter($component->get('selected'))))
+        ->toEqualCanonicalizing($rows->skip(1)->pluck('id')->all());
 });
 
-it('materialises nothing when the selected cluster is collapsed', function () {
+it('drops a scope entirely when the tick lands on rows it does not cover', function () {
+    $netflix = collect(range(1, 2))->map(fn (): Transaction => bulkTxn($this->user, $this->account));
+    $steam = bulkTxn($this->user, $this->account, ['description' => 'PAYPAL STEAM']);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class, ['groupMode' => 'merchant', 'categorised' => 'uncategorised'])
+        // NETFLIX is expanded, but the scope is taken over the other cluster,
+        // so the rows on screen are not the rows the scope covers.
+        ->call('toggleCluster', 'NETFLIX.COM')
+        ->call('selectCluster', 'PAYPAL STEAM');
+
+    expect($component->get('selected'))->toBe([])
+        ->and($component->viewData('selectionCount'))->toBe(1);
+
+    $component->set('selected.'.$netflix->first()->id, true);
+
+    // The user is plainly working on something else, so the scope goes.
+    expect($component->get('bulkScope'))->toBeNull()
+        ->and($component->get('bulkExcluded'))->toBe([])
+        ->and($component->viewData('selectionCount'))->toBe(1);
+
+    $component->set('bulkCategoryId', (string) $this->category->id)
+        ->call('applyCategoryToSelection');
+
+    expect($netflix->first()->fresh()->category_id)->toBe($this->category->id)
+        ->and($steam->fresh()->category_id)->toBeNull();
+});
+
+it('mirrors nothing into the checkboxes when the selected cluster is collapsed', function () {
     collect(range(1, 4))->map(fn (): Transaction => bulkTxn($this->user, $this->account));
 
     $component = Livewire::actingAs($this->user)
@@ -708,6 +803,5 @@ it('materialises nothing when the selected cluster is collapsed', function () {
 
     // Nothing is on screen to tick, and the scope still carries the write.
     expect($component->get('selected'))->toBe([])
-        ->and($component->viewData('selectionCount'))->toBe(4)
-        ->and($component->viewData('scopeCoversScreen'))->toBeFalse();
+        ->and($component->viewData('selectionCount'))->toBe(4);
 });

@@ -137,6 +137,25 @@ final class TransactionList extends Component
     #[Locked]
     public ?array $bulkScope = null;
 
+    /**
+     * Rows the user has taken back out of the held scope.
+     *
+     * A scope stands for "everything matching this", which is exactly why a
+     * hand-pick must not drop it: unticking one row of a 700-row filter-wide
+     * selection means "the other 699", and collapsing to whatever happens to
+     * be on screen would silently discard every matching row on another page.
+     * The scope keeps its reach and this list records the subtractions, so the
+     * payload grows only by what the user actually deselects.
+     *
+     * #[Locked] for the same reason as $bulkScope: nothing binds it, it is
+     * written only by the selection mutators, and selectionQuery() feeds it
+     * straight into a whereNotIn.
+     *
+     * @var list<int>
+     */
+    #[Locked]
+    public array $bulkExcluded = [];
+
     public string $bulkCategoryId = '';
 
     #[Locked]
@@ -249,14 +268,25 @@ final class TransactionList extends Component
     }
 
     /**
-     * Hand-picking a row means the user is no longer working from a filter-wide
-     * scope, so the scope is dropped rather than silently widening the write.
+     * A hand-pick while a scope is held narrows the scope, it does not destroy
+     * it: the row is recorded as an exclusion and every other matching row,
+     * on screen or not, stays selected. Only a tick on rows the scope does not
+     * cover — a different cluster, or the page after a filter change — drops
+     * it, because there the user is plainly working on something else.
      */
     public function updatedSelected(): void
     {
-        $this->bulkScope = null;
         $this->bulkError = null;
         $this->bulkNotice = null;
+
+        if ($this->bulkScope !== null && $this->scopeCoversVisibleRows()) {
+            $this->applyVisibleTicksToScope();
+
+            return;
+        }
+
+        $this->bulkScope = null;
+        $this->bulkExcluded = [];
     }
 
     /**
@@ -267,13 +297,37 @@ final class TransactionList extends Component
      */
     public function toggleVisible(array $ids, bool $select): void
     {
-        $this->bulkScope = null;
         // Same reset as updatedSelected(): the notice is a persistent inline
         // element, not a toast, so without this a fresh selection renders
         // directly beneath "Categorised 25 transactions." from the previous
         // apply and reads as though it has already been written.
         $this->bulkError = null;
         $this->bulkNotice = null;
+
+        // "Clear these 25" under a 700-row scope means the 25 on screen, not
+        // all 700, so it subtracts from the scope rather than discarding it.
+        if ($this->bulkScope !== null && $this->scopeCoversVisibleRows()) {
+            $excluded = array_flip($this->bulkExcluded);
+
+            foreach ($ids as $id) {
+                if ($select) {
+                    unset($excluded[(int) $id]);
+                } else {
+                    $excluded[(int) $id] = true;
+                }
+            }
+
+            $this->bulkExcluded = array_map(intval(...), array_keys($excluded));
+
+            if ($this->selectionCount() === 0) {
+                $this->clearSelection();
+            }
+
+            return;
+        }
+
+        $this->bulkScope = null;
+        $this->bulkExcluded = [];
 
         foreach ($ids as $id) {
             if ($select) {
@@ -292,13 +346,10 @@ final class TransactionList extends Component
     public function selectAllMatching(): void
     {
         $this->bulkScope = ['filters' => $this->currentFilters(), 'merchantKey' => null];
-        // The scope is what gets written, but the rows on screen still have to
-        // look selected: a checkbox binds to $selected, so leaving it empty
-        // renders every box unticked beside a bar reporting hundreds, and the
-        // first tick then reads as "one row selected" while silently dropping
-        // the rest. Materialising only the visible ids keeps the payload
-        // bounded by what is rendered while the scope carries the remainder.
-        $this->selected = array_fill_keys($this->visibleEligibleIds(), true);
+        $this->bulkExcluded = [];
+        // render() mirrors the scope into the checkboxes on screen, so this
+        // stays empty and cannot go stale when the page or filters move.
+        $this->selected = [];
         $this->bulkError = null;
         $this->bulkNotice = null;
     }
@@ -306,19 +357,13 @@ final class TransactionList extends Component
     /**
      * Select every eligible row in one cluster, however many pages it spans.
      * The write set is the scope, not an id list, so a cluster spanning more
-     * than the screen costs one string rather than hundreds of ids; only the
-     * rows actually rendered are materialised into $selected so their
-     * checkboxes read as ticked.
+     * than the screen costs one string rather than hundreds of ids.
      */
     public function selectCluster(string $merchantKey): void
     {
         $this->bulkScope = ['filters' => $this->currentFilters(), 'merchantKey' => $merchantKey];
-        // Only the expanded cluster has rows on screen. Selecting a collapsed
-        // one renders no checkboxes, so there is nothing to materialise and
-        // scopeCoversScreen() correctly reports that the scope is off screen.
-        $this->selected = $merchantKey === $this->expandedKey
-            ? array_fill_keys($this->visibleEligibleIds(), true)
-            : [];
+        $this->bulkExcluded = [];
+        $this->selected = [];
         $this->bulkError = null;
         $this->bulkNotice = null;
     }
@@ -327,6 +372,7 @@ final class TransactionList extends Component
     {
         $this->selected = [];
         $this->bulkScope = null;
+        $this->bulkExcluded = [];
         $this->bulkCategoryId = '';
         $this->bulkError = null;
         $this->bulkNotice = null;
@@ -868,6 +914,20 @@ final class TransactionList extends Component
             : $transactions->getCollection();
 
         $pageEligibleIds = $this->eligibleIds($visibleRows);
+        $scopeCoversScreen = $this->scopeCoversScreen($expandedOnPage);
+
+        // A scope is not an id list, but a checkbox binds to $selected, so the
+        // rows it covers have to be mirrored into that property or they render
+        // unticked beside a bar reporting hundreds. Mirrored on every render
+        // rather than once at selection time: the page, the expansion and the
+        // filters can all move under a held scope, and a stale mirror would
+        // leave the last screen's ids sitting in a property the next hand-pick
+        // reads.
+        if ($this->bulkScope !== null) {
+            $this->selected = $scopeCoversScreen
+                ? array_fill_keys(array_diff($pageEligibleIds, $this->bulkExcluded), true)
+                : [];
+        }
 
         return view('livewire.transaction-list', [
             'transactions' => $transactions,
@@ -888,8 +948,33 @@ final class TransactionList extends Component
             'selectionCount' => $this->selectionCount(),
             'pageEligibleIds' => $pageEligibleIds,
             'matchingCount' => $this->matchingEligibleCount(),
-            'scopeCoversScreen' => $this->scopeCoversScreen($expandedOnPage),
         ]);
+    }
+
+    /**
+     * Fold the checkbox state the client just sent into the held scope: render()
+     * mirrors the scope into $selected for the rows on screen, so anything
+     * visible and no longer ticked is a subtraction, and a re-tick undoes one.
+     */
+    private function applyVisibleTicksToScope(): void
+    {
+        $excluded = array_flip($this->bulkExcluded);
+
+        foreach ($this->visibleEligibleIds() as $id) {
+            if (empty($this->selected[$id])) {
+                $excluded[$id] = true;
+            } else {
+                unset($excluded[$id]);
+            }
+        }
+
+        $this->bulkExcluded = array_map(intval(...), array_keys($excluded));
+
+        // Subtracting the last row leaves a scope that resolves to nothing;
+        // holding it would keep a bulk bar alive over an empty selection.
+        if ($this->selectionCount() === 0) {
+            $this->clearSelection();
+        }
     }
 
     /**
@@ -1002,17 +1087,42 @@ final class TransactionList extends Component
     /**
      * The eligible row ids currently rendered, resolved outside render().
      *
+     * Takes the same page-presence test render() applies: an expansion left
+     * behind by the cluster paginator renders no checkboxes, so its members
+     * are not on screen and must not be folded into a scope.
+     *
      * @return list<int>
      */
     private function visibleEligibleIds(): array
     {
         $filters = $this->currentFilters();
 
-        $rows = $this->inMerchantMode()
-            ? $this->clusterMembers($filters)
-            : $this->paginatedRows($filters)->getCollection();
+        if ($this->inMerchantMode()) {
+            return $this->expandedOnPageNow()
+                ? $this->eligibleIds($this->clusterMembers($filters))
+                : [];
+        }
 
-        return $this->eligibleIds($rows);
+        return $this->eligibleIds($this->paginatedRows($filters)->getCollection());
+    }
+
+    /**
+     * Whether the expanded cluster is on the current cluster page, resolved
+     * outside render() for the property hooks.
+     */
+    private function expandedOnPageNow(): bool
+    {
+        return $this->inMerchantMode()
+            && $this->expandedOnPage($this->merchantClusters($this->currentFilters()));
+    }
+
+    /**
+     * scopeCoversScreen() for callers that have not already resolved the
+     * cluster page — the selection hooks, which run before render().
+     */
+    private function scopeCoversVisibleRows(): bool
+    {
+        return $this->scopeCoversScreen($this->expandedOnPageNow());
     }
 
     /**
@@ -1043,7 +1153,11 @@ final class TransactionList extends Component
             }
 
             return $this->eligibleForBulk($this->queryFor($filters))
-                ->when($merchantKey !== null, fn (Builder $q): Builder => $q->where('merchant_key', $merchantKey));
+                ->when($merchantKey !== null, fn (Builder $q): Builder => $q->where('merchant_key', $merchantKey))
+                // Rows the user took back out of the scope. A scope minus its
+                // exclusions is what "everything matching this, except those"
+                // resolves to, and it is the same set the bar counts.
+                ->when($this->bulkExcluded !== [], fn (Builder $q): Builder => $q->whereNotIn('id', $this->bulkExcluded));
         }
 
         $ids = $this->selectedIds();
@@ -1082,10 +1196,12 @@ final class TransactionList extends Component
      */
     private function selectionCount(): int
     {
-        // A whole-filter scope resolves to exactly the query matchingCount
-        // already ran this render, so reuse it instead of repeating the
-        // aggregate with its two NOT EXISTS subqueries.
+        // A whole-filter scope with nothing subtracted resolves to exactly the
+        // query matchingCount already ran this render, so reuse it instead of
+        // repeating the aggregate with its two NOT EXISTS subqueries. An
+        // exclusion list makes the two sets differ, so the shortcut is off.
         if ($this->bulkScope !== null
+            && $this->bulkExcluded === []
             && ($this->bulkScope['merchantKey'] ?? null) === null
             && ($this->bulkScope['filters'] ?? null) === $this->currentFilters()) {
             return $this->matchingEligibleCount();

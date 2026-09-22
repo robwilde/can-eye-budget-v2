@@ -119,17 +119,15 @@
         @php
             // Three-state: none / some / all of the eligible rows on screen.
             //
-            // A scope leaves $selected empty by design, so it has to be folded
-            // in or the page would render every box unticked while the bulk bar
-            // reports hundreds selected. $scopeCoversScreen is decided by the
-            // component: a scope whose merchant or whose frozen filters no
-            // longer match what is rendered does NOT count, because clicking
-            // this control calls toggleVisible(), which nulls the scope and
-            // would destroy a selection the user still holds.
+            // $selected is authoritative here even while a scope is held: the
+            // component mirrors the scope, minus anything the user has
+            // subtracted from it, into exactly the rows this page renders. A
+            // scope covering rows off screen therefore never inflates this
+            // count, and rows the user has taken back out of it read as
+            // unticked in both the boxes and the label.
             $eligibleOnScreen = count($pageEligibleIds);
             $selectedOnScreen = collect($pageEligibleIds)->filter(fn (int $id): bool => ! empty($selected[$id]))->count();
-            $allOnScreenSelected = $scopeCoversScreen
-                || ($eligibleOnScreen > 0 && $selectedOnScreen === $eligibleOnScreen);
+            $allOnScreenSelected = $eligibleOnScreen > 0 && $selectedOnScreen === $eligibleOnScreen;
         @endphp
 
         <div class="flex flex-wrap items-center gap-3 px-1">
