@@ -12,8 +12,7 @@ use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserRule;
-use App\Models\UserRuleGroup;
-use App\Services\CategoryRuleGenerator;
+use App\Services\CategoryRuleMiner;
 use App\Services\RuleEvaluator;
 use App\Services\TransactionAnalysisPipeline;
 use App\Support\Transactions\MerchantMatchValue;
@@ -24,89 +23,6 @@ use League\Csv\Reader;
 
 final class MineCategoryRulesCommand extends Command
 {
-    private const string GROUP_NAME = 'Auto-categorisation';
-
-    /** @var array<string, int> */
-    private const array SEED_RULES = [
-        'PRIMEVIDEO' => 35,
-        'PHIND.COM' => 5,
-        'OPENAI *CHATGPT' => 5,
-        'PINECONE' => 5,
-        'RECALL' => 5,
-        'WARP PRO' => 5,
-        'SUBSTACK.COM' => 6,
-        'CODINGCHALLENGES' => 6,
-        'PADDLE.NET* DAILY.DEV' => 6,
-        'PHPARCH.COM' => 6,
-        'LEARN PROMPTING' => 9,
-        'TBL* NET NINJA' => 9,
-        'TBL* STREET-SMART' => 9,
-        'GUMROAD* MARTIN JOO' => 9,
-        'Datacamp' => 8,
-        'OBICO' => 13,
-        '3DEXPERIENCE' => 13,
-        'PAYPAL *CLOUDNS' => 2,
-        'RESCUETIME' => 86,
-        'DRAWSQL' => 86,
-        'APIFY' => 86,
-        'SP LUMEN.ME' => 18,
-        'PAYPAL *GLUCOSEGODD' => 18,
-        'PAYPAL *MADMUSL' => 18,
-        'HEADSPACE' => 18,
-        'Next Practice' => 18,
-        'PET CIRCLE' => 23,
-        'SP CELERY PETS' => 23,
-        'SP MEOWVO' => 23,
-        'KITTECUBE.COM' => 23,
-        'SP AUSSIEWOOF' => 23,
-        'SP RUFUS AND COCO' => 23,
-        'SP MICHU' => 23,
-        'GP VET' => 23,
-        'CAT SNACKS' => 23,
-        'HUBBL - BINGE' => 35,
-        'Spotify' => 35,
-        'AMZNPRIMEAU' => 35,
-        'STEAM PURCHASE' => 39,
-        'PAYPAL *TWITCHINTER' => 38,
-        'PAYPAL *GISMART' => 12,
-        'PAYPAL *IMPULSE' => 12,
-        'Google XAPPIFY' => 12,
-        'Google Pujie' => 12,
-        'Google Hiya' => 12,
-        'Google SYGIC' => 12,
-        'Google OBD2 Car Scann' => 12,
-        'FLEXJOBS' => 87,
-        'REMOTEJOBS.IO' => 87,
-        'jobleads.com' => 87,
-        'SP THEPERFECTRESUME' => 87,
-        'Upwork' => 87,
-        'EQUIFAX' => 20,
-        'HEART RESEARCH' => 33,
-        'Credit Card Interest' => 21,
-        'Purchase Interest' => 21,
-        'Card Replacement Fee' => 21,
-        'Insufficient funds' => 21,
-        'LIBERTY HIGHGATE HILL' => 78,
-        'Reddy Express' => 78,
-        'LINKT' => 81,
-        'READING NEWMARKET' => 42,
-        'CELLOPARK' => 82,
-        'SQ *THE KEBAB SHOP' => 47,
-        'SUBWAY' => 47,
-        'EATCLUB' => 46,
-        'SQ *MOTORCYCLE FREIGH' => 77,
-        'ENGINEERING LEADERSHI' => 6,
-        'PAYPAL *LUCENTGLOBE' => 45,
-        'ONLYFANS' => 37,
-        'Optmus to CC' => 62,
-        'AUSSIE BROADBAND LIMI' => 52,
-        'LinkedIn' => 87,
-        'Google Workspace' => 2,
-        'GSUITE' => 2,
-        'Google YouTube' => 35,
-        'GOOGLE*YOUTUBE' => 35,
-    ];
-
     protected $signature = 'categories:mine-rules
         {--user=1 : The user id to mine rules for}
         {--account=* : Restrict mining to these account ids}
@@ -116,8 +32,8 @@ final class MineCategoryRulesCommand extends Command
     protected $description = 'Mine category rules from a user\'s categorised history (plus curated seeds) so CSV imports arrive categorised';
 
     public function handle(
+        CategoryRuleMiner $miner,
         RuleEvaluator $evaluator,
-        CategoryRuleGenerator $generator,
         TransactionAnalysisPipeline $pipeline,
     ): int {
         $user = User::query()->find((int) $this->option('user'));
@@ -132,303 +48,52 @@ final class MineCategoryRulesCommand extends Command
         $accountIds = array_map('intval', (array) $this->option('account'));
         $dryRun = (bool) $this->option('dry-run');
 
-        $activeRules = $this->activeRules($user);
+        $coverageDirOption = $this->option('coverage-dir');
+        $coverageDir = is_string($coverageDirOption) && $coverageDirOption !== '' ? $coverageDirOption : null;
+
+        // Coverage scores the rules as they were *before* this run wrote anything,
+        // plus the synthetic ones below, so it has to be captured up front.
+        $activeRules = $coverageDir === null ? null : $miner->activeRules($user);
+
+        $result = $miner->mine($user, $accountIds);
+        $final = $result['candidates'];
+
         $categoryNames = Category::query()->pluck('name', 'id');
 
-        $candidates = [];
-        $ambiguous = [];
-        $conflicts = [];
-
-        foreach ($this->minedGroups($user, $accountIds, $generator) as $group) {
-            $categoryIds = array_keys($group['category_ids']);
-
-            if (count($categoryIds) > 1) {
-                sort($categoryIds);
-                $ambiguous[] = ['value' => $group['value'], 'categories' => $categoryIds];
-
-                continue;
-            }
-
-            $categoryId = $categoryIds[0];
-            $matchingCategories = $this->matchingRuleCategories($group['sample'], $activeRules, $evaluator);
-
-            if (isset($matchingCategories[$categoryId])) {
-                continue;
-            }
-
-            if ($matchingCategories !== []) {
-                $ruleCategory = array_key_first($matchingCategories);
-                $conflicts[] = [
-                    'value' => $group['value'],
-                    'candidate' => $categoryId,
-                    'rule_id' => $matchingCategories[$ruleCategory]->id,
-                    'rule_category' => $ruleCategory,
-                ];
-
-                continue;
-            }
-
-            $candidates[] = ['value' => $group['value'], 'category_id' => $categoryId, 'source' => 'mined'];
-        }
-
-        $seeds = [];
-        foreach (self::SEED_RULES as $value => $categoryId) {
-            $seeds[] = ['value' => $value, 'category_id' => $categoryId, 'source' => 'seed'];
-        }
-
-        $final = $this->dedupeAndSubsume([...$seeds, ...$candidates], $this->existingTriggerValues($activeRules));
-
         $this->reportCandidates($final, $categoryNames);
-        $this->reportAmbiguous($ambiguous, $categoryNames);
-        $this->reportConflicts($conflicts, $categoryNames);
+        $this->reportAmbiguous($result['ambiguous'], $categoryNames);
+        $this->reportConflicts($result['conflicts'], $categoryNames);
 
-        $unknownCategories = $this->unknownCategoryIds($final, $categoryNames);
-        if ($unknownCategories !== []) {
-            $this->error('Unknown category id(s) referenced by rules: '.implode(', ', $unknownCategories).'.');
-            $this->error('Category ids are environment-specific; verify SEED_RULES against this database before applying.');
+        if ($result['skippedSeeds'] !== []) {
+            $this->warn(
+                'Skipped '.count($result['skippedSeeds'])
+                .' seed(s) whose category does not exist here: '
+                .implode(', ', $result['skippedSeeds']).'.'
+            );
+        }
 
-            if (! $dryRun) {
-                return self::FAILURE;
-            }
+        // Diagnostic, not a gate. Seeds resolve by category path and unresolvable
+        // ones are skipped above, and transactions.category_id is nullOnDelete, so
+        // a mined candidate cannot reference a category that no longer exists.
+        if ($result['unknownCategoryIds'] !== []) {
+            $this->warn('Unknown category id(s) referenced by rules: '.implode(', ', $result['unknownCategoryIds']).'.');
         }
 
         if ($dryRun) {
             $this->warn('Dry run: no rules were written and the pipeline was not run.');
         } else {
-            $created = $this->createRules($user, $final);
-            $this->info("Created {$created} rule(s) in the '".self::GROUP_NAME."' group.");
+            $created = $miner->createRules($user, $final);
+            $this->info("Created {$created} rule(s) in the '".CategoryRuleMiner::GROUP_NAME."' group.");
 
             $run = $pipeline->run($user, PipelineTrigger::Manual);
             $this->info("Pipeline run #{$run->id} finished with status {$run->status->value}.");
         }
 
-        $coverageDir = $this->option('coverage-dir');
-        if (is_string($coverageDir) && $coverageDir !== '') {
+        if ($coverageDir !== null && $activeRules !== null) {
             $this->reportCoverage($coverageDir, $activeRules, $final, $evaluator);
         }
 
         return self::SUCCESS;
-    }
-
-    /**
-     * @param  list<array{value: string, category_id: int, source: string}>  $final
-     * @param  Collection<int, string>  $categoryNames
-     * @return list<int>
-     */
-    private function unknownCategoryIds(array $final, Collection $categoryNames): array
-    {
-        $unknown = [];
-
-        foreach ($final as $entry) {
-            if (! $categoryNames->has($entry['category_id'])) {
-                $unknown[$entry['category_id']] = true;
-            }
-        }
-
-        $ids = array_keys($unknown);
-        sort($ids);
-
-        return $ids;
-    }
-
-    /** @return Collection<int, UserRule> */
-    private function activeRules(User $user): Collection
-    {
-        return UserRule::query()
-            ->where('user_id', $user->id)
-            ->where('is_active', true)
-            ->whereHas('group', fn ($query) => $query->where('is_active', true))
-            ->ordered()
-            ->get();
-    }
-
-    /**
-     * @param  list<int>  $accountIds
-     * @return array<string, array{value: string, category_ids: array<int, bool>, sample: Transaction}>
-     */
-    private function minedGroups(User $user, array $accountIds, CategoryRuleGenerator $generator): array
-    {
-        $groups = [];
-
-        Transaction::query()
-            ->where('user_id', $user->id)
-            ->whereNotNull('category_id')
-            ->whereNull('folded_into_transaction_id')
-            ->current()
-            ->when($accountIds !== [], fn ($query) => $query->whereIn('account_id', $accountIds))
-            ->lazyById()
-            ->each(function (Transaction $transaction) use (&$groups, $generator): void {
-                $value = MerchantMatchValue::for($transaction->description) ?? $generator->suggestMatchValue($transaction);
-                $key = mb_strtolower($value);
-
-                if (! isset($groups[$key])) {
-                    $groups[$key] = ['value' => $value, 'category_ids' => [], 'sample' => $transaction];
-                }
-
-                $groups[$key]['category_ids'][(int) $transaction->category_id] = true;
-            });
-
-        return $groups;
-    }
-
-    /**
-     * @param  Collection<int, UserRule>  $activeRules
-     * @return array<int, UserRule>
-     */
-    private function matchingRuleCategories(Transaction $sample, Collection $activeRules, RuleEvaluator $evaluator): array
-    {
-        $matches = [];
-
-        foreach ($activeRules as $rule) {
-            if (! $evaluator->matches($sample, $rule)) {
-                continue;
-            }
-
-            $categoryId = $this->ruleCategory($rule);
-
-            if ($categoryId !== null && ! isset($matches[$categoryId])) {
-                $matches[$categoryId] = $rule;
-            }
-        }
-
-        return $matches;
-    }
-
-    private function ruleCategory(UserRule $rule): ?int
-    {
-        foreach ($rule->actions as $action) {
-            if (($action['type'] ?? null) === RuleActionType::SetCategory->value) {
-                return (int) $action['value'];
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * @param  Collection<int, UserRule>  $activeRules
-     * @return array<string, true>
-     */
-    private function existingTriggerValues(Collection $activeRules): array
-    {
-        $values = [];
-
-        foreach ($activeRules as $rule) {
-            foreach ($rule->triggers as $trigger) {
-                $value = $trigger['value'] ?? '';
-
-                if ($value !== '') {
-                    $values[mb_strtolower($value)] = true;
-                }
-            }
-        }
-
-        return $values;
-    }
-
-    /**
-     * @param  list<array{value: string, category_id: int, source: string}>  $entries
-     * @param  array<string, true>  $existingValues
-     * @return list<array{value: string, category_id: int, source: string}>
-     */
-    private function dedupeAndSubsume(array $entries, array $existingValues): array
-    {
-        $byKey = [];
-
-        foreach ($entries as $entry) {
-            $key = mb_strtolower($entry['value']);
-
-            if (isset($existingValues[$key]) || isset($byKey[$key])) {
-                continue;
-            }
-
-            $byKey[$key] = $entry;
-        }
-
-        $merged = array_values($byKey);
-
-        $final = [];
-
-        foreach ($merged as $entry) {
-            $subsumed = false;
-
-            foreach ($merged as $other) {
-                if ($other['category_id'] !== $entry['category_id']) {
-                    continue;
-                }
-
-                if (mb_strtolower($other['value']) === mb_strtolower($entry['value'])) {
-                    continue;
-                }
-
-                if (mb_stripos($entry['value'], $other['value']) !== false) {
-                    $subsumed = true;
-                    break;
-                }
-            }
-
-            if (! $subsumed) {
-                $final[] = $entry;
-            }
-        }
-
-        return $final;
-    }
-
-    /**
-     * @param  list<array{value: string, category_id: int, source: string}>  $final
-     */
-    private function createRules(User $user, array $final): int
-    {
-        if ($final === []) {
-            return 0;
-        }
-
-        $group = $this->resolveGroup($user->id);
-        $order = (int) UserRule::query()->where('user_rule_group_id', $group->id)->max('order');
-
-        foreach ($final as $entry) {
-            UserRule::query()->create([
-                'user_id' => $user->id,
-                'user_rule_group_id' => $group->id,
-                'name' => mb_substr('Categorise '.$entry['value'], 0, 255),
-                'triggers' => [[
-                    'field' => RuleTriggerField::Description->value,
-                    'operator' => RuleTriggerOperator::Contains->value,
-                    'value' => $entry['value'],
-                ]],
-                'actions' => [[
-                    'type' => RuleActionType::SetCategory->value,
-                    'value' => (string) $entry['category_id'],
-                ]],
-                'strict_mode' => true,
-                'is_auto_apply' => true,
-                'is_active' => true,
-                'order' => ++$order,
-            ]);
-        }
-
-        return count($final);
-    }
-
-    private function resolveGroup(int $userId): UserRuleGroup
-    {
-        $existing = UserRuleGroup::query()
-            ->where('user_id', $userId)
-            ->where('name', self::GROUP_NAME)
-            ->first();
-
-        if ($existing !== null) {
-            return $existing;
-        }
-
-        return UserRuleGroup::query()->create([
-            'user_id' => $userId,
-            'name' => self::GROUP_NAME,
-            'order' => (int) UserRuleGroup::query()->where('user_id', $userId)->max('order') + 1,
-            'is_active' => true,
-            'stop_processing' => false,
-        ]);
     }
 
     /**
@@ -598,8 +263,14 @@ final class MineCategoryRulesCommand extends Command
     private function descriptionIsCategorised(Transaction $transaction, array $rules, RuleEvaluator $evaluator): bool
     {
         foreach ($rules as $rule) {
-            if ($evaluator->matches($transaction, $rule) && $this->ruleCategory($rule) !== null) {
-                return true;
+            if (! $evaluator->matches($transaction, $rule)) {
+                continue;
+            }
+
+            foreach ($rule->actions as $action) {
+                if (($action['type'] ?? null) === RuleActionType::SetCategory->value) {
+                    return true;
+                }
             }
         }
 

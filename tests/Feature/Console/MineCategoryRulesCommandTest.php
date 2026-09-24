@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-use App\Console\Commands\MineCategoryRulesCommand;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
+use App\Services\CategorySeedRules;
 use Carbon\CarbonImmutable;
 
 beforeEach(function () {
@@ -38,18 +38,29 @@ function triggerValues(): Illuminate\Support\Collection
     return UserRule::all()->map(fn (UserRule $rule): string => $rule->triggers[0]['value'] ?? '');
 }
 
+/**
+ * Curated seeds resolve by category **full path** now, not by hardcoded id, so
+ * the fixture has to materialise each path's ancestor chain rather than mint
+ * categories at specific ids. Paths are read back off the unresolved seeds
+ * CategorySeedRules reports, which is the only public view of them.
+ */
 function ensureSeedCategories(): void
 {
-    $seeds = (new ReflectionClass(MineCategoryRulesCommand::class))->getConstant('SEED_RULES');
+    foreach (app(CategorySeedRules::class)->resolve()['skipped'] as $entry) {
+        $path = mb_substr($entry, (int) mb_strpos($entry, ' → ') + mb_strlen(' → '));
+        $parent = null;
 
-    foreach (array_unique(array_values($seeds)) as $id) {
-        if (Category::query()->whereKey($id)->exists()) {
-            continue;
+        foreach (explode(' / ', $path) as $segment) {
+            $parent = Category::query()
+                ->where('name', $segment)
+                ->where('parent_id', $parent?->id)
+                ->first()
+                ?? Category::query()->create([
+                    'name' => $segment,
+                    'parent_id' => $parent?->id,
+                    'is_hidden' => false,
+                ]);
         }
-
-        $category = new Category(['name' => 'Seed category '.$id, 'is_hidden' => false]);
-        $category->id = $id;
-        $category->save();
     }
 }
 
@@ -149,13 +160,17 @@ test('creates a rule from the curated seed list', function () {
     expect(triggerValues()->contains('PRIMEVIDEO'))->toBeTrue();
 });
 
-test('aborts without writing when a referenced category is missing', function () {
-    Category::query()->whereKey(35)->delete();
-    $before = UserRule::count();
+// Replaces 'aborts without writing when a referenced category is missing'.
+// That test deleted the category a seed's hardcoded id pointed at and expected a
+// FAILURE exit. Seeds now resolve by full path and an unresolvable one is skipped
+// and reported by design (#454), so that abort was unreachable and has been
+// removed — the contract under test is the report, not the failure.
+test('skips and reports a curated seed whose category path does not exist here', function () {
+    Category::query()->where('name', 'Streaming')->delete();
 
     $this->artisan('categories:mine-rules', mineRulesArgs($this->user, $this->account))
-        ->expectsOutputToContain('Unknown category id(s)')
-        ->assertFailed();
+        ->expectsOutputToContain('seed(s) whose category does not exist here')
+        ->assertSuccessful();
 
-    expect(UserRule::count())->toBe($before);
+    expect(triggerValues()->contains('PRIMEVIDEO'))->toBeFalse();
 });

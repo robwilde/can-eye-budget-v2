@@ -99,6 +99,21 @@
                 wire-model="groupMode"
             />
         @endif
+
+        {{-- Provenance filter. Only meaningful once rows have categories, and
+             'Set by a rule' is the review queue for everything automation
+             decided. --}}
+        @if($categorised !== 'uncategorised')
+            <x-cib.filter-toggle
+                :options="[
+                    ['value' => 'all', 'label' => 'Any source'],
+                    ['value' => 'manual', 'label' => 'Set by you'],
+                    ['value' => 'rule', 'label' => 'Set by a rule'],
+                ]"
+                :selected="$source"
+                wire-model="source"
+            />
+        @endif
     </div>
 
     <flux:input wire:model.live.debounce.300ms="search" placeholder="Search transactions..." icon="magnifying-glass" size="sm"/>
@@ -356,6 +371,18 @@
                                  data-testid="bulk-apply">
                         Apply to these {{ $selectionCount }}
                     </flux:button>
+
+                    {{-- Shown while reviewing machine-set categories, which
+                         is the only context where reverting is the action
+                         you want. --}}
+                    @if($source === 'rule')
+                        <flux:button variant="ghost" size="sm"
+                                     wire:click="revertMachineCategories"
+                                     wire:loading.attr="disabled" wire:target="revertMachineCategories"
+                                     data-testid="bulk-revert">
+                            Undo rule-set categories
+                        </flux:button>
+                    @endif
 
                     <flux:button variant="ghost" size="sm" wire:click="clearSelection" data-testid="bulk-clear">
                         Clear
