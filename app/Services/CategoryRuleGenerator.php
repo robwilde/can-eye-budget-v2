@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\DTOs\CategoryRulePreview;
+use App\Enums\CategorySource;
 use App\Enums\RuleActionType;
 use App\Enums\RuleTriggerField;
 use App\Enums\RuleTriggerOperator;
@@ -11,6 +13,7 @@ use App\Models\Transaction;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
 use App\Support\Recurring\MerchantSignature;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * Builds a "categorise this merchant" rule from a source transaction and a
@@ -50,20 +53,113 @@ final readonly class CategoryRuleGenerator
             'user_id' => $source->user_id,
             'user_rule_group_id' => $group->id,
             'name' => $this->ruleName($source),
-            'triggers' => [$this->buildTrigger($source, $matchValue)],
-            'actions' => [[
-                'type' => RuleActionType::SetCategory->value,
-                'value' => (string) $categoryId,
-            ]],
             'strict_mode' => true,
             'is_auto_apply' => true,
             'is_active' => true,
             'order' => $this->nextRuleOrder($group->id),
+            ...$this->matchAttributes($source, $categoryId, $matchValue),
         ]);
 
         $this->applyToExisting($source->user_id, $rule);
 
         return $rule;
+    }
+
+    /**
+     * What generateAndApply() would do, without creating anything.
+     *
+     * Dry-runs the *real* RuleEvaluator against an unsaved rule built from the
+     * *same* matchAttributes() the commit path uses. A reimplementation here
+     * would drift from actual behaviour, and a preview that disagrees with the
+     * result is worse than no preview at all.
+     *
+     * @param  list<int>  $selectedIds  ids the user already had selected, so the
+     *                                  preview can separate "what I asked for"
+     *                                  from "what else this would touch"
+     */
+    public function preview(
+        Transaction $source,
+        int $categoryId,
+        ?string $matchValue,
+        array $selectedIds = [],
+    ): CategoryRulePreview {
+        $draft = new UserRule([
+            'user_id' => $source->user_id,
+            'strict_mode' => true,
+            ...$this->matchAttributes($source, $categoryId, $matchValue),
+        ]);
+
+        $selected = array_flip($selectedIds);
+        $inSelection = 0;
+        $beyondSelection = 0;
+        $wouldChange = 0;
+        $protectedByManual = 0;
+        $existingCategories = [];
+
+        $this->eligible($source->user_id)
+            ->with('category.parent.parent')
+            ->lazyById()
+            ->each(function (Transaction $transaction) use (
+                $draft,
+                $selected,
+                $categoryId,
+                &$inSelection,
+                &$beyondSelection,
+                &$wouldChange,
+                &$protectedByManual,
+                &$existingCategories,
+            ): void {
+                if (! $this->evaluator->matches($transaction, $draft)) {
+                    return;
+                }
+
+                $isSelected = isset($selected[$transaction->id]);
+                $isSelected ? $inSelection++ : $beyondSelection++;
+
+                // The executor's own guard, so a legacy row with no recorded
+                // source is counted as protected exactly as the sweep treats it.
+                $isProtected = $transaction->categoryProtectedFromRules();
+
+                if ($isProtected) {
+                    $protectedByManual++;
+                } elseif (
+                    $transaction->category_id !== $categoryId
+                    // Same category but Feed-sourced: the executor still
+                    // restamps it as Rule, so the sweep writes this row too.
+                    || $transaction->category_source !== CategorySource::Rule
+                ) {
+                    $wouldChange++;
+                }
+
+                if (
+                    ! $isSelected
+                    && ! $isProtected
+                    && $transaction->category_id !== null
+                    && $transaction->category_id !== $categoryId
+                ) {
+                    // Only rows the sweep will actually move out of a category:
+                    // protected rows are already reported, and rows already in
+                    // the target leave nothing. Keyed by full path: category
+                    // names repeat across branches ('Subscription' under Office
+                    // and Personal), and the warning is about which branch rows
+                    // would leave.
+                    // category_id is a FK with nullOnDelete, so a non-null id
+                    // always resolves to a row.
+                    $path = $transaction->category->fullPath();
+                    $existingCategories[$path] = ($existingCategories[$path] ?? 0) + 1;
+                }
+            });
+
+        arsort($existingCategories);
+
+        return new CategoryRulePreview(
+            matchValue: $this->resolvedMatchValue($source, $matchValue),
+            inSelection: $inSelection,
+            beyondSelection: $beyondSelection,
+            wouldChange: $wouldChange,
+            protectedByManual: $protectedByManual,
+            existingCategories: $existingCategories,
+        );
     }
 
     /**
@@ -85,16 +181,65 @@ final readonly class CategoryRuleGenerator
         return $this->merchantToken($source->description);
     }
 
+    /**
+     * The trigger and action a generated rule carries. Shared by the commit
+     * path and the preview so the two cannot diverge.
+     *
+     * @return array{triggers: array<int, array<string, string>>, actions: array<int, array<string, string>>}
+     */
+    private function matchAttributes(Transaction $source, int $categoryId, ?string $matchValue): array
+    {
+        return [
+            'triggers' => [$this->buildTrigger($source, $matchValue)],
+            'actions' => [[
+                'type' => RuleActionType::SetCategory->value,
+                'value' => (string) $categoryId,
+            ]],
+        ];
+    }
+
+    private function resolvedMatchValue(Transaction $source, ?string $matchValue): string
+    {
+        return $this->buildTrigger($source, $matchValue)['value'];
+    }
+
+    /**
+     * Transactions a generated rule may legally touch.
+     *
+     * Shared by the sweep and the preview, so the preview counts exactly the
+     * population the sweep will walk.
+     *
+     * Splits and transfers are excluded at the query level as well as in the
+     * executor: a split transaction's category is decided by its parts, and a
+     * transfer is not spending at all. Note whereDoesntHave('splits') is the
+     * split test — parent_transaction_id is createChild() lineage and means
+     * something entirely different.
+     *
+     * @return Builder<Transaction>
+     */
+    private function eligible(int $userId): Builder
+    {
+        return Transaction::query()
+            ->where('user_id', $userId)
+            ->current()
+            ->whereNull('transfer_pair_id')
+            ->whereDoesntHave('splits');
+    }
+
     private function applyToExisting(int $userId, UserRule $rule): void
     {
         // Stream by id rather than loading the whole history into memory. Keying
         // on the (unchanging) id keeps paging stable even though we mutate rows.
-        Transaction::query()
-            ->where('user_id', $userId)
-            ->current()
+        $this->eligible($userId)
             ->lazyById()
             ->each(function (Transaction $transaction) use ($rule): void {
                 if ($this->evaluator->matches($transaction, $rule)) {
+                    // Write exactly the matched row. The planned-group fan-out
+                    // would rewrite siblings the rule does not match, including
+                    // ones a person categorised, none of which preview() counts.
+                    // applyCategoryToSelection() opts out for the same reason.
+                    $transaction->propagateCategoryChange = false;
+
                     $this->executor->execute($transaction, $rule->actions);
                 }
             });

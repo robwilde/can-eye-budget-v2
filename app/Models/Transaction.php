@@ -14,6 +14,7 @@ use App\Support\Recurring\MerchantSignature;
 use Carbon\CarbonImmutable;
 use Database\Factories\TransactionFactory;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -47,7 +48,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property int|null $parent_transaction_id
  * @property int|null $folded_into_transaction_id
  * @property string|null $notes
- * @property-read \Illuminate\Database\Eloquent\Collection<int, TransactionSplit> $splits
+ * @property-read Collection<int, TransactionSplit> $splits
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
  * @property CarbonImmutable|null $deleted_at
@@ -216,6 +217,20 @@ final class Transaction extends Model
         return $this->relationLoaded('splits')
             ? $this->splits->isNotEmpty()
             : $this->splits()->exists();
+    }
+
+    /**
+     * Whether a rule must leave this row's category alone: a rule fills gaps,
+     * it never overrides a person. A categorised row that never declared a
+     * source is treated as Manual, which is what saving() would default it to.
+     *
+     * One definition for the executor that writes and the preview that
+     * predicts, so the two cannot disagree about which rows are protected.
+     */
+    public function categoryProtectedFromRules(): bool
+    {
+        return $this->category_id !== null
+            && ! ($this->category_source ?? CategorySource::Manual)->isOverwritableByRule();
     }
 
     public function splitTotal(): int
