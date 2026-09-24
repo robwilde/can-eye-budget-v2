@@ -91,7 +91,8 @@ final readonly class RuleActionExecutor
             return null;
         }
 
-        $visible = Category::visible()->whereIn('id', $categoryIds)->pluck('id')->all();
+        // Cast: some drivers return ids as strings, and the match is strict.
+        $visible = array_map(intval(...), Category::visible()->whereIn('id', $categoryIds)->pluck('id')->all());
 
         foreach (array_reverse($categoryIds) as $categoryId) {
             if (in_array($categoryId, $visible, true)) {
