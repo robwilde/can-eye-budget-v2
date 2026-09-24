@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\DTOs\CategoryRulePreview;
+use App\Enums\CategorySource;
 use App\Enums\RuleActionType;
 use App\Enums\RuleTriggerField;
 use App\Enums\RuleTriggerOperator;
@@ -121,7 +122,12 @@ final readonly class CategoryRuleGenerator
 
                 if ($isProtected) {
                     $protectedByManual++;
-                } elseif ($transaction->category_id !== $categoryId) {
+                } elseif (
+                    $transaction->category_id !== $categoryId
+                    // Same category but Feed-sourced: the executor still
+                    // restamps it as Rule, so the sweep writes this row too.
+                    || $transaction->category_source !== CategorySource::Rule
+                ) {
                     $wouldChange++;
                 }
 

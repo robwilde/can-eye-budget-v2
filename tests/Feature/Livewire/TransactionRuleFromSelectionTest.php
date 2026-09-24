@@ -96,6 +96,24 @@ it('the preview count equals the number actually changed', function () {
         ->and($actuallyChanged)->toBe($preview->wouldChange);
 });
 
+it('counts a feed-sourced row already in the target category as changed', function () {
+    // The executor restamps it Feed → Rule, so the sweep writes it; the
+    // preview must count that write or the notice under-reports.
+    $selected = ruleTxn($this->user, $this->account, 'NETFLIX.COM');
+    $feed = ruleTxn($this->user, $this->account, 'NETFLIX.COM', [
+        'category_id' => $this->category->id,
+        'category_source' => CategorySource::Feed,
+    ]);
+
+    $generator = app(CategoryRuleGenerator::class);
+    $preview = $generator->preview($selected, $this->category->id, 'NETFLIX', [$selected->id]);
+
+    $generator->generateAndApply($selected, $this->category->id, 'NETFLIX');
+
+    expect($preview->wouldChange)->toBe(2)
+        ->and($feed->fresh()->category_source)->toBe(CategorySource::Rule);
+});
+
 it('reports rows protected by a manual category and leaves them untouched', function () {
     $otherCategory = Category::factory()->create(['is_hidden' => false]);
 

@@ -601,6 +601,9 @@ final class TransactionList extends Component
         $generator->generateAndApply($source, $categoryId, $this->ruleMatchValue);
 
         $this->clearSelection();
+        // Same failure mode as applyCategoryToSelection(): the sweep can empty
+        // the current page under the uncategorised filter.
+        $this->resetPage();
 
         $this->bulkNotice = sprintf(
             'Rule created. %d transaction%s categorised%s.',
