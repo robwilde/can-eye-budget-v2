@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\RuleActionType;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserRuleGroup;
@@ -20,13 +21,18 @@ use Illuminate\Database\Eloquent\Builder;
  * clearable without inventing a single new rule.
  *
  * Deliberately narrow:
- * - only rows with no category are considered, so nothing is ever overwritten;
+ * - only rows with no category are considered, and the planned-group fan-out
+ *   is switched off, so nothing is ever overwritten — not even a sibling;
  * - splits and transfers are excluded, as everywhere else;
+ * - only a rule's SetCategory actions run. The sweep has no audit ledger, so
+ *   running anything else (AppendNotes, say) would repeat it on every sweep
+ *   for a row the rule matched but left uncategorised;
  * - writes go through RuleActionExecutor, so rows are stamped
  *   CategorySource::Rule and stay reviewable and revertible.
  *
  * Idempotent by construction: a row that gets a category drops out of the
- * uncategorised scope, so re-running finds nothing left to do.
+ * uncategorised scope, and a row that does not had nothing written to it, so
+ * re-running changes nothing that an earlier run already decided.
  */
 final readonly class RuleBacklogApplier
 {
@@ -63,10 +69,22 @@ final readonly class RuleBacklogApplier
             $scanned++;
 
             foreach ($groups as $group) {
+                // Mirrors UserRulesStage: stop_processing ends the walk only
+                // when some rule in the group matched, auto-apply or not.
+                $groupMatched = false;
+
                 foreach ($group->rules as $rule) {
-                    if (! $rule->is_auto_apply || ! $this->evaluator->matches($transaction, $rule)) {
+                    if (! $this->evaluator->matches($transaction, $rule)) {
                         continue;
                     }
+
+                    $groupMatched = true;
+
+                    if (! $rule->is_auto_apply) {
+                        continue;
+                    }
+
+                    $actions = $this->categoryActions($rule->actions);
 
                     if ($dryRun) {
                         // Read-only resolution. An earlier version of this
@@ -76,7 +94,7 @@ final readonly class RuleBacklogApplier
                         // "dry" run silently created a duplicate transaction
                         // for every match. Never call execute() to ask a
                         // question.
-                        if ($this->executor->categoryItWouldSet($transaction, $rule->actions) !== null) {
+                        if ($this->executor->categoryItWouldSet($transaction, $actions) !== null) {
                             $categorised++;
 
                             return;
@@ -85,7 +103,10 @@ final readonly class RuleBacklogApplier
                         continue;
                     }
 
-                    $this->executor->execute($transaction, $rule->actions);
+                    // The planned-group fan-out would rewrite siblings the rule
+                    // does not match, including ones a person categorised.
+                    $transaction->propagateCategoryChange = false;
+                    $this->executor->execute($transaction, $actions);
 
                     if ($transaction->category_id !== null) {
                         $categorised++;
@@ -94,7 +115,7 @@ final readonly class RuleBacklogApplier
                     }
                 }
 
-                if ($group->stop_processing) {
+                if ($groupMatched && $group->stop_processing) {
                     return;
                 }
             }
@@ -103,9 +124,16 @@ final readonly class RuleBacklogApplier
         return ['scanned' => $scanned, 'categorised' => $categorised];
     }
 
-    public function backlogCount(User $user): int
+    /**
+     * @param  array<int, array<string, string>>  $actions
+     * @return array<int, array<string, string>>
+     */
+    private function categoryActions(array $actions): array
     {
-        return $this->backlog($user)->count();
+        return array_values(array_filter(
+            $actions,
+            static fn (array $action): bool => ($action['type'] ?? null) === RuleActionType::SetCategory->value,
+        ));
     }
 
     /**

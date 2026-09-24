@@ -15,9 +15,9 @@ use App\Models\Category;
  * the database they were curated against and something else entirely anywhere
  * else, so applying them to another account would mis-file real money.
  *
- * A full path is stable across databases and is resolved per user at apply
- * time. A seed whose path does not resolve for that user is **skipped and
- * reported**, never guessed at.
+ * A full path is stable across databases and is resolved against the
+ * (shared) category tree at apply time. A seed whose path does not resolve is
+ * **skipped and reported**, never guessed at.
  */
 final class CategorySeedRules
 {
@@ -121,7 +121,7 @@ final class CategorySeedRules
     {
         $idsByPath = [];
 
-        foreach (Category::query()->with('parent.parent')->get() as $category) {
+        foreach (Category::allWithLinkedParents() as $category) {
             $idsByPath[mb_strtolower($category->fullPath())] = (int) $category->id;
         }
 

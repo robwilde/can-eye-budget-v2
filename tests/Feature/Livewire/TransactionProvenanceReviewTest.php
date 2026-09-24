@@ -11,6 +11,7 @@ use App\Enums\TransactionDirection;
 use App\Livewire\TransactionList;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -161,4 +162,78 @@ it('falls back to any-source for an unknown source filter', function () {
         ->test(TransactionList::class, ['source' => 'nonsense']);
 
     expect($component->get('source'))->toBe('all');
+});
+
+it('leaves unselected planned siblings and the plan alone when reverting', function () {
+    $manualCategory = Category::factory()->create(['is_hidden' => false]);
+    $planned = PlannedTransaction::factory()->for($this->user)->for($this->account)->create([
+        'category_id' => $manualCategory->id,
+    ]);
+
+    $byRule = provenanceRow($this->user, $this->account, [
+        'planned_transaction_id' => $planned->id,
+        'category_id' => $this->category->id,
+        'category_source' => CategorySource::Rule,
+    ]);
+    $manualSibling = provenanceRow($this->user, $this->account, [
+        'planned_transaction_id' => $planned->id,
+        'category_id' => $manualCategory->id,
+        'category_source' => CategorySource::Manual,
+    ]);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('source', 'rule')
+        ->set('selected', [$byRule->id => true])
+        ->call('revertMachineCategories');
+
+    expect($byRule->fresh()->category_id)->toBeNull()
+        ->and($manualSibling->fresh()->category_id)->toBe($manualCategory->id)
+        ->and($manualSibling->fresh()->category_source)->toBe(CategorySource::Manual)
+        ->and($planned->fresh()->category_id)->toBe($manualCategory->id);
+});
+
+it('returns to the first page after reverting the last page of the rule view', function () {
+    $rows = collect(range(1, 30))->map(fn (): Transaction => provenanceRow($this->user, $this->account, [
+        'category_id' => $this->category->id,
+        'category_source' => CategorySource::Rule,
+    ]));
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('source', 'rule')
+        ->call('gotoPage', 2)
+        ->set('selected', $rows->slice(25)->mapWithKeys(fn (Transaction $t): array => [$t->id => true])->all())
+        ->call('revertMachineCategories');
+
+    $transactions = $component->viewData('transactions');
+
+    expect($transactions->currentPage())->toBe(1)
+        ->and($transactions->total())->toBe(25);
+});
+
+it('drops the source filter when switching to uncategorised', function () {
+    $uncategorised = provenanceRow($this->user, $this->account, ['category_id' => null]);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('source', 'rule')
+        ->set('categorised', 'uncategorised')
+        ->assertSet('source', 'all');
+
+    expect($component->viewData('transactions')->pluck('id')->all())->toBe([$uncategorised->id]);
+});
+
+it('ignores a source filter on a direct uncategorised load', function () {
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class, ['categorised' => 'uncategorised', 'source' => 'rule'])
+        ->assertSet('source', 'all');
+});
+
+it('refuses a source filter while uncategorised is selected', function () {
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->set('source', 'manual')
+        ->assertSet('source', 'all');
 });

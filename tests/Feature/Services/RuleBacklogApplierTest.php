@@ -11,13 +11,14 @@ use App\Enums\RuleActionType;
 use App\Enums\RuleTriggerField;
 use App\Enums\RuleTriggerOperator;
 use App\Enums\TransactionDirection;
-use App\Jobs\ApplyRuleBacklogJob;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
+use App\Services\RuleActionExecutor;
 use App\Services\RuleBacklogApplier;
 use Carbon\CarbonImmutable;
 
@@ -186,19 +187,95 @@ it('never crosses users', function () {
         ->and($theirs->fresh()->category_id)->toBeNull();
 });
 
-it('reports the backlog size without writing', function () {
-    backlogTxn($this->user, $this->account);
-    backlogTxn($this->user, $this->account);
-    backlogTxn($this->user, $this->account, ['category_id' => $this->category->id]);
+it('does not fan a backlog category out to a manually categorised planned sibling', function () {
+    $manual = Category::factory()->create(['is_hidden' => false]);
+    $planned = PlannedTransaction::factory()->for($this->user)->for($this->account)->create();
+    backlogRule($this->user, $this->category->id, 'NETFLIX');
 
-    expect($this->applier->backlogCount($this->user))->toBe(2);
+    $txn = backlogTxn($this->user, $this->account, ['planned_transaction_id' => $planned->id]);
+    $sibling = backlogTxn($this->user, $this->account, [
+        'description' => 'SOMETHING ELSE',
+        'planned_transaction_id' => $planned->id,
+        'category_id' => $manual->id,
+        'category_source' => CategorySource::Manual,
+    ]);
+
+    $this->applier->apply($this->user);
+
+    expect($txn->fresh()->category_id)->toBe($this->category->id)
+        ->and($sibling->fresh()->category_id)->toBe($manual->id)
+        ->and($sibling->fresh()->category_source)->toBe(CategorySource::Manual);
 });
 
-it('clears the backlog through the queued job', function () {
-    backlogRule($this->user, $this->category->id, 'NETFLIX');
+it('honours stop_processing only when a rule in that group matched', function () {
+    $later = Category::factory()->create(['is_hidden' => false]);
+
+    $stopper = backlogRule($this->user, $this->category->id, 'SPOTIFY');
+    $stopper->group->update(['stop_processing' => true, 'order' => 1]);
+
+    $laterRule = backlogRule($this->user, $later->id, 'NETFLIX');
+    $laterRule->group->update(['order' => 2]);
+
+    $unmatched = backlogTxn($this->user, $this->account);
+    $matched = backlogTxn($this->user, $this->account, ['description' => 'SPOTIFY NETFLIX']);
+
+    $dry = $this->applier->apply($this->user, dryRun: true);
+    $this->applier->apply($this->user);
+
+    expect($dry['categorised'])->toBe(2)
+        ->and($unmatched->fresh()->category_id)->toBe($later->id)
+        ->and($matched->fresh()->category_id)->toBe($this->category->id);
+});
+
+it('stops at a stop_processing group whose matching rule is not auto-apply', function () {
+    $later = Category::factory()->create(['is_hidden' => false]);
+
+    $stopper = backlogRule($this->user, $this->category->id, 'NETFLIX', autoApply: false);
+    $stopper->group->update(['stop_processing' => true, 'order' => 1]);
+
+    backlogRule($this->user, $later->id, 'NETFLIX')->group->update(['order' => 2]);
+
     $txn = backlogTxn($this->user, $this->account);
 
-    (new ApplyRuleBacklogJob($this->user->id))->handle($this->applier);
+    $result = $this->applier->apply($this->user);
+
+    expect($result['categorised'])->toBe(0)
+        ->and($txn->fresh()->category_id)->toBeNull();
+});
+
+it('runs only category actions, so repeated sweeps never repeat other writes', function () {
+    $hidden = Category::factory()->create(['is_hidden' => true]);
+    $rule = backlogRule($this->user, $hidden->id, 'NETFLIX');
+    $rule->update(['actions' => [
+        ['type' => RuleActionType::AppendNotes->value, 'value' => 'swept'],
+        ['type' => RuleActionType::SetCategory->value, 'value' => (string) $hidden->id],
+    ]]);
+
+    $txn = backlogTxn($this->user, $this->account, ['notes' => null]);
+
+    $this->applier->apply($this->user);
+    $this->applier->apply($this->user);
+
+    expect($txn->fresh()->notes)->toBeNull()
+        ->and($txn->fresh()->category_id)->toBeNull();
+});
+
+it('predicts the category the write lands when a rule sets several', function () {
+    $hidden = Category::factory()->create(['is_hidden' => true]);
+    $first = Category::factory()->create(['is_hidden' => false]);
+
+    backlogRule($this->user, $this->category->id, 'NETFLIX')->update(['actions' => [
+        ['type' => RuleActionType::SetCategory->value, 'value' => (string) $first->id],
+        ['type' => RuleActionType::SetCategory->value, 'value' => (string) $this->category->id],
+        ['type' => RuleActionType::SetCategory->value, 'value' => (string) $hidden->id],
+    ]]);
+
+    $txn = backlogTxn($this->user, $this->account);
+
+    expect(app(RuleActionExecutor::class)->categoryItWouldSet($txn, UserRule::first()->actions))
+        ->toBe($this->category->id);
+
+    $this->applier->apply($this->user);
 
     expect($txn->fresh()->category_id)->toBe($this->category->id);
 });

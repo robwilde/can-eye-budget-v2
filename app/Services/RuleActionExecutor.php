@@ -68,22 +68,35 @@ final readonly class RuleActionExecutor
      * ends in $transaction->save(). Sharing the decision with setCategory()
      * below means a preview cannot disagree with the write.
      *
+     * execute() runs every SetCategory action in order and a hidden category is
+     * skipped, so the last visible one is what lands; this resolves the same.
+     *
      * @param  array<int, array<string, string>>  $actions
      */
     public function categoryItWouldSet(Transaction $transaction, array $actions): ?int
     {
+        if (! $this->maySetCategory($transaction)) {
+            return null;
+        }
+
+        $categoryIds = [];
+
         foreach ($actions as $action) {
-            if (($action['type'] ?? null) !== RuleActionType::SetCategory->value) {
-                continue;
+            if (($action['type'] ?? null) === RuleActionType::SetCategory->value) {
+                $categoryIds[] = (int) ($action['value'] ?? 0);
             }
+        }
 
-            $categoryId = (int) ($action['value'] ?? 0);
+        if ($categoryIds === []) {
+            return null;
+        }
 
-            if (! $this->maySetCategory($transaction)) {
-                return null;
+        $visible = Category::visible()->whereIn('id', $categoryIds)->pluck('id')->all();
+
+        foreach (array_reverse($categoryIds) as $categoryId) {
+            if (in_array($categoryId, $visible, true)) {
+                return $categoryId;
             }
-
-            return Category::visible()->where('id', $categoryId)->exists() ? $categoryId : null;
         }
 
         return null;

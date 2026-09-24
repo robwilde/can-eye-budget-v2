@@ -261,6 +261,13 @@ final class TransactionList extends Component
             $this->groupMode = 'date';
         }
 
+        // The provenance toggle is hidden while triaging uncategorised rows,
+        // and an uncategorised row has no source (saving() nulls it), so any
+        // value but 'all' would empty the list with no visible cause.
+        if ($this->categorised === 'uncategorised') {
+            $this->source = 'all';
+        }
+
         // An expanded cluster only means anything in merchant mode; carrying a
         // stale key into date mode would leave a dead query-string parameter.
         if ($this->groupMode !== 'merchant') {
@@ -557,6 +564,10 @@ final class TransactionList extends Component
                         // model's invariant hook, so provenance cannot be left
                         // claiming a source for an absent category.
                         $transaction->category_id = null;
+                        // The planned-group fan-out would clear siblings the
+                        // user did not select, including ones they categorised
+                        // themselves, and the plan's own category.
+                        $transaction->propagateCategoryChange = false;
                         $transaction->save();
                         $reverted++;
                     }
@@ -564,6 +575,9 @@ final class TransactionList extends Component
         });
 
         $this->clearSelection();
+        // Every reverted row leaves the 'rule' view it was reverted from, so a
+        // later page may now be past the end. Start again from page one.
+        $this->resetPage();
         $this->bulkNotice = $reverted === 1
             ? 'Reverted 1 rule-set category.'
             : sprintf('Reverted %d rule-set categories.', $reverted);
@@ -1028,12 +1042,18 @@ final class TransactionList extends Component
             $this->expandedKey = null;
         }
 
+        // Mirror of mount(): the provenance toggle is hidden here.
+        if ($this->categorised === 'uncategorised') {
+            $this->source = 'all';
+        }
+
         $this->resetPage();
     }
 
     public function updatedSource(): void
     {
-        if (! in_array($this->source, self::VALID_SOURCE_FILTERS, true)) {
+        if (! in_array($this->source, self::VALID_SOURCE_FILTERS, true)
+            || $this->categorised === 'uncategorised') {
             $this->source = 'all';
         }
 
