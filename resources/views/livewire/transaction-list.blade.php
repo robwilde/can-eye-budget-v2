@@ -393,7 +393,8 @@
 
                             <flux:button variant="danger" size="sm"
                                          wire:click="createRuleFromSelection"
-                                         wire:loading.attr="disabled" wire:target="createRuleFromSelection"
+                                         wire:loading.attr="disabled" wire:dirty.attr="disabled"
+                                         wire:target="createRuleFromSelection,ruleMatchValue,bulkCategoryId"
                                          data-testid="rule-confirm">
                                 Create rule + apply to past and future
                             </flux:button>

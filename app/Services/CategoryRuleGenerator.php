@@ -131,10 +131,18 @@ final readonly class CategoryRuleGenerator
                     $wouldChange++;
                 }
 
-                if (! $isSelected && $transaction->category_id !== null) {
-                    // Keyed by full path: category names repeat across
-                    // branches ('Subscription' under Office and Personal), and
-                    // the warning is about which branch rows would leave.
+                if (
+                    ! $isSelected
+                    && ! $isProtected
+                    && $transaction->category_id !== null
+                    && $transaction->category_id !== $categoryId
+                ) {
+                    // Only rows the sweep will actually move out of a category:
+                    // protected rows are already reported, and rows already in
+                    // the target leave nothing. Keyed by full path: category
+                    // names repeat across branches ('Subscription' under Office
+                    // and Personal), and the warning is about which branch rows
+                    // would leave.
                     // category_id is a FK with nullOnDelete, so a non-null id
                     // always resolves to a row.
                     $path = $transaction->category->fullPath();

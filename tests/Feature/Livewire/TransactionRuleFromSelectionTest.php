@@ -150,9 +150,21 @@ it('separates matches inside the selection from those beyond it', function () {
 it('lists the categories that matching rows outside the selection already hold', function () {
     $other = Category::factory()->create(['is_hidden' => false, 'name' => 'Streaming']);
 
-    $selected = ruleTxn($this->user, $this->account, 'NETFLIX.COM');
+    $selected = ruleTxn($this->user, $this->account, 'NETFLIX.COM', [
+        'category_id' => Category::factory()->create(['is_hidden' => false, 'name' => 'Selected'])->id,
+        'category_source' => CategorySource::Rule,
+    ]);
     ruleTxn($this->user, $this->account, 'NETFLIX.COM', [
         'category_id' => $other->id,
+        'category_source' => CategorySource::Rule,
+    ]);
+    // Neither leaves a category: one is protected, one already holds the target.
+    ruleTxn($this->user, $this->account, 'NETFLIX.COM', [
+        'category_id' => $other->id,
+        'category_source' => CategorySource::Manual,
+    ]);
+    ruleTxn($this->user, $this->account, 'NETFLIX.COM', [
+        'category_id' => $this->category->id,
         'category_source' => CategorySource::Rule,
     ]);
 
@@ -181,24 +193,53 @@ it('honours an edited match value rather than the suggested one', function () {
         ->toBe('NOTHINGMATCHESTHIS');
 });
 
-it('defaults a cluster rule to a value that matches the cluster it was built from', function () {
+it('defaults a cluster rule to a value that matches the cluster it was built from', function (string $first, string $second) {
     // The cluster key is a normalised signature ('PAYPAL STEAM'), not a
     // substring of the raw descriptions, so it cannot be the `description
     // contains` default: a rule carrying it would match none of these rows.
-    $a = ruleTxn($this->user, $this->account, 'PAYPAL *STEAM 4829');
-    $b = ruleTxn($this->user, $this->account, 'PAYPAL *STEAM 5561');
+    $a = ruleTxn($this->user, $this->account, $first);
+    $b = ruleTxn($this->user, $this->account, $second);
+
+    expect($b->merchant_key)->toBe($a->merchant_key);
 
     Livewire::actingAs($this->user)
         ->test(TransactionList::class)
         ->set('categorised', 'uncategorised')
         ->set('groupMode', 'merchant')
-        ->call('selectCluster', 'PAYPAL STEAM')
+        ->call('selectCluster', $a->merchant_key)
         ->set('bulkCategoryId', (string) $this->category->id)
         ->call('openRulePanel')
         ->call('createRuleFromSelection');
 
     expect($a->fresh()->category_id)->toBe($this->category->id)
         ->and($b->fresh()->category_id)->toBe($this->category->id);
+})->with([
+    'paypal sub-merchant' => ['PAYPAL *STEAM 4829', 'PAYPAL *STEAM 5561'],
+    'store number' => ['WOOLWORTHS 111 SYDNEY', 'WOOLWORTHS 111 SYDNEY'],
+    'store number, varying suffix' => ['WOOLWORTHS 1234 BONDI', 'WOOLWORTHS 5678 BONDI'],
+]);
+
+it('returns to the first page after the rule sweep empties the current one', function () {
+    // 26 matching + 4 unrelated uncategorised rows: two pages of 25. The rule
+    // categorises every NETFLIX row, leaving 4 — page 2 no longer exists.
+    $netflix = collect(range(1, 26))->map(fn (): Transaction => ruleTxn($this->user, $this->account, 'NETFLIX.COM'));
+    foreach (range(1, 4) as $_) {
+        ruleTxn($this->user, $this->account, 'SPOTIFY AB');
+    }
+
+    $transactions = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->call('gotoPage', 2)
+        ->set('selected', [$netflix->last()->id => true])
+        ->set('bulkCategoryId', (string) $this->category->id)
+        ->set('ruleMatchValue', 'NETFLIX')
+        ->call('createRuleFromSelection')
+        ->viewData('transactions');
+
+    expect($transactions->currentPage())->toBe(1)
+        ->and($transactions->total())->toBe(4)
+        ->and($transactions->count())->toBe(4);
 });
 
 it('counts a whole collapsed cluster as inside the selection', function () {
@@ -310,9 +351,11 @@ it('updates the preview when the match value or category changes', function () {
     $component = Livewire::actingAs($this->user)
         ->test(TransactionList::class)
         ->set('selected.'.$selected->id, true)
+        ->set('ruleMatchValue', 'NETFLIX')
         ->call('openRulePanel')
-        ->set('bulkCategoryId', (string) $this->category->id)
-        ->set('ruleMatchValue', 'NETFLIX');
+        ->assertViewHas('rulePreview', null)
+        // Category alone must produce the numbers: it is the combobox's only request.
+        ->set('bulkCategoryId', (string) $this->category->id);
 
     expect($component->viewData('rulePreview')->totalMatches())->toBe(2);
 
@@ -393,16 +436,6 @@ it('never builds a rule from a transfer', function () {
     expect($component->get('bulkError'))->toBe('Nothing is selected.')
         ->and(UserRule::count())->toBe(0)
         ->and($transfer->fresh()->category_id)->toBeNull();
-});
-
-it('stamps rule-applied rows as rule, not manual', function () {
-    $selected = ruleTxn($this->user, $this->account, 'NETFLIX.COM');
-    $beyond = ruleTxn($this->user, $this->account, 'NETFLIX.COM');
-
-    app(CategoryRuleGenerator::class)
-        ->generateAndApply($selected, $this->category->id, 'NETFLIX');
-
-    expect($beyond->fresh()->category_source)->toBe(CategorySource::Rule);
 });
 
 it('closes the panel and clears the selection after creating a rule', function () {

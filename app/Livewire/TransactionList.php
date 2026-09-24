@@ -658,10 +658,14 @@ final class TransactionList extends Component
 
     /**
      * The modal saved or deleted a transaction/plan; re-render so the fresh
-     * render() query picks up the change.
+     * render() query picks up the change. A split or hand-set category also
+     * changes what a pending rule would do, so an open preview is recomputed.
      */
     #[On('transaction-saved')]
-    public function refreshList(): void {}
+    public function refreshList(): void
+    {
+        $this->refreshRulePreview();
+    }
 
     public function scanEmail(int $transactionId, GmailServiceContract $gmail): void
     {
