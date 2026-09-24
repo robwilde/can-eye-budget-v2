@@ -24,6 +24,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\Paginator;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
@@ -181,6 +182,15 @@ final class TransactionList extends Component
     #[Locked]
     public bool $rulePanelOpen = false;
 
+    /**
+     * The dry-run shown in the panel. Held rather than computed in render():
+     * it walks the user's whole history, so it is recomputed only when one of
+     * its inputs moves — the match value, the category, or the selection, and
+     * the last of those closes the panel instead.
+     */
+    #[Locked]
+    public ?CategoryRulePreview $rulePreview = null;
+
     #[Locked]
     public ?int $emailPanelTxnId = null;
 
@@ -295,6 +305,7 @@ final class TransactionList extends Component
     {
         $this->bulkError = null;
         $this->bulkNotice = null;
+        $this->closeRulePanel();
 
         if ($this->bulkScope !== null && $this->scopeCoversVisibleRows()) {
             $this->applyVisibleTicksToScope();
@@ -310,7 +321,8 @@ final class TransactionList extends Component
      * Tick or untick every eligible row currently on screen: the page in date
      * mode, the expanded cluster in merchant mode.
      *
-     * @param  list<int>  $ids
+     * @param  list<int|string>  $ids  client-supplied through wire:click, so
+     *                                 each is cast before it becomes a key
      */
     public function toggleVisible(array $ids, bool $select): void
     {
@@ -320,6 +332,7 @@ final class TransactionList extends Component
         // apply and reads as though it has already been written.
         $this->bulkError = null;
         $this->bulkNotice = null;
+        $this->closeRulePanel();
 
         // "Clear these 25" under a 700-row scope means the 25 on screen, not
         // all 700, so it subtracts from the scope rather than discarding it.
@@ -369,6 +382,7 @@ final class TransactionList extends Component
         $this->selected = [];
         $this->bulkError = null;
         $this->bulkNotice = null;
+        $this->closeRulePanel();
     }
 
     /**
@@ -383,6 +397,7 @@ final class TransactionList extends Component
         $this->selected = [];
         $this->bulkError = null;
         $this->bulkNotice = null;
+        $this->closeRulePanel();
     }
 
     public function clearSelection(): void
@@ -393,6 +408,7 @@ final class TransactionList extends Component
         $this->bulkCategoryId = '';
         $this->bulkError = null;
         $this->bulkNotice = null;
+        $this->closeRulePanel();
     }
 
     /**
@@ -414,23 +430,17 @@ final class TransactionList extends Component
      * transfers and splits eligibleForBulk() renders disabled with a stated
      * reason. Every other writer, including a single-row edit and
      * RuleActionExecutor, keeps the grouping behaviour untouched.
+     *
+     * @throws Throwable
      */
     public function applyCategoryToSelection(): void
     {
         $this->bulkError = null;
         $this->bulkNotice = null;
 
-        $categoryId = (int) $this->bulkCategoryId;
+        $categoryId = $this->chosenBulkCategoryId();
 
-        if ($categoryId <= 0) {
-            $this->bulkError = 'Choose a category first.';
-
-            return;
-        }
-
-        if (! Category::visible()->whereKey($categoryId)->exists()) {
-            $this->bulkError = 'That category is not available.';
-
+        if ($categoryId === null) {
             return;
         }
 
@@ -453,7 +463,7 @@ final class TransactionList extends Component
         // already hold still restamps rule-assigned rows as Manual — the whole
         // "lock these in so rules stop overwriting them" workflow — and would
         // have reported "Categorised 0 transactions." while doing it.
-        $updated = (int) (clone $query)
+        $updated = (clone $query)
             ->where(fn (Builder $q): Builder => $q
                 ->whereNull('category_id')
                 ->orWhere('category_id', '!=', $categoryId)
@@ -467,7 +477,7 @@ final class TransactionList extends Component
         // chunkById is a keyset cursor (id > lastId), not an offset, so rows
         // dropping out of the filter predicate as the loop writes them stay
         // behind the cursor and cannot be skipped.
-        DB::transaction(function () use ($query, $categoryId): void {
+        DB::transaction(static function () use ($query, $categoryId): void {
             $query->chunkById(200, function (EloquentCollection $chunk) use ($categoryId): void {
                 foreach ($chunk as $transaction) {
                     $transaction->category_id = $categoryId;
@@ -522,18 +532,37 @@ final class TransactionList extends Component
         }
 
         if ($this->ruleMatchValue === '') {
-            // In cluster mode the merchant key is the natural default; otherwise
-            // fall back to the generator's own suggestion.
-            $this->ruleMatchValue = $this->bulkScope['merchantKey'] ?? $generator->suggestMatchValue($source);
+            // Not the cluster's merchant_key, even in cluster mode: the key is
+            // a normalised signature ('PAYPAL STEAM' for 'PAYPAL *STEAM 4829')
+            // and rarely a substring of the raw description the rule's
+            // `description contains` trigger tests against.
+            $this->ruleMatchValue = $generator->suggestMatchValue($source);
         }
 
         $this->rulePanelOpen = true;
+        $this->refreshRulePreview();
     }
 
+    public function updatedRuleMatchValue(): void
+    {
+        $this->refreshRulePreview();
+    }
+
+    public function updatedBulkCategoryId(): void
+    {
+        $this->refreshRulePreview();
+    }
+
+    /**
+     * Also the reset every selection mutator runs: a panel left open across a
+     * selection change would come back pre-filled with a trigger built from
+     * rows that are no longer selected.
+     */
     public function closeRulePanel(): void
     {
         $this->rulePanelOpen = false;
         $this->ruleMatchValue = '';
+        $this->rulePreview = null;
     }
 
     /**
@@ -547,17 +576,9 @@ final class TransactionList extends Component
         $this->bulkError = null;
         $this->bulkNotice = null;
 
-        $categoryId = (int) $this->bulkCategoryId;
+        $categoryId = $this->chosenBulkCategoryId();
 
-        if ($categoryId <= 0) {
-            $this->bulkError = 'Choose a category first.';
-
-            return;
-        }
-
-        if (! Category::visible()->whereKey($categoryId)->exists()) {
-            $this->bulkError = 'That category is not available.';
-
+        if ($categoryId === null) {
             return;
         }
 
@@ -575,12 +596,11 @@ final class TransactionList extends Component
             return;
         }
 
-        $preview = $generator->preview($source, $categoryId, $this->ruleMatchValue, $this->selectedIds());
+        $preview = $generator->preview($source, $categoryId, $this->ruleMatchValue, $this->resolvedSelectionIds());
 
         $generator->generateAndApply($source, $categoryId, $this->ruleMatchValue);
 
         $this->clearSelection();
-        $this->closeRulePanel();
 
         $this->bulkNotice = sprintf(
             'Rule created. %d transaction%s categorised%s.',
@@ -1011,15 +1031,15 @@ final class TransactionList extends Component
         // 3" over rows the user cannot see, writing off screen when clicked.
         $expandedOnPage = $clusters !== null && $this->expandedOnPage($clusters);
 
-        $clusterRows = $inMerchantMode
-            ? ($expandedOnPage ? $this->clusterMembers($filters) : new EloquentCollection)
-            : null;
-
         // The rows a page-level "select all" would affect: the current page in
         // date mode, the expanded cluster in merchant mode.
-        $visibleRows = $transactions === null
-            ? ($clusterRows ?? new EloquentCollection)
-            : $transactions->getCollection();
+        if ($inMerchantMode) {
+            $clusterRows = $expandedOnPage ? $this->clusterMembers($filters) : new EloquentCollection;
+            $visibleRows = $clusterRows;
+        } else {
+            $clusterRows = null;
+            $visibleRows = $transactions->getCollection();
+        }
 
         $pageEligibleIds = $this->eligibleIds($visibleRows);
         $scopeCoversScreen = $this->scopeCoversScreen($expandedOnPage);
@@ -1056,7 +1076,6 @@ final class TransactionList extends Component
             'selectionCount' => $this->selectionCount(),
             'pageEligibleIds' => $pageEligibleIds,
             'matchingCount' => $this->matchingEligibleCount(),
-            'rulePreview' => $this->rulePanelOpen ? $this->currentRulePreview() : null,
         ]);
     }
 
@@ -1148,13 +1167,10 @@ final class TransactionList extends Component
             return false;
         }
 
-        foreach ($clusters->items() as $cluster) {
-            if ($cluster->merchant_key === $this->expandedKey) {
-                return true;
-            }
-        }
-
-        return false;
+        return array_any(
+            $clusters->items(),
+            fn (Transaction $cluster): bool => $cluster->merchant_key === $this->expandedKey,
+        );
     }
 
     /**
@@ -1180,10 +1196,13 @@ final class TransactionList extends Component
     }
 
     /**
-     * @param  EloquentCollection<int, Transaction>  $rows
+     * Takes the base collection: LengthAwarePaginator::getCollection() is
+     * declared as one even though it holds the page's Eloquent models.
+     *
+     * @param  Collection<int, Transaction>  $rows
      * @return list<int>
      */
-    private function eligibleIds(EloquentCollection $rows): array
+    private function eligibleIds(Collection $rows): array
     {
         return $rows
             ->reject(fn (Transaction $t): bool => $this->isBulkExcluded($t))
@@ -1245,20 +1264,74 @@ final class TransactionList extends Component
     }
 
     /**
-     * The live preview for the panel, recomputed on each render so editing the
-     * match value updates the numbers before anything is committed.
+     * The chosen bulk category, or null with bulkError saying why. Shared by
+     * the two actions that write it, so "apply" and "create rule" refuse the
+     * same inputs with the same message.
      */
-    private function currentRulePreview(): ?CategoryRulePreview
+    private function chosenBulkCategoryId(): ?int
     {
         $categoryId = (int) $this->bulkCategoryId;
-        $source = $this->ruleSourceTransaction();
 
-        if ($source === null || mb_trim($this->ruleMatchValue) === '') {
+        if ($categoryId <= 0) {
+            $this->bulkError = 'Choose a category first.';
+
             return null;
         }
 
-        return app(CategoryRuleGenerator::class)
-            ->preview($source, $categoryId, $this->ruleMatchValue, $this->selectedIds());
+        if (! Category::visible()->whereKey($categoryId)->exists()) {
+            $this->bulkError = 'That category is not available.';
+
+            return null;
+        }
+
+        return $categoryId;
+    }
+
+    /**
+     * Recompute the held preview. Null — the panel's "choose a category and a
+     * match value" state — until both are usable: a preview against no
+     * category would count rows the confirm button then refuses to write.
+     */
+    private function refreshRulePreview(): void
+    {
+        $this->rulePreview = null;
+
+        if (! $this->rulePanelOpen || mb_trim($this->ruleMatchValue) === '') {
+            return;
+        }
+
+        $categoryId = (int) $this->bulkCategoryId;
+
+        if ($categoryId <= 0 || ! Category::visible()->whereKey($categoryId)->exists()) {
+            return;
+        }
+
+        $source = $this->ruleSourceTransaction();
+
+        if ($source === null) {
+            return;
+        }
+
+        $this->rulePreview = app(CategoryRuleGenerator::class)
+            ->preview($source, $categoryId, $this->ruleMatchValue, $this->resolvedSelectionIds());
+    }
+
+    /**
+     * Every row the selection resolves to, whatever is on screen.
+     *
+     * Not selectedIds(): under a held scope that is only the page's mirror of
+     * it — empty for a collapsed cluster — so the preview would call the
+     * user's own selection "outside your selection".
+     *
+     * @return list<int>
+     */
+    private function resolvedSelectionIds(): array
+    {
+        return $this->selectionQuery()
+            ?->pluck('id')
+            ->map(static fn ($id): int => (int) $id)
+            ->values()
+            ->all() ?? [];
     }
 
     /**
@@ -1343,7 +1416,7 @@ final class TransactionList extends Component
             return $this->matchingEligibleCount();
         }
 
-        return (int) ($this->selectionQuery()?->count() ?? 0);
+        return $this->selectionQuery()?->count() ?? 0;
     }
 
     /**
@@ -1355,7 +1428,7 @@ final class TransactionList extends Component
      */
     private function matchingEligibleCount(): int
     {
-        return $this->matchingCountCache ??= (int) $this->eligibleForBulk(
+        return $this->matchingCountCache ??= $this->eligibleForBulk(
             $this->queryFor($this->currentFilters()),
         )->count();
     }
