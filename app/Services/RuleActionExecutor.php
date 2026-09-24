@@ -75,9 +75,8 @@ final readonly class RuleActionExecutor
     private function setCategory(Transaction $transaction, string $value): bool
     {
         $categoryId = (int) $value;
-        $source = $transaction->category_source ?? CategorySource::Manual;
 
-        if ($transaction->category_id !== null && ! $source->isOverwritableByRule()) {
+        if ($transaction->categoryProtectedFromRules()) {
             return true;
         }
 

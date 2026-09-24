@@ -96,7 +96,7 @@ final readonly class CategoryRuleGenerator
         $existingCategories = [];
 
         $this->eligible($source->user_id)
-            ->with('category')
+            ->with('category.parent.parent')
             ->lazyById()
             ->each(function (Transaction $transaction) use (
                 $draft,
@@ -115,9 +115,9 @@ final readonly class CategoryRuleGenerator
                 $isSelected = isset($selected[$transaction->id]);
                 $isSelected ? $inSelection++ : $beyondSelection++;
 
-                // Mirrors the guard in RuleActionExecutor::setCategory().
-                $isProtected = $transaction->category_id !== null
-                    && $transaction->category_source?->isOverwritableByRule() === false;
+                // The executor's own guard, so a legacy row with no recorded
+                // source is counted as protected exactly as the sweep treats it.
+                $isProtected = $transaction->categoryProtectedFromRules();
 
                 if ($isProtected) {
                     $protectedByManual++;
@@ -126,10 +126,13 @@ final readonly class CategoryRuleGenerator
                 }
 
                 if (! $isSelected && $transaction->category_id !== null) {
+                    // Keyed by full path: category names repeat across
+                    // branches ('Subscription' under Office and Personal), and
+                    // the warning is about which branch rows would leave.
                     // category_id is a FK with nullOnDelete, so a non-null id
                     // always resolves to a row.
-                    $name = $transaction->category->name;
-                    $existingCategories[$name] = ($existingCategories[$name] ?? 0) + 1;
+                    $path = $transaction->category->fullPath();
+                    $existingCategories[$path] = ($existingCategories[$path] ?? 0) + 1;
                 }
             });
 
@@ -217,6 +220,12 @@ final readonly class CategoryRuleGenerator
             ->lazyById()
             ->each(function (Transaction $transaction) use ($rule): void {
                 if ($this->evaluator->matches($transaction, $rule)) {
+                    // Write exactly the matched row. The planned-group fan-out
+                    // would rewrite siblings the rule does not match, including
+                    // ones a person categorised, none of which preview() counts.
+                    // applyCategoryToSelection() opts out for the same reason.
+                    $transaction->propagateCategoryChange = false;
+
                     $this->executor->execute($transaction, $rule->actions);
                 }
             });
