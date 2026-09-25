@@ -188,3 +188,23 @@ it('stops offering or re-queuing a merchant while its lookup is pending', functi
     Queue::assertPushed(ResolveMerchantBrandJob::class, 1);
     expect($component->get('pendingMerchantKeys'))->toBe($queuedAt);
 });
+
+it('queues only the expanded cluster in merchant mode, and nothing when none is open', function () {
+    [$woolworths, $jetBrains] = seedVisibleMerchants($this->row);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->set('groupMode', 'merchant')
+        ->call('updateVisibleMerchants');
+
+    Queue::assertNothingPushed();
+    expect($component->get('pendingMerchantKeys'))->toBe([]);
+
+    $component->call('toggleCluster', $jetBrains)
+        ->call('updateVisibleMerchants');
+
+    Queue::assertPushed(ResolveMerchantBrandJob::class, 1);
+    expect(array_keys($component->get('pendingMerchantKeys')))->toBe([$jetBrains])
+        ->and($woolworths)->not->toBe($jetBrains);
+});
