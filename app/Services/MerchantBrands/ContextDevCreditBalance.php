@@ -18,7 +18,12 @@ use Illuminate\Support\Facades\Date;
  */
 final readonly class ContextDevCreditBalance
 {
+    /** How long a failed refresh suppresses further attempts. */
+    public const int REFRESH_BACKOFF_SECONDS = 60;
+
     private const string CACHE_KEY = 'context-dev:balance';
+
+    private const string BACKOFF_KEY = 'context-dev:balance:backoff';
 
     public function __construct(private Repository $cache) {}
 
@@ -58,6 +63,23 @@ final readonly class ContextDevCreditBalance
             'remaining' => (int) ($cached['remaining'] ?? 0),
             'observed_at' => $observed,
         ];
+    }
+
+    /**
+     * Hold off refreshing after a failure, so an outage does not make every
+     * render wait on the request timeout.
+     */
+    public function deferRefresh(): void
+    {
+        $this->cache->put(self::BACKOFF_KEY, true, self::REFRESH_BACKOFF_SECONDS);
+    }
+
+    /**
+     * Stale and not inside the back-off window after a failed refresh.
+     */
+    public function refreshDue(): bool
+    {
+        return $this->isStale() && ! $this->cache->has(self::BACKOFF_KEY);
     }
 
     /**

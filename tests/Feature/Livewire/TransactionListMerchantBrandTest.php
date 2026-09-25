@@ -185,3 +185,20 @@ it('renders an unknown balance without calling Context.dev when no API key is co
         ->assertSee('Credits: unknown')
         ->assertSee('VISA WOOLWORTHS 1234 SYDNEY');
 });
+
+it('keeps the last balance after a failed refresh and backs off before trying again', function () {
+    app(ContextDevCreditBalance::class)->record(900);
+    $this->travel(16)->minutes();
+    $this->contextDev->expects('creditsRemaining')->once()
+        ->andThrow(new APIConnectionException(new Request('GET', 'https://api.context.dev/v1/logs?limit=1')));
+
+    Livewire::actingAs($this->user)->test(TransactionList::class)->assertSee('900 credits');
+    Livewire::actingAs($this->user)->test(TransactionList::class)->assertSee('900 credits');
+});
+
+it('shows the credits badge even when no transactions match', function () {
+    $component = Livewire::actingAs($this->user)->test(TransactionList::class);
+    $component->set('search', 'no-such-merchant-zzz');
+
+    $component->assertSee('No transactions found')->assertSee('970 credits');
+});
