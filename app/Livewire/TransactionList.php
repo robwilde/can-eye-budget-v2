@@ -795,6 +795,13 @@ final class TransactionList extends Component
         }
 
         $key = $this->merchantKeyFor($transaction);
+
+        if (isset($this->pendingMerchantKeys[$key])) {
+            Flux::toast(text: 'This merchant is already being looked up.', variant: 'warning');
+
+            return;
+        }
+
         ResolveMerchantBrandJob::dispatch(auth()->user(), $key);
         $this->markPending([$key]);
 
@@ -1394,11 +1401,12 @@ final class TransactionList extends Component
         $identifiableKeys = [];
 
         foreach ($rows as $row) {
-            $existing = $sidecar->get($keyById[$row->id]);
+            $key = $keyById[$row->id];
+            $existing = $sidecar->get($key);
 
             if ($existing?->status === MerchantBrandStatus::Resolved) {
                 $brands[$row->id] = $existing;
-            } elseif ($enrichmentEnabled && $row->merchant_key !== null && ! $existing?->blocksLookup() && $gate->allows($row)) {
+            } elseif ($enrichmentEnabled && $row->merchant_key !== null && ! $existing?->blocksLookup() && $gate->allows($row) && ! isset($this->pendingMerchantKeys[$key])) {
                 $identifiable[$row->id] = true;
                 $identifiableKeys[$row->merchant_key] = true;
             }

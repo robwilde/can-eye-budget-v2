@@ -152,3 +152,24 @@ it('adds a single identify request to the pending list', function () {
         ->assertSet('pendingMerchantKeys', [$row->merchant_key => now()->getTimestamp()])
         ->assertDispatched('toast-show', fn (string $event, array $params): bool => $params['slots']['text'] === 'Looking up the merchant…');
 });
+
+it('stops offering or re-queuing a merchant while its lookup is pending', function () {
+    $row = ($this->row)('VISA WOOLWORTHS SYDNEY');
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->assertSeeHtml('data-testid="identify-merchant-'.$row->id.'"')
+        ->call('updateVisibleMerchants')
+        ->assertDontSeeHtml('data-testid="identify-merchant-'.$row->id.'"');
+
+    expect($component->viewData('identifiableKeys'))->toBe([]);
+    $queuedAt = $component->get('pendingMerchantKeys');
+
+    $this->travel(30)->seconds();
+
+    $component->call('identifyMerchant', $row->id)
+        ->assertDispatched('toast-show', fn (string $event, array $params): bool => $params['slots']['text'] === 'This merchant is already being looked up.');
+
+    Queue::assertPushed(ResolveMerchantBrandJob::class, 1);
+    expect($component->get('pendingMerchantKeys'))->toBe($queuedAt);
+});
