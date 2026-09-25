@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Contracts\ContextDevServiceContract;
 use App\Enums\MerchantBrandStatus;
 use App\Enums\TransactionDirection;
 use App\Jobs\ResolveMerchantBrandJob;
@@ -11,13 +12,24 @@ use App\Livewire\TransactionList;
 use App\Models\MerchantBrand;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\MerchantBrands\ContextDevCreditBalance;
 use Carbon\CarbonImmutable;
+use ContextDev\Core\Exceptions\APIConnectionException;
+use GuzzleHttp\Psr7\Request;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 
 beforeEach(function () {
     $this->travelTo(CarbonImmutable::parse('2026-06-15'));
     config(['services.context_dev.enrichment_enabled' => true]);
+    // The page reads the Context.dev balance when enrichment is on; never the live API.
+    $this->contextDev = Mockery::mock(ContextDevServiceContract::class);
+    $this->contextDev->allows('creditsRemaining')->andReturnUsing(function (): int {
+        app(ContextDevCreditBalance::class)->record(970);
+
+        return 970;
+    })->byDefault();
+    app()->instance(ContextDevServiceContract::class, $this->contextDev);
 
     $this->user = User::factory()->create();
     $this->row = Transaction::factory()->for($this->user)->create([
@@ -132,4 +144,33 @@ it('shows the brand for a row whose merchant_key was never persisted', function 
         ->test(TransactionList::class)
         ->assertSeeHtml('https://media.brand.dev/woolworths.png')
         ->assertSeeHtml('data-testid="veto-merchant-'.$this->row->id.'"');
+});
+
+it('shows the Context.dev balance and today\'s remaining allowance', function () {
+    config(['services.context_dev.daily_credit_cap' => 200]);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->assertSeeHtml('data-testid="context-dev-credits"')
+        ->assertSee('970 credits')
+        ->assertSee('200 left today');
+});
+
+it('shows no credits badge when enrichment is off', function () {
+    config(['services.context_dev.enrichment_enabled' => false]);
+    $this->contextDev->shouldNotReceive('creditsRemaining');
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->assertDontSeeHtml('data-testid="context-dev-credits"');
+});
+
+it('still renders, with an unknown balance, when the balance check fails', function () {
+    $this->contextDev->allows('creditsRemaining')->andThrow(new APIConnectionException(new Request('GET', 'https://api.context.dev/v1/logs?limit=1')));
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->assertSeeHtml('data-testid="context-dev-credits"')
+        ->assertSee('Credits: unknown')
+        ->assertSee('VISA WOOLWORTHS 1234 SYDNEY');
 });

@@ -116,7 +116,19 @@
         @endif
     </div>
 
-    <flux:input wire:model.live.debounce.300ms="search" placeholder="Search transactions..." icon="magnifying-glass" size="sm"/>
+    <div class="flex flex-wrap items-center gap-3">
+        <flux:input wire:model.live.debounce.300ms="search" placeholder="Search transactions..." icon="magnifying-glass" size="sm" class="min-w-48 flex-1"/>
+
+        @if($creditSummary !== null)
+            <flux:badge size="sm" class="shrink-0" data-testid="context-dev-credits">
+                @if($creditSummary['balance'] === null)
+                    Credits: unknown
+                @else
+                    {{ number_format($creditSummary['balance']) }} credits · {{ number_format($creditSummary['leftToday']) }} left today
+                @endif
+            </flux:badge>
+        @endif
+    </div>
 
     @if($inMerchantMode ? $clusters->isEmpty() : $transactions->isEmpty())
         <x-cib.empty-state
