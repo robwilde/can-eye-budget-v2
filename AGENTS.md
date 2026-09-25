@@ -74,8 +74,18 @@ Enforced by `pint.json` (preset `laravel` + strict ruleset) and `tests/Arch.php`
 - Wiring: `app/Providers/AppServiceProvider.php` (singletons/aliases, **pipeline stage order**, view composers), `app/Providers/FortifyServiceProvider.php` (auth views `pages::auth.*`, 5/min limiters).
 - Layout: `resources/views/layouts/app/sidebar.blade.php` — Flux sidebar + **globally mounts `<livewire:transaction-modal/>` and `<livewire:feedback-widget/>`** (open modal anywhere via `dispatch('open-transaction-modal', date)`).
 - Frontend: `resources/css/app.css` (Tailwind v4 CSS-first + hand-rolled **CIB** design system: `cib-teal/yellow/black` tokens, `.cib-card`, signature `.cib-yellow-pill` "Add …" button), `resources/js/app.js` (only exposes ApexCharts + FeedbackPlus), `vite.config.js`.
-- Config: `config/budget.php` (single flag `recurring_detection`, default **false**), `config/services.php` (Basiq + GitHub feedback), `config/horizon.php`.
+- Config: `config/budget.php` (single flag `recurring_detection`, default **false**), `config/services.php` (Basiq + GitHub feedback + Redbark + Context.dev), `config/horizon.php`.
 - Docs of record (no README): `CLAUDE.md`, `CLAUDE.local.md`, `docs/plans/2026-06-05-transaction-reconciliation-lifecycle-design.md`, `docs/basiq-sandbox-setup.md`.
+
+## Context.dev (web data / merchant enrichment)
+
+- **Env var:** `CONTEXT_DEV_API_KEY` (server-side secret, `.env` only; placeholder in `.env.example`) → `config('services.context_dev.api_key')`. Always read through config, never `env()`/`getenv()` at call sites (entrypoint runs `config:cache`). Rotate at https://www.context.dev/dashboard/api-keys.
+- **Wrapper (the only Context.dev entry point):** `App\Contracts\ContextDevServiceContract` → `App\Services\ContextDevService` (singleton in `AppServiceProvider`, built via `ContextDevService::withApiKey()`), returning `App\DTOs\MerchantBrandData`. SDK: `context-dev/context-dev-php` (^3.0). Add new endpoints as methods on this contract; never call the SDK or `api.context.dev` elsewhere.
+- **Transport gotcha:** the SDK's auto-discovered Guzzle client has `http_errors=true`, so every 4xx/5xx surfaces as `APIConnectionException` (no 429/5xx retry, no 404 → `NotFoundException`). `withApiKey()` injects Guzzle with `http_errors=false`; keep it. Retries are the SDK's (408/409/429/5xx, max 2, honours `Retry-After`); 4xx validation errors are never retried.
+- **Endpoints in use:** `POST /brand/retrieve` with `type: by_transaction`, `high_confidence_only: true` (10 credits) — https://docs.context.dev/api-reference/brand-intelligence/brand, guide https://docs.context.dev/guides/enrich-transaction-codes. Sent via `Client::request()` because the generated `brand->retrieve()` helper cannot express a transaction lookup. 404 or a brand with neither title nor domain = unresolved (a domain-only brand uses the domain as its title) (`null`), which is a normal state, not an error. Only pass hints (`country_gl`/`city`/`mcc`) the feed actually supplied.
+- **Operator tool:** `ddev artisan app:resolve-merchant-brand "<descriptor>" [--country=au] [--city=] [--mcc=]` — one billable call per run; do not loop it over the transactions table (use the Batch API or cache matches per the guide).
+- **Tests never hit the live API:** `phpunit.xml` blanks `CONTEXT_DEV_API_KEY` on all three channels (like `SENTRY_DSN`). Mock the contract (`tests/Feature/Commands/ResolveMerchantBrandCommandTest.php`) or inject a Guzzle `MockHandler` via `withApiKey($key, $stack)` (`tests/Feature/Services/ContextDevServiceTest.php`).
+- Docs are the source of truth (append `.md` for markdown): https://docs.context.dev; failures → https://docs.context.dev/optimization/troubleshooting.
 
 ## Runtime/Tooling Preferences
 
