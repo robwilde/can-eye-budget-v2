@@ -36,6 +36,7 @@ use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
@@ -218,6 +219,20 @@ final class TransactionList extends Component
 
     #[Locked]
     public ?string $emailScanError = null;
+
+    /**
+     * Merchant keys with a lookup queued from this page, cleared as their
+     * merchant_brands rows appear. Locked: written only by the lookup actions
+     * and the poll, and fed into a whereIn.
+     *
+     * @var list<string>
+     */
+    #[Locked]
+    public array $pendingMerchantKeys = [];
+
+    /** Unix time of the latest queued lookup; the poll gives up PENDING_TIMEOUT_SECONDS after it. */
+    #[Locked]
+    public ?int $pendingSince = null;
 
     #[Locked]
     public ?int $splitPanelTxnId = null;
@@ -771,9 +786,58 @@ final class TransactionList extends Component
             return;
         }
 
-        ResolveMerchantBrandJob::dispatch(auth()->user(), $this->merchantKeyFor($transaction));
+        $key = $this->merchantKeyFor($transaction);
+        ResolveMerchantBrandJob::dispatch(auth()->user(), $key);
+        $this->markPending([$key]);
 
-        Flux::toast(text: 'Looking up the merchant. Refresh in a moment to see it.', variant: 'success');
+        Flux::toast(text: 'Looking up the merchant…', variant: 'success');
+    }
+
+    /**
+     * Queue a lookup for every identifiable merchant among the rows on screen,
+     * never the whole filter, up to today's remaining allowance. Keys are
+     * recomputed here rather than trusted from the client.
+     */
+    public function updateVisibleMerchants(ContextDevCreditBudget $budget): void
+    {
+        if (! config('services.context_dev.enrichment_enabled')) {
+            Flux::toast(text: 'Merchant lookups are turned off.', variant: 'warning');
+
+            return;
+        }
+
+        $slots = intdiv($budget->remaining(), ContextDevCreditBudget::BRAND_LOOKUP_CREDITS);
+
+        if ($slots === 0) {
+            Flux::toast(text: "Today's merchant lookup allowance is used up. Try again tomorrow.", variant: 'warning');
+
+            return;
+        }
+
+        [, , $keys] = $this->merchantBrandState($this->visibleRows($this->currentFilters()));
+        $keys = array_values(array_diff($keys, $this->pendingMerchantKeys));
+
+        if ($keys === []) {
+            Flux::toast(text: 'No merchants on this page need identifying.', variant: 'warning');
+
+            return;
+        }
+
+        $queued = array_slice($keys, 0, $slots);
+
+        foreach ($queued as $key) {
+            ResolveMerchantBrandJob::dispatch(auth()->user(), $key);
+        }
+
+        $this->markPending($queued);
+
+        $skipped = count($keys) - count($queued);
+        $text = 'Looking up '.count($queued).' '.Str::plural('merchant', count($queued)).'…';
+
+        Flux::toast(
+            text: $skipped > 0 ? $text." {$skipped} skipped: today's allowance." : $text,
+            variant: 'success',
+        );
     }
 
     /**
@@ -1199,7 +1263,7 @@ final class TransactionList extends Component
                 : [];
         }
 
-        [$merchantBrands, $identifiableIds] = $this->merchantBrandState($visibleRows);
+        [$merchantBrands, $identifiableIds, $identifiableKeys] = $this->merchantBrandState($visibleRows);
 
         return view('livewire.transaction-list', [
             'transactions' => $transactions,
@@ -1222,6 +1286,7 @@ final class TransactionList extends Component
             'matchingCount' => $this->matchingEligibleCount(),
             'merchantBrands' => $merchantBrands,
             'identifiableIds' => $identifiableIds,
+            'identifiableKeys' => $identifiableKeys,
             'creditSummary' => $this->creditSummary(),
         ]);
     }
@@ -1264,17 +1329,18 @@ final class TransactionList extends Component
      * affordable today, gate passes, no resolved, vetoed or still-fresh sidecar
      * row). Keys are derived with merchantKeyFor() for display and veto; identify
      * is offered only when the column is persisted, because the job selects rows
-     * by it. One query per render, not per row.
+     * by it. Also the distinct merchant keys of those identifiable rows, in
+     * first-seen order. One query per render, not per row.
      *
      * @param  Collection<int, Transaction>  $rows
-     * @return array{0: array<int, MerchantBrand>, 1: array<int, true>}
+     * @return array{0: array<int, MerchantBrand>, 1: array<int, true>, 2: list<string>}
      */
     private function merchantBrandState(Collection $rows): array
     {
         $keyById = $rows->mapWithKeys(fn (Transaction $row): array => [$row->id => $this->merchantKeyFor($row)]);
 
         if ($keyById->isEmpty()) {
-            return [[], []];
+            return [[], [], []];
         }
 
         $sidecar = MerchantBrand::query()
@@ -1288,6 +1354,7 @@ final class TransactionList extends Component
         $gate = app(DescriptorGate::class);
         $brands = [];
         $identifiable = [];
+        $identifiableKeys = [];
 
         foreach ($rows as $row) {
             $existing = $sidecar->get($keyById[$row->id]);
@@ -1296,10 +1363,18 @@ final class TransactionList extends Component
                 $brands[$row->id] = $existing;
             } elseif ($enrichmentEnabled && $row->merchant_key !== null && ! $existing?->blocksLookup() && $gate->allows($row)) {
                 $identifiable[$row->id] = true;
+                $identifiableKeys[$row->merchant_key] = true;
             }
         }
 
-        return [$brands, $identifiable];
+        return [$brands, $identifiable, array_map(strval(...), array_keys($identifiableKeys))];
+    }
+
+    /** @param  list<string>  $keys */
+    private function markPending(array $keys): void
+    {
+        $this->pendingMerchantKeys = array_values(array_unique([...$this->pendingMerchantKeys, ...$keys]));
+        $this->pendingSince = now()->getTimestamp();
     }
 
     private function merchantKeyFor(Transaction $transaction): string

@@ -1,4 +1,5 @@
 @php
+    use App\Services\MerchantBrands\ContextDevCreditBudget;
     use Carbon\CarbonImmutable;
     use Illuminate\Support\Str;
 @endphp
@@ -186,6 +187,16 @@
             @if($bulkScope === null && $matchingCount > $eligibleOnScreen)
                 <flux:button size="sm" variant="ghost" wire:click="selectAllMatching" data-testid="select-all-matching">
                     Select all {{ $matchingCount }} matching this filter
+                </flux:button>
+            @endif
+
+            @if($pendingMerchantKeys !== [])
+                <flux:button size="sm" variant="ghost" disabled data-testid="update-visible-merchants">
+                    Identifying {{ count($pendingMerchantKeys) }}…
+                </flux:button>
+            @elseif($identifiableKeys !== [])
+                <flux:button size="sm" variant="ghost" wire:click="updateVisibleMerchants" data-testid="update-visible-merchants">
+                    Update {{ count($identifiableKeys) }} {{ Str::plural('merchant', count($identifiableKeys)) }} on this page (≤{{ count($identifiableKeys) * ContextDevCreditBudget::BRAND_LOOKUP_CREDITS }} credits)
                 </flux:button>
             @endif
         </div>
