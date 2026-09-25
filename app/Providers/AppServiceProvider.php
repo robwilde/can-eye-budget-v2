@@ -13,6 +13,7 @@ use App\Services\CategoryRuleGenerator;
 use App\Services\ContextDevService;
 use App\Services\GitHubService;
 use App\Services\GmailService;
+use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\PipelineStages\IdentifyPrimaryAccountStage;
 use App\Services\PipelineStages\IdentifyRecurringTransactionsStage;
 use App\Services\PipelineStages\MatchPlannedTransactionsStage;
@@ -56,6 +57,11 @@ final class AppServiceProvider extends ServiceProvider
         });
 
         $this->app->alias(ContextDevServiceContract::class, ContextDevService::class);
+
+        $this->app->bind(ContextDevCreditBudget::class, fn (): ContextDevCreditBudget => new ContextDevCreditBudget(
+            cache: $this->app->make('cache.store'),
+            dailyCap: (int) config('services.context_dev.daily_credit_cap'),
+        ));
 
         $this->app->singleton(
             GmailServiceContract::class,
