@@ -22,6 +22,7 @@ use App\Models\TransactionEmail;
 use App\Models\TransactionSplit;
 use App\Services\CategoryRuleGenerator;
 use App\Services\GmailService;
+use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\MerchantBrands\DescriptorGate;
 use App\Support\AmountParser;
 use Flux\Flux;
@@ -749,14 +750,20 @@ final class TransactionList extends Component
      * skips the recurrence threshold but not the gate, veto, retry window, kill
      * switch or daily cap, which the job re-checks.
      */
-    public function identifyMerchant(int $transactionId, DescriptorGate $gate): void
+    public function identifyMerchant(int $transactionId, DescriptorGate $gate, ContextDevCreditBudget $budget): void
     {
         $transaction = Transaction::query()
             ->where('user_id', auth()->id())
             ->findOrFail($transactionId);
 
-        if (! config('services.context_dev.enrichment_enabled') || ! $gate->allows($transaction)) {
+        if (! config('services.context_dev.enrichment_enabled') || $transaction->merchant_key === null || ! $gate->allows($transaction)) {
             Flux::toast(text: 'This transaction cannot be matched to a merchant.', variant: 'warning');
+
+            return;
+        }
+
+        if ($budget->remaining() < ContextDevCreditBudget::BRAND_LOOKUP_CREDITS) {
+            Flux::toast(text: "Today's merchant lookup allowance is used up. Try again tomorrow.", variant: 'warning');
 
             return;
         }
@@ -1224,11 +1231,11 @@ final class TransactionList extends Component
 
     /**
      * For the rows on screen: the resolved brand per transaction id, and the ids
-     * of rows that may offer "Identify merchant" (enrichment on, gate passes, no
-     * resolved, vetoed or still-fresh sidecar row). Keyed by transaction id and
-     * derived with merchantKeyFor(), the same key the identify/veto actions use,
-     * so a row whose merchant_key was never persisted behaves identically.
-     * One query per render, not per row.
+     * of rows that may offer "Identify merchant" (enrichment on, a lookup still
+     * affordable today, gate passes, no resolved, vetoed or still-fresh sidecar
+     * row). Keys are derived with merchantKeyFor() for display and veto; identify
+     * is offered only when the column is persisted, because the job selects rows
+     * by it. One query per render, not per row.
      *
      * @param  Collection<int, Transaction>  $rows
      * @return array{0: array<int, MerchantBrand>, 1: array<int, true>}
@@ -1247,7 +1254,8 @@ final class TransactionList extends Component
             ->get()
             ->keyBy('merchant_key');
 
-        $enrichmentEnabled = (bool) config('services.context_dev.enrichment_enabled');
+        $enrichmentEnabled = (bool) config('services.context_dev.enrichment_enabled')
+            && app(ContextDevCreditBudget::class)->remaining() >= ContextDevCreditBudget::BRAND_LOOKUP_CREDITS;
         $gate = app(DescriptorGate::class);
         $brands = [];
         $identifiable = [];
@@ -1257,7 +1265,7 @@ final class TransactionList extends Component
 
             if ($existing?->status === MerchantBrandStatus::Resolved) {
                 $brands[$row->id] = $existing;
-            } elseif ($enrichmentEnabled && ! $existing?->blocksLookup() && $gate->allows($row)) {
+            } elseif ($enrichmentEnabled && $row->merchant_key !== null && ! $existing?->blocksLookup() && $gate->allows($row)) {
                 $identifiable[$row->id] = true;
             }
         }

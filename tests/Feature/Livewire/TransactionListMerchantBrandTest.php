@@ -96,7 +96,21 @@ it('offers no lookup when enrichment is off or the row fails the gate', function
 })->with([
     'enrichment off' => [fn () => config(['services.context_dev.enrichment_enabled' => false])],
     'transfer wording' => [fn (Transaction $row) => $row->update(['description' => 'TRANSFER TO J SMITH'])],
+    'daily cap spent' => [fn () => config(['services.context_dev.daily_credit_cap' => 0])],
 ]);
+
+it('offers no lookup for a row whose merchant_key was never persisted', function () {
+    Queue::fake([ResolveMerchantBrandJob::class]);
+    // The job selects rows by the persisted column, so a derived key could never resolve.
+    Illuminate\Support\Facades\DB::table('transactions')->where('id', $this->row->id)->update(['merchant_key' => null]);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->assertDontSeeHtml('data-testid="identify-merchant-'.$this->row->id.'"')
+        ->call('identifyMerchant', $this->row->id);
+
+    Queue::assertNothingPushed();
+});
 
 it('refuses to act on another user\'s transaction', function () {
     $foreign = Transaction::factory()->create();
