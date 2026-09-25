@@ -580,6 +580,19 @@ account and no transactions, so there is nothing to import yet. The mount it dep
 Operational note: Dokploy's REST API covers applications, domains, MariaDB, Redis and mounts, but exposes no exec endpoint. In-container checks were run
 through the container terminal websocket at `/docker-container-terminal`, which accepts the `x-api-key` header.
 
+#### Merchant enrichment enabled (#470)
+
+Enabled on 2026-09-25 and deployed from `develop` @`5a8234f` (`5a8234fc7b034621b699d6fee70babbdacc054af`).
+
+| Subject | As built |
+|---|---|
+| Variables | Added to all three Applications through `application.saveEnvironment` (never `application.update`, which nulls `command`/`args`), each existing line preserved: `CONTEXT_DEV_API_KEY=<redacted>`, `CONTEXT_DEV_ENRICHMENT_ENABLED=true`, `CONTEXT_DEV_DAILY_CREDIT_CAP=200`. Re-read afterwards: line counts web 36 → 39, horizon 36 → 39, scheduler 35 → 38; `command` and `args` still `null`; `buildArgs` unchanged |
+| Deployments | Manual deploys, web first: `can-eye-web` `dDJbELZQfLcK_75-mReVJ`, then `can-eye-horizon` `GtlTN6GeJtgQPR2a9XlAq` and `can-eye-scheduler` `6WyF7esyHa5JlL52nXMI3`, all `done`; `/up` 200 afterwards |
+| Enrichment worker | `supervisor-enrichment` (queue `enrichment`, 1 process) is declared in `config/horizon.php` `defaults`, which Horizon merges into every configured environment (`production`, `staging`, `local`); the per-environment blocks only resize `supervisor-1` |
+
+The Transactions UI for enrichment (V10: credit badge, Update populating logos) depends on #468 and #469, which were not on `develop` at this deploy. It
+needs those merged and another deploy before it can be verified here.
+
 ## Open prerequisites
 
 Prerequisites 1 through 5 are satisfied by the deployment recorded above. 6 onward remain open.
