@@ -21,7 +21,7 @@ beforeEach(function () {
 
     $this->user = User::factory()->create();
     $this->row = Transaction::factory()->for($this->user)->create([
-        'description' => 'WOOLWORTHS 1234 SYDNEY',
+        'description' => 'VISA WOOLWORTHS 1234 SYDNEY',
         'direction' => TransactionDirection::Debit,
         'merchant_name' => null,
         'post_date' => now()->subDays(2),
@@ -39,7 +39,7 @@ it('shows the resolved brand beside the original descriptor', function () {
         ->test(TransactionList::class)
         ->assertSeeHtml('https://media.brand.dev/woolworths.png')
         ->assertSee('Woolworths')
-        ->assertSee('WOOLWORTHS 1234 SYDNEY')
+        ->assertSee('VISA WOOLWORTHS 1234 SYDNEY')
         ->assertSeeHtml('data-testid="veto-merchant-'.$this->row->id.'"')
         ->assertDontSeeHtml('data-testid="identify-merchant-'.$this->row->id.'"');
 });

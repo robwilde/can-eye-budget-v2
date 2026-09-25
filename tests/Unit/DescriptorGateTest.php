@@ -29,15 +29,18 @@ function gateTransaction(string $description, array $attributes = []): Transacti
 it('allows card-style merchant debits', function (string $descriptor) {
     expect((new DescriptorGate)->allows(gateTransaction($descriptor)))->toBeTrue();
 })->with([
-    'WOOLWORTHS 1234 SYDNEY',
+    'VISA WOOLWORTHS 1234 SYDNEY',
+    'VISA Android Pay-WOOLWORTHS/111 BOUNDARY SWESTEND      AU  608180 #8357',
+    'VISA -JetBrains                Prague       CZ FRGN AMT-1.320000 055718 #8357',
+    'EFTPOS BAKER BROS NEWTOWN',
     'COLES SUPERMARKET MELBOURNE',
     'SQ *COFFEE SHOP CHATSWOOD AU',
     'COFFEE MINISTRY MALVERN EAST AU',
     'PAYPAL *STEAM 4829',
+    'VISA -PAYPAL *PAYPROGLOBA      4029357733   CA  012007 #8357',
     'NETFLIX.COM',
     'SHELL COLES EXPRESS CAIRNS',
-    'JB HI-FI HOBART',
-    'DIRECT DEBIT TELSTRA 12345678',
+    'Direct Debit GOLDEN INSURANCE - PLCY 082212484-029',
     'UBER *TRIP HELP.UBER.COM',
 ]);
 
@@ -60,6 +63,36 @@ it('denies transfers, person payments, bank charges and income wording', functio
     'HOME LOAN REPAYMENT',
     'CREDIT CARD PAYMENT',
 ]);
+
+it('denies payment-rail descriptors that name no merchant', function (string $descriptor) {
+    expect((new DescriptorGate)->allows(gateTransaction($descriptor)))->toBeFalse();
+})->with([
+    'VISA -PAYPAL *PYPL PAYIN4      1800073263   AU  680866 #8357',
+    'PAYPAL *PYPL PAYIN4      1800073263   AU',
+    'VISA -Afterpay                 afterpay.com AU  341006 #8357',
+    'Afterpay                 afterpay.com AU',
+    'SQ *',
+]);
+
+it('denies unmarked descriptors shaped like a person\'s name', function (string $descriptor) {
+    expect((new DescriptorGate)->allows(gateTransaction($descriptor)))->toBeFalse();
+})->with([
+    'JOHN SMITH',
+    'J SMITH REF 20250614',
+    'JANE A CITIZEN',
+    "MARY O'BRIEN",
+    'SMITH-JONES',
+    'Direct Debit NIB - 64699390',
+    // Plainly named merchants share the shape; refusing them is the accepted cost.
+    'JB HI-FI HOBART',
+    'WOOLWORTHS 1234 SYDNEY',
+]);
+
+it('still allows a card-marked descriptor whose payee words look like a name', function () {
+    // A card cannot pay a person directly, so the network prefix settles it.
+    expect((new DescriptorGate)->allows(gateTransaction('VISA -HONEYMONEY.IO            EDMONTON     CA FRGN AMT-5.000000 078040 #8357')))->toBeTrue()
+        ->and((new DescriptorGate)->allows(gateTransaction('EFTPOS JOHN SMITH')))->toBeTrue();
+});
 
 it('denies credits even when the wording looks like a merchant', function () {
     $refund = gateTransaction('WOOLWORTHS 1234 SYDNEY', ['direction' => TransactionDirection::Credit]);
@@ -91,8 +124,8 @@ it('sends a redacted descriptor, never card masks, auth codes or account numbers
 })->with([
     'card mask and auth code' => ['VISA -JetBrains                Prague       CZ FRGN AMT-1.320000 055718 #8357', 'VISA JETBRAINS PRAGUE CZ FRGN'],
     'policy number' => ['Direct Debit GOLDEN INSURANCE - PLCY 082212484-029', 'DIRECT DEBIT GOLDEN INSURANCE PLCY'],
-    'member number' => ['Direct Debit NIB - 64699390', 'DIRECT DEBIT NIB'],
-    'store number' => ['WOOLWORTHS 1234 SYDNEY', 'WOOLWORTHS SYDNEY'],
+    'member number' => ['Direct Debit NIB HEALTH INSURANCE - 64699390', 'DIRECT DEBIT NIB HEALTH INSURANCE'],
+    'store number' => ['VISA WOOLWORTHS 1234 SYDNEY', 'VISA WOOLWORTHS SYDNEY'],
 ]);
 
 it('refuses a descriptor whose redaction still carries a long number', function () {

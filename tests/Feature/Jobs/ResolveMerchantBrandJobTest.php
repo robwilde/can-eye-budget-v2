@@ -29,14 +29,14 @@ beforeEach(function () {
 function woolworthsRow(User $user, array $attributes = []): Transaction
 {
     return Transaction::factory()->for($user)->create([
-        'description' => 'WOOLWORTHS 1234 SYDNEY',
+        'description' => 'VISA WOOLWORTHS 1234 SYDNEY',
         'direction' => TransactionDirection::Debit,
         'merchant_name' => null,
         ...$attributes,
     ]);
 }
 
-function runResolve(User $user, string $key = 'WOOLWORTHS SYDNEY'): void
+function runResolve(User $user, string $key = 'VISA WOOLWORTHS SYDNEY'): void
 {
     dispatch_sync(new ResolveMerchantBrandJob($user, $key));
 }
@@ -47,7 +47,7 @@ it('stores a resolved brand without touching the transaction', function () {
 
     $this->contextDev->shouldReceive('brandFromTransaction')
         ->once()
-        ->with('WOOLWORTHS SYDNEY', 'au', null, '5411')
+        ->with('VISA WOOLWORTHS SYDNEY', 'au', null, '5411')
         ->andReturn(new MerchantBrandData(title: 'Woolworths', domain: 'woolworths.com.au', logoUrl: 'https://cdn/w.png'));
 
     runResolve($this->user, $keyBefore);
@@ -88,7 +88,7 @@ it('records an unresolved verdict and does not pay again inside its window', fun
 
 it('looks a key up again once its retry window has passed', function () {
     woolworthsRow($this->user);
-    MerchantBrand::factory()->for($this->user)->unresolved()->expired()->create(['merchant_key' => 'WOOLWORTHS SYDNEY']);
+    MerchantBrand::factory()->for($this->user)->unresolved()->expired()->create(['merchant_key' => 'VISA WOOLWORTHS SYDNEY']);
     $this->contextDev->shouldReceive('brandFromTransaction')->once()->andReturn(new MerchantBrandData(title: 'Woolworths'));
 
     runResolve($this->user);
@@ -103,8 +103,8 @@ it('makes no call when the lookup is blocked', function (Closure $arrange) {
 
     runResolve($this->user);
 })->with([
-    'vetoed' => [fn (User $user) => MerchantBrand::factory()->for($user)->vetoed()->create(['merchant_key' => 'WOOLWORTHS SYDNEY'])],
-    'fresh resolved row' => [fn (User $user) => MerchantBrand::factory()->for($user)->create(['merchant_key' => 'WOOLWORTHS SYDNEY'])],
+    'vetoed' => [fn (User $user) => MerchantBrand::factory()->for($user)->vetoed()->create(['merchant_key' => 'VISA WOOLWORTHS SYDNEY'])],
+    'fresh resolved row' => [fn (User $user) => MerchantBrand::factory()->for($user)->create(['merchant_key' => 'VISA WOOLWORTHS SYDNEY'])],
     'kill switch off' => [fn () => config(['services.context_dev.enrichment_enabled' => false])],
     'daily cap spent' => [fn () => config(['services.context_dev.daily_credit_cap' => 5])],
 ]);
@@ -121,7 +121,7 @@ it('makes no call when every row for the key fails the gate', function () {
 it('does not overwrite a veto made while the lookup was in flight', function () {
     woolworthsRow($this->user);
     $this->contextDev->shouldReceive('brandFromTransaction')->once()->andReturnUsing(function () {
-        MerchantBrand::factory()->for($this->user)->vetoed()->create(['merchant_key' => 'WOOLWORTHS SYDNEY']);
+        MerchantBrand::factory()->for($this->user)->vetoed()->create(['merchant_key' => 'VISA WOOLWORTHS SYDNEY']);
 
         return new MerchantBrandData(title: 'Woolworths');
     });
