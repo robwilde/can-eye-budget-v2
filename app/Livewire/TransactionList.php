@@ -1180,15 +1180,8 @@ final class TransactionList extends Component
         // 3" over rows the user cannot see, writing off screen when clicked.
         $expandedOnPage = $clusters !== null && $this->expandedOnPage($clusters);
 
-        // The rows a page-level "select all" would affect: the current page in
-        // date mode, the expanded cluster in merchant mode.
-        if ($inMerchantMode) {
-            $clusterRows = $expandedOnPage ? $this->clusterMembers($filters) : new EloquentCollection;
-            $visibleRows = $clusterRows;
-        } else {
-            $clusterRows = null;
-            $visibleRows = $transactions->getCollection();
-        }
+        $visibleRows = $this->visibleRows($filters, $expandedOnPage, $transactions);
+        $clusterRows = $inMerchantMode ? $visibleRows : null;
 
         $pageEligibleIds = $this->eligibleIds($visibleRows);
         $scopeCoversScreen = $this->scopeCoversScreen($expandedOnPage);
@@ -1458,15 +1451,27 @@ final class TransactionList extends Component
      */
     private function visibleEligibleIds(): array
     {
-        $filters = $this->currentFilters();
+        return $this->eligibleIds($this->visibleRows($this->currentFilters()));
+    }
 
+    /**
+     * The rows on screen: the current page in date mode, the expanded cluster in
+     * merchant mode (none when the expansion is not on the current cluster page).
+     *
+     * @param  array<string, mixed>  $filters
+     * @param  bool|null  $expandedOnPage  already resolved by render(); null resolves it now
+     * @param  LengthAwarePaginator<int, Transaction>|null  $page  the date-mode page render() already loaded
+     * @return Collection<int, Transaction>
+     */
+    private function visibleRows(array $filters, ?bool $expandedOnPage = null, ?LengthAwarePaginator $page = null): Collection
+    {
         if ($this->inMerchantMode()) {
-            return $this->expandedOnPageNow()
-                ? $this->eligibleIds($this->clusterMembers($filters))
-                : [];
+            return ($expandedOnPage ?? $this->expandedOnPageNow())
+                ? $this->clusterMembers($filters)
+                : new EloquentCollection;
         }
 
-        return $this->eligibleIds($this->paginatedRows($filters)->getCollection());
+        return ($page ?? $this->paginatedRows($filters))->getCollection();
     }
 
     /**
