@@ -206,7 +206,9 @@ return [
     'defaults' => [
         'supervisor-1' => [
             'connection' => 'redis',
-            'queue' => ['default'],
+            // Every queue a worker should drain must be listed; "default" is not a
+            // wildcard. enrichment carries paid Context.dev lookups (#465).
+            'queue' => ['default', 'enrichment'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             'maxProcesses' => 1,

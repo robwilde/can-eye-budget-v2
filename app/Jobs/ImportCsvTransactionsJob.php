@@ -179,6 +179,7 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
         ]);
 
         RunTransactionAnalysisJob::dispatch($bankImport->user);
+        EnrichMerchantBrandsJob::dispatch($bankImport->user);
     }
 
     public function failed(Throwable $exception): void
