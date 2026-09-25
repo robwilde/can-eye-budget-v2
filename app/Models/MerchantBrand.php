@@ -40,6 +40,9 @@ final class MerchantBrand extends Model
     /** @use HasFactory<MerchantBrandFactory> */
     use HasFactory;
 
+    /**
+     * @var list<string>
+     */
     protected $fillable = [
         'user_id',
         'merchant_key',
@@ -84,6 +87,9 @@ final class MerchantBrand extends Model
             ->orWhere('retry_after', '>', now()));
     }
 
+    /**
+     * @return array<string, string>
+     */
     protected function casts(): array
     {
         return [

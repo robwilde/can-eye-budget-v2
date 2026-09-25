@@ -109,7 +109,8 @@ final class DescriptorGate
 
         $raw = mb_trim((string) $transaction->description);
 
-        if ($raw === '' || mb_strlen($raw) > self::MAX_LENGTH) {
+        // An email address names a person or mailbox, never a card merchant.
+        if ($raw === '' || mb_strlen($raw) > self::MAX_LENGTH || str_contains($raw, '@')) {
             return null;
         }
 

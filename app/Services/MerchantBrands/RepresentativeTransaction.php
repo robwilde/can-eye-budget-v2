@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\MerchantBrands;
 
+use App\Enums\TransactionDirection;
 use App\Models\Transaction;
 use App\Models\User;
 
@@ -25,6 +26,11 @@ final readonly class RepresentativeTransaction
         return Transaction::query()
             ->where('user_id', $user->id)
             ->where('merchant_key', $merchantKey)
+            // Rows the gate always refuses are filtered first, so newer credits or
+            // transfers cannot crowd every sendable debit out of the window.
+            ->where('direction', TransactionDirection::Debit)
+            ->whereNull('transfer_pair_id')
+            ->whereNull('folded_into_transaction_id')
             ->latest('post_date')
             ->latest('id')
             ->limit(self::CANDIDATE_ROWS)

@@ -120,6 +120,22 @@ it('makes no call when every row for the key fails the gate', function () {
     expect(MerchantBrand::query()->count())->toBe(0);
 });
 
+it('finds a sendable debit behind more than ten newer refunds for the key', function () {
+    woolworthsRow($this->user, ['post_date' => now()->subMonth()]);
+    Transaction::factory()->for($this->user)->count(11)->create([
+        'description' => 'VISA WOOLWORTHS 1234 SYDNEY',
+        'direction' => TransactionDirection::Credit,
+        'merchant_name' => null,
+        'post_date' => now(),
+    ]);
+    $this->contextDev->shouldReceive('brandFromTransaction')->once()
+        ->andReturn(new MerchantBrandData(title: 'Woolworths'));
+
+    runResolve($this->user);
+
+    expect(MerchantBrand::query()->sole()->status)->toBe(MerchantBrandStatus::Resolved);
+});
+
 it('does not overwrite a veto made while the lookup was in flight', function () {
     woolworthsRow($this->user);
     $this->contextDev->shouldReceive('brandFromTransaction')->once()->andReturnUsing(function () {

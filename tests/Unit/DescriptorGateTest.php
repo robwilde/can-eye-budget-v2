@@ -100,6 +100,9 @@ it('denies unmarked descriptors shaped like a person\'s name', function (string 
     'PAY JOHN SMITH',
     'DEBIT JOHN SMITH',
     'CARD JOHN SMITH',
+    'PAYPAL *JOHN.SMITH@GMAIL.COM',
+    'JANE CITIZEN',
+    'JOHN SMITH 1234',
 ]);
 
 it('denies a PayPal payee that looks like a person, but not a PayPal merchant handle', function () {
