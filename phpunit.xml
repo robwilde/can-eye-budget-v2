@@ -53,5 +53,10 @@
              variable arrives — a shell, CI job or direnv profile can export it. -->
         <env name="SENTRY_DSN" value="" force="true"/>
         <server name="SENTRY_DSN" value=""/>
+        <!-- Same three-channel blanking as SENTRY_DSN above: every Context.dev call costs
+             credits, so the suite must never reach the live API even with a key exported.
+             Tests mock App\Contracts\ContextDevServiceContract instead. -->
+        <env name="CONTEXT_DEV_API_KEY" value="" force="true"/>
+        <server name="CONTEXT_DEV_API_KEY" value=""/>
     </php>
 </phpunit>
