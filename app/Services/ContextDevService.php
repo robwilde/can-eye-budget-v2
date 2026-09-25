@@ -43,6 +43,10 @@ final readonly class ContextDevService implements ContextDevServiceContract
         return new self(new Client(apiKey: $apiKey, requestOptions: ['transporter' => $transporter]));
     }
 
+    /**
+     * Always sends high_confidence_only: a wrong merchant on a budget line is worse than an
+     * unresolved one.
+     */
     public function brandFromTransaction(
         string $descriptor,
         ?string $countryCode = null,
@@ -55,7 +59,6 @@ final readonly class ContextDevService implements ContextDevServiceContract
             'country_gl' => $countryCode,
             'city' => $city,
             'mcc' => $mcc,
-            // A wrong merchant on a budget line is worse than an unresolved one.
             'high_confidence_only' => true,
         ], static fn (mixed $value): bool => $value !== null && $value !== '');
 
@@ -75,6 +78,9 @@ final readonly class ContextDevService implements ContextDevServiceContract
     }
 
     /**
+     * Brand fields are independently optional: a domain alone still identifies the
+     * merchant (and becomes the title), so only a brand with neither is unresolved.
+     *
      * @param  array<array-key, mixed>  $payload
      */
     private function toMerchant(array $payload): ?MerchantBrandData
@@ -85,8 +91,6 @@ final readonly class ContextDevService implements ContextDevServiceContract
             return null;
         }
 
-        // Brand fields are independently optional: a domain alone still identifies the
-        // merchant, so only a response with neither is unresolved.
         $domain = $this->string($brand['domain'] ?? null);
         $title = $this->string($brand['title'] ?? null) ?? $domain;
 
