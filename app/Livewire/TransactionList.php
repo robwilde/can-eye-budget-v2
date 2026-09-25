@@ -761,7 +761,7 @@ final class TransactionList extends Component
             return;
         }
 
-        ResolveMerchantBrandJob::dispatch(auth()->user(), $transaction->merchant_key ?? $transaction->resolveMerchantKey());
+        ResolveMerchantBrandJob::dispatch(auth()->user(), $this->merchantKeyFor($transaction));
 
         Flux::toast(text: 'Looking up the merchant. Refresh in a moment to see it.', variant: 'success');
     }
@@ -777,7 +777,7 @@ final class TransactionList extends Component
             ->findOrFail($transactionId);
 
         MerchantBrand::query()->updateOrCreate(
-            ['user_id' => auth()->id(), 'merchant_key' => $transaction->merchant_key ?? $transaction->resolveMerchantKey()],
+            ['user_id' => auth()->id(), 'merchant_key' => $this->merchantKeyFor($transaction)],
             ['status' => MerchantBrandStatus::Vetoed, 'retry_after' => null],
         );
 
@@ -1223,47 +1223,51 @@ final class TransactionList extends Component
     }
 
     /**
-     * Resolved brands for the rows on screen, keyed by merchant_key, and the ids
-     * of rows that may offer "Identify merchant": enrichment on, gate passes, and
-     * no sidecar row (resolved, vetoed or still-fresh unresolved) for the key.
+     * For the rows on screen: the resolved brand per transaction id, and the ids
+     * of rows that may offer "Identify merchant" (enrichment on, gate passes, no
+     * resolved, vetoed or still-fresh sidecar row). Keyed by transaction id and
+     * derived with merchantKeyFor(), the same key the identify/veto actions use,
+     * so a row whose merchant_key was never persisted behaves identically.
      * One query per render, not per row.
      *
      * @param  Collection<int, Transaction>  $rows
-     * @return array{0: array<string, MerchantBrand>, 1: array<int, true>}
+     * @return array{0: array<int, MerchantBrand>, 1: array<int, true>}
      */
     private function merchantBrandState(Collection $rows): array
     {
-        $keys = $rows->pluck('merchant_key')->filter()->unique()->values();
+        $keyById = $rows->mapWithKeys(fn (Transaction $row): array => [$row->id => $this->merchantKeyFor($row)]);
 
-        if ($keys->isEmpty()) {
+        if ($keyById->isEmpty()) {
             return [[], []];
         }
 
         $sidecar = MerchantBrand::query()
             ->where('user_id', auth()->id())
-            ->whereIn('merchant_key', $keys)
+            ->whereIn('merchant_key', $keyById->unique()->values())
             ->get()
             ->keyBy('merchant_key');
 
-        $brands = $sidecar
-            ->filter(fn (MerchantBrand $brand): bool => $brand->status === MerchantBrandStatus::Resolved)
-            ->all();
-
+        $enrichmentEnabled = (bool) config('services.context_dev.enrichment_enabled');
+        $gate = app(DescriptorGate::class);
+        $brands = [];
         $identifiable = [];
 
-        if (config('services.context_dev.enrichment_enabled')) {
-            $gate = app(DescriptorGate::class);
+        foreach ($rows as $row) {
+            $existing = $sidecar->get($keyById[$row->id]);
 
-            foreach ($rows as $row) {
-                $existing = $sidecar->get((string) $row->merchant_key);
-
-                if (! isset($brands[$row->merchant_key]) && ! $existing?->blocksLookup() && $gate->allows($row)) {
-                    $identifiable[$row->id] = true;
-                }
+            if ($existing?->status === MerchantBrandStatus::Resolved) {
+                $brands[$row->id] = $existing;
+            } elseif ($enrichmentEnabled && ! $existing?->blocksLookup() && $gate->allows($row)) {
+                $identifiable[$row->id] = true;
             }
         }
 
         return [$brands, $identifiable];
+    }
+
+    private function merchantKeyFor(Transaction $transaction): string
+    {
+        return $transaction->merchant_key ?? $transaction->resolveMerchantKey();
     }
 
     /**

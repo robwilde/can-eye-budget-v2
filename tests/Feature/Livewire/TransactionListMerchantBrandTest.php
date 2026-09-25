@@ -105,3 +105,17 @@ it('refuses to act on another user\'s transaction', function () {
         ->test(TransactionList::class)
         ->call('vetoMerchantBrand', $foreign->id);
 })->throws(Illuminate\Database\Eloquent\ModelNotFoundException::class);
+
+it('shows the brand for a row whose merchant_key was never persisted', function () {
+    // Pre-backfill rows: the saving hook cannot be bypassed through Eloquent.
+    Illuminate\Support\Facades\DB::table('transactions')->where('id', $this->row->id)->update(['merchant_key' => null]);
+    MerchantBrand::factory()->for($this->user)->create([
+        'merchant_key' => $this->row->fresh()->resolveMerchantKey(),
+        'logo_url' => 'https://media.brand.dev/woolworths.png',
+    ]);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->assertSeeHtml('https://media.brand.dev/woolworths.png')
+        ->assertSeeHtml('data-testid="veto-merchant-'.$this->row->id.'"');
+});

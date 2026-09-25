@@ -10,7 +10,7 @@
 
      Passed in: $transaction.
      Read from the component's view data: $account, $formatMoney, $gmailEnabled,
-     $merchantBrands (resolved brands keyed by merchant_key), $identifiableIds,
+     $merchantBrands (resolved brands keyed by transaction id), $identifiableIds,
      $emailPanelTxnId, $emailResults, $emailScanError, $splitPanelTxnId,
      $splitLines, $splitCategories, $splitError.
 
@@ -25,7 +25,7 @@
     $splitCategoryLabel = $transaction->isSplit()
         ? $transaction->splits->map(fn ($s) => $s->category?->name)->filter()->unique()->join(' · ')
         : null;
-    $brand = $merchantBrands[$transaction->merchant_key] ?? null;
+    $brand = $merchantBrands[$transaction->id] ?? null;
     $metaParts = array_filter([
         $brand?->title,
         $splitCategoryLabel !== null && $splitCategoryLabel !== '' ? $splitCategoryLabel : $transaction->category?->name,
