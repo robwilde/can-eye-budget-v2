@@ -92,6 +92,38 @@ it('offers nothing when every on-screen row is resolved or fails the gate', func
     Queue::assertNothingPushed();
 });
 
+it('polls while lookups are pending, dropping keys as their brands arrive', function () {
+    [$woolworths, $jetBrains] = seedVisibleMerchants($this->row);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->assertDontSeeHtml('wire:poll.4s="pollMerchantBrands"')
+        ->call('updateVisibleMerchants')
+        ->assertSeeHtml('wire:poll.4s="pollMerchantBrands"');
+
+    MerchantBrand::factory()->for($this->user)->create(['merchant_key' => $woolworths]);
+
+    $component->call('pollMerchantBrands');
+
+    expect($component->get('pendingMerchantKeys'))->toBe([$jetBrains]);
+});
+
+it('gives up on pending lookups after the timeout', function () {
+    seedVisibleMerchants($this->row);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->call('updateVisibleMerchants');
+
+    $this->travel(4)->minutes();
+
+    $component->call('pollMerchantBrands')
+        ->assertDontSeeHtml('wire:poll.4s="pollMerchantBrands"');
+
+    expect($component->get('pendingMerchantKeys'))->toBe([])
+        ->and($component->get('pendingSince'))->toBeNull();
+});
+
 it('adds a single identify request to the pending list', function () {
     $row = ($this->row)('VISA WOOLWORTHS SYDNEY');
 

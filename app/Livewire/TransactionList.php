@@ -73,6 +73,12 @@ final class TransactionList extends Component
      */
     private const int CLUSTERS_PER_PAGE = 25;
 
+    /**
+     * A lookup skipped by the job's guards (cap, gate, kill switch) never writes
+     * a merchant_brands row, so pending keys cannot all be relied on to clear.
+     */
+    private const int PENDING_TIMEOUT_SECONDS = 180;
+
     #[Url]
     public string $direction = 'all';
 
@@ -838,6 +844,32 @@ final class TransactionList extends Component
             text: $skipped > 0 ? $text." {$skipped} skipped: today's allowance." : $text,
             variant: 'success',
         );
+    }
+
+    /**
+     * Driven by wire:poll while lookups are pending: drops keys whose sidecar row
+     * now exists, and gives up on the rest once the timeout has passed.
+     */
+    public function pollMerchantBrands(): void
+    {
+        if ($this->pendingSince === null || now()->getTimestamp() - $this->pendingSince > self::PENDING_TIMEOUT_SECONDS) {
+            $this->pendingMerchantKeys = [];
+            $this->pendingSince = null;
+
+            return;
+        }
+
+        $done = MerchantBrand::query()
+            ->where('user_id', auth()->id())
+            ->whereIn('merchant_key', $this->pendingMerchantKeys)
+            ->pluck('merchant_key')
+            ->all();
+
+        $this->pendingMerchantKeys = array_values(array_diff($this->pendingMerchantKeys, $done));
+
+        if ($this->pendingMerchantKeys === []) {
+            $this->pendingSince = null;
+        }
     }
 
     /**

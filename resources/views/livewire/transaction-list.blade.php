@@ -200,7 +200,7 @@
                 </flux:button>
             @endif
         </div>
-        <div class="relative">
+        <div class="relative" @if($pendingMerchantKeys !== []) wire:poll.4s="pollMerchantBrands" @endif>
             <div wire:loading class="absolute inset-0 z-10 flex items-center justify-center bg-white/60 dark:bg-zinc-900/60">
                 <flux:icon.arrow-path class="size-6 animate-spin text-zinc-400"/>
             </div>
