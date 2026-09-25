@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Contracts\BasiqServiceContract;
+use App\Contracts\ContextDevServiceContract;
 use App\Contracts\GitHubServiceContract;
 use App\Contracts\GmailServiceContract;
 use App\Services\BasiqService;
 use App\Services\CategoryRuleGenerator;
+use App\Services\ContextDevService;
 use App\Services\GitHubService;
 use App\Services\GmailService;
 use App\Services\PipelineStages\IdentifyPrimaryAccountStage;
@@ -25,6 +27,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
+use RuntimeException;
 
 final class AppServiceProvider extends ServiceProvider
 {
@@ -43,6 +46,16 @@ final class AppServiceProvider extends ServiceProvider
         $this->app->singleton(RedbarkClientFactory::class, fn (): RedbarkClientFactory => new RedbarkClientFactory(
             baseUrl: (string) config('services.redbark.base_url'),
         ));
+
+        $this->app->singleton(ContextDevServiceContract::class, function (): ContextDevService {
+            $apiKey = (string) config('services.context_dev.api_key');
+
+            throw_if(blank($apiKey), RuntimeException::class, 'CONTEXT_DEV_API_KEY is not configured.');
+
+            return ContextDevService::withApiKey($apiKey);
+        });
+
+        $this->app->alias(ContextDevServiceContract::class, ContextDevService::class);
 
         $this->app->singleton(
             GmailServiceContract::class,

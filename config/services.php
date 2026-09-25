@@ -34,6 +34,12 @@ return [
         'seed_user_id' => env('BASIQ_SEED_USER_ID'),
     ],
 
+    'context_dev' => [
+        // Server-side secret. Passed to the SDK explicitly (not left to its getenv()
+        // fallback) so the value survives config:cache in the container entrypoint.
+        'api_key' => env('CONTEXT_DEV_API_KEY'),
+    ],
+
     'redbark' => [
         'base_url' => env('REDBARK_BASE_URL') ?: 'https://api.redbark.com/v1',
         'include_pending' => (bool) env('REDBARK_INCLUDE_PENDING', false),
