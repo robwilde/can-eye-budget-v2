@@ -133,9 +133,13 @@ it('resolves the service from the container using the configured key', function 
         ->and(app(ContextDevService::class))->toBe($service);
 });
 
-it('refuses to build the service when no key is configured', function () {
-    config(['services.context_dev.api_key' => null]);
+it('refuses to build the service when no key is configured', function (?string $key) {
+    config(['services.context_dev.api_key' => $key]);
 
     expect(fn () => app(ContextDevServiceContract::class))
         ->toThrow(RuntimeException::class, 'CONTEXT_DEV_API_KEY is not configured.');
-});
+})->with([
+    'unset' => [null],
+    'empty' => [''],
+    'whitespace only' => ['   '],
+]);

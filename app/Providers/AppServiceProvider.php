@@ -50,7 +50,7 @@ final class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ContextDevServiceContract::class, function (): ContextDevService {
             $apiKey = (string) config('services.context_dev.api_key');
 
-            throw_if($apiKey === '', RuntimeException::class, 'CONTEXT_DEV_API_KEY is not configured.');
+            throw_if(blank($apiKey), RuntimeException::class, 'CONTEXT_DEV_API_KEY is not configured.');
 
             return ContextDevService::withApiKey($apiKey);
         });
