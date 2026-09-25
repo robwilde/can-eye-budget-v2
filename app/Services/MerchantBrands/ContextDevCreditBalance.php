@@ -18,12 +18,12 @@ use Illuminate\Support\Facades\Date;
  */
 final readonly class ContextDevCreditBalance
 {
-    /** How long a failed refresh suppresses further attempts. */
+    /** How long a refresh claim blocks further attempts. */
     public const int REFRESH_BACKOFF_SECONDS = 60;
 
     private const string CACHE_KEY = 'context-dev:balance';
 
-    private const string BACKOFF_KEY = 'context-dev:balance:backoff';
+    private const string REFRESH_CLAIM_KEY = 'context-dev:balance:refresh-claim';
 
     public function __construct(private Repository $cache) {}
 
@@ -66,20 +66,14 @@ final readonly class ContextDevCreditBalance
     }
 
     /**
-     * Hold off refreshing after a failure, so an outage does not make every
-     * render wait on the request timeout.
+     * Claim the right to refresh a stale balance. The claim is an atomic cache
+     * add, so of any concurrent renders only one calls Context.dev, and it
+     * stands for REFRESH_BACKOFF_SECONDS whatever the outcome: after a failure
+     * an outage costs at most one request timeout per window.
      */
-    public function deferRefresh(): void
+    public function claimRefresh(): bool
     {
-        $this->cache->put(self::BACKOFF_KEY, true, self::REFRESH_BACKOFF_SECONDS);
-    }
-
-    /**
-     * Stale and not inside the back-off window after a failed refresh.
-     */
-    public function refreshDue(): bool
-    {
-        return $this->isStale() && ! $this->cache->has(self::BACKOFF_KEY);
+        return $this->isStale() && $this->cache->add(self::REFRESH_CLAIM_KEY, true, self::REFRESH_BACKOFF_SECONDS);
     }
 
     /**

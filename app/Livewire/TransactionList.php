@@ -1237,7 +1237,7 @@ final class TransactionList extends Component
      * The Context.dev balance and today's remaining allowance, or null when
      * enrichment is off. A stale balance is refreshed with the free logs call;
      * if that fails the last recorded value is kept (null when there is none)
-     * and refreshes pause for ContextDevCreditBalance::REFRESH_BACKOFF_SECONDS.
+     * and further refreshes wait out the claim (ContextDevCreditBalance::REFRESH_BACKOFF_SECONDS).
      * Without an API key there is nothing to call: the service binding would
      * throw, so the refresh is skipped and the last value (if any) is shown.
      *
@@ -1251,12 +1251,11 @@ final class TransactionList extends Component
 
         $balance = app(ContextDevCreditBalance::class);
 
-        if ($balance->refreshDue() && filled(config('services.context_dev.api_key'))) {
+        if (filled(config('services.context_dev.api_key')) && $balance->claimRefresh()) {
             try {
                 app(ContextDevServiceContract::class)->creditsRemaining();
             } catch (ContextDevException $e) {
                 Log::warning('Context.dev credit balance refresh failed', ['exception' => $e::class]);
-                $balance->deferRefresh();
             }
         }
 
