@@ -445,7 +445,7 @@ Set the common application environment on all three Application services. Values
 | `MAIL_*`                                                                 | Staging SMTP/sandbox settings; never production mailbox credentials. `log` is fine unless password reset or verification is being tested   |
 | `BASIQ_*`                                                                | Empty or Basiq sandbox credentials and callback URL only. Note `webhooks/basiq` is CSRF-exempt and publicly reachable regardless          |
 | `REDBARK_BASE_URL` / `REDBARK_INCLUDE_PENDING` / `REDBARK_HOLD_TTL_DAYS` | Staging API policy; do not use production secrets by default                                                                              |
-| `CONTEXT_DEV_API_KEY` / `CONTEXT_DEV_ENRICHMENT_ENABLED` / `CONTEXT_DEV_DAILY_CREDIT_CAP` | On all three services (#470): the key is a server-side secret and every brand lookup is billed (10 credits), so spend is bounded by `CONTEXT_DEV_DAILY_CREDIT_CAP=200` with `CONTEXT_DEV_ENRICHMENT_ENABLED=true`. Setting enrichment to `false` stops automatic lookups |
+| `CONTEXT_DEV_API_KEY` / `CONTEXT_DEV_ENRICHMENT_ENABLED` / `CONTEXT_DEV_DAILY_CREDIT_CAP` | The Context.dev key is shared on purpose between local and staging: one account, one credit pool, so both environments draw on the same balance. As built (#470) it is set on all three services with `CONTEXT_DEV_ENRICHMENT_ENABLED=true` and `CONTEXT_DEV_DAILY_CREDIT_CAP=200`. Each brand lookup costs 10 credits; setting enrichment to `false` stops automatic lookups |
 | `GMAIL_USERNAME` / `GMAIL_APP_PASSWORD`                                  | Empty unless a dedicated staging mailbox is approved                                                                                     |
 | `GITHUB_TOKEN`                                                           | A least-privilege staging token only if feedback issue/screenshot upload is required                                                      |
 | `GITHUB_FEEDBACK_REPO`                                                   | Keep the target repository only if staging feedback is intended to create issues                                                          |
@@ -537,7 +537,7 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
 - The Horizon dashboard is not reachable by a seeded account absent from `HORIZON_AUTHORIZED_EMAILS`. With registration disabled on staging there is no way
   to self-register a fresh account for this check, so seed one.
 - `/register` returns 404 and `/` renders with no sign-up link, confirming `FORTIFY_REGISTRATION_ENABLED=false` reached the running container.
-- No production Basiq, Redbark, Gmail, GitHub, mail, or storage credentials are present unless explicitly approved for staging.
+- No production Basiq, Redbark, Gmail, GitHub, mail, or storage credentials are present unless explicitly approved for staging. The Context.dev key is the approved exception: it is shared between local and staging.
 - MariaDB and Redis have no external ports and no public domain.
 - The service count is five: three Applications, one MariaDB/MySQL service, and one Redis.
 
