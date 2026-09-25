@@ -20,7 +20,9 @@ interface ContextDevServiceContract
      * product state, distinct from a failure. Pass only hints the feed actually supplied;
      * invented hints make matches worse.
      *
-     * @throws ContextDevException on transport or API failure, after the SDK's bounded retries
+     * @throws ContextDevException on transport or API failure (after the SDK's bounded retries)
+     *                             or a 2xx response that is not a JSON object — the only exceptions
+     *                             this contract lets escape
      */
     public function brandFromTransaction(
         string $descriptor,

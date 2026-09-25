@@ -5,8 +5,10 @@
 declare(strict_types=1);
 
 use App\Contracts\ContextDevServiceContract;
+use App\Exceptions\ContextDev\ContextDevResponseException;
 use App\Services\ContextDevService;
 use ContextDev\Core\Exceptions\BadRequestException;
+use ContextDev\Core\Exceptions\InternalServerException;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
@@ -29,6 +31,11 @@ function contextDevService(array $responses, array &$history = []): ContextDevSe
 function brandResponse(int $status, array $body): Response
 {
     return new Response($status, ['Content-Type' => 'application/json'], json_encode($body, JSON_THROW_ON_ERROR));
+}
+
+function gatewayPage(int $status): Response
+{
+    return new Response($status, ['Content-Type' => 'text/html'], '<html><body>Bad Gateway</body></html>');
 }
 
 it('sends a high-confidence transaction lookup with only the hints supplied', function () {
@@ -91,6 +98,8 @@ it('treats a 404 or a brand with neither title nor domain as unresolved', functi
     expect(contextDevService([$response])->brandFromTransaction('XYZ 000'))->toBeNull();
 })->with([
     '404 not found' => [brandResponse(404, ['error_code' => 'NOT_FOUND', 'request_id' => 'r'])],
+    '404 with an HTML body' => [gatewayPage(404)],
+    '404 with an empty body' => [new Response(404)],
     'empty brand' => [brandResponse(200, ['status' => 'ok', 'brand' => []])],
 ]);
 
@@ -123,6 +132,27 @@ it('surfaces validation errors without retrying them', function () {
     expect(fn () => $service->brandFromTransaction('ab'))->toThrow(BadRequestException::class)
         ->and($history)->toHaveCount(1);
 });
+
+it('keeps the status of a non-JSON error page, retrying a 5xx before surfacing it', function () {
+    $history = [];
+    $service = contextDevService([gatewayPage(502), gatewayPage(502), gatewayPage(502)], $history);
+
+    try {
+        $service->brandFromTransaction('WOOLWORTHS 1234');
+        $this->fail('Expected an InternalServerException.');
+    } catch (InternalServerException $e) {
+        expect($e->status)->toBe(502)
+            ->and($history)->toHaveCount(3);
+    }
+});
+
+it('reports a 2xx response that is not a JSON object as a Context.dev failure', function (Response $response) {
+    expect(fn () => contextDevService([$response])->brandFromTransaction('WOOLWORTHS 1234'))
+        ->toThrow(ContextDevResponseException::class);
+})->with([
+    'HTML 200' => [gatewayPage(200)],
+    'JSON scalar 200' => [new Response(200, ['Content-Type' => 'application/json'], '"ok"')],
+]);
 
 it('resolves the service from the container using the configured key', function () {
     config(['services.context_dev.api_key' => 'ctxt_secret_test']);
