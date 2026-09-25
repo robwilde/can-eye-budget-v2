@@ -53,7 +53,7 @@ it('queues one lookup per recurring merchant key, not per row', function () {
 it('skips one-off, credit, transfer, vetoed and fresh keys', function () {
     rows($this->user, 'ONE OFF MARKET STALL', 1);
     rows($this->user, 'SALARY ACME PTY LTD', 2, ['direction' => TransactionDirection::Credit]);
-    rows($this->user, 'BUNNINGS WAREHOUSE ADELAIDE', 2, ['transfer_pair_id' => Transaction::factory()->for($this->user)]);
+    rows($this->user, 'BUNNINGS WAREHOUSE ADELAIDE', 2, ['transfer_pair_id' => Transaction::factory()->for($this->user)->credit()]);
     rows($this->user, 'KMART AUSTRALIA PERTH', 2);
     rows($this->user, 'ALDI STORES BRISBANE', 2);
     rows($this->user, 'COLES SUPERMARKET MELBOURNE', 2);
