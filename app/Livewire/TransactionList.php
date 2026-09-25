@@ -856,8 +856,11 @@ final class TransactionList extends Component
     }
 
     /**
-     * Driven by wire:poll while lookups are pending: drops keys whose sidecar row
-     * now exists, and gives up on the rest once the timeout has passed.
+     * Driven by wire:poll while lookups are pending: drops a key once its sidecar
+     * row's updated_at is at or after the time the key was queued, and gives up
+     * on the rest once the timeout has passed. Existence alone is not enough: an
+     * expired unresolved row is re-queued while it already exists, so only a
+     * write since queueing shows the lookup has finished.
      */
     public function pollMerchantBrands(): void
     {
