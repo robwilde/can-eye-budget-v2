@@ -38,10 +38,7 @@ final readonly class ContextDevService implements ContextDevServiceContract
      */
     public static function withApiKey(string $apiKey, ?callable $handler = null): self
     {
-        $transporter = new GuzzleClient(array_filter([
-            'http_errors' => false,
-            'handler' => $handler,
-        ], static fn (mixed $value): bool => $value !== null));
+        $transporter = new GuzzleClient(['http_errors' => false, 'handler' => $handler]);
 
         return new self(new Client(apiKey: $apiKey, requestOptions: ['transporter' => $transporter]));
     }
