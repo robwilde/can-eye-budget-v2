@@ -59,5 +59,9 @@
              via App\Services\ContextDevService::withApiKey() instead. -->
         <env name="CONTEXT_DEV_API_KEY" value="" force="true"/>
         <server name="CONTEXT_DEV_API_KEY" value=""/>
+        <!-- Enrichment off by default so a developer's .env cannot turn it on: the transactions
+             page reads the Context.dev balance when it is on. Tests that need it set the config. -->
+        <env name="CONTEXT_DEV_ENRICHMENT_ENABLED" value="false" force="true"/>
+        <server name="CONTEXT_DEV_ENRICHMENT_ENABLED" value="false"/>
     </php>
 </phpunit>
