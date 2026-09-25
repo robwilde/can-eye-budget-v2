@@ -94,12 +94,14 @@ it('leaves absent optional fields null instead of guessing', function () {
         ->and($merchant->partial)->toBeFalse();
 });
 
-it('treats a 404 or a brand with neither title nor domain as unresolved', function (Response $response) {
+it('treats a 404, a 400 NOT_FOUND or a brand with neither title nor domain as unresolved', function (Response $response) {
     expect(contextDevService([$response])->brandFromTransaction('XYZ 000'))->toBeNull();
 })->with([
     '404 not found' => [brandResponse(404, ['error_code' => 'NOT_FOUND', 'request_id' => 'r'])],
     '404 with an HTML body' => [gatewayPage(404)],
     '404 with an empty body' => [new Response(404)],
+    // The live API's answer for an unidentifiable transaction (observed 2026-09-25).
+    '400 NOT_FOUND' => [brandResponse(400, ['message' => 'Transaction could not be identified.', 'status' => 'error', 'error_code' => 'NOT_FOUND', 'request_id' => 'r'])],
     'empty brand' => [brandResponse(200, ['status' => 'ok', 'brand' => []])],
 ]);
 
