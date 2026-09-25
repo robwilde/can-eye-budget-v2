@@ -227,11 +227,13 @@ final class TransactionList extends Component
     public ?string $emailScanError = null;
 
     /**
-     * Merchant keys with a lookup queued from this page, cleared as their
-     * merchant_brands rows appear. Locked: written only by the lookup actions
-     * and the poll, and fed into a whereIn.
+     * Merchant keys with a lookup queued from this page, mapped to the unix time
+     * each was queued, and cleared once their merchant_brands row is written at
+     * or after that time. Row existence alone is not enough: an expired
+     * unresolved row is queued again and exists before its job runs. Locked:
+     * written only by the lookup actions and the poll, and fed into a whereIn.
      *
-     * @var list<string>
+     * @var array<string, int>
      */
     #[Locked]
     public array $pendingMerchantKeys = [];
@@ -821,7 +823,7 @@ final class TransactionList extends Component
         }
 
         [, , $keys] = $this->merchantBrandState($this->visibleRows($this->currentFilters()));
-        $keys = array_values(array_diff($keys, $this->pendingMerchantKeys));
+        $keys = array_values(array_diff($keys, array_keys($this->pendingMerchantKeys)));
 
         if ($keys === []) {
             Flux::toast(text: 'No merchants on this page need identifying.', variant: 'warning');
@@ -859,13 +861,16 @@ final class TransactionList extends Component
             return;
         }
 
-        $done = MerchantBrand::query()
+        $written = MerchantBrand::query()
             ->where('user_id', auth()->id())
-            ->whereIn('merchant_key', $this->pendingMerchantKeys)
-            ->pluck('merchant_key')
-            ->all();
+            ->whereIn('merchant_key', array_keys($this->pendingMerchantKeys))
+            ->pluck('updated_at', 'merchant_key');
 
-        $this->pendingMerchantKeys = array_values(array_diff($this->pendingMerchantKeys, $done));
+        $this->pendingMerchantKeys = array_filter(
+            $this->pendingMerchantKeys,
+            static fn (int $queuedAt, string $key): bool => ! $written->has($key) || $written[$key]->getTimestamp() < $queuedAt,
+            ARRAY_FILTER_USE_BOTH,
+        );
 
         if ($this->pendingMerchantKeys === []) {
             $this->pendingSince = null;
@@ -1405,8 +1410,11 @@ final class TransactionList extends Component
     /** @param  list<string>  $keys */
     private function markPending(array $keys): void
     {
-        $this->pendingMerchantKeys = array_values(array_unique([...$this->pendingMerchantKeys, ...$keys]));
         $this->pendingSince = now()->getTimestamp();
+
+        foreach ($keys as $key) {
+            $this->pendingMerchantKeys[$key] = $this->pendingSince;
+        }
     }
 
     private function merchantKeyFor(Transaction $transaction): string

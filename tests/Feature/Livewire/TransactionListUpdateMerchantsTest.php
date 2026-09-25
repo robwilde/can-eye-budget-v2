@@ -53,7 +53,7 @@ it('offers one lookup per distinct on-screen merchant and queues exactly those',
         ->assertSee('Identifying 2…');
 
     Queue::assertPushed(ResolveMerchantBrandJob::class, 2);
-    expect($component->get('pendingMerchantKeys'))->toEqualCanonicalizing($keys);
+    expect(array_keys($component->get('pendingMerchantKeys')))->toEqualCanonicalizing($keys);
 });
 
 it('queues only what today\'s allowance covers', function () {
@@ -105,7 +105,26 @@ it('polls while lookups are pending, dropping keys as their brands arrive', func
 
     $component->call('pollMerchantBrands');
 
-    expect($component->get('pendingMerchantKeys'))->toBe([$jetBrains]);
+    expect(array_keys($component->get('pendingMerchantKeys')))->toBe([$jetBrains]);
+});
+
+it('keeps a re-queued key pending until its expired row is rewritten', function () {
+    $row = ($this->row)('VISA WOOLWORTHS SYDNEY');
+    $stale = MerchantBrand::factory()->for($this->user)->unresolved()->expired()->create(['merchant_key' => $row->merchant_key]);
+    $this->travel(1)->minutes();
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->call('updateVisibleMerchants')
+        ->call('pollMerchantBrands');
+
+    expect(array_keys($component->get('pendingMerchantKeys')))->toBe([$row->merchant_key]);
+
+    $stale->update(['retry_after' => now()->addDays(14)]);
+
+    $component->call('pollMerchantBrands');
+
+    expect($component->get('pendingMerchantKeys'))->toBe([]);
 });
 
 it('gives up on pending lookups after the timeout', function () {
@@ -130,6 +149,6 @@ it('adds a single identify request to the pending list', function () {
     Livewire::actingAs($this->user)
         ->test(TransactionList::class)
         ->call('identifyMerchant', $row->id)
-        ->assertSet('pendingMerchantKeys', [$row->merchant_key])
+        ->assertSet('pendingMerchantKeys', [$row->merchant_key => now()->getTimestamp()])
         ->assertDispatched('toast-show', fn (string $event, array $params): bool => $params['slots']['text'] === 'Looking up the merchant…');
 });
