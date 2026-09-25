@@ -26,9 +26,9 @@ function contextDevService(array $responses, array &$history = []): ContextDevSe
     return ContextDevService::withApiKey('ctxt_secret_test', $stack);
 }
 
-function brandResponse(int $status, array $body, array $headers = []): Response
+function brandResponse(int $status, array $body): Response
 {
-    return new Response($status, ['Content-Type' => 'application/json', ...$headers], json_encode($body, JSON_THROW_ON_ERROR));
+    return new Response($status, ['Content-Type' => 'application/json'], json_encode($body, JSON_THROW_ON_ERROR));
 }
 
 it('sends a high-confidence transaction lookup with only the hints supplied', function () {
@@ -105,7 +105,7 @@ it('keeps a domain-only brand, using the domain as the display name', function (
 it('retries a rate-limited call and returns the eventual match', function () {
     $history = [];
     $service = contextDevService([
-        brandResponse(429, ['error_code' => 'RATE_LIMITED', 'message' => 'slow down', 'request_id' => 'r'], ['Retry-After' => '0']),
+        brandResponse(429, ['error_code' => 'RATE_LIMITED', 'message' => 'slow down', 'request_id' => 'r']),
         brandResponse(200, ['brand' => ['title' => 'Woolworths']]),
     ], $history);
 

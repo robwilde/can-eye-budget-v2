@@ -15,8 +15,11 @@ use UnexpectedValueException;
  * Wraps the Context.dev PHP SDK. All Context.dev traffic goes through here.
  *
  * Retries are the SDK's: 408/409/429/5xx are retried up to RequestOptions::$maxRetries
- * (default 2) with exponential backoff capped at 8s, and a 429's Retry-After header is
- * honoured. 400/401/403/404/422 are never retried.
+ * (default 2); 400/401/403/404/422 never are. At the defaults there is effectively no
+ * backoff: BaseClient::retryDelay() scales by retryCount² (0s before the first retry) and
+ * sendRequest() truncates sub-second sleeps to zero, so both retries fire back-to-back.
+ * A numeric Retry-After on any retried status is slept for as-is, not capped by
+ * RequestOptions::$maxRetryDelay; the HTTP-date form resolves to zero.
  *
  * Brand lookups go through Client::request() rather than $client->brand->retrieve():
  * the generated helper requires every lookup type's identifier at once, which cannot
