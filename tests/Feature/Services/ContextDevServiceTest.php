@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Contracts\ContextDevServiceContract;
 use App\Services\ContextDevService;
 use ContextDev\Core\Exceptions\BadRequestException;
 use GuzzleHttp\Handler\MockHandler;
@@ -121,4 +122,20 @@ it('surfaces validation errors without retrying them', function () {
 
     expect(fn () => $service->brandFromTransaction('ab'))->toThrow(BadRequestException::class)
         ->and($history)->toHaveCount(1);
+});
+
+it('resolves the service from the container using the configured key', function () {
+    config(['services.context_dev.api_key' => 'ctxt_secret_test']);
+
+    $service = app(ContextDevServiceContract::class);
+
+    expect($service)->toBeInstanceOf(ContextDevService::class)
+        ->and(app(ContextDevService::class))->toBe($service);
+});
+
+it('refuses to build the service when no key is configured', function () {
+    config(['services.context_dev.api_key' => null]);
+
+    expect(fn () => app(ContextDevServiceContract::class))
+        ->toThrow(RuntimeException::class, 'CONTEXT_DEV_API_KEY is not configured.');
 });
