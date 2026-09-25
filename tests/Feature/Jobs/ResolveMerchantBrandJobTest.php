@@ -47,7 +47,7 @@ it('stores a resolved brand without touching the transaction', function () {
 
     $this->contextDev->shouldReceive('brandFromTransaction')
         ->once()
-        ->with('VISA WOOLWORTHS SYDNEY', 'au', null, '5411')
+        ->with('VISA WOOLWORTHS SYDNEY', null, null, '5411')
         ->andReturn(new MerchantBrandData(title: 'Woolworths', domain: 'woolworths.com.au', logoUrl: 'https://cdn/w.png'));
 
     runResolve($this->user, $keyBefore);

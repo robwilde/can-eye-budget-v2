@@ -39,12 +39,6 @@ final class ResolveMerchantBrandJob implements ShouldBeUnique, ShouldQueue
 
     public const int UNRESOLVED_RETRY_DAYS = 14;
 
-    /**
-     * Every account the app reads is Australian (Basiq AU, Redbark CDR, AU bank
-     * CSVs), so this is a fact about the data, not an invented hint.
-     */
-    private const string COUNTRY = 'au';
-
     /** Recent rows considered when picking one the gate will let through. */
     private const int CANDIDATE_ROWS = 10;
 
@@ -106,7 +100,9 @@ final class ResolveMerchantBrandJob implements ShouldBeUnique, ShouldQueue
         try {
             $brand = app(ContextDevServiceContract::class)->brandFromTransaction(
                 descriptor: $descriptor,
-                countryCode: self::COUNTRY,
+                // No country hint: the account being Australian says nothing about where the
+                // merchant is ("US FRGN" rows), and country_gl constrains the match.
+                countryCode: null,
                 city: $this->hint($representative->enrich_data['location']['suburb'] ?? null),
                 mcc: $this->hint($representative->enrich_data['redbark']['merchantCategoryCode'] ?? null),
             );
