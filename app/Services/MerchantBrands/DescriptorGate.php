@@ -15,6 +15,9 @@ use App\Support\Recurring\MerchantSignature;
  * a payee's name to a third party. It therefore only admits card-style merchant
  * debits and refuses anything that looks like money moving between people or
  * accounts, bank charges, or a payment aggregator whose key names no merchant.
+ * A leading card-scheme marker (VISA, MASTERCARD, MC, EFTPOS) settles that the
+ * payee is a merchant; PayPal never does, and generic PAY/DEBIT/CARD words are
+ * only stripped before an unmarked descriptor is checked for a name shape.
  *
  * Pure: no I/O, so the decision table is pinned by a unit-test dataset.
  */
@@ -24,7 +27,7 @@ final class DescriptorGate
      * Words that mark person-to-person or account movements, bank charges and
      * income. Matched on word boundaries, so FEE does not catch COFFEE.
      */
-    private const string DENY_PATTERN = '/\b(TRANSFER|TFR|XFER|BPAY|PAYID|PAY ?ID|OSKO|NPP|PAY ANYONE|PAYMENT (TO|FROM)|INTERNET BANKING|NETBANK|ATM|CASH ?OUT|WITHDRAWAL|DEPOSIT|FEE|FEES|INTEREST|SALARY|WAGES|PAYROLL|PAY CYCLE|DIRECT CREDIT|REFUND|REVERSAL|LOAN|MORTGAGE|REPAYMENT|CREDIT CARD|CHEQUE)\b/u';
+    private const string DENY_PATTERN = '/\b(TRANSFER|TFR|TRF|TRANSF|XFER|BPAY|PAYID|PAY ?ID|OSKO|NPP|PAY ANYONE|PAYMENT (TO|FROM)|PYMT|INTERNET BANKING|NETBANK|ATM|CASH ?OUT|WITHDRAWAL|DEPOSIT|FEE|FEES|INTEREST|SALARY|WAGES|PAYROLL|PAY CYCLE|DIRECT CREDIT|REFUND|REVERSAL|LOAN|MORTGAGE|REPAYMENT|CREDIT CARD|CHEQUE)\b/u';
 
     /**
      * Merchant keys that name a payment rail rather than a merchant. "PAYPAL" alone
@@ -35,8 +38,18 @@ final class DescriptorGate
         'KLARNA', 'HUMM', 'LATITUDE', 'EFTPOS', 'VISA', 'MASTERCARD', 'APPLE PAY', 'GOOGLE PAY',
     ];
 
-    /** Card-network and wallet words that prefix a descriptor without naming the payee. */
+    /**
+     * Card-network, wallet and generic payment words stripped from the front of a
+     * descriptor before it is judged. Stripping alone settles nothing: "PAY JOHN
+     * SMITH" is still name-checked on "JOHN SMITH".
+     */
     private const array NETWORK_TOKENS = ['VISA', 'MASTERCARD', 'MC', 'EFTPOS', 'ANDROID', 'APPLE', 'GOOGLE', 'PAY', 'DEBIT', 'CARD'];
+
+    /** A leading card-scheme marker: a card paid the payee, and a card cannot pay a person. */
+    private const array CARD_MARKERS = ['VISA', 'MASTERCARD', 'MC', 'EFTPOS'];
+
+    /** Titles that make any following tokens a person's name. */
+    private const array HONORIFIC_TOKENS = ['MR', 'MRS', 'MS', 'MISS', 'DR'];
 
     /** Payment rails whose name, alone, says nothing about which shop was paid. */
     private const array RAIL_TOKENS = ['PAYPAL', 'SQ', 'SQUARE', 'AFTERPAY', 'ZIP', 'ZIPPAY', 'STRIPE', 'KLARNA', 'HUMM', 'LATITUDE'];
@@ -57,8 +70,8 @@ final class DescriptorGate
         'INSURANCE', 'ENERGY', 'TELECOM', 'MOBILE', 'SUBSCRIPTION', 'MEMBERSHIP', 'CLINIC', 'DENTAL',
     ];
 
-    /** A name-only descriptor is at most this many tokens ("JANE A CITIZEN"). */
-    private const int NAME_ONLY_MAX_TOKENS = 3;
+    /** A name-only descriptor is at most this many tokens ("DIRECT DEBIT JOHN SMITH"). */
+    private const int NAME_ONLY_MAX_TOKENS = 4;
 
     private const int MIN_LENGTH = 3;
 
@@ -96,11 +109,17 @@ final class DescriptorGate
 
         $raw = mb_trim((string) $transaction->description);
 
-        if ($raw === '' || mb_strlen($raw) > self::MAX_LENGTH || preg_match(self::DENY_PATTERN, mb_strtoupper($raw)) === 1) {
+        if ($raw === '' || mb_strlen($raw) > self::MAX_LENGTH) {
             return null;
         }
 
         $redacted = MerchantSignature::for($raw);
+
+        // Both forms: a code or doubled space can split a phrase in the raw text
+        // ("PAYMENT 123456 TO") that only becomes whole once redacted.
+        if (preg_match(self::DENY_PATTERN, mb_strtoupper($raw)) === 1 || preg_match(self::DENY_PATTERN, $redacted) === 1) {
+            return null;
+        }
 
         if (mb_strlen($redacted) < self::MIN_LENGTH || preg_match('/\d{4,}/', $redacted) === 1) {
             return null;
@@ -112,10 +131,28 @@ final class DescriptorGate
             return null;
         }
 
-        // A card-network or payment-rail prefix means a card or rail paid the payee,
-        // and those cannot pay a person directly, so only unmarked descriptors get
-        // the name-shape check.
-        $viaCardOrRail = count($tokens) !== count(preg_split('/\s+/', $redacted) ?: [])
+        // PayPal pays people as readily as shops, so a name-shaped payee after it is
+        // refused even behind a card marker. A single token stays allowed: it cannot
+        // be told apart from a merchant handle ("PAYPAL *STEAM").
+        if ($tokens !== [] && $tokens[0] === 'PAYPAL') {
+            $payee = array_slice($tokens, 1);
+
+            if ($payee !== [] && preg_match('/^[A-Z]{2}$/', $payee[array_key_last($payee)]) === 1) {
+                array_pop($payee);
+            }
+
+            if (count($payee) >= 2 && $this->looksLikeAName($payee)) {
+                return null;
+            }
+
+            return $redacted;
+        }
+
+        // A card-scheme marker means a card paid the payee, and a card cannot pay a
+        // person directly; other rails (SQ, AFTERPAY, …) likewise only pay merchants.
+        // Generic PAY/DEBIT/CARD are stripped but settle nothing.
+        $firstToken = (preg_split('/\s+/', $redacted) ?: [''])[0];
+        $viaCardOrRail = in_array(mb_ltrim($firstToken, '-'), self::CARD_MARKERS, true)
             || ($tokens !== [] && in_array($tokens[0], self::RAIL_TOKENS, true));
 
         if (! $viaCardOrRail && $this->looksLikeAName($tokens)) {
@@ -179,12 +216,16 @@ final class DescriptorGate
      */
     private function looksLikeAName(array $tokens): bool
     {
+        if ($tokens !== [] && in_array($tokens[0], self::HONORIFIC_TOKENS, true)) {
+            return true;
+        }
+
         if ($tokens === [] || count($tokens) > self::NAME_ONLY_MAX_TOKENS) {
             return false;
         }
 
         foreach ($tokens as $token) {
-            if (preg_match("/^[A-Z][A-Z'\\-]*$/u", $token) !== 1 || in_array($token, self::MERCHANT_CUE_TOKENS, true)) {
+            if (preg_match("/^\\p{Lu}[\\p{Lu}'\\-]*$/u", $token) !== 1 || in_array($token, self::MERCHANT_CUE_TOKENS, true)) {
                 return false;
             }
         }

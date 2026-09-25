@@ -62,6 +62,13 @@ it('denies transfers, person payments, bank charges and income wording', functio
     'INTEREST CHARGED',
     'HOME LOAN REPAYMENT',
     'CREDIT CARD PAYMENT',
+    'PAYMENT  TO JOHN SMITH',
+    'PAYMENT 123456 TO JOHN SMITH',
+    'PAY  ANYONE JOHN SMITH',
+    'INTERNET  BANKING JOHN SMITH',
+    'TRF TO JOHN SMITH',
+    'TRANSF TO JOHN SMITH',
+    'PYMT JOHN SMITH RENT',
 ]);
 
 it('denies payment-rail descriptors that name no merchant', function (string $descriptor) {
@@ -86,7 +93,20 @@ it('denies unmarked descriptors shaped like a person\'s name', function (string 
     // Plainly named merchants share the shape; refusing them is the accepted cost.
     'JB HI-FI HOBART',
     'WOOLWORTHS 1234 SYDNEY',
+    'JOHN SMITH RENT JUNE',
+    'DIRECT DEBIT JOHN SMITH',
+    'MR JOHN ANDREW SMITH',
+    'JOSÉ GARCÍA',
+    'PAY JOHN SMITH',
+    'DEBIT JOHN SMITH',
+    'CARD JOHN SMITH',
 ]);
+
+it('denies a PayPal payee that looks like a person, but not a PayPal merchant handle', function () {
+    expect((new DescriptorGate)->allows(gateTransaction('PAYPAL *JOHN SMITH')))->toBeFalse()
+        ->and((new DescriptorGate)->allows(gateTransaction('VISA -PAYPAL *JOHN SMITH      4029357733   AU  012007 #8357')))->toBeFalse()
+        ->and((new DescriptorGate)->allows(gateTransaction('PAYPAL *JOHNSMITH')))->toBeTrue();
+});
 
 it('still allows a card-marked descriptor whose payee words look like a name', function () {
     // A card cannot pay a person directly, so the network prefix settles it.
