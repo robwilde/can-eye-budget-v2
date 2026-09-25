@@ -36,6 +36,7 @@ use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
@@ -71,6 +72,12 @@ final class TransactionList extends Component
      * page of 25 clusters is already a long scroll.
      */
     private const int CLUSTERS_PER_PAGE = 25;
+
+    /**
+     * A lookup skipped by the job's guards (cap, gate, kill switch) never writes
+     * a merchant_brands row, so pending keys cannot all be relied on to clear.
+     */
+    private const int PENDING_TIMEOUT_SECONDS = 180;
 
     #[Url]
     public string $direction = 'all';
@@ -218,6 +225,22 @@ final class TransactionList extends Component
 
     #[Locked]
     public ?string $emailScanError = null;
+
+    /**
+     * Merchant keys with a lookup queued from this page, mapped to the unix time
+     * each was queued, and cleared once their merchant_brands row is written at
+     * or after that time. Row existence alone is not enough: an expired
+     * unresolved row is queued again and exists before its job runs. Locked:
+     * written only by the lookup actions and the poll, and fed into a whereIn.
+     *
+     * @var array<string, int>
+     */
+    #[Locked]
+    public array $pendingMerchantKeys = [];
+
+    /** Unix time of the latest queued lookup; the poll gives up PENDING_TIMEOUT_SECONDS after it. */
+    #[Locked]
+    public ?int $pendingSince = null;
 
     #[Locked]
     public ?int $splitPanelTxnId = null;
@@ -771,9 +794,97 @@ final class TransactionList extends Component
             return;
         }
 
-        ResolveMerchantBrandJob::dispatch(auth()->user(), $this->merchantKeyFor($transaction));
+        $key = $this->merchantKeyFor($transaction);
 
-        Flux::toast(text: 'Looking up the merchant. Refresh in a moment to see it.', variant: 'success');
+        if (isset($this->pendingMerchantKeys[$key])) {
+            Flux::toast(text: 'This merchant is already being looked up.', variant: 'warning');
+
+            return;
+        }
+
+        ResolveMerchantBrandJob::dispatch(auth()->user(), $key);
+        $this->markPending([$key]);
+
+        Flux::toast(text: 'Looking up the merchant…', variant: 'success');
+    }
+
+    /**
+     * Queue a lookup for every identifiable merchant among the rows on screen,
+     * never the whole filter, up to today's remaining allowance. Keys are
+     * recomputed here rather than trusted from the client.
+     */
+    public function updateVisibleMerchants(ContextDevCreditBudget $budget): void
+    {
+        if (! config('services.context_dev.enrichment_enabled')) {
+            Flux::toast(text: 'Merchant lookups are turned off.', variant: 'warning');
+
+            return;
+        }
+
+        $slots = intdiv($budget->remaining(), ContextDevCreditBudget::BRAND_LOOKUP_CREDITS);
+
+        if ($slots === 0) {
+            Flux::toast(text: "Today's merchant lookup allowance is used up. Try again tomorrow.", variant: 'warning');
+
+            return;
+        }
+
+        [, , $keys] = $this->merchantBrandState($this->visibleRows($this->currentFilters()));
+        $keys = array_values(array_diff($keys, array_keys($this->pendingMerchantKeys)));
+
+        if ($keys === []) {
+            Flux::toast(text: 'No merchants on this page need identifying.', variant: 'warning');
+
+            return;
+        }
+
+        $queued = array_slice($keys, 0, $slots);
+
+        foreach ($queued as $key) {
+            ResolveMerchantBrandJob::dispatch(auth()->user(), $key);
+        }
+
+        $this->markPending($queued);
+
+        $skipped = count($keys) - count($queued);
+        $text = 'Looking up '.count($queued).' '.Str::plural('merchant', count($queued)).'…';
+
+        Flux::toast(
+            text: $skipped > 0 ? $text." {$skipped} skipped: today's allowance." : $text,
+            variant: 'success',
+        );
+    }
+
+    /**
+     * Driven by wire:poll while lookups are pending: drops a key once its sidecar
+     * row's updated_at is at or after the time the key was queued, and gives up
+     * on the rest once the timeout has passed. Existence alone is not enough: an
+     * expired unresolved row is re-queued while it already exists, so only a
+     * write since queueing shows the lookup has finished.
+     */
+    public function pollMerchantBrands(): void
+    {
+        if ($this->pendingSince === null || now()->getTimestamp() - $this->pendingSince >= self::PENDING_TIMEOUT_SECONDS) {
+            $this->pendingMerchantKeys = [];
+            $this->pendingSince = null;
+
+            return;
+        }
+
+        $written = MerchantBrand::query()
+            ->where('user_id', auth()->id())
+            ->whereIn('merchant_key', array_keys($this->pendingMerchantKeys))
+            ->pluck('updated_at', 'merchant_key');
+
+        $this->pendingMerchantKeys = array_filter(
+            $this->pendingMerchantKeys,
+            static fn (int $queuedAt, string $key): bool => ! $written->has($key) || $written[$key]->getTimestamp() < $queuedAt,
+            ARRAY_FILTER_USE_BOTH,
+        );
+
+        if ($this->pendingMerchantKeys === []) {
+            $this->pendingSince = null;
+        }
     }
 
     /**
@@ -1180,15 +1291,8 @@ final class TransactionList extends Component
         // 3" over rows the user cannot see, writing off screen when clicked.
         $expandedOnPage = $clusters !== null && $this->expandedOnPage($clusters);
 
-        // The rows a page-level "select all" would affect: the current page in
-        // date mode, the expanded cluster in merchant mode.
-        if ($inMerchantMode) {
-            $clusterRows = $expandedOnPage ? $this->clusterMembers($filters) : new EloquentCollection;
-            $visibleRows = $clusterRows;
-        } else {
-            $clusterRows = null;
-            $visibleRows = $transactions->getCollection();
-        }
+        $visibleRows = $this->visibleRows($filters, $expandedOnPage, $transactions);
+        $clusterRows = $inMerchantMode ? $visibleRows : null;
 
         $pageEligibleIds = $this->eligibleIds($visibleRows);
         $scopeCoversScreen = $this->scopeCoversScreen($expandedOnPage);
@@ -1206,7 +1310,7 @@ final class TransactionList extends Component
                 : [];
         }
 
-        [$merchantBrands, $identifiableIds] = $this->merchantBrandState($visibleRows);
+        [$merchantBrands, $identifiableIds, $identifiableKeys] = $this->merchantBrandState($visibleRows);
 
         return view('livewire.transaction-list', [
             'transactions' => $transactions,
@@ -1229,6 +1333,7 @@ final class TransactionList extends Component
             'matchingCount' => $this->matchingEligibleCount(),
             'merchantBrands' => $merchantBrands,
             'identifiableIds' => $identifiableIds,
+            'identifiableKeys' => $identifiableKeys,
             'creditSummary' => $this->creditSummary(),
         ]);
     }
@@ -1271,17 +1376,18 @@ final class TransactionList extends Component
      * affordable today, gate passes, no resolved, vetoed or still-fresh sidecar
      * row). Keys are derived with merchantKeyFor() for display and veto; identify
      * is offered only when the column is persisted, because the job selects rows
-     * by it. One query per render, not per row.
+     * by it. Also the distinct merchant keys of those identifiable rows, in
+     * first-seen order. One query per render, not per row.
      *
      * @param  Collection<int, Transaction>  $rows
-     * @return array{0: array<int, MerchantBrand>, 1: array<int, true>}
+     * @return array{0: array<int, MerchantBrand>, 1: array<int, true>, 2: list<string>}
      */
     private function merchantBrandState(Collection $rows): array
     {
         $keyById = $rows->mapWithKeys(fn (Transaction $row): array => [$row->id => $this->merchantKeyFor($row)]);
 
         if ($keyById->isEmpty()) {
-            return [[], []];
+            return [[], [], []];
         }
 
         $sidecar = MerchantBrand::query()
@@ -1295,18 +1401,31 @@ final class TransactionList extends Component
         $gate = app(DescriptorGate::class);
         $brands = [];
         $identifiable = [];
+        $identifiableKeys = [];
 
         foreach ($rows as $row) {
-            $existing = $sidecar->get($keyById[$row->id]);
+            $key = $keyById[$row->id];
+            $existing = $sidecar->get($key);
 
             if ($existing?->status === MerchantBrandStatus::Resolved) {
                 $brands[$row->id] = $existing;
-            } elseif ($enrichmentEnabled && $row->merchant_key !== null && ! $existing?->blocksLookup() && $gate->allows($row)) {
+            } elseif ($enrichmentEnabled && $row->merchant_key !== null && ! $existing?->blocksLookup() && $gate->allows($row) && ! isset($this->pendingMerchantKeys[$key])) {
                 $identifiable[$row->id] = true;
+                $identifiableKeys[$row->merchant_key] = true;
             }
         }
 
-        return [$brands, $identifiable];
+        return [$brands, $identifiable, array_map(strval(...), array_keys($identifiableKeys))];
+    }
+
+    /** @param  list<string>  $keys */
+    private function markPending(array $keys): void
+    {
+        $this->pendingSince = now()->getTimestamp();
+
+        foreach ($keys as $key) {
+            $this->pendingMerchantKeys[$key] = $this->pendingSince;
+        }
     }
 
     private function merchantKeyFor(Transaction $transaction): string
@@ -1458,15 +1577,27 @@ final class TransactionList extends Component
      */
     private function visibleEligibleIds(): array
     {
-        $filters = $this->currentFilters();
+        return $this->eligibleIds($this->visibleRows($this->currentFilters()));
+    }
 
+    /**
+     * The rows on screen: the current page in date mode, the expanded cluster in
+     * merchant mode (none when the expansion is not on the current cluster page).
+     *
+     * @param  array<string, mixed>  $filters
+     * @param  bool|null  $expandedOnPage  already resolved by render(); null resolves it now
+     * @param  LengthAwarePaginator<int, Transaction>|null  $page  the date-mode page render() already loaded
+     * @return Collection<int, Transaction>
+     */
+    private function visibleRows(array $filters, ?bool $expandedOnPage = null, ?LengthAwarePaginator $page = null): Collection
+    {
         if ($this->inMerchantMode()) {
-            return $this->expandedOnPageNow()
-                ? $this->eligibleIds($this->clusterMembers($filters))
-                : [];
+            return ($expandedOnPage ?? $this->expandedOnPageNow())
+                ? $this->clusterMembers($filters)
+                : new EloquentCollection;
         }
 
-        return $this->eligibleIds($this->paginatedRows($filters)->getCollection());
+        return ($page ?? $this->paginatedRows($filters))->getCollection();
     }
 
     /**
