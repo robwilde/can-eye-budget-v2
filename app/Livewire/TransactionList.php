@@ -9,17 +9,23 @@ use App\Contracts\GmailServiceContract;
 use App\DTOs\CategoryRulePreview;
 use App\DTOs\EmailSearchResult;
 use App\Enums\CategorySource;
+use App\Enums\MerchantBrandStatus;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionPeriod;
 use App\Exceptions\GmailSearchException;
+use App\Jobs\ResolveMerchantBrandJob;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\MerchantBrand;
 use App\Models\Transaction;
 use App\Models\TransactionEmail;
 use App\Models\TransactionSplit;
 use App\Services\CategoryRuleGenerator;
 use App\Services\GmailService;
+use App\Services\MerchantBrands\ContextDevCreditBudget;
+use App\Services\MerchantBrands\DescriptorGate;
 use App\Support\AmountParser;
+use Flux\Flux;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -739,6 +745,52 @@ final class TransactionList extends Component
         $this->refreshRulePreview();
     }
 
+    /**
+     * Queue a paid Context.dev lookup for this row's merchant. A user request
+     * skips the recurrence threshold but not the gate, veto, retry window, kill
+     * switch or daily cap, which the job re-checks.
+     */
+    public function identifyMerchant(int $transactionId, DescriptorGate $gate, ContextDevCreditBudget $budget): void
+    {
+        $transaction = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->findOrFail($transactionId);
+
+        if (! config('services.context_dev.enrichment_enabled') || $transaction->merchant_key === null || ! $gate->allows($transaction)) {
+            Flux::toast(text: 'This transaction cannot be matched to a merchant.', variant: 'warning');
+
+            return;
+        }
+
+        if ($budget->remaining() < ContextDevCreditBudget::BRAND_LOOKUP_CREDITS) {
+            Flux::toast(text: "Today's merchant lookup allowance is used up. Try again tomorrow.", variant: 'warning');
+
+            return;
+        }
+
+        ResolveMerchantBrandJob::dispatch(auth()->user(), $this->merchantKeyFor($transaction));
+
+        Flux::toast(text: 'Looking up the merchant. Refresh in a moment to see it.', variant: 'success');
+    }
+
+    /**
+     * "Wrong merchant": hide the brand for this merchant key and never look it up
+     * again for this user. Transactions themselves are untouched.
+     */
+    public function vetoMerchantBrand(int $transactionId): void
+    {
+        $transaction = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->findOrFail($transactionId);
+
+        MerchantBrand::query()->updateOrCreate(
+            ['user_id' => auth()->id(), 'merchant_key' => $this->merchantKeyFor($transaction)],
+            ['status' => MerchantBrandStatus::Vetoed, 'retry_after' => null],
+        );
+
+        Flux::toast(text: 'Merchant hidden. It will not be suggested again.', variant: 'success');
+    }
+
     public function scanEmail(int $transactionId, GmailServiceContract $gmail): void
     {
         if ($this->emailPanelTxnId === $transactionId) {
@@ -1151,6 +1203,8 @@ final class TransactionList extends Component
                 : [];
         }
 
+        [$merchantBrands, $identifiableIds] = $this->merchantBrandState($visibleRows);
+
         return view('livewire.transaction-list', [
             'transactions' => $transactions,
             'grouped' => $grouped,
@@ -1170,7 +1224,58 @@ final class TransactionList extends Component
             'selectionCount' => $this->selectionCount(),
             'pageEligibleIds' => $pageEligibleIds,
             'matchingCount' => $this->matchingEligibleCount(),
+            'merchantBrands' => $merchantBrands,
+            'identifiableIds' => $identifiableIds,
         ]);
+    }
+
+    /**
+     * For the rows on screen: the resolved brand per transaction id, and the ids
+     * of rows that may offer "Identify merchant" (enrichment on, a lookup still
+     * affordable today, gate passes, no resolved, vetoed or still-fresh sidecar
+     * row). Keys are derived with merchantKeyFor() for display and veto; identify
+     * is offered only when the column is persisted, because the job selects rows
+     * by it. One query per render, not per row.
+     *
+     * @param  Collection<int, Transaction>  $rows
+     * @return array{0: array<int, MerchantBrand>, 1: array<int, true>}
+     */
+    private function merchantBrandState(Collection $rows): array
+    {
+        $keyById = $rows->mapWithKeys(fn (Transaction $row): array => [$row->id => $this->merchantKeyFor($row)]);
+
+        if ($keyById->isEmpty()) {
+            return [[], []];
+        }
+
+        $sidecar = MerchantBrand::query()
+            ->where('user_id', auth()->id())
+            ->whereIn('merchant_key', $keyById->unique()->values())
+            ->get()
+            ->keyBy('merchant_key');
+
+        $enrichmentEnabled = (bool) config('services.context_dev.enrichment_enabled')
+            && app(ContextDevCreditBudget::class)->remaining() >= ContextDevCreditBudget::BRAND_LOOKUP_CREDITS;
+        $gate = app(DescriptorGate::class);
+        $brands = [];
+        $identifiable = [];
+
+        foreach ($rows as $row) {
+            $existing = $sidecar->get($keyById[$row->id]);
+
+            if ($existing?->status === MerchantBrandStatus::Resolved) {
+                $brands[$row->id] = $existing;
+            } elseif ($enrichmentEnabled && $row->merchant_key !== null && ! $existing?->blocksLookup() && $gate->allows($row)) {
+                $identifiable[$row->id] = true;
+            }
+        }
+
+        return [$brands, $identifiable];
+    }
+
+    private function merchantKeyFor(Transaction $transaction): string
+    {
+        return $transaction->merchant_key ?? $transaction->resolveMerchantKey();
     }
 
     /**

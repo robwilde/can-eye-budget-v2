@@ -38,6 +38,11 @@ return [
         // Server-side secret. Passed to the SDK explicitly (not left to its getenv()
         // fallback) so the value survives config:cache in the container entrypoint.
         'api_key' => env('CONTEXT_DEV_API_KEY'),
+        // Automatic transaction enrichment (#465). Off unless opted in: every lookup
+        // costs 10 credits. The cap bounds automatic and user-requested lookups per
+        // Australia/Brisbane day.
+        'enrichment_enabled' => (bool) env('CONTEXT_DEV_ENRICHMENT_ENABLED', false),
+        'daily_credit_cap' => (int) env('CONTEXT_DEV_DAILY_CREDIT_CAP', 500),
     ],
 
     'redbark' => [

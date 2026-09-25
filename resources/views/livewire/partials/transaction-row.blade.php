@@ -10,6 +10,7 @@
 
      Passed in: $transaction.
      Read from the component's view data: $account, $formatMoney, $gmailEnabled,
+     $merchantBrands (resolved brands keyed by transaction id), $identifiableIds,
      $emailPanelTxnId, $emailResults, $emailScanError, $splitPanelTxnId,
      $splitLines, $splitCategories, $splitError.
 
@@ -24,7 +25,9 @@
     $splitCategoryLabel = $transaction->isSplit()
         ? $transaction->splits->map(fn ($s) => $s->category?->name)->filter()->unique()->join(' · ')
         : null;
+    $brand = $merchantBrands[$transaction->id] ?? null;
     $metaParts = array_filter([
+        $brand?->title,
         $splitCategoryLabel !== null && $splitCategoryLabel !== '' ? $splitCategoryLabel : $transaction->category?->name,
         $account === null ? $transaction->account?->name : null,
     ]);
@@ -75,12 +78,24 @@
             :amount="$transaction->amount"
             :tone="$tone"
             :icon="$transaction->category?->resolveIcon()"
+            :logo="$brand?->logo_url"
             :click="'$dispatch(\'edit-transaction\', { id: ' . $transaction->id . ' })'"
         >
             @if(! empty($metaParts) || $isPlanned || $transaction->emails->isNotEmpty() || $transaction->isSplit())
                 <x-slot:meta>{{ implode(' · ', $metaParts) }}@if($isPlanned) <span class="pill plan">Planned</span>@endif@if($transaction->isSplit()) <span class="pill split">Split ({{ $transaction->splits->count() }})</span>@endif@if($transaction->emails->isNotEmpty()) <span class="pill email">{{ $transaction->emails->count() }} email{{ $transaction->emails->count() > 1 ? 's' : '' }}</span>@endif</x-slot:meta>
             @endif
             <x-slot:actions>
+                @if($brand !== null)
+                    <flux:button variant="ghost" size="sm" icon="no-symbol"
+                                 wire:click="vetoMerchantBrand({{ $transaction->id }})"
+                                 wire:confirm="Hide {{ $brand->title }} for this merchant? It will not be looked up again."
+                                 data-testid="veto-merchant-{{ $transaction->id }}" aria-label="Wrong merchant"/>
+                @elseif(isset($identifiableIds[$transaction->id]))
+                    <flux:button variant="ghost" size="sm" icon="sparkles"
+                                 wire:click="identifyMerchant({{ $transaction->id }})"
+                                 wire:loading.attr="disabled" wire:target="identifyMerchant({{ $transaction->id }})"
+                                 data-testid="identify-merchant-{{ $transaction->id }}" aria-label="Identify merchant"/>
+                @endif
                 @if($transaction->transfer_pair_id === null)
                     <flux:button variant="ghost" size="sm" icon="scissors"
                                  wire:click="toggleSplit({{ $transaction->id }})"

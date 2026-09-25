@@ -140,6 +140,7 @@ final class SyncTransactionsJob implements ShouldBeUnique, ShouldQueue
         ]);
 
         RunTransactionAnalysisJob::dispatch($this->user);
+        EnrichMerchantBrandsJob::dispatch($this->user);
     }
 
     /**

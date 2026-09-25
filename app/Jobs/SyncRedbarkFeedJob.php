@@ -196,6 +196,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
         ]);
 
         RunTransactionAnalysisJob::dispatch($this->feed->user);
+        EnrichMerchantBrandsJob::dispatch($this->feed->user);
     }
 
     public function failed(Throwable $exception): void

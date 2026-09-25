@@ -8,6 +8,7 @@ use App\Contracts\ContextDevServiceContract;
 use App\DTOs\MerchantBrandData;
 use App\Exceptions\ContextDev\ContextDevResponseException;
 use ContextDev\Client;
+use ContextDev\Core\Exceptions\BadRequestException;
 use ContextDev\Core\Exceptions\NotFoundException;
 use GuzzleHttp\Client as GuzzleClient;
 use GuzzleHttp\HandlerStack;
@@ -63,8 +64,10 @@ final readonly class ContextDevService implements ContextDevServiceContract
      * Always sends high_confidence_only: a wrong merchant on a budget line is worse than an
      * unresolved one.
      *
-     * Any 404 means unresolved, whatever its body. A 2xx whose body is not a JSON object is
-     * a failure.
+     * Any 404 means unresolved, whatever its body, and so does a 400 whose error_code is
+     * NOT_FOUND: that is how the live API answers an unidentifiable transaction ("Transaction
+     * could not be identified.", 0 credits). Every other 400 is a real validation failure and
+     * is rethrown. A 2xx whose body is not a JSON object is a failure.
      *
      * @throws ContextDevResponseException when a 2xx response is not a JSON object
      */
@@ -88,6 +91,12 @@ final readonly class ContextDevService implements ContextDevServiceContract
             $payload = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
         } catch (NotFoundException) {
             return null;
+        } catch (BadRequestException $e) {
+            if ($this->errorCode($e) === 'NOT_FOUND') {
+                return null;
+            }
+
+            throw $e;
         } catch (JsonException $e) {
             throw ContextDevResponseException::notJson($e);
         }
@@ -110,6 +119,27 @@ final readonly class ContextDevService implements ContextDevServiceContract
         return $response
             ->withHeader('Content-Type', 'application/json')
             ->withBody(Utils::streamFor(json_encode(['body' => mb_substr($body, 0, 500)], JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE)));
+    }
+
+    /**
+     * The SDK decodes the error body into its message but never sets APIException::$body,
+     * so read error_code from the response it keeps. The stream was consumed once already.
+     */
+    private function errorCode(BadRequestException $e): ?string
+    {
+        $body = $e->response?->getBody();
+
+        if ($body === null) {
+            return null;
+        }
+
+        if ($body->isSeekable()) {
+            $body->rewind();
+        }
+
+        $decoded = json_decode((string) $body, true);
+
+        return is_array($decoded) && is_string($decoded['error_code'] ?? null) ? $decoded['error_code'] : null;
     }
 
     /**

@@ -217,6 +217,24 @@ return [
             'timeout' => 120,
             'nice' => 0,
         ],
+
+        // Paid Context.dev lookups (#465). A separate supervisor, not a second queue
+        // on supervisor-1: with balance=auto, queue order does not set priority (the
+        // autoscaler shares workers by load), so the cap has to be structural. One
+        // process keeps lookups serial and off the import/analysis workers; it runs
+        // in every environment because defaults are merged into each one.
+        'supervisor-enrichment' => [
+            'connection' => 'redis',
+            'queue' => ['enrichment'],
+            'balance' => 'simple',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 128,
+            'tries' => 1,
+            'timeout' => 150,
+            'nice' => 10,
+        ],
     ],
 
     'environments' => [

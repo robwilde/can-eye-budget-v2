@@ -9,6 +9,7 @@
     'amount',
     'tone' => 'out',
     'icon' => null,
+    'logo' => null,
     'matched' => false,
     'click' => null,
 ])
@@ -28,8 +29,10 @@
     <div {{ $attributes->class(['tx-row', 'passive']) }}>
         @if ($click !== null)
             <button type="button" class="tx-row-hit" wire:click="{{ $click }}">
-                <div @class(['tx-ico', $tone])>
-                    @if ($icon)
+                <div @class(['tx-ico', $tone, 'has-logo' => $logo])>
+                    @if ($logo)
+                        <img src="{{ $logo }}" alt="" loading="lazy" referrerpolicy="no-referrer" class="tx-logo">
+                    @elseif ($icon)
                         <flux:icon :name="$icon" variant="mini"/>
                     @endif
                 </div>
@@ -47,8 +50,10 @@
                 <div @class(['tx-amt', $tone])>{{ MoneyCast::format((int) $amount) }}</div>
             </button>
         @else
-            <div @class(['tx-ico', $tone])>
-                @if ($icon)
+            <div @class(['tx-ico', $tone, 'has-logo' => $logo])>
+                @if ($logo)
+                    <img src="{{ $logo }}" alt="" loading="lazy" referrerpolicy="no-referrer" class="tx-logo">
+                @elseif ($icon)
                     <flux:icon :name="$icon" variant="mini"/>
                 @endif
             </div>
@@ -78,8 +83,10 @@
                 wire:click="$dispatch('edit-transaction', { id: {{ (int) $transactionId }} })"
             @endif
     >
-        <div @class(['tx-ico', $tone])>
-            @if ($icon)
+        <div @class(['tx-ico', $tone, 'has-logo' => $logo])>
+            @if ($logo)
+                <img src="{{ $logo }}" alt="" loading="lazy" referrerpolicy="no-referrer" class="tx-logo">
+            @elseif ($icon)
                 <flux:icon :name="$icon" variant="mini"/>
             @endif
         </div>

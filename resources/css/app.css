@@ -260,6 +260,9 @@ select:focus[data-flux-control] {
     .tx-ico.inc { background: var(--color-money-available-soft); color: var(--color-cib-green-600); }
     .tx-ico.plan { background: var(--color-money-planned-soft); color: var(--color-money-planned); }
     .tx-ico svg { width: 18px; height: 18px; }
+    /* Merchant brand logo from Context.dev (#465): neutral tile so any logo colour reads. */
+    .tx-ico.has-logo { background: #fff; overflow: hidden; }
+    .tx-logo { width: 100%; height: 100%; object-fit: contain; padding: 3px; }
     .tx-name { font: 700 14px/1.2 var(--font-sans); color: var(--color-fg-1); }
     .tx-meta { font: 400 12px/1.3 var(--font-sans); color: var(--color-fg-3); margin-top: 2px; }
     .tx-amt { font: 900 15px/1 var(--font-display); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
