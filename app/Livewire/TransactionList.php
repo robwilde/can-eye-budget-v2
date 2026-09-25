@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Casts\MoneyCast;
+use App\Contracts\ContextDevServiceContract;
 use App\Contracts\GmailServiceContract;
 use App\DTOs\CategoryRulePreview;
 use App\DTOs\EmailSearchResult;
@@ -22,9 +23,11 @@ use App\Models\TransactionEmail;
 use App\Models\TransactionSplit;
 use App\Services\CategoryRuleGenerator;
 use App\Services\GmailService;
+use App\Services\MerchantBrands\ContextDevCreditBalance;
 use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\MerchantBrands\DescriptorGate;
 use App\Support\AmountParser;
+use ContextDev\Core\Exceptions\ContextDevException;
 use Flux\Flux;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -1226,7 +1229,40 @@ final class TransactionList extends Component
             'matchingCount' => $this->matchingEligibleCount(),
             'merchantBrands' => $merchantBrands,
             'identifiableIds' => $identifiableIds,
+            'creditSummary' => $this->creditSummary(),
         ]);
+    }
+
+    /**
+     * The Context.dev balance and today's remaining allowance, or null when
+     * enrichment is off. A stale balance is refreshed with the free logs call;
+     * if that fails the last recorded value is kept (null when there is none)
+     * and further refreshes wait out the claim (ContextDevCreditBalance::REFRESH_BACKOFF_SECONDS).
+     * Without an API key there is nothing to call: the service binding would
+     * throw, so the refresh is skipped and the last value (if any) is shown.
+     *
+     * @return array{balance: int|null, leftToday: int}|null
+     */
+    private function creditSummary(): ?array
+    {
+        if (! config('services.context_dev.enrichment_enabled')) {
+            return null;
+        }
+
+        $balance = app(ContextDevCreditBalance::class);
+
+        if (filled(config('services.context_dev.api_key')) && $balance->claimRefresh()) {
+            try {
+                app(ContextDevServiceContract::class)->creditsRemaining();
+            } catch (ContextDevException $e) {
+                Log::warning('Context.dev credit balance refresh failed', ['exception' => $e::class]);
+            }
+        }
+
+        return [
+            'balance' => $balance->current()['remaining'] ?? null,
+            'leftToday' => app(ContextDevCreditBudget::class)->remaining(),
+        ];
     }
 
     /**
