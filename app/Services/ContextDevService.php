@@ -121,14 +121,15 @@ final readonly class ContextDevService implements ContextDevServiceContract
 
     /**
      * GET /logs?limit=1 costs no credits but carries key_metadata.credits_remaining like
-     * every other response. Needs the logs:read scope. Short timeout: a page render waits on it.
+     * every other response. Needs the logs:read scope. A page render waits on it, so it gets
+     * one 5 s attempt: the SDK's default two retries would stretch an outage to ~15 s.
      *
      * @throws ContextDevResponseException when the response lacks credits_remaining
      */
     public function creditsRemaining(): int
     {
         try {
-            $response = $this->client->request(method: 'get', path: 'logs', query: ['limit' => 1], options: ['timeout' => 5]);
+            $response = $this->client->request(method: 'get', path: 'logs', query: ['limit' => 1], options: ['timeout' => 5, 'maxRetries' => 0]);
             $payload = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
         } catch (JsonException $e) {
             throw ContextDevResponseException::notJson($e);

@@ -224,3 +224,11 @@ it('throws when the logs response carries no credits_remaining', function () {
     expect(fn () => contextDevService([brandResponse(200, ['data' => []])])->creditsRemaining())
         ->toThrow(ContextDevResponseException::class);
 });
+
+it('makes a single attempt at the balance check instead of retrying', function () {
+    $history = [];
+    $service = contextDevService([gatewayPage(502), brandResponse(200, ['key_metadata' => ['credits_remaining' => 970]])], $history);
+
+    expect(fn () => $service->creditsRemaining())->toThrow(InternalServerException::class)
+        ->and($history)->toHaveCount(1);
+});
