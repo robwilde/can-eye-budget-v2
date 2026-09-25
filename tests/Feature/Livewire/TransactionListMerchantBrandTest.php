@@ -21,7 +21,7 @@ use Livewire\Livewire;
 
 beforeEach(function () {
     $this->travelTo(CarbonImmutable::parse('2026-06-15'));
-    config(['services.context_dev.enrichment_enabled' => true]);
+    config(['services.context_dev.enrichment_enabled' => true, 'services.context_dev.api_key' => 'ctxt_test']);
     // The page reads the Context.dev balance when enrichment is on; never the live API.
     $this->contextDev = Mockery::mock(ContextDevServiceContract::class);
     $this->contextDev->allows('creditsRemaining')->andReturnUsing(function (): int {
@@ -171,6 +171,17 @@ it('still renders, with an unknown balance, when the balance check fails', funct
     Livewire::actingAs($this->user)
         ->test(TransactionList::class)
         ->assertSeeHtml('data-testid="context-dev-credits"')
+        ->assertSee('Credits: unknown')
+        ->assertSee('VISA WOOLWORTHS 1234 SYDNEY');
+});
+
+it('renders an unknown balance without calling Context.dev when no API key is configured', function () {
+    // Resolving the real binding without a key throws RuntimeException.
+    config(['services.context_dev.api_key' => '']);
+    $this->contextDev->shouldNotReceive('creditsRemaining');
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
         ->assertSee('Credits: unknown')
         ->assertSee('VISA WOOLWORTHS 1234 SYDNEY');
 });
