@@ -864,7 +864,7 @@ final class TransactionList extends Component
      */
     public function pollMerchantBrands(): void
     {
-        if ($this->pendingSince === null || now()->getTimestamp() - $this->pendingSince > self::PENDING_TIMEOUT_SECONDS) {
+        if ($this->pendingSince === null || now()->getTimestamp() - $this->pendingSince >= self::PENDING_TIMEOUT_SECONDS) {
             $this->pendingMerchantKeys = [];
             $this->pendingSince = null;
 

@@ -143,6 +143,21 @@ it('gives up on pending lookups after the timeout', function () {
         ->and($component->get('pendingSince'))->toBeNull();
 });
 
+it('gives up on pending lookups exactly at the timeout', function () {
+    seedVisibleMerchants($this->row);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->call('updateVisibleMerchants');
+
+    $this->travel(180)->seconds();
+
+    $component->call('pollMerchantBrands');
+
+    expect($component->get('pendingMerchantKeys'))->toBe([])
+        ->and($component->get('pendingSince'))->toBeNull();
+});
+
 it('adds a single identify request to the pending list', function () {
     $row = ($this->row)('VISA WOOLWORTHS SYDNEY');
 
