@@ -7,6 +7,7 @@ declare(strict_types=1);
 use App\Contracts\ContextDevServiceContract;
 use App\Exceptions\ContextDev\ContextDevResponseException;
 use App\Services\ContextDevService;
+use App\Services\MerchantBrands\ContextDevCreditBalance;
 use ContextDev\Core\Exceptions\BadRequestException;
 use ContextDev\Core\Exceptions\InternalServerException;
 use GuzzleHttp\Handler\MockHandler;
@@ -20,12 +21,12 @@ use GuzzleHttp\Psr7\Response;
  * @param  list<Response>  $responses
  * @param  array<int, array<string, mixed>>  $history
  */
-function contextDevService(array $responses, array &$history = []): ContextDevService
+function contextDevService(array $responses, array &$history = [], ?ContextDevCreditBalance $balance = null): ContextDevService
 {
     $stack = HandlerStack::create(new MockHandler($responses));
     $stack->push(Middleware::history($history));
 
-    return ContextDevService::withApiKey('ctxt_secret_test', $stack);
+    return ContextDevService::withApiKey('ctxt_secret_test', $stack, $balance);
 }
 
 function brandResponse(int $status, array $body): Response
@@ -175,3 +176,51 @@ it('refuses to build the service when no key is configured', function (?string $
     'empty' => [''],
     'whitespace only' => ['   '],
 ]);
+
+it('records credits_remaining from a matched brand response', function () {
+    $balance = app(ContextDevCreditBalance::class);
+    $history = [];
+
+    contextDevService([brandResponse(200, [
+        'brand' => ['title' => 'Woolworths'],
+        'key_metadata' => ['credits_remaining' => 960],
+    ])], $history, $balance)->brandFromTransaction('WOOLWORTHS 1234 SYDNEY');
+
+    expect($balance->current()['remaining'])->toBe(960);
+});
+
+it('records credits_remaining from a 400 NOT_FOUND body and still returns null', function () {
+    $balance = app(ContextDevCreditBalance::class);
+    $history = [];
+
+    $merchant = contextDevService([brandResponse(400, [
+        'status' => 'error',
+        'error_code' => 'NOT_FOUND',
+        'key_metadata' => ['credits_remaining' => 955],
+    ])], $history, $balance)->brandFromTransaction('XYZ 000');
+
+    expect($merchant)->toBeNull()
+        ->and($balance->current()['remaining'])->toBe(955);
+});
+
+it('reads the balance from the free logs endpoint and records it', function () {
+    $balance = app(ContextDevCreditBalance::class);
+    $history = [];
+
+    $credits = contextDevService([brandResponse(200, [
+        'data' => [],
+        'key_metadata' => ['credits_remaining' => 970],
+    ])], $history, $balance)->creditsRemaining();
+
+    $request = $history[0]['request'];
+
+    expect($credits)->toBe(970)
+        ->and($balance->current()['remaining'])->toBe(970)
+        ->and($request->getMethod())->toBe('GET')
+        ->and((string) $request->getUri())->toBe('https://api.context.dev/v1/logs?limit=1');
+});
+
+it('throws when the logs response carries no credits_remaining', function () {
+    expect(fn () => contextDevService([brandResponse(200, ['data' => []])])->creditsRemaining())
+        ->toThrow(ContextDevResponseException::class);
+});

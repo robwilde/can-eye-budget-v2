@@ -24,4 +24,9 @@ final class ContextDevResponseException extends ContextDevException
     {
         return new self('Context.dev brand response was not a JSON object.');
     }
+
+    public static function missingCredits(): self
+    {
+        return new self('Context.dev response did not include key_metadata.credits_remaining.');
+    }
 }

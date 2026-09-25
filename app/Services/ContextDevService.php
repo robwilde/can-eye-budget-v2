@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Contracts\ContextDevServiceContract;
 use App\DTOs\MerchantBrandData;
 use App\Exceptions\ContextDev\ContextDevResponseException;
+use App\Services\MerchantBrands\ContextDevCreditBalance;
 use ContextDev\Client;
 use ContextDev\Core\Exceptions\BadRequestException;
 use ContextDev\Core\Exceptions\NotFoundException;
@@ -33,7 +34,10 @@ use Psr\Http\Message\ResponseInterface;
  */
 final readonly class ContextDevService implements ContextDevServiceContract
 {
-    public function __construct(private Client $client) {}
+    public function __construct(
+        private Client $client,
+        private ?ContextDevCreditBalance $balance = null,
+    ) {}
 
     /**
      * Build the SDK client with a transport it can actually read errors from.
@@ -49,15 +53,16 @@ final readonly class ContextDevService implements ContextDevServiceContract
      * to its typed exception: 404 → NotFoundException, 5xx retried → InternalServerException.
      *
      * @param  callable|null  $handler  Guzzle handler stack; tests inject a MockHandler here.
+     * @param  ContextDevCreditBalance|null  $balance  where observed credits_remaining values are recorded
      */
-    public static function withApiKey(string $apiKey, ?callable $handler = null): self
+    public static function withApiKey(string $apiKey, ?callable $handler = null, ?ContextDevCreditBalance $balance = null): self
     {
         $stack = HandlerStack::create($handler);
         $stack->push(Middleware::mapResponse(self::jsonErrorBody(...)), 'context_dev_json_error_body');
 
         $transporter = new GuzzleClient(['http_errors' => false, 'handler' => $stack]);
 
-        return new self(new Client(apiKey: $apiKey, requestOptions: ['transporter' => $transporter]));
+        return new self(new Client(apiKey: $apiKey, requestOptions: ['transporter' => $transporter]), $balance);
     }
 
     /**
@@ -92,7 +97,11 @@ final readonly class ContextDevService implements ContextDevServiceContract
         } catch (NotFoundException) {
             return null;
         } catch (BadRequestException $e) {
-            if ($this->errorCode($e) === 'NOT_FOUND') {
+            $error = $this->errorBody($e);
+
+            if (($error['error_code'] ?? null) === 'NOT_FOUND') {
+                $this->recordCredits($error);
+
                 return null;
             }
 
@@ -105,7 +114,35 @@ final readonly class ContextDevService implements ContextDevServiceContract
             throw ContextDevResponseException::notAnObject();
         }
 
+        $this->recordCredits($payload);
+
         return $this->toMerchant($payload);
+    }
+
+    /**
+     * GET /logs?limit=1 costs no credits but carries key_metadata.credits_remaining like
+     * every other response. Needs the logs:read scope. Short timeout: a page render waits on it.
+     *
+     * @throws ContextDevResponseException when the response lacks credits_remaining
+     */
+    public function creditsRemaining(): int
+    {
+        try {
+            $response = $this->client->request(method: 'get', path: 'logs', query: ['limit' => 1], options: ['timeout' => 5]);
+            $payload = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            throw ContextDevResponseException::notJson($e);
+        }
+
+        $credits = is_array($payload) ? $this->credits($payload) : null;
+
+        if ($credits === null) {
+            throw ContextDevResponseException::missingCredits();
+        }
+
+        $this->balance?->record($credits);
+
+        return $credits;
     }
 
     private static function jsonErrorBody(ResponseInterface $response): ResponseInterface
@@ -123,14 +160,16 @@ final readonly class ContextDevService implements ContextDevServiceContract
 
     /**
      * The SDK decodes the error body into its message but never sets APIException::$body,
-     * so read error_code from the response it keeps. The stream was consumed once already.
+     * so read the body from the response it keeps. The stream was consumed once already.
+     *
+     * @return array<array-key, mixed>
      */
-    private function errorCode(BadRequestException $e): ?string
+    private function errorBody(BadRequestException $e): array
     {
         $body = $e->response?->getBody();
 
         if ($body === null) {
-            return null;
+            return [];
         }
 
         if ($body->isSeekable()) {
@@ -139,7 +178,25 @@ final readonly class ContextDevService implements ContextDevServiceContract
 
         $decoded = json_decode((string) $body, true);
 
-        return is_array($decoded) && is_string($decoded['error_code'] ?? null) ? $decoded['error_code'] : null;
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /** @param  array<array-key, mixed>  $payload */
+    private function recordCredits(array $payload): void
+    {
+        $credits = $this->credits($payload);
+
+        if ($credits !== null) {
+            $this->balance?->record($credits);
+        }
+    }
+
+    /** @param  array<array-key, mixed>  $payload */
+    private function credits(array $payload): ?int
+    {
+        $credits = $payload['key_metadata']['credits_remaining'] ?? null;
+
+        return is_int($credits) ? $credits : null;
     }
 
     /**

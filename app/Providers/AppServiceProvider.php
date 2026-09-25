@@ -54,7 +54,7 @@ final class AppServiceProvider extends ServiceProvider
 
             throw_if(blank($apiKey), RuntimeException::class, 'CONTEXT_DEV_API_KEY is not configured.');
 
-            return ContextDevService::withApiKey($apiKey);
+            return ContextDevService::withApiKey($apiKey, balance: $this->app->make(ContextDevCreditBalance::class));
         });
 
         $this->app->alias(ContextDevServiceContract::class, ContextDevService::class);

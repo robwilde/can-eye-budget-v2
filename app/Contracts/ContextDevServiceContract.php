@@ -30,4 +30,12 @@ interface ContextDevServiceContract
         ?string $city = null,
         ?string $mcc = null,
     ): ?MerchantBrandData;
+
+    /**
+     * The account's current credit balance, via a free call that spends no credits.
+     *
+     * @throws ContextDevException on transport or API failure, or a response without
+     *                             key_metadata.credits_remaining
+     */
+    public function creditsRemaining(): int;
 }
