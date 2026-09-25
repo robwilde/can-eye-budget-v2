@@ -445,6 +445,7 @@ Set the common application environment on all three Application services. Values
 | `MAIL_*`                                                                 | Staging SMTP/sandbox settings; never production mailbox credentials. `log` is fine unless password reset or verification is being tested   |
 | `BASIQ_*`                                                                | Empty or Basiq sandbox credentials and callback URL only. Note `webhooks/basiq` is CSRF-exempt and publicly reachable regardless          |
 | `REDBARK_BASE_URL` / `REDBARK_INCLUDE_PENDING` / `REDBARK_HOLD_TTL_DAYS` | Staging API policy; do not use production secrets by default                                                                              |
+| `CONTEXT_DEV_API_KEY` / `CONTEXT_DEV_ENRICHMENT_ENABLED` / `CONTEXT_DEV_DAILY_CREDIT_CAP` | The Context.dev key is shared on purpose between local and staging: one account, one credit pool, so both environments draw on the same balance. As built (#470) it is set on all three services with `CONTEXT_DEV_ENRICHMENT_ENABLED=true` and `CONTEXT_DEV_DAILY_CREDIT_CAP=200`. Each brand lookup costs 10 credits; setting enrichment to `false` stops automatic lookups |
 | `GMAIL_USERNAME` / `GMAIL_APP_PASSWORD`                                  | Empty unless a dedicated staging mailbox is approved                                                                                     |
 | `GITHUB_TOKEN`                                                           | A least-privilege staging token only if feedback issue/screenshot upload is required                                                      |
 | `GITHUB_FEEDBACK_REPO`                                                   | Keep the target repository only if staging feedback is intended to create issues                                                          |
@@ -536,7 +537,7 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
 - The Horizon dashboard is not reachable by a seeded account absent from `HORIZON_AUTHORIZED_EMAILS`. With registration disabled on staging there is no way
   to self-register a fresh account for this check, so seed one.
 - `/register` returns 404 and `/` renders with no sign-up link, confirming `FORTIFY_REGISTRATION_ENABLED=false` reached the running container.
-- No production Basiq, Redbark, Gmail, GitHub, mail, or storage credentials are present unless explicitly approved for staging.
+- No production Basiq, Redbark, Gmail, GitHub, mail, or storage credentials are present unless explicitly approved for staging. The Context.dev key is the approved exception: it is shared between local and staging.
 - MariaDB and Redis have no external ports and no public domain.
 - The service count is five: three Applications, one MariaDB/MySQL service, and one Redis.
 
@@ -579,6 +580,19 @@ account and no transactions, so there is nothing to import yet. The mount it dep
 
 Operational note: Dokploy's REST API covers applications, domains, MariaDB, Redis and mounts, but exposes no exec endpoint. In-container checks were run
 through the container terminal websocket at `/docker-container-terminal`, which accepts the `x-api-key` header.
+
+#### Merchant enrichment enabled (#470)
+
+Enabled on 2026-09-25 and deployed from `develop` @`5a8234f` (`5a8234fc7b034621b699d6fee70babbdacc054af`).
+
+| Subject | As built |
+|---|---|
+| Variables | Added to all three Applications through `application.saveEnvironment` (never `application.update`, which nulls `command`/`args`), each existing line preserved: `CONTEXT_DEV_API_KEY=<redacted>`, `CONTEXT_DEV_ENRICHMENT_ENABLED=true`, `CONTEXT_DEV_DAILY_CREDIT_CAP=200`. Re-read afterwards: line counts web 36 → 39, horizon 36 → 39, scheduler 35 → 38; `command` and `args` still `null`; `buildArgs` unchanged |
+| Deployments | Manual deploys, web first: `can-eye-web` `dDJbELZQfLcK_75-mReVJ`, then `can-eye-horizon` `GtlTN6GeJtgQPR2a9XlAq` and `can-eye-scheduler` `6WyF7esyHa5JlL52nXMI3`, all `done`; `/up` 200 afterwards |
+| Enrichment worker | `supervisor-enrichment` (queue `enrichment`, 1 process) is declared in `config/horizon.php` `defaults`, which Horizon merges into every configured environment (`production`, `staging`, `local`); the per-environment blocks only resize `supervisor-1` |
+
+The Transactions UI for enrichment (V10: credit badge, Update populating logos) depends on #468 and #469, which were not on `develop` at this deploy. It
+needs those merged and another deploy before it can be verified here.
 
 ## Open prerequisites
 
