@@ -7,12 +7,15 @@ namespace App\Models;
 use App\Enums\MerchantBrandStatus;
 use Carbon\CarbonImmutable;
 use Database\Factories\MerchantBrandFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * A Context.dev brand resolved for one of a user's merchant keys.
+ * The outcome of a Context.dev brand lookup for one of a user's merchant keys:
+ * resolved, unresolved, or vetoed by the user (a veto may exist with no lookup
+ * ever made).
  *
  * Never joined into merchant_key derivation: this is a display layer only.
  *
@@ -66,6 +69,19 @@ final class MerchantBrand extends Model
     {
         return $this->status === MerchantBrandStatus::Vetoed
             || ($this->retry_after !== null && $this->retry_after->isFuture());
+    }
+
+    /**
+     * The query form of blocksLookup(): vetoed, or still inside the retry window.
+     *
+     * @param  Builder<MerchantBrand>  $query
+     * @return Builder<MerchantBrand>
+     */
+    public function scopeBlockingLookup(Builder $query): Builder
+    {
+        return $query->where(fn (Builder $q) => $q
+            ->where('status', MerchantBrandStatus::Vetoed)
+            ->orWhere('retry_after', '>', now()));
     }
 
     protected function casts(): array

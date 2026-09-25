@@ -12,6 +12,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\MerchantBrands\DescriptorGate;
+use App\Services\MerchantBrands\RepresentativeTransaction;
 use ContextDev\Core\Exceptions\ContextDevException;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -39,9 +40,6 @@ final class ResolveMerchantBrandJob implements ShouldBeUnique, ShouldQueue
 
     public const int UNRESOLVED_RETRY_DAYS = 14;
 
-    /** Recent rows considered when picking one the gate will let through. */
-    private const int CANDIDATE_ROWS = 10;
-
     /** The SDK already retries 408/409/429/5xx; a job retry would pay twice. */
     public int $tries = 1;
 
@@ -61,7 +59,7 @@ final class ResolveMerchantBrandJob implements ShouldBeUnique, ShouldQueue
         return $this->user->id.':'.$this->merchantKey;
     }
 
-    public function handle(DescriptorGate $gate, ContextDevCreditBudget $budget): void
+    public function handle(RepresentativeTransaction $representatives, DescriptorGate $gate, ContextDevCreditBudget $budget): void
     {
         if (! config('services.context_dev.enrichment_enabled')) {
             return;
@@ -73,14 +71,7 @@ final class ResolveMerchantBrandJob implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        $representative = Transaction::query()
-            ->where('user_id', $this->user->id)
-            ->where('merchant_key', $this->merchantKey)
-            ->latest('post_date')
-            ->latest('id')
-            ->limit(self::CANDIDATE_ROWS)
-            ->get()
-            ->first(fn (Transaction $transaction): bool => $gate->allows($transaction));
+        $representative = $representatives->for($this->user, $this->merchantKey);
 
         // Redacted by the gate: the raw description never leaves the app.
         $descriptor = $representative === null ? null : $gate->sendableDescriptor($representative);
@@ -107,7 +98,9 @@ final class ResolveMerchantBrandJob implements ShouldBeUnique, ShouldQueue
                 mcc: $this->hint($representative->enrich_data['redbark']['merchantCategoryCode'] ?? null),
             );
         } catch (ContextDevException $e) {
-            // No row is written, so the next sweep may try again.
+            $budget->release();
+
+            // Credits refunded and no row written, so the next sweep may try again.
             Log::warning('Context.dev merchant lookup failed', [
                 'userId' => $this->user->id,
                 'exception' => $e::class,

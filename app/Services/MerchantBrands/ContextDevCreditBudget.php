@@ -39,6 +39,12 @@ final readonly class ContextDevCreditBudget
         return max(0, $this->dailyCap - (int) $this->cache->get($this->key(), 0));
     }
 
+    /** Give back a reservation whose call never completed; only after tryReserve() returned true. */
+    public function release(int $credits = self::BRAND_LOOKUP_CREDITS): void
+    {
+        $this->cache->decrement($this->key(), $credits);
+    }
+
     private function key(): string
     {
         return 'context-dev:credits:'.Date::now('Australia/Brisbane')->format('Y-m-d');

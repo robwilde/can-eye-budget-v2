@@ -12,6 +12,7 @@ use App\Jobs\ResolveMerchantBrandJob;
 use App\Models\MerchantBrand;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\MerchantBrands\ContextDevCreditBudget;
 use ContextDev\Core\Exceptions\APIConnectionException;
 use GuzzleHttp\Psr7\Request;
 
@@ -64,6 +65,7 @@ it('stores a resolved brand without touching the transaction', function () {
 });
 
 it('gives a partial profile a shorter retry window than a complete one', function () {
+    $this->freezeSecond();
     woolworthsRow($this->user);
     $this->contextDev->shouldReceive('brandFromTransaction')->once()
         ->andReturn(new MerchantBrandData(title: 'Woolworths', partial: true));
@@ -73,7 +75,7 @@ it('gives a partial profile a shorter retry window than a complete one', functio
     $brand = MerchantBrand::query()->sole();
 
     expect($brand->partial)->toBeTrue()
-        ->and($brand->retry_after->isBefore(now()->addDays(ResolveMerchantBrandJob::PARTIAL_RETRY_DAYS + 1)))->toBeTrue();
+        ->and($brand->retry_after->equalTo(now()->addDays(ResolveMerchantBrandJob::PARTIAL_RETRY_DAYS)))->toBeTrue();
 });
 
 it('records an unresolved verdict and does not pay again inside its window', function () {
@@ -138,7 +140,8 @@ it('writes nothing when the API fails, leaving the key for the next sweep', func
 
     runResolve($this->user);
 
-    expect(MerchantBrand::query()->count())->toBe(0);
+    expect(MerchantBrand::query()->count())->toBe(0)
+        ->and(app(ContextDevCreditBudget::class)->remaining())->toBe(500);
 });
 
 it('never reads another user\'s transactions for the key', function () {

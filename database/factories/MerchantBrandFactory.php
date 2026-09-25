@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Database\Factories;
 
 use App\Enums\MerchantBrandStatus;
+use App\Jobs\ResolveMerchantBrandJob;
 use App\Models\MerchantBrand;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -18,7 +19,7 @@ final class MerchantBrandFactory extends Factory
     {
         return [
             'user_id' => User::factory(),
-            'merchant_key' => 'WOOLWORTHS SYDNEY',
+            'merchant_key' => mb_strtoupper(fake()->unique()->company()),
             'status' => MerchantBrandStatus::Resolved,
             'title' => 'Woolworths',
             'domain' => 'woolworths.com.au',
@@ -28,7 +29,7 @@ final class MerchantBrandFactory extends Factory
             'partial' => false,
             'source_descriptor' => 'WOOLWORTHS 1234 SYDNEY',
             'resolved_at' => now(),
-            'retry_after' => now()->addDays(180),
+            'retry_after' => now()->addDays(ResolveMerchantBrandJob::RESOLVED_RETRY_DAYS),
         ];
     }
 
@@ -42,7 +43,7 @@ final class MerchantBrandFactory extends Factory
             'industry' => null,
             'subindustry' => null,
             'resolved_at' => null,
-            'retry_after' => now()->addDays(14),
+            'retry_after' => now()->addDays(ResolveMerchantBrandJob::UNRESOLVED_RETRY_DAYS),
         ]);
     }
 

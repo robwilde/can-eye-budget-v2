@@ -41,12 +41,12 @@ function queuedKeys(): array
 }
 
 it('queues one lookup per recurring merchant key, not per row', function () {
-    rows($this->user, 'WOOLWORTHS 1234 SYDNEY', 3);
+    rows($this->user, 'VISA WOOLWORTHS 1234 SYDNEY', 3);
     rows($this->user, 'NETFLIX.COM', 2);
 
     dispatch_sync(new EnrichMerchantBrandsJob($this->user));
 
-    expect(queuedKeys())->toBe(['NETFLIX.COM', 'WOOLWORTHS SYDNEY']);
+    expect(queuedKeys())->toBe(['NETFLIX.COM', 'VISA WOOLWORTHS SYDNEY']);
     Queue::assertPushedOn(ResolveMerchantBrandJob::QUEUE, ResolveMerchantBrandJob::class);
 });
 
@@ -76,18 +76,29 @@ it('retries keys whose window has expired', function () {
 
 it('sizes the batch to the remaining budget, most frequent first', function () {
     config(['services.context_dev.daily_credit_cap' => 20]);
-    rows($this->user, 'WOOLWORTHS 1234 SYDNEY', 5);
+    rows($this->user, 'VISA WOOLWORTHS 1234 SYDNEY', 5);
     rows($this->user, 'NETFLIX.COM', 4);
     rows($this->user, 'KMART AUSTRALIA PERTH', 2);
 
     dispatch_sync(new EnrichMerchantBrandsJob($this->user));
 
-    expect(queuedKeys())->toBe(['NETFLIX.COM', 'WOOLWORTHS SYDNEY']);
+    expect(queuedKeys())->toBe(['NETFLIX.COM', 'VISA WOOLWORTHS SYDNEY']);
+});
+
+it('skips keys the gate refuses so they never take a budget slot', function () {
+    config(['services.context_dev.daily_credit_cap' => 20]);
+    rows($this->user, 'JOHN SMITH', 5);
+    rows($this->user, 'NETFLIX.COM', 4);
+    rows($this->user, 'KMART AUSTRALIA PERTH', 2);
+
+    dispatch_sync(new EnrichMerchantBrandsJob($this->user));
+
+    expect(queuedKeys())->toBe(['KMART AUSTRALIA PERTH', 'NETFLIX.COM']);
 });
 
 it('queues nothing when enrichment is switched off', function () {
     config(['services.context_dev.enrichment_enabled' => false]);
-    rows($this->user, 'WOOLWORTHS 1234 SYDNEY', 3);
+    rows($this->user, 'VISA WOOLWORTHS 1234 SYDNEY', 3);
 
     dispatch_sync(new EnrichMerchantBrandsJob($this->user));
 
@@ -95,7 +106,7 @@ it('queues nothing when enrichment is switched off', function () {
 });
 
 it('only considers the user\'s own transactions', function () {
-    rows(User::factory()->create(), 'WOOLWORTHS 1234 SYDNEY', 3);
+    rows(User::factory()->create(), 'VISA WOOLWORTHS 1234 SYDNEY', 3);
 
     dispatch_sync(new EnrichMerchantBrandsJob($this->user));
 

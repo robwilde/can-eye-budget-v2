@@ -34,3 +34,14 @@ it('starts a fresh allowance on the next Brisbane day', function () {
 
     expect($budget->tryReserve())->toBeTrue();
 });
+
+it('release() returns a reservation to the day\'s budget', function () {
+    $budget = creditBudget(20);
+
+    expect($budget->tryReserve())->toBeTrue();
+
+    $budget->release();
+
+    expect($budget->remaining())->toBe(20)
+        ->and($budget->tryReserve())->toBeTrue();
+});
