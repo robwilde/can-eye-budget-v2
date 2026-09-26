@@ -22,11 +22,11 @@ This is what the `ray()` PHP function does under the hood.
 
 ## Connection Details
 
-| Setting | Default | Environment Variable |
-|---------|---------|---------------------|
-| Host | `localhost` | `RAY_HOST` |
-| Port | `23517` | `RAY_PORT` |
-| URL | `http://localhost:23517/` | - |
+| Setting | Default                   | Environment Variable |
+|---------|---------------------------|----------------------|
+| Host    | `localhost`               | `RAY_HOST`           |
+| Port    | `23517`                   | `RAY_PORT`           |
+| URL     | `http://localhost:23517/` | -                    |
 
 ## Request Format
 
@@ -58,11 +58,11 @@ This is what the `ray()` PHP function does under the hood.
 
 ### Fields
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `uuid` | string | Unique identifier for this Ray instance. Reuse the same UUID to update an existing entry. |
-| `payloads` | array | Array of payload objects to send |
-| `meta` | object | Optional metadata (ray_package_version, project_name, php_version) |
+| Field      | Type   | Description                                                                               |
+|------------|--------|-------------------------------------------------------------------------------------------|
+| `uuid`     | string | Unique identifier for this Ray instance. Reuse the same UUID to update an existing entry. |
+| `payloads` | array  | Array of payload objects to send                                                          |
+| `meta`     | object | Optional metadata (ray_package_version, project_name, php_version)                        |
 
 ### Origin Object
 
@@ -231,15 +231,15 @@ These payloads only need a `type` and empty `content`:
 }
 ```
 
-| Type | Purpose |
-|------|---------|
-| `separator` | Add visual divider |
-| `clear_all` | Clear all entries |
-| `hide` | Hide this entry |
-| `remove` | Remove this entry |
-| `confetti` | Show confetti animation |
-| `show_app` | Bring Ray to foreground |
-| `hide_app` | Hide Ray window |
+| Type        | Purpose                 |
+|-------------|-------------------------|
+| `separator` | Add visual divider      |
+| `clear_all` | Clear all entries       |
+| `hide`      | Hide this entry         |
+| `remove`    | Remove this entry       |
+| `confetti`  | Show confetti animation |
+| `show_app`  | Bring Ray to foreground |
+| `hide_app`  | Hide Ray window         |
 
 ## Combining Multiple Payloads
 
@@ -393,22 +393,22 @@ curl -X POST http://localhost:23517/ \
 
 ## Payload Type Reference
 
-| Type | Content Fields | Purpose |
-|------|----------------|---------|
-| `log` | `values` (array) | Send values to Ray |
-| `custom` | `content`, `label` | HTML or text content |
-| `table` | `values`, `label` | Display as table |
-| `color` | `color` | Set entry color |
-| `screen_color` | `color` | Set screen background |
-| `label` | `label` | Add label to entry |
-| `size` | `size` | Set entry size (sm/lg) |
-| `notify` | `value` | Desktop notification |
-| `new_screen` | `name` | Create new screen |
-| `measure` | `name`, `is_new_timer`, timing fields | Performance timing |
-| `separator` | (empty) | Visual divider |
-| `clear_all` | (empty) | Clear all entries |
-| `hide` | (empty) | Hide entry |
-| `remove` | (empty) | Remove entry |
-| `confetti` | (empty) | Confetti animation |
-| `show_app` | (empty) | Show Ray window |
-| `hide_app` | (empty) | Hide Ray window |
+| Type           | Content Fields                        | Purpose                |
+|----------------|---------------------------------------|------------------------|
+| `log`          | `values` (array)                      | Send values to Ray     |
+| `custom`       | `content`, `label`                    | HTML or text content   |
+| `table`        | `values`, `label`                     | Display as table       |
+| `color`        | `color`                               | Set entry color        |
+| `screen_color` | `color`                               | Set screen background  |
+| `label`        | `label`                               | Add label to entry     |
+| `size`         | `size`                                | Set entry size (sm/lg) |
+| `notify`       | `value`                               | Desktop notification   |
+| `new_screen`   | `name`                                | Create new screen      |
+| `measure`      | `name`, `is_new_timer`, timing fields | Performance timing     |
+| `separator`    | (empty)                               | Visual divider         |
+| `clear_all`    | (empty)                               | Clear all entries      |
+| `hide`         | (empty)                               | Hide entry             |
+| `remove`       | (empty)                               | Remove entry           |
+| `confetti`     | (empty)                               | Confetti animation     |
+| `show_app`     | (empty)                               | Show Ray window        |
+| `hide_app`     | (empty)                               | Hide Ray window        |

@@ -8,14 +8,6 @@ metadata:
 
 # Flux UI Development
 
-## When to Apply
-
-Activate this skill when:
-
-- Creating UI components or pages
-- Working with forms, modals, or interactive elements
-- Checking available Flux components
-
 ## Documentation
 
 Use `search-docs` for detailed Flux UI patterns and documentation.
@@ -35,7 +27,7 @@ Use Flux UI components when available. Fall back to standard Blade components wh
 
 ## Available Components (Free Edition)
 
-Available: avatar, badge, brand, breadcrumbs, button, callout, checkbox, dropdown, field, heading, icon, input, modal, navbar, otp-input, profile, radio, select, separator, skeleton, switch, text, textarea, tooltip
+Available: avatar, badge, brand, breadcrumbs, button, callout, card, checkbox, dropdown, field, heading, icon, input, modal, navbar, otp-input, pagination, profile, progress, radio, select, separator, skeleton, switch, table, text, textarea, toast, tooltip
 
 ## Icons
 
@@ -49,7 +41,7 @@ Flux includes [Heroicons](https://heroicons.com/) as its default icon set. Searc
 For icons not available in Heroicons, use [Lucide](https://lucide.dev/). Import the icons you need with the Artisan command:
 
 ```bash
-php artisan flux:icon crown grip-vertical github
+ddev exec php artisan flux:icon crown grip-vertical github
 ```
 
 ## Common Patterns
