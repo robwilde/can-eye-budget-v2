@@ -29,7 +29,12 @@ trait DisablesRegistration
         return $app;
     }
 
-    public function restoreRegistrationFlag(): void
+    /**
+     * Invoked by Laravel's setUpTraits() through beforeApplicationDestroyed(), so the
+     * flag is restored after every test — including failed ones — without the consuming
+     * file having to remember an afterEach.
+     */
+    protected function tearDownDisablesRegistration(): void
     {
         if ($this->registrationFlagBeforeTest === false) {
             putenv('FORTIFY_REGISTRATION_ENABLED');

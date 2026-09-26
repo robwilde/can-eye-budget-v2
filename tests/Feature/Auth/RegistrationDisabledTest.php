@@ -11,10 +11,6 @@ use Tests\Concerns\DisablesRegistration;
 
 uses(DisablesRegistration::class);
 
-afterEach(function (): void {
-    $this->restoreRegistrationFlag();
-});
-
 test('the registration screen is gone when registration is disabled', function () {
     $this->get('/register')->assertNotFound();
 });
