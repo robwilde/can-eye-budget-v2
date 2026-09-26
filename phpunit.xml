@@ -31,8 +31,8 @@
              first. Only the <env force="true"> + <server> pair guarantees the suite cannot be
              redirected by a shell, CI job or direnv profile that exports one of these names
              (e.g. APP_ENV=local turning Ray on, DB_CONNECTION=mysql pointing RefreshDatabase at
-             a real database). Verified against PHPUnit's PhpHandler and phpdotenv's default
-             adapter order (ServerConstAdapter, EnvConstAdapter, PutenvAdapter). -->
+             a real database). Verified against PHPUnit's PhpHandler and Laravel's Env repository
+             order (phpdotenv's ServerConstAdapter, EnvConstAdapter, then Laravel's PutenvAdapter). -->
         <env name="APP_ENV" value="testing" force="true"/>
         <server name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file" force="true"/>
