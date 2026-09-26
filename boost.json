@@ -4,23 +4,26 @@
         "claude_code",
         "codex"
     ],
+    "cloud": false,
     "guidelines": true,
     "herd_mcp": false,
     "mcp": true,
     "nightwatch_mcp": false,
     "packages": [
-        "laravel/fortify",
         "spatie/laravel-ray",
         "spatie/boost-spatie-guidelines"
     ],
     "sail": false,
     "skills": [
+        "fortify-development",
+        "laravel-best-practices",
+        "configuring-horizon",
         "fluxui-development",
         "livewire-development",
         "pest-testing",
         "tailwindcss-development",
-        "fortify-development",
+        "spatie-laravel-php-standards",
         "debugging-output-and-previewing-html-using-ray",
-        "spatie-laravel-php-standards"
+        "clean-test-pro"
     ]
 }
