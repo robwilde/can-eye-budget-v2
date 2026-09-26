@@ -1,6 +1,9 @@
 ---
 name: fortify-development
-description: Laravel Fortify headless authentication backend development. Activate when implementing authentication features including login, registration, password reset, email verification, two-factor authentication (2FA/TOTP), profile updates, headless auth, authentication scaffolding, or auth guards in Laravel applications.
+description: 'ACTIVATE when the user works on authentication in Laravel. This includes login, registration, password reset, email verification, two-factor authentication (2FA/TOTP/QR codes/recovery codes), profile updates, password confirmation, or any auth-related routes and controllers. Activate when the user mentions Fortify, auth, authentication, login, register, signup, forgot password, verify email, 2FA, or references app/Actions/Fortify/, CreateNewUser, UpdateUserProfileInformation, FortifyServiceProvider, config/fortify.php, or auth guards. Fortify is the frontend-agnostic authentication backend for Laravel that registers all auth routes and controllers. Also activate when building SPA or headless authentication, customizing login redirects, overriding response contracts like LoginResponse, or configuring login throttling. Do NOT activate for Laravel Passport (OAuth2 API tokens), Socialite (OAuth social login), or non-auth Laravel features.'
+license: MIT
+metadata:
+  author: laravel
 ---
 
 # Laravel Fortify Development
@@ -39,7 +42,7 @@ Enable in `config/fortify.php` features array:
 ```
 - [ ] Add TwoFactorAuthenticatable trait to User model
 - [ ] Enable feature in config/fortify.php
-- [ ] If the `*_add_two_factor_columns_to_users_table.php` migration is missing, publish via `php artisan vendor:publish --tag=fortify-migrations` and migrate
+- [ ] If the `*_add_two_factor_columns_to_users_table.php` migration is missing, publish via `ddev exec php artisan vendor:publish --tag=fortify-migrations` and run `op migrate`
 - [ ] Set up view callbacks in FortifyServiceProvider
 - [ ] Create 2FA management UI
 - [ ] Test QR code and recovery codes

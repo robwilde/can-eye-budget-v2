@@ -1,0 +1,4 @@
+interface:
+  display_name: "Clean Test Pro"
+  short_description: "Test quality guardrails for AI agents"
+  default_prompt: "Use $clean-test-pro after tests are written or changed to review them against pragmatic testing guardrails."
