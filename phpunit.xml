@@ -24,39 +24,50 @@
         </include>
     </source>
     <php>
-        <env name="APP_ENV" value="testing"/>
-        <env name="APP_MAINTENANCE_DRIVER" value="file"/>
-        <env name="BCRYPT_ROUNDS" value="4"/>
-        <env name="BROADCAST_CONNECTION" value="null"/>
-        <env name="CACHE_STORE" value="array"/>
-        <env name="DB_CONNECTION" value="sqlite"/>
-        <env name="DB_DATABASE" value=":memory:"/>
-        <env name="MAIL_MAILER" value="array"/>
-        <env name="QUEUE_CONNECTION" value="sync"/>
-        <env name="SESSION_DRIVER" value="array"/>
-        <env name="PULSE_ENABLED" value="false"/>
-        <env name="TELESCOPE_ENABLED" value="false"/>
-        <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!-- Every variable below is pinned on all three channels PHP exposes an environment
+             variable through: getenv(), $_ENV and $_SERVER. A plain <env> is skipped when the
+             variable is already exported, and force="true" overrides getenv() and $_ENV but
+             leaves $_SERVER untouched — which is the channel Laravel's Env repository reads
+             first. Only the <env force="true"> + <server> pair guarantees the suite cannot be
+             redirected by a shell, CI job or direnv profile that exports one of these names
+             (e.g. APP_ENV=local turning Ray on, DB_CONNECTION=mysql pointing RefreshDatabase at
+             a real database). Verified against PHPUnit's PhpHandler and phpdotenv's default
+             adapter order (ServerConstAdapter, EnvConstAdapter, PutenvAdapter). -->
+        <env name="APP_ENV" value="testing" force="true"/>
+        <server name="APP_ENV" value="testing"/>
+        <env name="APP_MAINTENANCE_DRIVER" value="file" force="true"/>
+        <server name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <env name="BCRYPT_ROUNDS" value="4" force="true"/>
+        <server name="BCRYPT_ROUNDS" value="4"/>
+        <env name="BROADCAST_CONNECTION" value="null" force="true"/>
+        <server name="BROADCAST_CONNECTION" value="null"/>
+        <env name="CACHE_STORE" value="array" force="true"/>
+        <server name="CACHE_STORE" value="array"/>
+        <env name="DB_CONNECTION" value="sqlite" force="true"/>
+        <server name="DB_CONNECTION" value="sqlite"/>
+        <env name="DB_DATABASE" value=":memory:" force="true"/>
+        <server name="DB_DATABASE" value=":memory:"/>
+        <env name="MAIL_MAILER" value="array" force="true"/>
+        <server name="MAIL_MAILER" value="array"/>
+        <env name="QUEUE_CONNECTION" value="sync" force="true"/>
+        <server name="QUEUE_CONNECTION" value="sync"/>
+        <env name="SESSION_DRIVER" value="array" force="true"/>
+        <server name="SESSION_DRIVER" value="array"/>
+        <env name="PULSE_ENABLED" value="false" force="true"/>
+        <server name="PULSE_ENABLED" value="false"/>
+        <env name="TELESCOPE_ENABLED" value="false" force="true"/>
+        <server name="TELESCOPE_ENABLED" value="false"/>
+        <env name="NIGHTWATCH_ENABLED" value="false" force="true"/>
+        <server name="NIGHTWATCH_ENABLED" value="false"/>
         <!-- Blank rather than absent: bootstrap/app.php reports every exception to Sentry
              (#433), so a developer's real SENTRY_DSN would send deliberately thrown test
-             failures to the production project. An empty DSN disables the SDK outright
-             instead of erroring at boot.
-
-             Both lines are required, and neither is redundant. An exported SENTRY_DSN
-             reaches PHP through three channels: getenv(), $_ENV and $_SERVER. The forced
-             <env> blanks the first two but leaves $_SERVER intact, and Laravel's Env
-             repository reads $_SERVER — so without the <server> line an exported DSN still
-             wins and the suite still transmits. Verified by probing all three sources.
-
-             force="true" on <env> is likewise load-bearing: without it PHPUnit leaves an
-             already-exported value untouched. Reading .env is not the only way the
-             variable arrives — a shell, CI job or direnv profile can export it. -->
+             failures to the production project (#439). An empty DSN disables the SDK outright
+             instead of erroring at boot. -->
         <env name="SENTRY_DSN" value="" force="true"/>
         <server name="SENTRY_DSN" value=""/>
-        <!-- Same three-channel blanking as SENTRY_DSN above: every Context.dev call costs
-             credits, so the suite must never reach the live API even with a key exported.
-             Tests mock App\Contracts\ContextDevServiceContract or inject a Guzzle MockHandler
-             via App\Services\ContextDevService::withApiKey() instead. -->
+        <!-- Every Context.dev call costs credits, so the suite must never reach the live API
+             even with a key exported. Tests mock App\Contracts\ContextDevServiceContract or
+             inject a Guzzle MockHandler via App\Services\ContextDevService::withApiKey(). -->
         <env name="CONTEXT_DEV_API_KEY" value="" force="true"/>
         <server name="CONTEXT_DEV_API_KEY" value=""/>
         <!-- Enrichment off by default so a developer's .env cannot turn it on: the transactions
