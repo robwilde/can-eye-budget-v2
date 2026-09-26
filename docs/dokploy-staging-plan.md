@@ -592,7 +592,24 @@ Enabled on 2026-09-25 and deployed from `develop` @`5a8234f` (`5a8234fc7b034621b
 | Enrichment worker | `supervisor-enrichment` (queue `enrichment`, 1 process) is declared in `config/horizon.php` `defaults`, which Horizon merges into every configured environment (`production`, `staging`, `local`); the per-environment blocks only resize `supervisor-1` |
 
 The Transactions UI for enrichment (V10: credit badge, Update populating logos) depends on #468 and #469, which were not on `develop` at this deploy. It
-needs those merged and another deploy before it can be verified here.
+was verified after the next deploy; see below.
+
+#### Merchant enrichment UI verified (#474)
+
+Deployed on 2026-09-26 from `develop` @`04b3605` (`04b3605e2fb98ba40e9d8965af7885ce039b0913`), which carries #472 (credit badge, closes #468), #473
+(Update action, closes #469), #476 and #478. No environment change: the three `CONTEXT_DEV_*` variables from #470 were already in place.
+
+| Subject | As built |
+|---|---|
+| Deployments | Manual `application.deploy`, web first: `can-eye-web` `1uza9jGQq9snsaySazv7l` (12:24:54 → 12:26:54 UTC), then `can-eye-horizon` `hDaqErUuiJYvIU9_JJfLL` and `can-eye-scheduler` `ce3z3xet_aLagNh2pyKD2`, all `done` and each recording commit `04b3605`. Re-read afterwards: `command` and `args` still `null` on all three; all three containers `healthy` |
+| Deployed code | The web container holds `app/Services/MerchantBrands/ContextDevCreditBalance.php` and `data-testid="update-visible-merchants"` in `resources/views/livewire/transaction-list.blade.php` |
+| `/up` | 200 from `https://can-eye.mrwilde.dev/up` and from `http://127.0.0.1/up` inside the web container; `about` reports `staging`, debug `OFF` |
+| Credit badge | On `/transactions` (This Month, 25 rows) `context-dev-credits` read `890 credits · 200 left today`. No balance was recorded before the page loaded (`ContextDevCreditBalance::current()` was `null`), so that value came from the page's own `creditsRemaining()` refresh |
+| Update action | The button read `Update 9 merchants on this page (≤90 credits)`. After the click it read `Identifying 9…`, the table wrapper gained `wire:poll.4s`, and the count fell 9 → 8 → 4 → 2 while logos appeared: 1 → 7 `img` elements, 6 of them `media.brand.dev` logos. At about 77 s the poll and the button were gone. A `window.__marker` set before the click survived, so the page never reloaded. The badge then read `830 credits · 110 left today`: 6 resolved × 10 credits, and 9 lookups × 10 off the daily allowance |
+| `enrichment` queue | Read in the horizon container after the run: queue size 0, Horizon workload `length 0, wait 0, processes 1`, 0 failed jobs on `enrichment`, 9 recent completed `enrichment` jobs. `merchant_brands` rows went from 2 to 11. Horizon holds 2 older failed jobs on other queues; none is an enrichment job |
+
+Method: the check used a headless browser on the live domain. Login used a session minted in tinker for the seeded account, because no password is kept
+for it. That session row was deleted afterwards (`deleted=1`), and the helper files were removed from the containers.
 
 ## Open prerequisites
 
