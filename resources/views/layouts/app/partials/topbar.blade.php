@@ -4,6 +4,7 @@
         'calendar' => ['Calendar', now()->format('F Y')],
         'transactions' => ['Transactions', 'All activity'],
         'accounts' => ['Accounts', 'Connected banks'],
+        'connect-bank' => ['Connect', 'Link your bank'],
         'import-bank' => ['Import', 'Upload a CSV statement'],
         'rules' => ['Rules', 'Automations'],
     ];
