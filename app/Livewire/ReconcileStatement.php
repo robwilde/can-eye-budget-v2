@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Enums\StatementLineKind;
+use App\Exceptions\Statement\StatementLineAlreadyFolded;
+use App\Exceptions\Statement\StatementLineNotResolvable;
+use App\Exceptions\Statement\StatementReconciliationClosed;
+use App\Exceptions\Statement\StatementReconciliationIncomplete;
 use App\Models\Account;
 use App\Models\StatementReconciliation;
 use App\Models\StatementReconciliationLine;
@@ -23,7 +27,6 @@ use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithFileUploads;
-use RuntimeException;
 use Throwable;
 
 /**
@@ -192,7 +195,7 @@ final class ReconcileStatement extends Component
 
         try {
             $reconciler->build($reconciliation);
-        } catch (RuntimeException $e) {
+        } catch (StatementLineAlreadyFolded|StatementLineNotResolvable|StatementReconciliationClosed|StatementReconciliationIncomplete $e) {
             $this->errorMessage = $e->getMessage();
 
             return;
@@ -426,7 +429,7 @@ final class ReconcileStatement extends Component
 
         try {
             $mutation();
-        } catch (RuntimeException $e) {
+        } catch (StatementLineAlreadyFolded|StatementLineNotResolvable|StatementReconciliationClosed|StatementReconciliationIncomplete $e) {
             $this->errorMessage = $e->getMessage();
         }
     }

@@ -317,3 +317,25 @@ test('line ids from another reconciliation are rejected', function () {
         ->and($own->fresh()->kind)->toBe(StatementLineKind::StatementOnly)
         ->and(StatementReconciliationLine::query()->find($foreignFeedOnly->id))->not->toBeNull();
 });
+
+test('a line the reconciler cannot resolve surfaces an inline error', function () {
+    [$user, $account] = reconcileAccount();
+    $reconciliation = reconcileAugust($account);
+    $matched = reconcileLine($reconciliation, 'matched');
+    $statementOnly = reconcileLine($reconciliation, 'statementOnly');
+    $orphanFeedOnly = StatementReconciliationLine::factory()->for($reconciliation, 'reconciliation')->feedOnly()->create([
+        'post_date' => '2026-08-10',
+        'transaction_id' => null,
+    ]);
+
+    reconcilePage($user, $account)
+        ->call('ignore', $matched->id, 'Not needed')
+        ->assertSet('errorMessage', 'A matched line has no discrepancy to ignore.')
+        ->assertSee('A matched line has no discrepancy to ignore.')
+        ->call('link', $statementOnly->id, $orphanFeedOnly->id)
+        ->assertSet('errorMessage', 'The feed transaction behind this line no longer exists.');
+
+    expect($matched->fresh()->resolution)->toBeNull()
+        ->and($statementOnly->fresh()->kind)->toBe(StatementLineKind::StatementOnly)
+        ->and($orphanFeedOnly->fresh())->not->toBeNull();
+});
