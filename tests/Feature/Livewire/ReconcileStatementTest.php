@@ -154,18 +154,19 @@ test('re-uploading an open month rebuilds its lines', function () {
         ->and(StatementReconciliation::query()->count())->toBe(1);
 });
 
-test('uploading onto a closed month is refused', function () {
+test('a month closed after the upload refuses the reconcile', function () {
     [$user, $account] = reconcileAccount();
     $reconciliation = reconcileAugust($account);
-    $reconciliation->update(['status' => StatementReconciliationStatus::Closed, 'closed_at' => now()]);
-    $line = reconcileLine($reconciliation, 'statementOnly');
+    $line = reconcileLine($reconciliation, 'matched');
 
-    reconcilePage($user, $account)
-        ->assertSee('data-testid="reconcile-closed-banner"', false)
+    $page = reconcilePage($user, $account)
+        ->call('startUpload')
         ->set('file', reconcileCsv('august.csv', "Date,Description,Amount\n05/08/2026,KMART 1111,-9.00\n"))
-        ->call('uploadFile')
-        ->call('reconcile')
-        ->assertSet('errorMessage', 'This month is closed — reopen it first');
+        ->call('uploadFile');
+
+    $reconciliation->update(['status' => StatementReconciliationStatus::Closed, 'closed_at' => now()]);
+
+    $page->call('reconcile')->assertSet('errorMessage', 'This month is closed — reopen it first');
 
     expect($reconciliation->lines()->pluck('id')->all())->toBe([$line->id])
         ->and($reconciliation->fresh()->original_filename)->toBe('statement.csv');
@@ -432,4 +433,36 @@ test('uploading a second file before reconciling deletes the first pending file'
 
     expect(Storage::disk('local')->exists($first))->toBeFalse()
         ->and(Storage::disk('local')->exists($page->get('storedPath')))->toBeTrue();
+});
+
+test('a file cannot even be uploaded onto a closed month', function () {
+    [$user, $account] = reconcileAccount();
+    $reconciliation = reconcileAugust($account);
+    $reconciliation->update(['status' => StatementReconciliationStatus::Closed, 'closed_at' => now()]);
+
+    reconcilePage($user, $account)
+        ->set('file', reconcileCsv('august.csv', "Date,Description,Amount\n05/08/2026,KMART 1111,-9.00\n"))
+        ->call('uploadFile')
+        ->assertSet('errorMessage', 'This month is closed — reopen it first')
+        ->assertSet('storedPath', null)
+        ->assertSet('headers', []);
+
+    expect(Storage::disk('local')->allFiles('statement-reconciliations'))->toBe([]);
+});
+
+test('reopening and ticking all clear an earlier error', function () {
+    [$user, $account] = reconcileAccount();
+    $reconciliation = reconcileAugust($account);
+    $line = reconcileLine($reconciliation, 'matched');
+    $reconciliation->update(['status' => StatementReconciliationStatus::Closed, 'closed_at' => now()]);
+
+    reconcilePage($user, $account)
+        ->call('tick', $line->id)
+        ->assertSet('errorMessage', 'This month is closed — reopen it first')
+        ->call('reopen')
+        ->assertSet('errorMessage', null)
+        ->call('tick', 999999)
+        ->assertSet('errorMessage', 'That line is not part of this reconciliation.')
+        ->call('tickAll', 'matched')
+        ->assertSet('errorMessage', null);
 });

@@ -119,6 +119,12 @@ final class ReconcileStatement extends Component
             return;
         }
 
+        if ($this->reconciliation !== null && ! $this->reconciliation->isOpen()) {
+            $this->errorMessage = __('This month is closed — reopen it first');
+
+            return;
+        }
+
         $storedPath = $file->store('statement-reconciliations', 'local');
 
         if ($storedPath === false) {
@@ -241,6 +247,7 @@ final class ReconcileStatement extends Component
 
     public function tickAll(string $kind): void
     {
+        $this->errorMessage = null;
         $lineKind = StatementLineKind::tryFrom($kind);
 
         if (! in_array($lineKind, [StatementLineKind::Matched, StatementLineKind::FeedOnly], true)) {
@@ -305,6 +312,7 @@ final class ReconcileStatement extends Component
 
     public function reopen(StatementReconciler $reconciler): void
     {
+        $this->errorMessage = null;
         $reconciliation = $this->reconciliation;
 
         if ($reconciliation !== null) {
