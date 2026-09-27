@@ -1,6 +1,18 @@
 @use('App\Casts\MoneyCast')
 
 <div class="space-y-6">
+    @if ($this->needsBankConnection)
+        <section data-test="dashboard-connect-bank-card" class="flex flex-wrap items-center justify-between gap-4 border-2 border-black rounded-[28px] bg-cib-yellow-400 p-6 shadow-[3px_3px_0_0_#111]">
+            <div>
+                <h2 class="font-display text-2xl font-black tracking-tight">Connect your bank</h2>
+                <p class="mt-2 text-sm">Link your accounts through Redbark so your transactions sync automatically.</p>
+            </div>
+            <a href="{{ route('connect-bank') }}" wire:navigate class="inline-flex items-center gap-2 rounded-md border-2 border-cib-black bg-white px-4 py-2 text-sm font-bold text-cib-black shadow-pop-sm">
+                Connect your bank
+            </a>
+        </section>
+    @endif
+
     <div class="grid gap-4 lg:grid-cols-[1fr_300px]">
         <div class="space-y-4">
             @php
