@@ -18,8 +18,8 @@ return new class extends Migration
     {
         Schema::create('statement_reconciliations', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('account_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('user_id')->constrained(indexName: 'sr_user_fk')->cascadeOnDelete();
+            $table->foreignId('account_id')->constrained(indexName: 'sr_account_fk')->cascadeOnDelete();
             $table->date('period_start');
             $table->date('period_end');
             $table->string('status', 20)->default('open');
@@ -33,14 +33,14 @@ return new class extends Migration
             $table->timestamp('closed_at')->nullable();
             $table->timestamps();
 
-            $table->unique(['account_id', 'period_start']);
-            $table->index(['user_id', 'status']);
+            $table->unique(['account_id', 'period_start'], 'sr_account_period_uniq');
+            $table->index(['user_id', 'status'], 'sr_user_status_idx');
         });
 
         Schema::create('statement_reconciliation_lines', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('statement_reconciliation_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('transaction_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignId('statement_reconciliation_id')->constrained(indexName: 'srl_reconciliation_fk')->cascadeOnDelete();
+            $table->foreignId('transaction_id')->nullable()->constrained(indexName: 'srl_transaction_fk')->nullOnDelete();
             $table->string('kind', 20);
             $table->char('csv_hash', 64)->nullable();
             $table->date('post_date');
@@ -51,8 +51,8 @@ return new class extends Migration
             $table->timestamp('checked_at')->nullable();
             $table->timestamps();
 
-            $table->index(['statement_reconciliation_id', 'kind'], 'statement_lines_reconciliation_kind_index');
-            $table->index(['statement_reconciliation_id', 'csv_hash'], 'statement_lines_reconciliation_hash_index');
+            $table->index(['statement_reconciliation_id', 'kind'], 'srl_reconciliation_kind_idx');
+            $table->index(['statement_reconciliation_id', 'csv_hash'], 'srl_reconciliation_hash_idx');
         });
     }
 
