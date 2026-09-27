@@ -10,6 +10,7 @@ use App\Enums\StatementReconciliationStatus;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
+use App\Exceptions\Statement\StatementFileUnreadable;
 use App\Exceptions\Statement\StatementLineAlreadyFolded;
 use App\Exceptions\Statement\StatementLineNotResolvable;
 use App\Exceptions\Statement\StatementReconciliationClosed;
@@ -25,6 +26,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 /**
  * Checks one account's statement CSV for one calendar month against the transactions
@@ -49,9 +51,27 @@ final readonly class StatementReconciler
         $path = Storage::disk('local')->path($reconciliation->stored_path);
         $mapping = $reconciliation->column_mapping;
 
+        // Every row must parse before anything is replaced: a skipped row would let the
+        // month close without that statement line ever being checked.
+        try {
+            $summary = $this->parser->summarize($path, $mapping);
+        } catch (Throwable $e) {
+            throw new StatementFileUnreadable('The statement could not be read: '.$e->getMessage(), previous: $e);
+        }
+
+        if ($summary->errorRows !== []) {
+            $first = $summary->errorRows[0];
+
+            throw new StatementFileUnreadable(sprintf(
+                '%d statement row(s) could not be read with this column mapping (first: row %d, %s). Check the mapping and try again.',
+                count($summary->errorRows),
+                $first['row'],
+                $first['error'],
+            ));
+        }
+
         /** @var list<ParsedTransactionDto> $rows */
         $rows = iterator_to_array($this->parser->eachRow($path, $mapping), false);
-        $summary = $this->parser->summarize($path, $mapping);
 
         DB::transaction(function () use ($reconciliation, $rows, $summary): void {
             $periodStart = $reconciliation->period_start->startOfDay();
