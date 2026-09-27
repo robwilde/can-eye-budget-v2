@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Enums\TransactionDirection;
+use App\Models\Account;
 use App\Models\Budget;
 use App\Models\PlannedTransaction;
 use App\Models\RedbarkFeed;
@@ -42,13 +43,34 @@ final class Dashboard extends Component
     #[On('transaction-saved')]
     public function refreshFigures(): void
     {
-        unset($this->buffer, $this->daysUntilPay, $this->totalOwed, $this->totalAvailable, $this->totalNeeded, $this->numbers, $this->budgetsThisCycle, $this->nextThreePlanned, $this->spendLast7Days, $this->needsBankConnection); // @phpstan-ignore property.notFound
+        unset($this->buffer, $this->daysUntilPay, $this->totalOwed, $this->totalAvailable, $this->totalNeeded, $this->numbers, $this->budgetsThisCycle, $this->nextThreePlanned, $this->spendLast7Days, $this->needsBankConnection, $this->statementsDue); // @phpstan-ignore property.notFound
     }
 
     #[Computed]
     public function needsBankConnection(): bool
     {
         return ! RedbarkFeed::query()->where('user_id', auth()->id())->exists();
+    }
+
+    /**
+     * Redbark-linked accounts still waiting on last month's statement check. Empty without
+     * a feed: the connect card covers that case.
+     *
+     * @return Collection<int, Account>
+     */
+    #[Computed]
+    public function statementsDue(): Collection
+    {
+        if ($this->needsBankConnection()) {
+            return collect();
+        }
+
+        return Account::query()
+            ->where('user_id', auth()->id())
+            ->statementDueForLastMonth()
+            ->orderBy('name')
+            ->get()
+            ->toBase();
     }
 
     #[Computed]
