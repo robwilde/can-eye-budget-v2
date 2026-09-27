@@ -335,6 +335,22 @@ test('resolveImport restores a row the user deleted', function () {
         ->and(Transaction::query()->where('account_id', $reconciliation->account_id)->count())->toBe(1);
 });
 
+test('resolveImport reuses a live row with the same hash instead of inserting a duplicate', function () {
+    $reconciliation = stmtReconciliation([['05/01/2026', 'KMART 1111', '-9.00']]);
+    stmtBuild($reconciliation);
+    $line = stmtLine($reconciliation, StatementLineKind::StatementOnly);
+
+    $live = stmtFeedRow($reconciliation, '2026-01-05', '', -900);
+    $live->update(['csv_hash' => $line->csv_hash]);
+
+    $transaction = app(StatementReconciler::class)->resolveImport($line);
+
+    expect($transaction->id)->toBe($live->id)
+        ->and($transaction->fresh()->description)->toBe('KMART 1111')
+        ->and($line->fresh()->transaction_id)->toBe($live->id)
+        ->and(Transaction::query()->where('account_id', $reconciliation->account_id)->count())->toBe(1);
+});
+
 test('resolveLink pairs the lines and deletes the feed-only one', function () {
     $reconciliation = stmtReconciliation([['05/01/2026', 'PAYPAL *STEAM', '-20.00']]);
     $feed = stmtFeedRow($reconciliation, '2026-01-06', 'STEAM GAMES', -2000);
@@ -359,6 +375,35 @@ test('resolveLink refuses a pair from different reconciliations', function () {
 
     expect(fn () => app(StatementReconciler::class)->resolveLink($line, $feedOnly))
         ->toThrow(StatementLineNotResolvable::class);
+});
+
+test('resolveLink refuses a feed-only line whose transaction was deleted', function () {
+    $reconciliation = stmtReconciliation([['05/01/2026', 'PAYPAL *STEAM', '-20.00']]);
+    $feed = stmtFeedRow($reconciliation, '2026-01-06', 'STEAM GAMES', -2000);
+    stmtBuild($reconciliation);
+    $line = stmtLine($reconciliation, StatementLineKind::StatementOnly);
+    $feedOnly = stmtLine($reconciliation, StatementLineKind::FeedOnly);
+
+    $feed->forceDelete();
+    $feedOnly->refresh();
+
+    expect(fn () => app(StatementReconciler::class)->resolveLink($line, $feedOnly))
+        ->toThrow(StatementLineNotResolvable::class);
+
+    expect($line->fresh()->kind)->toBe(StatementLineKind::StatementOnly)
+        ->and(StatementReconciliationLine::query()->find($feedOnly->id))->not->toBeNull();
+});
+
+test('resolveIgnore refuses a matched line', function () {
+    $reconciliation = stmtReconciliation([['05/01/2026', 'KMART 1111', '-9.00']]);
+    stmtFeedRow($reconciliation, '2026-01-05', 'KMART 1111', -900);
+    stmtBuild($reconciliation);
+    $matched = stmtLine($reconciliation, StatementLineKind::Matched);
+
+    expect(fn () => app(StatementReconciler::class)->resolveIgnore($matched, 'noise'))
+        ->toThrow(StatementLineNotResolvable::class);
+
+    expect($matched->fresh()->resolution)->toBeNull();
 });
 
 test('close refuses while a line is unchecked and succeeds once all are checked', function () {
