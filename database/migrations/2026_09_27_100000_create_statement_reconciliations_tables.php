@@ -55,4 +55,10 @@ return new class extends Migration
             $table->index(['statement_reconciliation_id', 'csv_hash'], 'srl_reconciliation_hash_idx');
         });
     }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('statement_reconciliation_lines');
+        Schema::dropIfExists('statement_reconciliations');
+    }
 };
