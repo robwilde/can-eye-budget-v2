@@ -235,7 +235,8 @@ final readonly class StatementReconciler
         }
 
         // transaction_id is nullOnDelete: a feed row deleted since build() leaves nothing to link.
-        if ($feedOnly->transaction_id === null) {
+        // Transactions soft-delete, so a feed row the user deleted since build() still has an id.
+        if ($feedOnly->transaction_id === null || ! Transaction::query()->whereKey($feedOnly->transaction_id)->exists()) {
             throw new StatementLineNotResolvable('The feed transaction behind this line no longer exists.');
         }
 
@@ -257,6 +258,10 @@ final readonly class StatementReconciler
 
         if ($line->kind === StatementLineKind::Matched) {
             throw new StatementLineNotResolvable('A matched line has no discrepancy to ignore.');
+        }
+
+        if ($line->kind === StatementLineKind::FeedOnly) {
+            throw new StatementLineNotResolvable('A feed-only line is acknowledged by ticking it, not ignored.');
         }
 
         $line->update([
