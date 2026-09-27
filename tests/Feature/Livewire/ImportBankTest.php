@@ -61,14 +61,14 @@ test('uploading and selecting an existing csv account moves to step 2 with auto-
         ->assertSet('mapping.'.CsvColumnMapper::FIELD_AMOUNT, 'Amount');
 });
 
-test('uploading to a basiq-connected account is rejected with an error message', function () {
+test('uploading to a redbark-connected account is rejected with an error message', function () {
     $user = User::factory()->create();
-    $basiqAccount = Account::factory()->for($user)->withBasiq()->create();
+    $redbarkAccount = Account::factory()->for($user)->withRedbark()->create();
 
     Livewire::actingAs($user)
         ->test(ImportBank::class)
         ->set('accountChoice', 'existing')
-        ->set('accountId', $basiqAccount->id)
+        ->set('accountId', $redbarkAccount->id)
         ->set('file', fixtureUpload())
         ->call('uploadAndDetectHeaders')
         ->assertSet('step', 1)
@@ -171,10 +171,10 @@ test('confirmImport refuses if mapping is missing the date column', function () 
     Queue::assertNotPushed(ImportCsvTransactionsJob::class);
 });
 
-test('confirmImport refuses if account changes to a basiq account', function () {
+test('confirmImport refuses if account changes to a redbark account', function () {
     $user = User::factory()->create();
     $csvAccount = Account::factory()->for($user)->csvImport()->create();
-    $basiqAccount = Account::factory()->for($user)->withBasiq()->create();
+    $redbarkAccount = Account::factory()->for($user)->withRedbark()->create();
 
     Livewire::actingAs($user)
         ->test(ImportBank::class)
@@ -182,7 +182,7 @@ test('confirmImport refuses if account changes to a basiq account', function () 
         ->set('accountId', $csvAccount->id)
         ->set('file', fixtureUpload())
         ->call('uploadAndDetectHeaders')
-        ->set('accountId', $basiqAccount->id)
+        ->set('accountId', $redbarkAccount->id)
         ->call('confirmImport')
         ->assertHasErrors('account_id')
         ->assertSet('step', 2);

@@ -58,7 +58,6 @@ it('renders the user menu on every authed shell route', function (string $routeN
     'accounts',
     'transactions',
     'calendar',
-    'connect-bank',
     'rules',
 ]);
 

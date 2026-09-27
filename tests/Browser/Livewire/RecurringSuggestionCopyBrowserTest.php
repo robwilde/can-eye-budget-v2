@@ -46,7 +46,7 @@ test('clicking a recurring suggestion opens the prefilled transaction modal', fu
 
     $this->actingAs($user);
 
-    $page = visit('/connect-bank');
+    $page = visit(route('providers.edit'));
 
     // The suggestion renders and is clickable; the modal is not yet open.
     $page->assertSee('Recurring Transactions Detected')

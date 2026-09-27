@@ -34,8 +34,6 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property CarbonImmutable $post_date
  * @property CarbonImmutable|null $transaction_date
  * @property TransactionStatus $status
- * @property string|null $basiq_id
- * @property string|null $basiq_account_id
  * @property string|null $redbark_id
  * @property string|null $csv_hash
  * @property string|null $merchant_name
@@ -101,8 +99,6 @@ final class Transaction extends Model
         'post_date',
         'transaction_date',
         'status',
-        'basiq_id',
-        'basiq_account_id',
         'redbark_id',
         'csv_hash',
         'merchant_name',
@@ -143,7 +139,7 @@ final class Transaction extends Model
     }
 
     /**
-     * Latest post_date among bank-fed (csv/basiq) transactions for a user,
+     * Latest post_date among bank-fed (csv/redbark) transactions for a user,
      * optionally scoped to one account. Null when no imported transactions exist.
      * SoftDeletes are excluded automatically by the default builder.
      */
@@ -288,7 +284,7 @@ final class Transaction extends Model
      */
     public function createChild(array $overrides = []): self
     {
-        $excluded = ['id', 'created_at', 'updated_at', 'deleted_at', 'parent_transaction_id', 'basiq_id', 'redbark_id'];
+        $excluded = ['id', 'created_at', 'updated_at', 'deleted_at', 'parent_transaction_id', 'redbark_id'];
 
         $attributes = collect($this->getAttributes())
             ->except($excluded)

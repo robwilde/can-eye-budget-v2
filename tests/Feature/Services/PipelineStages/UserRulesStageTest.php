@@ -44,7 +44,7 @@ function createStageTransaction(User $user, Account $account, array $overrides =
         'description' => 'NETFLIX SUBSCRIPTION',
         'amount' => 1699,
         'direction' => TransactionDirection::Debit,
-        'source' => TransactionSource::Basiq,
+        'source' => TransactionSource::Redbark,
     ], $overrides));
 }
 

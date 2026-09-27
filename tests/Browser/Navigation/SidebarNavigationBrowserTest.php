@@ -34,16 +34,6 @@ test('clicking Transactions navigates to transactions page', function () {
         ->assertPathBeginsWith('/transactions');
 });
 
-test('the stood-down Basiq page has no sidebar entry but is still reachable', function () {
-    $this->actingAs(User::factory()->create());
-
-    // Redbark replaced Basiq as the live feed. The route and page are kept so the user can
-    // still reconnect Basiq by hand, but it is off the sidebar.
-    visit('/dashboard')->assertMissing('[data-flux-sidebar-item][href$="/connect-bank"]');
-
-    visit('/connect-bank')->assertPathBeginsWith('/connect-bank');
-});
-
 test('dashboard link has active state on dashboard page', function () {
     $this->actingAs(User::factory()->create());
 

@@ -9,7 +9,7 @@ use App\Events\TransactionReconciled;
 use App\Models\Transaction;
 
 /**
- * The single funnel every ingress path (CSV import, manual entry, Basiq sync) uses to
+ * The single funnel every ingress path (CSV import, manual entry, Redbark sync) uses to
  * record a posted transaction. It persists the transaction, reconciles it against the
  * user's active planned transactions through ReconciliationPolicy, and emits the matching
  * lifecycle event. Reconciling here — synchronously, before anything renders — is what

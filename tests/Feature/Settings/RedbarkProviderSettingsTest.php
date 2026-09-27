@@ -34,6 +34,12 @@ test('the providers page is displayed and needs authentication', function () {
     $this->get(route('providers.edit'))->assertOk()->assertSee('Providers');
 });
 
+test('the providers page renders the analysis suggestions panel', function () {
+    $this->actingAs(User::factory()->create());
+
+    $this->get(route('providers.edit'))->assertOk()->assertSeeLivewire('analysis-suggestions');
+});
+
 test('saving a key stores it encrypted and kicks off a sync', function () {
     $user = User::factory()->create();
 

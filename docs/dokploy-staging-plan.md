@@ -178,14 +178,14 @@ Evidence from the repository:
 - `.ddev/docker-compose.redis.yaml` uses Redis 7 and exposes Redis only to the local network.
 - `.env.example` selects `SESSION_DRIVER=database`, `QUEUE_CONNECTION=redis`, `CACHE_STORE=redis`, `REDIS_HOST=redis`, and `FILESYSTEM_DISK=local`.
 - `bootstrap/app.php` schedules `horizon:snapshot` every five minutes and `app:sync-redbark-feeds` every six hours with overlap protection.
-- `routes/console.php` schedules Basiq stuck-refresh cleanup every five minutes, Redbark stuck-sync cleanup every five minutes, and `app:expire-redbark-holds`
+- `routes/console.php` schedules Redbark stuck-sync cleanup every five minutes and `app:expire-redbark-holds`
   daily at 03:15, all with overlap protection.
 - Queue jobs implement `ShouldQueue`, and `config/horizon.php` uses the default Redis connection for Horizon state.
 - `config/filesystems.php` provides local/private, local/public, and S3 disks. The public disk URL is derived from `APP_URL`, and `public/storage` links to
   `storage/app/public`. Every disk sets `'throw' => false`, so storage failures are silent.
 - `app/Services/Reports/ReportAggregator.php:276-281` branches only for SQLite; every other driver uses `DATE_FORMAT(post_date, '%Y-%m')`. MariaDB/MySQL is
   therefore required by the current report implementation.
-- `bootstrap/app.php` now calls `$middleware->trustProxies(at: '*')` alongside `validateCsrfTokens(except: ['webhooks/basiq'])` (#371), so behind Dokploy's
+- `bootstrap/app.php` now calls `$middleware->trustProxies(at: '*')` (#371), so behind Dokploy's
   Traefik the application resolves the real client IP and recognises the request as secure. The framework's default trusted-header set is kept.
 - `/up` is registered explicitly in `bootstrap/app.php` as `App\Http\Controllers\HealthCheckController` behind `throttle:60,1` (#382); the
   `withRouting(health: '/up')` shorthand was dropped because it offers no middleware hook. The controller reproduces the framework handler
@@ -443,7 +443,6 @@ Set the common application environment on all three Application services. Values
 | `LIVEWIRE_TEMPORARY_FILE_UPLOAD_DISK`                                    | `local` on `can-eye-web`. Livewire temporary uploads default to the `local` disk — the shared `storage/app/private` volume — so the CSV import needs that mount on the web service too, not only on `can-eye-horizon` |
 | `AWS_*`                                                                  | Not used; leave empty. Only relevant if the rejected S3 refactor is ever revisited                                                        |
 | `MAIL_*`                                                                 | Staging SMTP/sandbox settings; never production mailbox credentials. `log` is fine unless password reset or verification is being tested   |
-| `BASIQ_*`                                                                | Empty or Basiq sandbox credentials and callback URL only. Note `webhooks/basiq` is CSRF-exempt and publicly reachable regardless          |
 | `REDBARK_BASE_URL` / `REDBARK_INCLUDE_PENDING` / `REDBARK_HOLD_TTL_DAYS` | Staging API policy; do not use production secrets by default                                                                              |
 | `CONTEXT_DEV_API_KEY` / `CONTEXT_DEV_ENRICHMENT_ENABLED` / `CONTEXT_DEV_DAILY_CREDIT_CAP` | The Context.dev key is shared on purpose between local and staging: one account, one credit pool, so both environments draw on the same balance. As built (#470) it is set on all three services with `CONTEXT_DEV_ENRICHMENT_ENABLED=true` and `CONTEXT_DEV_DAILY_CREDIT_CAP=200`. Each brand lookup costs 10 credits; setting enrichment to `false` stops automatic lookups |
 | `GMAIL_USERNAME` / `GMAIL_APP_PASSWORD`                                  | Empty unless a dedicated staging mailbox is approved                                                                                     |
@@ -537,7 +536,7 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
 - The Horizon dashboard is not reachable by a seeded account absent from `HORIZON_AUTHORIZED_EMAILS`. With registration disabled on staging there is no way
   to self-register a fresh account for this check, so seed one.
 - `/register` returns 404 and `/` renders with no sign-up link, confirming `FORTIFY_REGISTRATION_ENABLED=false` reached the running container.
-- No production Basiq, Redbark, Gmail, GitHub, mail, or storage credentials are present unless explicitly approved for staging. The Context.dev key is the approved exception: it is shared between local and staging.
+- No production Redbark, Gmail, GitHub, mail, or storage credentials are present unless explicitly approved for staging. The Context.dev key is the approved exception: it is shared between local and staging.
 - MariaDB and Redis have no external ports and no public domain.
 - The service count is five: three Applications, one MariaDB/MySQL service, and one Redis.
 
@@ -571,7 +570,7 @@ Provisioned and verified on 2026-09-19 from `develop` @`cc1dc9c` into project `c
 | Session | `POST /login` → 302 `/dashboard`, authed `GET /dashboard` 200. Cookie `can-eye-budget-staging-session`, `secure; httponly; samesite=lax` — the cross-request half that plain HTTP cannot prove |
 | Queue across containers | `RunTransactionAnalysisJob` dispatched in `can-eye-web` logged `RUNNING` → `83.35ms DONE` in `can-eye-horizon` |
 | Worker identity and sizing | Horizon master, supervisor and worker all `www-data`; `horizon:liveness` exit 0; supervisor started `--max-processes=3`, the `staging` sizing rather than production's 10 |
-| Scheduler | `basiq:fail-stuck-refresh-logs`, `redbark:fail-stuck-sync-logs`, `horizon:snapshot` and `scheduler:heartbeat` all firing; heartbeat mtime advanced 179s over a 179s window |
+| Scheduler | `redbark:fail-stuck-sync-logs`, `horizon:snapshot` and `scheduler:heartbeat` all firing; heartbeat mtime advanced 179s over a 179s window |
 | Shared volume | `can-eye-staging-import` mounted on web and horizon; a file written by `www-data` in horizon was read back from web |
 | Exposure | `144.6.123.191:3306` and `:6379` refuse public connections; `/_boost/browser-logs` 404, `/telescope` 404, `/.env` 403; the landing page carries no register link |
 
@@ -629,7 +628,7 @@ Prerequisites 1 through 5 are satisfied by the deployment recorded above. 6 onwa
    `APP_KEY` are a separate category again: first-boot preconditions, covered in step 8 of the deployment sequence.
 4. Satisfied: the managed MariaDB is `mariadb:11.8` at internal host `can-eye-mariadb-yuriat`, database `can_eye_budget_staging`, no external port.
 5. Satisfied: the managed Redis is `redis:7-alpine` at internal host `can-eye-redis-ltjrpq`, password authentication, no external port.
-6. Choose the mail sandbox and external integration policy, and decide whether staging should exercise Basiq/Redbark/Gmail/GitHub integrations or keep them
+6. Choose the mail sandbox and external integration policy, and decide whether staging should exercise Redbark/Gmail/GitHub integrations or keep them
    disabled until credentials and callback URLs are approved.
 7. After the source is accessible, inspect the reference `compare-build` Dockerfiles directly in Dokploy or GitHub and reconcile entrypoints, health checks, and
    environment names before creating the services.

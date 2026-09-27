@@ -7,7 +7,6 @@ namespace App\Enums;
 enum ImportSource: string
 {
     case Manual = 'manual';
-    case Basiq = 'basiq';
     case Csv = 'csv';
     case Redbark = 'redbark';
 
@@ -15,7 +14,6 @@ enum ImportSource: string
     {
         return match ($this) {
             self::Manual => 'Manual',
-            self::Basiq => 'Connected via bank',
             self::Csv => 'CSV import',
             self::Redbark => 'Connected via Redbark',
         };

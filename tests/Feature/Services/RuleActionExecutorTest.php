@@ -28,7 +28,7 @@ function createActionTransaction(User $user, Account $account, array $overrides 
         'description' => 'ORIGINAL DESCRIPTION',
         'amount' => 1000,
         'direction' => TransactionDirection::Debit,
-        'source' => TransactionSource::Basiq,
+        'source' => TransactionSource::Redbark,
         'notes' => null,
         'category_id' => null,
         'planned_transaction_id' => null,

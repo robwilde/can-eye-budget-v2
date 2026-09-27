@@ -26,14 +26,6 @@ return [
         'screenshot_url' => env('FEEDBACK_SCREENSHOT_URL'),
     ],
 
-    'basiq' => [
-        'api_key' => env('BASIQ_API_KEY'),
-        'base_url' => env('BASIQ_BASE_URL', 'https://au-api.basiq.io'),
-        'consent_url' => env('BASIQ_CONSENT_URL', 'https://consent.basiq.io'),
-        'webhook_secret' => env('BASIQ_WEBHOOK_SECRET'),
-        'seed_user_id' => env('BASIQ_SEED_USER_ID'),
-    ],
-
     'context_dev' => [
         // Server-side secret. Passed to the SDK explicitly (not left to its getenv()
         // fallback) so the value survives config:cache in the container entrypoint.

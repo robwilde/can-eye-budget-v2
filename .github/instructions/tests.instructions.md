@@ -35,7 +35,7 @@ applyTo: "tests/**/*.php"
 - Always use factories for model creation — never `Model::create()` directly
 - Use `->for($parent)` for relationships, not `['parent_id' => $parent->id]`
 - Use `->count(N)` for creating multiple records
-- Use factory states (e.g., `->withBasiq()`, `->savings()`) over manual attribute overrides
+- Use factory states (e.g., `->withRedbark()`, `->savings()`) over manual attribute overrides
 - Check existing factory states before manually setting attributes
 
 ## Database

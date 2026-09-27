@@ -7,7 +7,7 @@ namespace App\Events;
 use App\Models\Transaction;
 
 /**
- * A posted transaction entered the ledger (CSV import, manual entry, or Basiq sync)
+ * A posted transaction entered the ledger (CSV import, manual entry, or Redbark sync)
  * without matching an active planned transaction. It stands on its own.
  */
 final class TransactionEntered

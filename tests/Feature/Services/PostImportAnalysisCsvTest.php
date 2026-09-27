@@ -19,7 +19,7 @@ use Carbon\CarbonImmutable;
 /**
  * Regression coverage for issue #249: a clean CSV import produced no primary
  * account, pay cycle, or recurring suggestions because the analysis stages
- * filtered on source = Basiq and CSV rows were written as source = Csv.
+ * filtered on the bank-feed source alone and CSV rows were written as source = Csv.
  *
  * @param  array<string, mixed>  $overrides
  */

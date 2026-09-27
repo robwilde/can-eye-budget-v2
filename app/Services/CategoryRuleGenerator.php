@@ -165,7 +165,7 @@ final readonly class CategoryRuleGenerator
     /**
      * The default "description contains" value offered in the UI when the user
      * opts into categorising matching transactions. Prefers a clean merchant
-     * name (Basiq), otherwise the most distinctive payee token of the
+     * name (bank feed), otherwise the most distinctive payee token of the
      * description. The user can edit it before the rule is applied.
      */
     public function suggestMatchValue(Transaction $source): string

@@ -64,12 +64,11 @@ final class TransactionFactory extends Factory
         ]);
     }
 
-    public function fromBasiq(): self
+    public function fromRedbark(): self
     {
         return $this->state(fn (array $attributes) => [
-            'source' => TransactionSource::Basiq,
-            'basiq_id' => fake()->uuid(),
-            'basiq_account_id' => fake()->uuid(),
+            'source' => TransactionSource::Redbark,
+            'redbark_id' => fake()->uuid(),
             'merchant_name' => fake()->randomElement(['Woolworths', 'Coles', 'Aldi', 'Kmart', 'Bunnings', 'JB Hi-Fi']),
             'anzsic_code' => fake()->randomElement(['4111', '4112', '5411', '5311', '5251', '5731']),
             'enrich_data' => [

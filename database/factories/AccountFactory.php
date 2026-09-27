@@ -88,11 +88,10 @@ final class AccountFactory extends Factory
         ]);
     }
 
-    public function withBasiq(): self
+    public function withRedbark(): self
     {
         return $this->state(fn (array $attributes) => [
-            'basiq_account_id' => fake()->uuid(),
-            'import_source' => ImportSource::Basiq,
+            'import_source' => ImportSource::Redbark,
         ]);
     }
 

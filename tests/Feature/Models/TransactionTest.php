@@ -12,7 +12,6 @@ use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
-use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
 test('factory creates a valid transaction', function () {
@@ -52,11 +51,10 @@ test('withCategory state assigns a category', function () {
     expect($transaction->category)->toBeInstanceOf(Category::class);
 });
 
-test('fromBasiq state populates basiq fields', function () {
-    $transaction = Transaction::factory()->fromBasiq()->create();
+test('fromRedbark state populates redbark fields', function () {
+    $transaction = Transaction::factory()->fromRedbark()->create();
 
-    expect($transaction->basiq_id)->not->toBeNull()
-        ->and($transaction->basiq_account_id)->not->toBeNull()
+    expect($transaction->redbark_id)->not->toBeNull()
         ->and($transaction->merchant_name)->not->toBeNull()
         ->and($transaction->anzsic_code)->not->toBeNull()
         ->and($transaction->enrich_data)->toBeArray();
@@ -66,14 +64,6 @@ test('category_id is nullable', function () {
     $transaction = Transaction::factory()->create();
 
     expect($transaction->category_id)->toBeNull();
-});
-
-test('basiq_id must be unique', function () {
-    $basiqId = 'unique-basiq-id';
-    Transaction::factory()->create(['basiq_id' => $basiqId]);
-
-    expect(fn () => Transaction::factory()->create(['basiq_id' => $basiqId]))
-        ->toThrow(QueryException::class);
 });
 
 test('transaction belongs to a user', function () {
@@ -190,10 +180,10 @@ test('source is cast to TransactionSource enum', function () {
     expect($transaction->source)->toBeInstanceOf(TransactionSource::class);
 });
 
-test('fromBasiq factory state sets source to basiq', function () {
-    $transaction = Transaction::factory()->fromBasiq()->create();
+test('fromRedbark factory state sets source to redbark', function () {
+    $transaction = Transaction::factory()->fromRedbark()->create();
 
-    expect($transaction->source)->toBe(TransactionSource::Basiq);
+    expect($transaction->source)->toBe(TransactionSource::Redbark);
 });
 
 test('manual factory state sets source to manual', function () {
@@ -408,13 +398,13 @@ test('findCurrentVersion walks full chain from original ancestor', function () {
     expect($found->id)->toBe($child->id);
 });
 
-test('createChild does not copy basiq_id from parent', function () {
-    $parent = Transaction::factory()->fromBasiq()->create();
+test('createChild does not copy redbark_id from parent', function () {
+    $parent = Transaction::factory()->fromRedbark()->create();
 
     $child = $parent->createChild();
 
-    expect($child->basiq_id)->toBeNull()
-        ->and($parent->basiq_id)->not->toBeNull();
+    expect($child->redbark_id)->toBeNull()
+        ->and($parent->redbark_id)->not->toBeNull();
 });
 
 test('findCurrentVersion walks chain from middle node', function () {
@@ -469,32 +459,14 @@ test('createChild preserves planned_transaction_id from parent', function () {
     expect($child->planned_transaction_id)->toBe($planned->id);
 });
 
-test('backfill sets source to basiq for transactions with basiq_id', function () {
-    $basiqTransaction = Transaction::factory()->create([
-        'basiq_id' => 'test-basiq-id',
-        'source' => 'manual',
-    ]);
-    $manualTransaction = Transaction::factory()->create([
-        'basiq_id' => null,
-        'source' => 'manual',
-    ]);
-
-    DB::table('transactions')
-        ->whereNotNull('basiq_id')
-        ->update(['source' => 'basiq']);
-
-    expect($basiqTransaction->fresh()->source)->toBe(TransactionSource::Basiq)
-        ->and($manualTransaction->fresh()->source)->toBe(TransactionSource::Manual);
-});
-
 // ── Transaction::lastImportedPostDate (#313) ──────────────────────────────────
 
-test('lastImportedPostDate returns the maximum post_date across csv and basiq transactions', function () {
+test('lastImportedPostDate returns the maximum post_date across csv and redbark transactions', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
     Transaction::factory()->for($user)->for($account)->fromCsv()->create(['post_date' => '2026-06-01']);
-    Transaction::factory()->for($user)->for($account)->fromBasiq()->create(['post_date' => '2026-07-09']);
+    Transaction::factory()->for($user)->for($account)->fromRedbark()->create(['post_date' => '2026-07-09']);
     Transaction::factory()->for($user)->for($account)->fromCsv()->create(['post_date' => '2026-05-15']);
 
     $result = Transaction::lastImportedPostDate($user->id);
