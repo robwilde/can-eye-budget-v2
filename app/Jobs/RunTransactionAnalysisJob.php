@@ -26,6 +26,7 @@ final class RunTransactionAnalysisJob implements ShouldBeUnique, ShouldQueue
 
     public function __construct(
         public readonly User $user,
+        public readonly PipelineTrigger $trigger = PipelineTrigger::Sync,
     ) {}
 
     public function uniqueId(): int
@@ -43,7 +44,7 @@ final class RunTransactionAnalysisJob implements ShouldBeUnique, ShouldQueue
 
     public function handle(TransactionAnalysisPipeline $pipeline): void
     {
-        $pipeline->run($this->user, PipelineTrigger::Sync);
+        $pipeline->run($this->user, $this->trigger);
     }
 
     public function failed(Throwable $exception): void
