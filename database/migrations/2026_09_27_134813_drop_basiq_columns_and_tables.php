@@ -13,6 +13,8 @@ return new class extends Migration
     {
         DB::table('transactions')->where('source', 'basiq')->update(['source' => 'csv']);
         DB::table('accounts')->where('import_source', 'basiq')->update(['import_source' => 'manual']);
+        // Basiq syncs also stamped balance_source; the Account cast has no Basiq case left.
+        DB::table('accounts')->where('balance_source', 'basiq')->update(['balance_source' => 'manual']);
 
         Schema::table('transactions', function (Blueprint $table) {
             $table->dropUnique(['basiq_id']);
