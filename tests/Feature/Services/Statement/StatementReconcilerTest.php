@@ -407,6 +407,35 @@ test('resolveIgnore refuses a matched line', function () {
     expect($matched->fresh()->resolution)->toBeNull();
 });
 
+test('resolveIgnore refuses a feed-only line', function () {
+    $reconciliation = stmtReconciliation([]);
+    stmtFeedRow($reconciliation, '2026-01-05', 'KMART 1111', -900);
+    stmtBuild($reconciliation);
+    $feedOnly = stmtLine($reconciliation, StatementLineKind::FeedOnly);
+
+    expect(fn () => app(StatementReconciler::class)->resolveIgnore($feedOnly, 'noise'))
+        ->toThrow(StatementLineNotResolvable::class);
+
+    expect($feedOnly->fresh()->resolution)->toBeNull()
+        ->and($feedOnly->fresh()->isChecked())->toBeFalse();
+});
+
+test('resolveLink refuses a feed row the user has since deleted', function () {
+    $reconciliation = stmtReconciliation([['05/01/2026', 'PAYPAL *STEAM', '-20.00']]);
+    $feed = stmtFeedRow($reconciliation, '2026-01-06', 'STEAM GAMES', -2000);
+    stmtBuild($reconciliation);
+    $line = stmtLine($reconciliation, StatementLineKind::StatementOnly);
+    $feedOnly = stmtLine($reconciliation, StatementLineKind::FeedOnly);
+
+    $feed->delete();
+
+    expect(fn () => app(StatementReconciler::class)->resolveLink($line, $feedOnly->fresh()))
+        ->toThrow(StatementLineNotResolvable::class);
+
+    expect($line->fresh()->kind)->toBe(StatementLineKind::StatementOnly)
+        ->and($feedOnly->fresh())->not->toBeNull();
+});
+
 test('close refuses while a line is unchecked and succeeds once all are checked', function () {
     $reconciliation = StatementReconciliation::factory()->create();
     $line = StatementReconciliationLine::factory()->for($reconciliation, 'reconciliation')->statementOnly()->create();
