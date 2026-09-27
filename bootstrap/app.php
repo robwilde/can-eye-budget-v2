@@ -23,8 +23,6 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->trustProxies(at: '*');
 
         $middleware->preventRequestsDuringMaintenance(except: ['up']);
-
-        $middleware->validateCsrfTokens(except: ['webhooks/basiq']);
     })
     ->withSchedule(function (Schedule $schedule): void {
         $schedule->command('horizon:snapshot')->everyFiveMinutes();
@@ -40,8 +38,6 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('scheduler:heartbeat')
             ->everyMinute()
             ->runInBackground();
-        // Basiq is stood down in favour of the Redbark feed: its commands still exist and
-        // can be run by hand, they are just no longer scheduled.
         $schedule->command('app:sync-redbark-feeds')->everySixHours()->withoutOverlapping();
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
-use App\Contracts\BasiqServiceContract;
 use App\Contracts\ContextDevServiceContract;
 use App\Contracts\GitHubServiceContract;
 use App\Contracts\GmailServiceContract;
-use App\Services\BasiqService;
 use App\Services\CategoryRuleGenerator;
 use App\Services\ContextDevService;
 use App\Services\GitHubService;
@@ -38,13 +36,6 @@ final class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->singleton(BasiqServiceContract::class, fn (): BasiqService => new BasiqService(
-            apiKey: (string) config('services.basiq.api_key'),
-            baseUrl: (string) config('services.basiq.base_url'),
-        ));
-
-        $this->app->alias(BasiqServiceContract::class, BasiqService::class);
-
         $this->app->singleton(RedbarkClientFactory::class, fn (): RedbarkClientFactory => new RedbarkClientFactory(
             baseUrl: (string) config('services.redbark.base_url'),
         ));

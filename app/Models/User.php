@@ -20,7 +20,6 @@ use Illuminate\Support\Str;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 
 /**
- * @property CarbonImmutable|null $last_synced_at
  * @property int|null $pay_amount
  * @property PayFrequency|null $pay_frequency
  * @property CarbonImmutable|null $next_pay_date
@@ -39,8 +38,6 @@ final class User extends Authenticatable
     protected $fillable = [
         'name',
         'email',
-        'basiq_user_id',
-        'last_synced_at',
         'password',
         'pay_amount',
         'pay_frequency',
@@ -94,12 +91,6 @@ final class User extends Authenticatable
     public function plannedTransactions(): HasMany
     {
         return $this->hasMany(PlannedTransaction::class);
-    }
-
-    /** @return HasMany<BasiqRefreshLog, $this> */
-    public function basiqRefreshLogs(): HasMany
-    {
-        return $this->hasMany(BasiqRefreshLog::class);
     }
 
     /** @return HasOne<RedbarkFeed, $this> */
@@ -253,7 +244,6 @@ final class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
-            'last_synced_at' => 'datetime',
             'password' => 'hashed',
             'pay_amount' => MoneyCast::class,
             'pay_frequency' => PayFrequency::class,
