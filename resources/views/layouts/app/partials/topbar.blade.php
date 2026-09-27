@@ -4,7 +4,6 @@
         'calendar' => ['Calendar', now()->format('F Y')],
         'transactions' => ['Transactions', 'All activity'],
         'accounts' => ['Accounts', 'Connected banks'],
-        'connect-bank' => ['Connect', 'Link a bank'],
         'import-bank' => ['Import', 'Upload a CSV statement'],
         'rules' => ['Rules', 'Automations'],
     ];
@@ -37,15 +36,15 @@
                     class="hidden items-center gap-2 rounded-pill border border-cib-green-300 bg-money-available-soft px-3 py-1.5 text-xs font-bold text-cib-green-600 sm:inline-flex"
             >
                 <span class="size-1.75 rounded-full bg-cib-green-500 ring-4 ring-cib-green-500/20"></span>
-                Synced {{ $shellSyncedHuman }} · Basiq
+                Synced {{ $shellSyncedHuman }} · Redbark
             </span>
         @endif
 
         <a
-                href="{{ route('connect-bank') }}"
+                href="{{ route('providers.edit') }}"
                 wire:navigate
                 data-testid="topbar-refresh"
-                aria-label="Refresh Basiq sync"
+                aria-label="Refresh Redbark sync"
                 class="hidden size-9 items-center justify-center rounded-md border-2 border-cib-black bg-white shadow-pop-sm hover:bg-cib-cream-50 sm:inline-flex"
         >
             <flux:icon name="arrow-path" class="size-4"/>

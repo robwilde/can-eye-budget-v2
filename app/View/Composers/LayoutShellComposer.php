@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace App\View\Composers;
 
-use App\Models\BasiqRefreshLog;
+use App\Enums\RefreshStatus;
+use App\Models\RedbarkSyncLog;
 use App\Models\User;
 use Illuminate\View\View;
 
@@ -14,7 +15,7 @@ final class LayoutShellComposer
 
     private bool $resolved = false;
 
-    private ?BasiqRefreshLog $latestSync = null;
+    private ?RedbarkSyncLog $latestSync = null;
 
     private int $accountCount = 0;
 
@@ -46,8 +47,9 @@ final class LayoutShellComposer
         if ($user !== null) {
             $this->accountCount = $user->accounts()->active()->count();
             $this->daysUntilNextPay = $user->daysUntilNextPay();
-            $this->latestSync = BasiqRefreshLog::query()
+            $this->latestSync = RedbarkSyncLog::query()
                 ->where('user_id', $user->id)
+                ->where('status', RefreshStatus::Success)
                 ->latest()
                 ->first();
         }

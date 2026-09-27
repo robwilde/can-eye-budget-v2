@@ -254,6 +254,8 @@ new #[Title('Bank providers')] class extends Component {
                     </flux:table>
                 </div>
             @endif
+
+            <livewire:analysis-suggestions />
         </div>
 
         <flux:modal name="confirm-redbark-disconnect" class="md:w-96">

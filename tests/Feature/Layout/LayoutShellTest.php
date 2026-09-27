@@ -6,7 +6,8 @@
 
 declare(strict_types=1);
 
-use App\Models\BasiqRefreshLog;
+use App\Models\RedbarkFeed;
+use App\Models\RedbarkSyncLog;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
@@ -48,9 +49,9 @@ it('hides the payday chip when pay cycle is not configured', function () {
     $response->assertDontSee('until next payday', false);
 });
 
-it('shows a sync chip reflecting the latest BasiqRefreshLog', function () {
-    $log = BasiqRefreshLog::factory()
-        ->for($this->user)
+it('shows a sync chip reflecting the latest completed RedbarkSyncLog', function () {
+    $log = RedbarkSyncLog::factory()
+        ->for(RedbarkFeed::factory()->for($this->user), 'feed')
         ->completed()
         ->create();
     $log->forceFill(['created_at' => now()->subMinutes(3)])->save();
@@ -58,8 +59,18 @@ it('shows a sync chip reflecting the latest BasiqRefreshLog', function () {
     $response = $this->get(route('dashboard'));
 
     $response->assertOk();
-    $response->assertSee('Synced', false);
-    $response->assertSee('Basiq', false);
+    $response->assertSee('Synced 3m ago · Redbark', false);
+    $response->assertSee(route('providers.edit'), false);
+});
+
+it('ignores failed and pending Redbark syncs for the sync chip', function () {
+    $feed = RedbarkFeed::factory()->for($this->user)->create();
+    RedbarkSyncLog::factory()->for($feed, 'feed')->failed()->create();
+    RedbarkSyncLog::factory()->for($feed, 'feed')->create();
+
+    $this->get(route('dashboard'))
+        ->assertOk()
+        ->assertDontSee('data-testid="topbar-sync-chip"', false);
 });
 
 it('forces flux appearance to light to keep CIB surfaces readable', function () {
@@ -100,12 +111,15 @@ it('exposes the Log spend CTA in the topbar', function () {
     $response->assertSee('data-testid="topbar-log-spend"', false);
 });
 
-it('queries basiq_refresh_logs at most once per request for the layout shell', function () {
-    BasiqRefreshLog::factory()->for($this->user)->completed()->create();
+it('queries redbark_sync_logs at most once per request for the layout shell', function () {
+    RedbarkSyncLog::factory()
+        ->for(RedbarkFeed::factory()->for($this->user), 'feed')
+        ->completed()
+        ->create();
 
     $queries = 0;
     DB::listen(function ($query) use (&$queries): void {
-        if (str_contains($query->sql, 'basiq_refresh_logs')) {
+        if (str_contains($query->sql, 'redbark_sync_logs')) {
             $queries++;
         }
     });
