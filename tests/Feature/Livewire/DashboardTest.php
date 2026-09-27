@@ -12,6 +12,7 @@ use App\Models\Account;
 use App\Models\Budget;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
+use App\Models\RedbarkFeed;
 use App\Models\Transaction;
 use App\Models\User;
 use Livewire\Livewire;
@@ -516,4 +517,22 @@ test('refreshes pay-cycle figures when a transaction is saved elsewhere on the p
         ->assertSee('Spotify Premium');
 
     expect($component->get('totalNeeded'))->toBe(50000);
+});
+
+// ── Connect-your-bank card ─────────────────────────────────────────
+
+test('shows the connect your bank card when the user has no Redbark feed', function () {
+    Livewire::actingAs(User::factory()->create())
+        ->test(Dashboard::class)
+        ->assertSeeHtml('data-test="dashboard-connect-bank-card"')
+        ->assertSee(route('connect-bank'));
+});
+
+test('hides the connect your bank card once the user has a Redbark feed', function () {
+    $user = User::factory()->create();
+    RedbarkFeed::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(Dashboard::class)
+        ->assertDontSeeHtml('data-test="dashboard-connect-bank-card"');
 });

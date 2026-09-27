@@ -7,6 +7,7 @@ namespace App\Livewire;
 use App\Enums\TransactionDirection;
 use App\Models\Budget;
 use App\Models\PlannedTransaction;
+use App\Models\RedbarkFeed;
 use App\Support\Transactions\CategoryAttribution;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -41,7 +42,13 @@ final class Dashboard extends Component
     #[On('transaction-saved')]
     public function refreshFigures(): void
     {
-        unset($this->buffer, $this->daysUntilPay, $this->totalOwed, $this->totalAvailable, $this->totalNeeded, $this->numbers, $this->budgetsThisCycle, $this->nextThreePlanned, $this->spendLast7Days); // @phpstan-ignore property.notFound
+        unset($this->buffer, $this->daysUntilPay, $this->totalOwed, $this->totalAvailable, $this->totalNeeded, $this->numbers, $this->budgetsThisCycle, $this->nextThreePlanned, $this->spendLast7Days, $this->needsBankConnection); // @phpstan-ignore property.notFound
+    }
+
+    #[Computed]
+    public function needsBankConnection(): bool
+    {
+        return ! RedbarkFeed::query()->where('user_id', auth()->id())->exists();
     }
 
     #[Computed]

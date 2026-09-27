@@ -42,6 +42,9 @@ final class RedbarkAccountSetup extends Component
     /** @var list<string> */
     public array $rowErrors = [];
 
+    /** Set by the onboarding page so a finished setup lands on the dashboard, not accounts. */
+    public bool $redirectToDashboard = false;
+
     public function mount(): void
     {
         $feed = $this->feed();
@@ -172,7 +175,7 @@ final class RedbarkAccountSetup extends Component
 
         session()->flash('status', __('Redbark accounts set up.'));
 
-        $this->redirect(route('accounts'), navigate: true);
+        $this->redirect(route($this->redirectToDashboard ? 'dashboard' : 'accounts'), navigate: true);
     }
 
     public function render(): View

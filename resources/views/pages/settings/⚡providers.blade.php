@@ -1,7 +1,7 @@
 <?php
 
+use App\Actions\Redbark\SaveRedbarkApiKey;
 use App\Enums\ImportSource;
-use App\Enums\RedbarkFeedStatus;
 use App\Enums\RefreshStatus;
 use App\Enums\RefreshTrigger;
 use App\Jobs\SyncRedbarkFeedJob;
@@ -47,17 +47,13 @@ new #[Title('Bank providers')] class extends Component {
             && $log->created_at->greaterThan(now()->subSeconds(SyncRedbarkFeedJob::UNIQUE_FOR));
     }
 
-    public function save(): void
+    public function save(SaveRedbarkApiKey $saveApiKey): void
     {
         $validated = $this->validate([
             'api_key' => ['required', 'string', 'min:16', 'max:512'],
         ]);
 
-        // Resetting the status is what lets a rotated key clear a RequiresUpdate state.
-        $feed = RedbarkFeed::updateOrCreate(
-            ['user_id' => Auth::id()],
-            ['api_key' => $validated['api_key'], 'status' => RedbarkFeedStatus::Good, 'auth_failure_count' => 0],
-        );
+        $feed = $saveApiKey->handle(Auth::user(), $validated['api_key']);
 
         $this->api_key = '';
 

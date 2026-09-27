@@ -79,7 +79,7 @@ test('five registrations from one client all succeed under the limit', function 
             'password_confirmation' => 'password',
         ], ['X-Forwarded-For' => '203.0.113.10'])
             ->assertSessionHasNoErrors()
-            ->assertRedirect(route('dashboard', absolute: false));
+            ->assertRedirect(route('connect-bank', absolute: false));
 
         $this->assertAuthenticated();
 
