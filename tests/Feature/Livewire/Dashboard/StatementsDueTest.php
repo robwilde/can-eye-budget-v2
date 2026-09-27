@@ -102,5 +102,6 @@ test('the statements-due query count stays flat as accounts increase', function 
     }
     $withFive = $queriesFor();
 
-    expect($withFive)->toBe($withOne);
+    expect($withOne)->toBe(1)
+        ->and($withFive)->toBe($withOne);
 });

@@ -53,18 +53,15 @@ final class Dashboard extends Component
     }
 
     /**
-     * Redbark-linked accounts still waiting on last month's statement check. Empty without
-     * a feed: the connect card covers that case.
+     * Redbark-linked accounts still waiting on last month's statement check. One query; it is
+     * empty without a feed because linked accounts only exist under one, and the connect
+     * card covers that case.
      *
      * @return Collection<int, Account>
      */
     #[Computed]
     public function statementsDue(): Collection
     {
-        if ($this->needsBankConnection()) {
-            return collect();
-        }
-
         return Account::query()
             ->where('user_id', auth()->id())
             ->statementDueForLastMonth()
