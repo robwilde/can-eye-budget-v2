@@ -32,31 +32,6 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 
-/**
- * @param  list<array<string, mixed>>  $accounts
- * @param  list<array<string, mixed>>  $connections
- * @param  list<array<string, mixed>>  $transactions
- * @param  list<array<string, mixed>>  $balances
- */
-function fakeRedbark(
-    array $accounts = [],
-    array $connections = [],
-    array $transactions = [],
-    array $balances = [],
-): void {
-    // Http::fake() appends stubs and resolves on first match, so a second call would be
-    // unreachable. Swap in a fresh factory so each call is the authoritative one and a
-    // test can re-fake between two sync runs.
-    Http::swap(new Factory);
-
-    Http::fake([
-        '*/connections*' => Http::response(['data' => $connections, 'pagination' => ['hasMore' => false]]),
-        '*/accounts*' => Http::response(['data' => $accounts, 'pagination' => ['hasMore' => false]]),
-        '*/transactions*' => Http::response(['data' => $transactions, 'pagination' => ['hasMore' => false]]),
-        '*/balances*' => Http::response(['data' => $balances, 'pagination' => ['hasMore' => false]]),
-    ]);
-}
-
 function runRedbarkSync(RedbarkFeed $feed, RefreshTrigger $trigger = RefreshTrigger::Manual): void
 {
     new SyncRedbarkFeedJob($feed, $trigger)->handle(
@@ -85,39 +60,6 @@ function redbarkRow(array $overrides = []): array
         'merchantCategoryCode' => '5411',
         ...$overrides,
     ];
-}
-
-/** @param  array<string, mixed>  $overrides */
-function redbarkUpstreamAccount(array $overrides = []): array
-{
-    return [
-        'id' => 'rb_acc_1',
-        'connectionId' => 'rb_conn_1',
-        'name' => 'Everyday Account',
-        'type' => 'transaction',
-        'institutionName' => 'Test Bank',
-        'accountNumber' => '****4321',
-        'currency' => 'AUD',
-        ...$overrides,
-    ];
-}
-
-/** @return array{0: RedbarkFeed, 1: RedbarkAccount, 2: Account} */
-function linkedRedbarkFeed(array $feedOverrides = [], array $redbarkAccountOverrides = []): array
-{
-    $feed = RedbarkFeed::factory()->create($feedOverrides);
-    $account = Account::factory()->for($feed->user)->create(['import_source' => ImportSource::Redbark]);
-
-    $redbarkAccount = RedbarkAccount::factory()->create([
-        'redbark_feed_id' => $feed->id,
-        'account_id' => $account->id,
-        'redbark_account_id' => 'rb_acc_1',
-        'bank_connection_id' => 'rb_conn_1',
-        'current_balance' => null,
-        ...$redbarkAccountOverrides,
-    ]);
-
-    return [$feed, $redbarkAccount, $account];
 }
 
 function redbarkTransactionQuery(): array
