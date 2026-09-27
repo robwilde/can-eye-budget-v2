@@ -11,6 +11,7 @@ use App\Enums\StatementReconciliationStatus;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
+use App\Exceptions\Statement\StatementFileUnreadable;
 use App\Exceptions\Statement\StatementLineAlreadyFolded;
 use App\Exceptions\Statement\StatementLineNotResolvable;
 use App\Exceptions\Statement\StatementReconciliationClosed;
@@ -409,7 +410,7 @@ test('resolveIgnore refuses a matched line', function () {
 test('close refuses while a line is unchecked and succeeds once all are checked', function () {
     $reconciliation = StatementReconciliation::factory()->create();
     $line = StatementReconciliationLine::factory()->for($reconciliation, 'reconciliation')->statementOnly()->create();
-    StatementReconciliationLine::factory()->for($reconciliation, 'reconciliation')->statementOnly()->checked()->create();
+    StatementReconciliationLine::factory()->for($reconciliation, 'reconciliation')->matched()->checked()->create();
     $reconciler = app(StatementReconciler::class);
 
     expect(fn () => $reconciler->close($reconciliation))->toThrow(StatementReconciliationIncomplete::class);
@@ -448,8 +449,8 @@ test('every mutation on a closed reconciliation throws until it is reopened', fu
 
 test('canClose is false while any line is unchecked', function () {
     $reconciliation = StatementReconciliation::factory()->create();
-    StatementReconciliationLine::factory()->for($reconciliation, 'reconciliation')->checked()->create();
-    $unchecked = StatementReconciliationLine::factory()->for($reconciliation, 'reconciliation')->create();
+    StatementReconciliationLine::factory()->for($reconciliation, 'reconciliation')->matched()->checked()->create();
+    $unchecked = StatementReconciliationLine::factory()->for($reconciliation, 'reconciliation')->feedOnly()->create();
 
     expect($reconciliation->canClose())->toBeFalse();
 
@@ -457,6 +458,34 @@ test('canClose is false while any line is unchecked', function () {
 
     expect($reconciliation->canClose())->toBeTrue();
 });
+
+test('canClose is false while a ticked statement-only line is unresolved', function () {
+    $reconciliation = StatementReconciliation::factory()->create();
+    $line = StatementReconciliationLine::factory()->for($reconciliation, 'reconciliation')->statementOnly()->checked()->create();
+
+    expect($reconciliation->canClose())->toBeFalse();
+
+    $line->update(['resolution' => StatementLineResolution::Ignored, 'note' => 'Bank error, reversed']);
+
+    expect($reconciliation->canClose())->toBeTrue();
+});
+
+test('a statement with unreadable rows is refused and the existing build is kept', function (string $csv) {
+    $reconciliation = stmtReconciliation([['05/01/2026', 'KMART 1111', '-9.00']]);
+    stmtBuild($reconciliation);
+    $before = $reconciliation->lines()->pluck('id')->all();
+
+    Storage::disk('local')->put($reconciliation->stored_path, $csv);
+
+    expect(fn () => app(StatementReconciler::class)->build($reconciliation))
+        ->toThrow(StatementFileUnreadable::class);
+
+    expect($reconciliation->lines()->pluck('id')->all())->toBe($before);
+})->with([
+    'a row missing its amount' => ["Date,Description,Amount\n05/01/2026,KMART 1111,-9.00\n06/01/2026,KMART 2222,\n"],
+    'mapped columns absent from the file' => ["Posted,Narrative,Value\n05/01/2026,KMART 1111,-9.00\n"],
+    'a malformed date' => ["Date,Description,Amount\nnot-a-date,KMART 1111,-9.00\n"],
+]);
 
 test('one reconciliation per account and period start', function () {
     $existing = StatementReconciliation::factory()->create();
