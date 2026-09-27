@@ -178,6 +178,11 @@ final readonly class StatementReconciler
                 $existing->fill($values);
                 $existing->restore();
                 $transaction = $existing;
+            } elseif ($existing !== null) {
+                // A live row with this hash the matcher could not pair (e.g. a blank
+                // description has no fingerprint): reuse it, as a CSV re-import would.
+                $existing->fill($values)->save();
+                $transaction = $existing;
             } else {
                 $transaction = $this->ingestor->ingest(new Transaction([
                     'account_id' => $reconciliation->account_id,
@@ -209,6 +214,11 @@ final readonly class StatementReconciler
             throw new StatementLineNotResolvable('A link pairs a statement-only line with a feed-only line.');
         }
 
+        // transaction_id is nullOnDelete: a feed row deleted since build() leaves nothing to link.
+        if ($feedOnly->transaction_id === null) {
+            throw new StatementLineNotResolvable('The feed transaction behind this line no longer exists.');
+        }
+
         DB::transaction(function () use ($line, $feedOnly): void {
             $line->update([
                 'kind' => StatementLineKind::Matched,
@@ -224,6 +234,10 @@ final readonly class StatementReconciler
     public function resolveIgnore(StatementReconciliationLine $line, string $note): void
     {
         $this->assertOpen($line->reconciliation);
+
+        if ($line->kind === StatementLineKind::Matched) {
+            throw new StatementLineNotResolvable('A matched line has no discrepancy to ignore.');
+        }
 
         $line->update([
             'resolution' => StatementLineResolution::Ignored,
