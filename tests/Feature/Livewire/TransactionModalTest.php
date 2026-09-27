@@ -367,10 +367,10 @@ test('cannot edit another user transaction', function () {
         ->assertSet('editingTransactionId', null);
 });
 
-test('basiq transaction sets read-only flag', function () {
+test('redbark transaction sets read-only flag', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
@@ -379,11 +379,11 @@ test('basiq transaction sets read-only flag', function () {
         ->assertSet('editingTransactionId', $transaction->id);
 });
 
-test('basiq transaction allows updating category and notes via child', function () {
+test('redbark transaction allows updating category and notes via child', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
-    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create([
+    $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'category_id' => null,
         'notes' => null,
     ]);
@@ -412,7 +412,7 @@ test('basiq transaction allows updating category and notes via child', function 
         ->category_id->toBe($category->id)
         ->notes->toBe('Groceries for the week')
         ->clean_description->toBe('Woolworths groceries')
-        ->basiq_id->toBeNull()
+        ->redbark_id->toBeNull()
         ->amount->toBe($transaction->amount)
         ->account_id->toBe($transaction->account_id);
 });
@@ -507,10 +507,10 @@ test('dispatches transaction-saved event on update', function () {
         ->assertDispatched('transaction-saved');
 });
 
-test('basiq transaction parent remains immutable on save', function () {
+test('redbark transaction parent remains immutable on save', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create([
+    $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'amount' => 5000,
         'post_date' => '2026-03-10',
     ]);
@@ -792,10 +792,10 @@ test('delete non-transfer soft-deletes single transaction', function () {
         ->and(Transaction::withTrashed()->where('id', $transaction->id)->exists())->toBeTrue();
 });
 
-test('cannot delete basiq transaction', function () {
+test('cannot delete redbark transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
@@ -1134,10 +1134,10 @@ test('plan toggle visible when editing planned transaction', function () {
         ->assertSee(__('Enter vs Plan'));
 });
 
-test('plan toggle hidden when editing basiq transaction', function () {
+test('plan toggle hidden when editing redbark transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
@@ -1318,10 +1318,10 @@ test('dropdown type selector shown when adding new transaction', function () {
         ->assertSeeHtml("\$set('transactionType', 'transfer')");
 });
 
-test('static heading shown when editing basiq transaction', function () {
+test('static heading shown when editing redbark transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
@@ -1534,10 +1534,10 @@ test('transfer type shows notes field with transfer description label', function
         ->assertDontSee(__('Notes'));
 });
 
-test('basiq transaction shows notes field with notes label', function () {
+test('redbark transaction shows notes field with notes label', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
@@ -1606,7 +1606,7 @@ test('switching from transfer clears notes before save', function () {
 test('negative amount displays as positive when editing transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create([
+    $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'amount' => -4250,
         'description' => 'bank charge',
     ]);
@@ -1662,10 +1662,10 @@ test('header date is editable for manual transaction', function () {
     expect($transaction->post_date->format('Y-m-d'))->toBe('2026-03-15');
 });
 
-test('header date is read-only badge for basiq transaction', function () {
+test('header date is read-only badge for redbark transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create([
+    $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'post_date' => '2026-03-15',
     ]);
 
@@ -1809,29 +1809,29 @@ test('deleting a child resurfaces the parent as current', function () {
     expect($currentIds)->toContain($parent->id);
 });
 
-test('cannot delete basiq original but can delete basiq child', function () {
+test('cannot delete redbark original but can delete redbark child', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
 
-    $basiqOriginal = Transaction::factory()->for($user)->for($account)->fromBasiq()->create();
+    $redbarkOriginal = Transaction::factory()->for($user)->for($account)->fromRedbark()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
-        ->dispatch('edit-transaction', id: $basiqOriginal->id)
+        ->dispatch('edit-transaction', id: $redbarkOriginal->id)
         ->set('categoryId', $category->id)
         ->call('save');
 
     $child = Transaction::query()
-        ->where('parent_transaction_id', $basiqOriginal->id)
+        ->where('parent_transaction_id', $redbarkOriginal->id)
         ->first();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
-        ->dispatch('edit-transaction', id: $basiqOriginal->id)
+        ->dispatch('edit-transaction', id: $redbarkOriginal->id)
         ->call('deleteTransaction');
 
-    expect(Transaction::query()->find($basiqOriginal->id))->not->toBeNull();
+    expect(Transaction::query()->find($redbarkOriginal->id))->not->toBeNull();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
@@ -2251,12 +2251,12 @@ test('planned transfer can be converted to planned expense', function () {
         ->and($planned->direction)->toBe(TransactionDirection::Debit);
 });
 
-test('basiq transaction cannot be converted to transfer via tampered transactionType', function () {
+test('redbark transaction cannot be converted to transfer via tampered transactionType', function () {
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
     $toAccount = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
-    $transaction = Transaction::factory()->for($user)->for($fromAccount)->fromBasiq()->create([
+    $transaction = Transaction::factory()->for($user)->for($fromAccount)->fromRedbark()->create([
         'amount' => 3000,
         'direction' => TransactionDirection::Debit,
     ]);
@@ -2283,11 +2283,11 @@ test('basiq transaction cannot be converted to transfer via tampered transaction
         ->transfer_pair_id->toBeNull();
 });
 
-test('basiq transaction cannot be converted to income via tampered transactionType', function () {
+test('redbark transaction cannot be converted to income via tampered transactionType', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
-    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create([
+    $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'amount' => 5000,
         'direction' => TransactionDirection::Debit,
     ]);
@@ -2879,12 +2879,12 @@ test('converting planned transfer to entered preserves notes', function () {
         ->and($credit->notes)->toBe('monthly savings note');
 });
 
-test('basiq transaction cannot convert to plan mode', function () {
+test('redbark transaction cannot convert to plan mode', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
 
-    $transaction = Transaction::factory()->for($user)->for($account)->fromBasiq()->create([
+    $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'amount' => 3000,
         'direction' => TransactionDirection::Debit,
     ]);
@@ -3489,19 +3489,19 @@ test('editing a transaction without ticking categorise-matching creates no rule 
         ->and($sibling->fresh()->category_id)->toBeNull();
 });
 
-test('editing a basiq transaction with categorise-matching ticked creates a rule and categorises matching transactions', function () {
+test('editing a redbark transaction with categorise-matching ticked creates a rule and categorises matching transactions', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
 
-    $source = Transaction::factory()->for($user)->for($account)->fromBasiq()->create([
+    $source = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'merchant_name' => 'Netflix',
         'amount' => 1599,
         'direction' => TransactionDirection::Debit,
         'post_date' => '2026-03-15',
         'category_id' => null,
     ]);
-    $sibling = Transaction::factory()->for($user)->for($account)->fromBasiq()->create([
+    $sibling = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'merchant_name' => 'Netflix',
         'amount' => 1599,
         'direction' => TransactionDirection::Debit,

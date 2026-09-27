@@ -28,7 +28,7 @@ function createIncomeTransaction(User $user, Account $account, array $overrides 
         ->for($user)
         ->for($account)
         ->credit()
-        ->fromBasiq()
+        ->fromRedbark()
         ->create(array_merge([
             'transfer_pair_id' => null,
             'merchant_name' => null,
@@ -253,14 +253,14 @@ test('outbound transfers boost confidence', function () {
             ->for($this->user)
             ->for($savingsAccount)
             ->credit()
-            ->fromBasiq()
+            ->fromRedbark()
             ->create(['post_date' => CarbonImmutable::parse('2025-06-05')->addDays($i * 30)]);
 
         Transaction::factory()
             ->for($this->user)
             ->for($this->account)
             ->debit()
-            ->fromBasiq()
+            ->fromRedbark()
             ->create([
                 'transfer_pair_id' => $creditSide->id,
                 'post_date' => CarbonImmutable::parse('2025-06-05')->addDays($i * 30),
@@ -336,14 +336,14 @@ test('excludes incoming transfers from income grouping', function () {
             ->for($this->user)
             ->for($otherAccount)
             ->debit()
-            ->fromBasiq()
+            ->fromRedbark()
             ->create(['post_date' => $startDate->addDays($i * 30)]);
 
         Transaction::factory()
             ->for($this->user)
             ->for($this->account)
             ->credit()
-            ->fromBasiq()
+            ->fromRedbark()
             ->create([
                 'description' => 'TRANSFER FROM OTHER',
                 'amount' => 300_000,

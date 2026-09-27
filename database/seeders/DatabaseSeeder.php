@@ -22,7 +22,6 @@ final class DatabaseSeeder extends Seeder
             'name' => 'Rob Wilde',
             'email' => 'robert@mrwilde.com',
             'password' => Hash::make('H@rd24G$t'),
-            'basiq_user_id' => '73e1de93-4ee0-42de-8c10-27cb7d0e23aa',
         ]);
 
         $this->call(CategorySeeder::class);

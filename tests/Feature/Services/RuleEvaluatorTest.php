@@ -31,7 +31,7 @@ function createTestTransaction(User $user, Account $account, array $overrides = 
         'merchant_name' => 'Netflix Inc',
         'amount' => 1699,
         'direction' => TransactionDirection::Debit,
-        'source' => TransactionSource::Basiq,
+        'source' => TransactionSource::Redbark,
         'notes' => null,
     ], $overrides));
 }
@@ -227,7 +227,7 @@ test('direction is_not matches when different', function () {
 test('source is matches enum value', function () {
     $transaction = createTestTransaction($this->user, $this->account);
     $rule = createTestRule($this->user, $this->group, [
-        ['field' => 'source', 'operator' => 'is', 'value' => 'basiq'],
+        ['field' => 'source', 'operator' => 'is', 'value' => 'redbark'],
     ]);
 
     expect($this->evaluator->matches($transaction, $rule))->toBeTrue();

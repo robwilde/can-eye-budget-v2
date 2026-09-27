@@ -59,7 +59,7 @@ function seedSalary(
             ->for($user)
             ->for($account)
             ->credit()
-            ->fromBasiq()
+            ->fromRedbark()
             ->create([
                 'description' => $description,
                 'merchant_name' => null,

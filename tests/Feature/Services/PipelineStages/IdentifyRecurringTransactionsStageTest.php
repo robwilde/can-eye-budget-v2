@@ -33,9 +33,9 @@ beforeEach(function () {
     $this->stage = app(IdentifyRecurringTransactionsStage::class);
 });
 
-function createBasiqTransaction(User $user, Account $account, array $overrides = []): Transaction
+function createRedbarkTransaction(User $user, Account $account, array $overrides = []): Transaction
 {
-    return Transaction::factory()->fromBasiq()->create(array_merge([
+    return Transaction::factory()->fromRedbark()->create(array_merge([
         'user_id' => $user->id,
         'account_id' => $account->id,
     ], $overrides));
@@ -47,7 +47,7 @@ function createMonthlyGroup(User $user, Account $account, string $merchantName, 
     $transactions = collect();
 
     for ($i = 0; $i < $count; $i++) {
-        $transactions->push(createBasiqTransaction($user, $account, [
+        $transactions->push(createRedbarkTransaction($user, $account, [
             'merchant_name' => $merchantName,
             'amount' => $amount,
             'post_date' => $start->addMonthsNoOverflow($i),
@@ -77,7 +77,7 @@ test('detects weekly recurring transactions', function () {
     $start = CarbonImmutable::parse('2026-01-05');
 
     for ($i = 0; $i < 4; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'Coffee Club',
             'amount' => 550,
             'post_date' => $start->addWeeks($i),
@@ -97,7 +97,7 @@ test('detects fortnightly recurring transactions', function () {
     $start = CarbonImmutable::parse('2026-01-03');
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'Lawn Care',
             'amount' => 8000,
             'post_date' => $start->addWeeks($i * 2),
@@ -117,7 +117,7 @@ test('detects quarterly recurring transactions', function () {
     $start = CarbonImmutable::parse('2025-04-01');
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'Insurance Corp',
             'amount' => 45000,
             'post_date' => $start->addMonthsNoOverflow($i * 3),
@@ -134,7 +134,7 @@ test('detects quarterly recurring transactions', function () {
 });
 
 test('requires minimum 2 transactions to detect pattern', function () {
-    createBasiqTransaction($this->user, $this->account, [
+    createRedbarkTransaction($this->user, $this->account, [
         'merchant_name' => 'Solo Purchase',
         'amount' => 2000,
         'post_date' => '2026-01-15',
@@ -162,14 +162,14 @@ test('separates debits and credits for same merchant', function () {
     $start = CarbonImmutable::parse('2026-01-15');
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'Transfer Corp',
             'amount' => 10000,
             'post_date' => $start->addMonthsNoOverflow($i),
             'direction' => TransactionDirection::Debit,
         ]);
 
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'Transfer Corp',
             'amount' => 10000,
             'post_date' => $start->addMonthsNoOverflow($i)->addDays(1),
@@ -193,7 +193,7 @@ test('prefers merchant_name over description for grouping', function () {
     $start = CarbonImmutable::parse('2026-01-15');
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'Woolworths',
             'description' => 'WOOLWORTHS '.fake()->randomNumber(4).' SYDNEY AU',
             'amount' => 8500,
@@ -213,7 +213,7 @@ test('prefers clean_description when merchant_name is null', function () {
     $start = CarbonImmutable::parse('2026-01-15');
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => null,
             'clean_description' => 'BP Fuel Station',
             'description' => 'BP FUEL STATION '.fake()->randomNumber(4),
@@ -234,7 +234,7 @@ test('strips card numbers from raw descriptions for grouping', function () {
     $start = CarbonImmutable::parse('2026-01-15');
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => null,
             'clean_description' => null,
             'description' => 'WOOLWORTHS 1234 SYDNEY AU',
@@ -256,7 +256,7 @@ test('strips date patterns from raw descriptions for grouping', function () {
     $dates = ['12/03', '13/04', '14/05'];
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => null,
             'clean_description' => null,
             'description' => 'BP DANDENONG '.$dates[$i],
@@ -277,7 +277,7 @@ test('deduplicates repeated names in descriptions', function () {
     $start = CarbonImmutable::parse('2026-01-15');
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => null,
             'clean_description' => null,
             'description' => 'NETFLIX.COM NETFLIX.COM',
@@ -301,7 +301,7 @@ test('rejects a group with genuinely variable amounts', function () {
     $amounts = [10000, 15000, 22000];
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'Variable Store',
             'amount' => $amounts[$i],
             'post_date' => $start->addMonthsNoOverflow($i),
@@ -318,7 +318,7 @@ test('detects a bill through a premium step-change and suggests the latest amoun
     $amounts = [9059, 9059, 9059, 9059, 9581, 9581];
 
     foreach ($amounts as $i => $amt) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'NIB',
             'amount' => $amt,
             'direction' => TransactionDirection::Debit,
@@ -339,7 +339,7 @@ test('ignores a one-off double debit and suggests the dominant amount', function
     $amounts = [7017, 7017, 14034, 7017, 7017, 7017];
 
     foreach ($amounts as $i => $amt) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'Golden Insurance',
             'amount' => $amt,
             'direction' => TransactionDirection::Debit,
@@ -359,7 +359,7 @@ test('accepts group with amounts within 5 percent tolerance', function () {
     $amounts = [10000, 10200, 10400];
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'Consistent Store',
             'amount' => $amounts[$i],
             'post_date' => $start->addMonthsNoOverflow($i),
@@ -513,7 +513,7 @@ test('still suggests a different credit that only shares amount and frequency wi
     $start = CarbonImmutable::parse('2026-01-15');
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'ACME REFUND CENTRE',
             'amount' => 570660,
             'direction' => TransactionDirection::Credit,
@@ -593,7 +593,7 @@ test('ignores transactions already linked to PlannedTransaction', function () {
     $start = CarbonImmutable::parse('2026-01-15');
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'Linked Merchant',
             'amount' => 3000,
             'post_date' => $start->addMonthsNoOverflow($i),
@@ -607,7 +607,7 @@ test('ignores transactions already linked to PlannedTransaction', function () {
         ->and($result->suggestionIds)->toBeEmpty();
 });
 
-test('returns success with empty suggestionIds when no Basiq transactions exist', function () {
+test('returns success with empty suggestionIds when no Redbark transactions exist', function () {
     $result = $this->stage->execute($this->context);
 
     expect($result->success)->toBeTrue()
@@ -621,7 +621,7 @@ test('higher confidence for more matches', function () {
     $start = CarbonImmutable::parse('2025-07-15');
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'SmallGroup',
             'amount' => 2000,
             'post_date' => $start->addMonthsNoOverflow($i),
@@ -631,7 +631,7 @@ test('higher confidence for more matches', function () {
     $account2 = Account::factory()->for($this->user)->create();
 
     for ($i = 0; $i < 8; $i++) {
-        createBasiqTransaction($this->user, $account2, [
+        createRedbarkTransaction($this->user, $account2, [
             'merchant_name' => 'LargeGroup',
             'amount' => 2000,
             'post_date' => $start->addMonthsNoOverflow($i),
@@ -654,7 +654,7 @@ test('higher confidence for identical amounts versus varying', function () {
     $start = CarbonImmutable::parse('2026-01-15');
 
     for ($i = 0; $i < 4; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'IdenticalCo',
             'amount' => 5000,
             'post_date' => $start->addMonthsNoOverflow($i),
@@ -665,7 +665,7 @@ test('higher confidence for identical amounts versus varying', function () {
     $varyingAmounts = [5000, 5200, 4900, 5100];
 
     for ($i = 0; $i < 4; $i++) {
-        createBasiqTransaction($this->user, $account2, [
+        createRedbarkTransaction($this->user, $account2, [
             'merchant_name' => 'VaryingCo',
             'amount' => $varyingAmounts[$i],
             'post_date' => $start->addMonthsNoOverflow($i),
@@ -689,7 +689,7 @@ test('higher confidence for regular intervals', function () {
 
     $regularDates = ['2026-01-15', '2026-02-15', '2026-03-15', '2026-04-15'];
     foreach ($regularDates as $date) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'RegularCo',
             'amount' => 3000,
             'post_date' => $date,
@@ -698,7 +698,7 @@ test('higher confidence for regular intervals', function () {
 
     $irregularDates = ['2026-01-15', '2026-02-18', '2026-03-12', '2026-04-16'];
     foreach ($irregularDates as $date) {
-        createBasiqTransaction($this->user, $account2, [
+        createRedbarkTransaction($this->user, $account2, [
             'merchant_name' => 'IrregularCo',
             'amount' => 3000,
             'post_date' => $date,
@@ -724,7 +724,7 @@ test('payload contains all required fields with correct types', function () {
     $start = CarbonImmutable::parse('2026-01-15');
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'Netflix',
             'amount' => 1699,
             'post_date' => $start->addMonthsNoOverflow($i),
@@ -767,17 +767,17 @@ test('matched_transaction_ids contains all group transaction IDs', function () {
 });
 
 test('start_date is earliest post_date in group', function () {
-    createBasiqTransaction($this->user, $this->account, [
+    createRedbarkTransaction($this->user, $this->account, [
         'merchant_name' => 'DateTest',
         'amount' => 2000,
         'post_date' => '2026-03-15',
     ]);
-    createBasiqTransaction($this->user, $this->account, [
+    createRedbarkTransaction($this->user, $this->account, [
         'merchant_name' => 'DateTest',
         'amount' => 2000,
         'post_date' => '2026-01-15',
     ]);
-    createBasiqTransaction($this->user, $this->account, [
+    createRedbarkTransaction($this->user, $this->account, [
         'merchant_name' => 'DateTest',
         'amount' => 2000,
         'post_date' => '2026-02-15',
@@ -909,7 +909,7 @@ test('maps a 24-day cadence (previously an unmatched gap) to three-weekly', func
     $start = CarbonImmutable::parse('2026-01-01');
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'Gym Membership',
             'amount' => 5000,
             'post_date' => $start->addDays(24 * $i),
@@ -927,7 +927,7 @@ test('maps a 10-day cadence (previously an unmatched gap) to weekly', function (
     $start = CarbonImmutable::parse('2026-01-01');
 
     for ($i = 0; $i < 3; $i++) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'Window Cleaner',
             'amount' => 4000,
             'post_date' => $start->addDays(10 * $i),
@@ -943,7 +943,7 @@ test('maps a 10-day cadence (previously an unmatched gap) to weekly', function (
 
 test('snaps wobbling monthly intervals to every month', function () {
     foreach (['2026-01-15', '2026-02-12', '2026-03-15'] as $date) {
-        createBasiqTransaction($this->user, $this->account, [
+        createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'Phone Plan',
             'amount' => 4999,
             'post_date' => CarbonImmutable::parse($date),

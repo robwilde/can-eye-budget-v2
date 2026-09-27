@@ -21,7 +21,7 @@ use Livewire\Livewire;
 
 function createRecurringReviewTransaction(User $user, Account $account, array $overrides = []): Transaction
 {
-    return Transaction::factory()->fromBasiq()->create(array_merge([
+    return Transaction::factory()->fromRedbark()->create(array_merge([
         'user_id' => $user->id,
         'account_id' => $account->id,
     ], $overrides));

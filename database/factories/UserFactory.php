@@ -32,8 +32,6 @@ final class UserFactory extends Factory
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
             'password' => self::$password ??= Hash::make('password'),
-            'basiq_user_id' => null,
-            'last_synced_at' => null,
             'remember_token' => Str::random(10),
             'two_factor_secret' => null,
             'two_factor_recovery_codes' => null,
@@ -48,16 +46,6 @@ final class UserFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'email_verified_at' => null,
-        ]);
-    }
-
-    /**
-     * Indicate that the model has a Basiq user ID.
-     */
-    public function withBasiq(): self
-    {
-        return $this->state(fn (array $attributes) => [
-            'basiq_user_id' => fake()->uuid(),
         ]);
     }
 

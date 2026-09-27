@@ -32,7 +32,7 @@ test('csvImport scope only includes csv accounts', function () {
     $user = User::factory()->create();
     $csv = Account::factory()->for($user)->create(['import_source' => ImportSource::Csv]);
     Account::factory()->for($user)->create(['import_source' => ImportSource::Manual]);
-    Account::factory()->for($user)->create(['import_source' => ImportSource::Basiq]);
+    Account::factory()->for($user)->create(['import_source' => ImportSource::Redbark]);
 
     $results = Account::query()->csvImport()->where('user_id', $user->id)->get();
 
@@ -40,20 +40,9 @@ test('csvImport scope only includes csv accounts', function () {
         ->and($results->first()->id)->toBe($csv->id);
 });
 
-test('basiqConnected scope only includes basiq accounts', function () {
-    $user = User::factory()->create();
-    Account::factory()->for($user)->create(['import_source' => ImportSource::Csv]);
-    $basiq = Account::factory()->for($user)->create(['import_source' => ImportSource::Basiq]);
-
-    $results = Account::query()->basiqConnected()->where('user_id', $user->id)->get();
-
-    expect($results)->toHaveCount(1)
-        ->and($results->first()->id)->toBe($basiq->id);
-});
-
 test('redbarkConnected scope only includes redbark accounts', function () {
     $user = User::factory()->create();
-    Account::factory()->for($user)->create(['import_source' => ImportSource::Basiq]);
+    Account::factory()->for($user)->create(['import_source' => ImportSource::Csv]);
     $redbark = Account::factory()->for($user)->create(['import_source' => ImportSource::Redbark]);
 
     $results = Account::query()->redbarkConnected()->where('user_id', $user->id)->get();
@@ -66,18 +55,16 @@ test('isImportSource matches the configured source', function () {
     $account = Account::factory()->create(['import_source' => ImportSource::Csv]);
 
     expect($account->isImportSource(ImportSource::Csv))->toBeTrue()
-        ->and($account->isImportSource(ImportSource::Basiq))->toBeFalse();
+        ->and($account->isImportSource(ImportSource::Redbark))->toBeFalse();
 });
 
 test('acceptsCsvImports is true for csv and manual accounts only', function () {
     $csv = Account::factory()->create(['import_source' => ImportSource::Csv]);
     $manual = Account::factory()->create(['import_source' => ImportSource::Manual]);
-    $basiq = Account::factory()->create(['import_source' => ImportSource::Basiq]);
     $redbark = Account::factory()->create(['import_source' => ImportSource::Redbark]);
 
     expect($csv->acceptsCsvImports())->toBeTrue()
         ->and($manual->acceptsCsvImports())->toBeTrue()
-        ->and($basiq->acceptsCsvImports())->toBeFalse()
         ->and($redbark->acceptsCsvImports())->toBeFalse();
 });
 

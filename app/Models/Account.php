@@ -21,7 +21,6 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 /**
  * @property int $id
  * @property int $user_id
- * @property string|null $basiq_account_id
  * @property ImportSource $import_source
  * @property string $name
  * @property string|null $account_last4
@@ -50,7 +49,6 @@ final class Account extends Model
      */
     protected $fillable = [
         'user_id',
-        'basiq_account_id',
         'import_source',
         'name',
         'account_last4',
@@ -108,15 +106,6 @@ final class Account extends Model
     public function scopeCsvImport(Builder $query): Builder
     {
         return $query->where('import_source', ImportSource::Csv);
-    }
-
-    /**
-     * @param  Builder<self>  $query
-     * @return Builder<self>
-     */
-    public function scopeBasiqConnected(Builder $query): Builder
-    {
-        return $query->where('import_source', ImportSource::Basiq);
     }
 
     /**

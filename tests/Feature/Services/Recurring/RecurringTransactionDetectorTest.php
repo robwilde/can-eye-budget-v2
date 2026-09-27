@@ -26,7 +26,7 @@ beforeEach(function () {
 function createDetectorTransaction(User $user, Account $account, array $overrides = []): Transaction
 {
     return Transaction::factory()
-        ->fromBasiq()
+        ->fromRedbark()
         ->for($user)
         ->for($account)
         ->create($overrides);

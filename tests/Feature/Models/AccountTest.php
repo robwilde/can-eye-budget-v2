@@ -8,7 +8,6 @@ use App\Enums\AccountClass;
 use App\Enums\AccountStatus;
 use App\Models\Account;
 use App\Models\User;
-use Illuminate\Database\QueryException;
 
 test('factory creates a valid account', function () {
     $account = Account::factory()->create();
@@ -56,20 +55,6 @@ test('investment state produces investment type with positive balance', function
 
     expect($account->type)->toBe(AccountClass::Investment)
         ->and($account->balance)->toBeGreaterThan(0);
-});
-
-test('basiq_account_id is nullable', function () {
-    $account = Account::factory()->create();
-
-    expect($account->basiq_account_id)->toBeNull();
-});
-
-test('basiq_account_id must be unique', function () {
-    $basiqId = 'unique-basiq-id';
-    Account::factory()->create(['basiq_account_id' => $basiqId]);
-
-    expect(fn () => Account::factory()->create(['basiq_account_id' => $basiqId]))
-        ->toThrow(QueryException::class);
 });
 
 test('account belongs to a user', function () {

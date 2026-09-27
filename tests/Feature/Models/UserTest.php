@@ -16,34 +16,12 @@ use App\Models\PipelineRun;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
-use Illuminate\Database\QueryException;
 
 test('factory creates a valid user', function () {
     $user = User::factory()->create();
 
     expect($user)->toBeInstanceOf(User::class)
         ->and($user->exists)->toBeTrue();
-});
-
-test('basiq_user_id is nullable', function () {
-    $user = User::factory()->create();
-
-    expect($user->basiq_user_id)->toBeNull();
-});
-
-test('basiq_user_id must be unique', function () {
-    $basiqId = 'unique-basiq-id';
-    User::factory()->create(['basiq_user_id' => $basiqId]);
-
-    expect(fn () => User::factory()->create(['basiq_user_id' => $basiqId]))
-        ->toThrow(QueryException::class);
-});
-
-test('withBasiq state sets basiq_user_id', function () {
-    $user = User::factory()->withBasiq()->create();
-
-    expect($user->basiq_user_id)->not->toBeNull()
-        ->and($user->basiq_user_id)->toBeString();
 });
 
 test('user has many accounts', function () {
