@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\StatementLineKind;
 use App\Enums\StatementReconciliationStatus;
 use Carbon\CarbonImmutable;
 use Database\Factories\StatementReconciliationFactory;
@@ -89,10 +90,20 @@ final class StatementReconciliation extends Model
         return $this->status === StatementReconciliationStatus::Open;
     }
 
-    /** Only an open reconciliation whose every line has been ticked off can close. */
+    /**
+     * Only an open reconciliation can close, and only once every line is ticked off and
+     * every statement-only line has been resolved (imported, linked or ignored): a
+     * statement line the feed never delivered cannot simply be acknowledged.
+     */
     public function canClose(): bool
     {
-        return $this->isOpen() && ! $this->lines()->whereNull('checked_at')->exists();
+        return $this->isOpen()
+            && ! $this->lines()
+                ->where(fn (Builder $query): Builder => $query->whereNull('checked_at')
+                    ->orWhere(fn (Builder $unresolved): Builder => $unresolved
+                        ->where('kind', StatementLineKind::StatementOnly)
+                        ->whereNull('resolution')))
+                ->exists();
     }
 
     /**
