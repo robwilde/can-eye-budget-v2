@@ -39,6 +39,14 @@ final class StatementReconciliationFactory extends Factory
         ];
     }
 
+    public function open(): self
+    {
+        return $this->state(fn (array $attributes): array => [
+            'status' => StatementReconciliationStatus::Open,
+            'closed_at' => null,
+        ]);
+    }
+
     public function closed(): self
     {
         return $this->state(fn (array $attributes): array => [

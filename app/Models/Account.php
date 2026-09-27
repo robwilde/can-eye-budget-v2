@@ -9,6 +9,8 @@ use App\Enums\AccountClass;
 use App\Enums\AccountGroup;
 use App\Enums\AccountStatus;
 use App\Enums\ImportSource;
+use App\Enums\StatementReconciliationStatus;
+use App\Support\Redbark\InitialSyncWindow;
 use Carbon\CarbonImmutable;
 use Database\Factories\AccountFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -141,6 +143,39 @@ final class Account extends Model
     public function scopeVisible(Builder $query): Builder
     {
         return $query->where('group', '!=', AccountGroup::Hidden);
+    }
+
+    /**
+     * Eager-loads the Redbark link and only last month's statement reconciliation, so a
+     * list of accounts can show its reconcile state without a query per account.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeWithLastMonthReconciliation(Builder $query): Builder
+    {
+        $periodStart = InitialSyncWindow::start(CarbonImmutable::now())->toDateString();
+
+        return $query->with([
+            'redbarkAccount',
+            'statementReconciliations' => fn ($reconciliations) => $reconciliations->whereDate('period_start', $periodStart),
+        ]);
+    }
+
+    /**
+     * Redbark-linked accounts whose statement for last month has not been reconciled and closed.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeStatementDueForLastMonth(Builder $query): Builder
+    {
+        $periodStart = InitialSyncWindow::start(CarbonImmutable::now())->toDateString();
+
+        return $query->whereHas('redbarkAccount')
+            ->whereDoesntHave('statementReconciliations', fn (Builder $reconciliations): Builder => $reconciliations
+                ->whereDate('period_start', $periodStart)
+                ->where('status', StatementReconciliationStatus::Closed));
     }
 
     public function availableBalance(): int
