@@ -24,6 +24,7 @@ use App\Models\Transaction;
 use App\Services\RedbarkClientFactory;
 use App\Services\RedbarkTransactionMatcher;
 use App\Services\TransactionIngestor;
+use App\Support\Redbark\InitialSyncWindow;
 use App\Support\RedbarkCurrency;
 use App\Support\RedbarkNarration;
 use Carbon\CarbonImmutable;
@@ -55,13 +56,11 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
     /** A settled pending row may post up to this many days after it appeared. */
     public const int PENDING_CLAIM_WINDOW_DAYS = 8;
 
-    private const int BACKFILL_DAYS = 90;
-
     private const int INCREMENTAL_LOOKBACK_DAYS = 7;
 
     public int $tries = 5;
 
-    /** A 90-day backfill across several accounts is many sequential HTTP calls. */
+    /** An initial backfill across several accounts is many sequential HTTP calls. */
     public int $timeout = 600;
 
     public int $uniqueFor = self::UNIQUE_FOR;
@@ -477,7 +476,8 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
     /**
      * A non-empty snapshot means this account has synced before, so only the last week
      * needs refetching to catch late-posting rows. Refetching the whole history every
-     * run would hit the server's row ceiling on busy accounts.
+     * run would hit the server's row ceiling on busy accounts. Otherwise the account's
+     * sync_start_date (set at link time) wins, falling back to the initial sync window.
      */
     private function transactionStartDate(RedbarkAccount $redbarkAccount): CarbonImmutable
     {
@@ -489,7 +489,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
                 ->startOfDay();
         }
 
-        return $redbarkAccount->sync_start_date ?? CarbonImmutable::now()->subDays(self::BACKFILL_DAYS);
+        return $redbarkAccount->sync_start_date ?? InitialSyncWindow::start(CarbonImmutable::now());
     }
 
     /**
