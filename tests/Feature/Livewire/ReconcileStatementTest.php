@@ -466,3 +466,14 @@ test('reopening and ticking all clear an earlier error', function () {
         ->call('tickAll', 'matched')
         ->assertSet('errorMessage', null);
 });
+
+test('each line checkbox is named after its line', function () {
+    [$user, $account] = reconcileAccount();
+    $line = reconcileLine(reconcileAugust($account), 'matched');
+    $line->update(['description' => 'WOOLWORTHS 1234']);
+
+    reconcilePage($user, $account)
+        ->assertSeeHtml('aria-label="Tick 10/08/2026 WOOLWORTHS 1234"')
+        ->call('tick', $line->id)
+        ->assertSeeHtml('aria-label="Untick 10/08/2026 WOOLWORTHS 1234"');
+});

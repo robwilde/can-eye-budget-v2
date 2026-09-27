@@ -7,6 +7,7 @@
     <flux:checkbox
         :checked="$line->isChecked()"
         :disabled="$closed || $needsResolution"
+        :aria-label="($line->isChecked() ? __('Untick') : __('Tick')) . ' ' . $line->post_date->format('d/m/Y') . ' ' . $line->description"
         wire:click="{{ $line->isChecked() ? 'untick' : 'tick' }}({{ $line->id }})"
         data-testid="reconcile-check-{{ $line->id }}"
     />
