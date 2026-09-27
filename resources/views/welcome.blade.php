@@ -275,7 +275,7 @@
                 Connect your bank in 60 seconds.
             </h3>
             <p class="mt-4 text-base leading-relaxed opacity-80">
-                We use Basiq, Australia's open banking provider, to securely sync
+                We use Redbark, an Australian CDR bank feed, to securely sync
                 your transactions through the CDR. You authorise once. We never
                 see your bank password.
             </p>
@@ -324,7 +324,7 @@
         <ul class="mt-16 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8 text-base">
             @foreach ([
                 ['Self-hosted', 'Your data, your hardware.'],
-                ['CDR-compliant', 'Australian open banking via Basiq.'],
+                ['CDR-compliant', 'Australian open banking via Redbark.'],
                 ['No upsells', 'No premium tier. No ads. Ever.'],
                 ['Open source', 'Read the code. Fork the code.'],
             ] as [$title, $body])
