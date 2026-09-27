@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Livewire\ReconcileStatement;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome')->name('home');
@@ -17,6 +18,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('rules', 'rules')->name('rules');
     // Transient page reached from the providers panel, so deliberately not in the sidebar.
     Route::view('redbark/setup', 'redbark-setup')->name('redbark.setup');
+    Route::get('accounts/{account}/reconcile', ReconcileStatement::class)->name('accounts.reconcile');
 });
 
 require __DIR__.'/settings.php';
