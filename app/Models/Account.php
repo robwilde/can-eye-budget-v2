@@ -84,6 +84,12 @@ final class Account extends Model
         return $this->hasMany(BankImport::class);
     }
 
+    /** @return HasMany<StatementReconciliation, $this> */
+    public function statementReconciliations(): HasMany
+    {
+        return $this->hasMany(StatementReconciliation::class);
+    }
+
     /** @return HasOne<RedbarkAccount, $this> */
     public function redbarkAccount(): HasOne
     {
