@@ -156,6 +156,15 @@ test('a hand-entered transaction neither matches a statement line nor shows as f
     'planned' => [TransactionSource::Planned],
 ]);
 
+test('a hand-entered row the feed adopted matches like a feed row', function () {
+    $reconciliation = stmtReconciliation([['05/01/2026', 'WOOLWORTHS 1234 SYDNEY', '-42.50']]);
+    $adopted = stmtFeedRow($reconciliation, '2026-01-05', 'WOOLWORTHS 1234 SYDNEY', -4250);
+    $adopted->update(['source' => TransactionSource::Manual, 'redbark_id' => 'rb_txn_adopted']);
+
+    expect(stmtKinds(stmtBuild($reconciliation)))->toBe(['matched'])
+        ->and(stmtLine($reconciliation, StatementLineKind::Matched)->transaction_id)->toBe($adopted->id);
+});
+
 test('a csv row imported earlier still matches', function () {
     $reconciliation = stmtReconciliation([['05/01/2026', 'WOOLWORTHS 1234 SYDNEY', '-42.50']]);
     stmtFeedRow($reconciliation, '2026-01-05', 'WOOLWORTHS 1234 SYDNEY', -4250)->update(['source' => TransactionSource::Csv]);
