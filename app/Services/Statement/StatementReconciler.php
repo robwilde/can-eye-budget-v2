@@ -23,6 +23,7 @@ use App\Services\CsvImport\ParsedTransactionDto;
 use App\Services\RedbarkTransactionMatcher;
 use App\Services\TransactionIngestor;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -82,10 +83,13 @@ final readonly class StatementReconciler
 
             $candidates = Transaction::query()
                 ->where('account_id', $reconciliation->account_id)
-                // Only rows that came from the bank count as delivered: feed rows, plus CSV
-                // rows (earlier statement imports, including lines resolved here by import).
-                // A hand-entered row must not stand in for a feed row that never arrived.
-                ->whereIn('source', [TransactionSource::Redbark, TransactionSource::Csv])
+                // Only rows that came from the bank count as delivered: feed rows, CSV rows
+                // (earlier statement imports, including lines resolved here by import), and any
+                // row the feed adopted (RedbarkTransactionMatcher sets redbark_id but keeps the
+                // original source). A hand-entered row must not stand in for a missing feed row.
+                ->where(fn (Builder $query): Builder => $query
+                    ->whereIn('source', [TransactionSource::Redbark, TransactionSource::Csv])
+                    ->orWhereNotNull('redbark_id'))
                 ->whereNull('deleted_at')
                 ->whereBetween('post_date', [
                     $periodStart->subDays(RedbarkTransactionMatcher::DATE_TOLERANCE_DAYS)->toDateString(),
