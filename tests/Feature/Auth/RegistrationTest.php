@@ -32,9 +32,18 @@ test('new users can register', function () {
     ]);
 
     $response->assertSessionHasNoErrors()
-        ->assertRedirect(route('dashboard', absolute: false));
+        ->assertRedirect(route('connect-bank', absolute: false));
 
     $this->assertAuthenticated();
+});
+
+test('registering over JSON returns 201 without a redirect', function () {
+    $this->postJson(route('register.store'), [
+        'name' => 'Jane Doe',
+        'email' => 'jane@example.com',
+        'password' => 'password',
+        'password_confirmation' => 'password',
+    ])->assertCreated();
 });
 
 test('a newly registered user is provisioned with the month-end balance rule', function () {
