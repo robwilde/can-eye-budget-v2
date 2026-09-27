@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Enums\StatementLineKind;
+use App\Exceptions\Statement\StatementFileUnreadable;
 use App\Exceptions\Statement\StatementLineAlreadyFolded;
 use App\Exceptions\Statement\StatementLineNotResolvable;
 use App\Exceptions\Statement\StatementReconciliationClosed;
@@ -18,7 +19,9 @@ use App\Services\Statement\StatementReconciler;
 use App\Support\Redbark\InitialSyncWindow;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
@@ -98,6 +101,7 @@ final class ReconcileStatement extends Component
 
     public function cancelUpload(): void
     {
+        $this->discardPendingFile();
         $this->reset(['file', 'uploading', 'headers', 'mapping', 'storedPath', 'originalFilename', 'errorMessage']);
     }
 
@@ -132,9 +136,17 @@ final class ReconcileStatement extends Component
             return;
         }
 
+        $this->discardPendingFile();
         $this->storedPath = $storedPath;
         $this->originalFilename = $file->getClientOriginalName();
-        $this->mapping = array_merge($mapper->suggest($this->headers), $this->account->column_mapping ?? []);
+
+        // A saved mapping only applies where this file still has that column; a bank that
+        // renamed a header falls back to the suggestion instead of an unparseable mapping.
+        $saved = array_filter(
+            $this->account->column_mapping ?? [],
+            fn (?string $column): bool => $column !== null && in_array($column, $this->headers, true),
+        );
+        $this->mapping = array_merge($mapper->suggest($this->headers), $saved);
     }
 
     public function reconcile(StatementReconciler $reconciler): void
@@ -147,12 +159,18 @@ final class ReconcileStatement extends Component
             return;
         }
 
+        $column = Rule::in($this->headers);
+
         $this->validate([
             'mapping' => ['required', 'array'],
-            'mapping.date' => ['required', 'string'],
-            'mapping.amount' => ['nullable', 'string', 'required_without_all:mapping.debit,mapping.credit'],
-            'mapping.debit' => ['nullable', 'string'],
-            'mapping.credit' => ['nullable', 'string'],
+            'mapping.date' => ['required', 'string', $column],
+            'mapping.description' => ['nullable', 'string', $column],
+            'mapping.amount' => ['nullable', 'string', 'required_without_all:mapping.debit,mapping.credit', $column],
+            'mapping.debit' => ['nullable', 'string', $column],
+            'mapping.credit' => ['nullable', 'string', $column],
+            'mapping.balance' => ['nullable', 'string', $column],
+        ], [
+            'mapping.*.in' => __('That column is not in this file. Pick one of its headers.'),
         ]);
 
         if (! empty($this->mapping['amount']) && (! empty($this->mapping['debit']) || ! empty($this->mapping['credit']))) {
@@ -170,35 +188,41 @@ final class ReconcileStatement extends Component
         }
 
         $periodStart = $this->periodStart();
-
-        // forPeriod matches on the date part; a plain updateOrCreate would compare the
-        // stored datetime string against a bare date and miss the existing row.
-        $reconciliation = $existing ?? new StatementReconciliation([
-            'account_id' => $this->account->id,
-            'period_start' => $periodStart,
-        ]);
         $previousPath = $existing?->stored_path;
 
-        $reconciliation->fill([
-            'user_id' => $this->account->user_id,
-            'period_end' => $periodStart->endOfMonth()->startOfDay(),
-            'original_filename' => $this->originalFilename,
-            'stored_path' => $this->storedPath,
-            'column_mapping' => $this->mapping,
-        ])->save();
+        try {
+            // Saving the new file and mapping and rebuilding the lines succeed or fail
+            // together: a statement the mapping cannot read leaves the previous build intact.
+            DB::transaction(function () use ($existing, $periodStart, $reconciler): void {
+                // forPeriod matches on the date part; a plain updateOrCreate would compare the
+                // stored datetime string against a bare date and miss the existing row.
+                $reconciliation = $existing ?? new StatementReconciliation([
+                    'account_id' => $this->account->id,
+                    'period_start' => $periodStart,
+                ]);
+
+                $reconciliation->fill([
+                    'user_id' => $this->account->user_id,
+                    'period_end' => $periodStart->endOfMonth()->startOfDay(),
+                    'original_filename' => $this->originalFilename,
+                    'stored_path' => $this->storedPath,
+                    'column_mapping' => $this->mapping,
+                ])->save();
+
+                $this->account->update(['column_mapping' => $this->mapping]);
+
+                $reconciler->build($reconciliation);
+            });
+        } catch (StatementFileUnreadable|StatementReconciliationClosed $e) {
+            $this->errorMessage = $e->getMessage();
+            $this->account->refresh();
+            unset($this->reconciliation);
+
+            return;
+        }
 
         if ($previousPath !== null && $previousPath !== $this->storedPath) {
             Storage::disk('local')->delete($previousPath);
-        }
-
-        $this->account->update(['column_mapping' => $this->mapping]);
-
-        try {
-            $reconciler->build($reconciliation);
-        } catch (StatementLineAlreadyFolded|StatementLineNotResolvable|StatementReconciliationClosed|StatementReconciliationIncomplete $e) {
-            $this->errorMessage = $e->getMessage();
-
-            return;
         }
 
         $this->reset(['file', 'uploading', 'headers', 'mapping', 'storedPath', 'originalFilename']);
@@ -419,7 +443,23 @@ final class ReconcileStatement extends Component
             return;
         }
 
+        if ($checked && $line->kind === StatementLineKind::StatementOnly && $line->resolution === null) {
+            $this->errorMessage = __('Add, link or ignore this statement line before ticking it.');
+
+            return;
+        }
+
         $line->update(['checked_at' => $checked ? now() : null]);
+    }
+
+    /** Deletes an uploaded file that never became (or no longer is) a reconciliation's file. */
+    private function discardPendingFile(): void
+    {
+        if ($this->storedPath !== null && $this->storedPath !== $this->reconciliation?->stored_path) {
+            Storage::disk('local')->delete($this->storedPath);
+        }
+
+        $this->storedPath = null;
     }
 
     /** Runs a reconciler mutation, surfacing its domain errors inline. */

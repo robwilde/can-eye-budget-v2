@@ -1,11 +1,12 @@
 @php
     $pending ??= false;
     $openTransaction ??= false;
+    $needsResolution = $line->kind === \App\Enums\StatementLineKind::StatementOnly && $line->resolution === null;
 @endphp
 <div class="flex flex-wrap items-center gap-3">
     <flux:checkbox
         :checked="$line->isChecked()"
-        :disabled="$closed"
+        :disabled="$closed || $needsResolution"
         wire:click="{{ $line->isChecked() ? 'untick' : 'tick' }}({{ $line->id }})"
         data-testid="reconcile-check-{{ $line->id }}"
     />

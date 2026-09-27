@@ -339,3 +339,97 @@ test('a line the reconciler cannot resolve surfaces an inline error', function (
         ->and($statementOnly->fresh()->kind)->toBe(StatementLineKind::StatementOnly)
         ->and($orphanFeedOnly->fresh())->not->toBeNull();
 });
+
+test('a saved mapping only applies to columns this file still has', function () {
+    [$user, $account] = reconcileAccount();
+    $account->update(['column_mapping' => ['date' => 'Entered Date', 'description' => 'Description', 'amount' => 'Amount']]);
+
+    reconcilePage($user, $account)
+        ->set('file', reconcileCsv('august.csv', "Date,Description,Amount\n05/08/2026,KMART 1111,-9.00\n"))
+        ->call('uploadFile')
+        ->assertSet('mapping.date', 'Date')
+        ->assertSet('mapping.description', 'Description');
+});
+
+test('a mapping that names a column missing from the file is rejected', function () {
+    [$user, $account] = reconcileAccount();
+
+    reconcilePage($user, $account)
+        ->set('file', reconcileCsv('august.csv', "Date,Description,Amount\n05/08/2026,KMART 1111,-9.00\n"))
+        ->call('uploadFile')
+        ->set('mapping.date', 'Entered Date')
+        ->call('reconcile')
+        ->assertHasErrors('mapping.date');
+
+    expect(StatementReconciliation::query()->count())->toBe(0);
+});
+
+test('an unreadable statement is reported and the previous build is kept', function () {
+    [$user, $account] = reconcileAccount();
+    $reconciliation = reconcileAugust($account);
+    Storage::disk('local')->put($reconciliation->stored_path, "Date,Description,Amount\n05/08/2026,KMART 1111,-9.00\n");
+    $line = reconcileLine($reconciliation, 'statementOnly');
+
+    $page = reconcilePage($user, $account)
+        ->call('startUpload')
+        ->set('file', reconcileCsv('broken.csv', "Date,Description,Amount\n05/08/2026,KMART 1111,-9.00\n06/08/2026,KMART 2222,\n"))
+        ->call('uploadFile')
+        ->call('reconcile');
+
+    expect($page->get('errorMessage'))->toContain('could not be read')
+        ->and($page->get('storedPath'))->not->toBeNull();
+
+    $reconciliation->refresh();
+
+    expect($reconciliation->original_filename)->toBe('statement.csv')
+        ->and($reconciliation->lines()->pluck('id')->all())->toBe([$line->id])
+        ->and(Storage::disk('local')->exists($reconciliation->stored_path))->toBeTrue();
+});
+
+test('an unresolved statement-only line cannot be ticked', function () {
+    [$user, $account] = reconcileAccount();
+    $reconciliation = reconcileAugust($account);
+    $unresolved = reconcileLine($reconciliation, 'statementOnly');
+    $ignored = reconcileLine($reconciliation, 'statementOnly');
+    $ignored->update(['resolution' => StatementLineResolution::Ignored, 'note' => 'Bank error']);
+
+    reconcilePage($user, $account)
+        ->call('tick', $unresolved->id)
+        ->assertSet('errorMessage', 'Add, link or ignore this statement line before ticking it.')
+        ->call('tick', $ignored->id);
+
+    expect($unresolved->fresh()->isChecked())->toBeFalse()
+        ->and($ignored->fresh()->isChecked())->toBeTrue();
+});
+
+test('cancelling an upload deletes the pending file but keeps the reconciliation file', function () {
+    [$user, $account] = reconcileAccount();
+    $reconciliation = reconcileAugust($account);
+    Storage::disk('local')->put($reconciliation->stored_path, "Date,Description,Amount\n");
+
+    $page = reconcilePage($user, $account)
+        ->call('startUpload')
+        ->set('file', reconcileCsv('august.csv', "Date,Description,Amount\n05/08/2026,KMART 1111,-9.00\n"))
+        ->call('uploadFile');
+    $pending = $page->get('storedPath');
+
+    $page->call('cancelUpload');
+
+    expect(Storage::disk('local')->exists($pending))->toBeFalse()
+        ->and(Storage::disk('local')->exists($reconciliation->stored_path))->toBeTrue();
+});
+
+test('uploading a second file before reconciling deletes the first pending file', function () {
+    [$user, $account] = reconcileAccount();
+
+    $page = reconcilePage($user, $account)
+        ->set('file', reconcileCsv('first.csv', "Date,Description,Amount\n05/08/2026,KMART 1111,-9.00\n"))
+        ->call('uploadFile');
+    $first = $page->get('storedPath');
+
+    $page->set('file', reconcileCsv('second.csv', "Date,Description,Amount\n05/08/2026,KMART 1111,-9.00\n"))
+        ->call('uploadFile');
+
+    expect(Storage::disk('local')->exists($first))->toBeFalse()
+        ->and(Storage::disk('local')->exists($page->get('storedPath')))->toBeTrue();
+});
