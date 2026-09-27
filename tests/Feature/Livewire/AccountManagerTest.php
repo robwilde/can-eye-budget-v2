@@ -9,6 +9,9 @@ use App\Enums\AccountGroup;
 use App\Enums\ImportSource;
 use App\Livewire\AccountManager;
 use App\Models\Account;
+use App\Models\RedbarkAccount;
+use App\Models\RedbarkFeed;
+use App\Models\StatementReconciliation;
 use App\Models\Transaction;
 use App\Models\User;
 use Livewire\Livewire;
@@ -388,4 +391,70 @@ test('cib: add account modal labels render as cib-label spans', function () {
     expect(mb_substr_count($html, 'class="cib-label'))->toBeGreaterThanOrEqual(5);
 
     $component->assertSeeHtml('wire:model="name"');
+});
+
+function redbarkLinkedAccount(User $user, string $name): Account
+{
+    $account = Account::factory()->for($user)->create(['name' => $name]);
+    RedbarkAccount::factory()->create([
+        'redbark_feed_id' => RedbarkFeed::factory()->create(['user_id' => $user->id])->id,
+        'account_id' => $account->id,
+    ]);
+
+    return $account;
+}
+
+test('redbark accounts link to last month\'s reconciliation, other accounts do not', function () {
+    $user = User::factory()->create();
+    $linked = redbarkLinkedAccount($user, 'Everyday');
+    $plain = Account::factory()->for($user)->create(['name' => 'Cash']);
+
+    Livewire::actingAs($user)
+        ->test(AccountManager::class)
+        ->assertSeeHtml('data-test="account-reconcile-link-'.$linked->id.'"')
+        ->assertSeeHtml(route('accounts.reconcile', $linked))
+        ->assertDontSeeHtml('data-test="account-reconcile-link-'.$plain->id.'"');
+});
+
+test('a closed reconciliation for last month shows the reconciled pill instead of the link', function (string $state, bool $closed) {
+    $this->travelTo('2026-09-27 10:00:00');
+    $user = User::factory()->create();
+    $account = redbarkLinkedAccount($user, 'Everyday');
+
+    StatementReconciliation::factory()->{$state}()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'period_start' => '2026-08-01',
+        'period_end' => '2026-08-31',
+    ]);
+
+    $page = Livewire::actingAs($user)->test(AccountManager::class);
+
+    if ($closed) {
+        $page->assertSeeHtml('data-test="account-reconciled-'.$account->id.'"')
+            ->assertDontSeeHtml('data-test="account-reconcile-link-'.$account->id.'"');
+    } else {
+        $page->assertSeeHtml('data-test="account-reconcile-link-'.$account->id.'"')
+            ->assertDontSeeHtml('data-test="account-reconciled-'.$account->id.'"');
+    }
+})->with([
+    'closed' => ['closed', true],
+    'open' => ['open', false],
+]);
+
+test('a closed reconciliation for an older month does not count as last month', function () {
+    $this->travelTo('2026-09-27 10:00:00');
+    $user = User::factory()->create();
+    $account = redbarkLinkedAccount($user, 'Everyday');
+
+    StatementReconciliation::factory()->closed()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'period_start' => '2026-07-01',
+        'period_end' => '2026-07-31',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(AccountManager::class)
+        ->assertSeeHtml('data-test="account-reconcile-link-'.$account->id.'"');
 });

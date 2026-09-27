@@ -38,6 +38,15 @@
                             <x-slot:meta>{{ $metaText }}</x-slot:meta>
                         @endif
                         <x-slot:actions>
+                            @if ($account->redbarkAccount !== null)
+                                @if ($account->statementReconciliations->contains(fn ($reconciliation) => ! $reconciliation->isOpen()))
+                                    <x-cib.stat-pill tone="income" data-test="account-reconciled-{{ $account->id }}">✓ {{ __('Reconciled') }}</x-cib.stat-pill>
+                                @else
+                                    <a href="{{ route('accounts.reconcile', $account) }}" wire:navigate
+                                       class="text-sm font-bold underline decoration-dotted"
+                                       data-test="account-reconcile-link-{{ $account->id }}">{{ __('Reconcile last month') }}</a>
+                                @endif
+                            @endif
                             <div class="hidden items-center gap-1 md:flex">
                                 <flux:button variant="ghost" size="sm" icon="pencil" wire:click="openEditModal({{ $account->id }})"/>
                                 <flux:button variant="ghost" size="sm" icon="trash" wire:click="confirmDelete({{ $account->id }})"

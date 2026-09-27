@@ -145,6 +145,7 @@ final class AccountManager extends Component
     {
         $accounts = auth()->user()
             ->accounts()
+            ->withLastMonthReconciliation()
             ->orderBy('name')
             ->get()
             ->sortBy(fn (Account $account): int => match ($account->group) {
