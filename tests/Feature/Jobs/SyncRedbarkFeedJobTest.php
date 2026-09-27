@@ -137,7 +137,7 @@ beforeEach(function () {
     Queue::fake([RunTransactionAnalysisJob::class]);
 });
 
-test('a first sync backfills 90 days', function () {
+test('a first sync without a sync_start_date pulls from the start of the previous month', function () {
     $this->travelTo('2026-08-14 09:00:00');
 
     [$feed] = linkedRedbarkFeed();
@@ -146,7 +146,7 @@ test('a first sync backfills 90 days', function () {
 
     runRedbarkSync($feed);
 
-    expect(redbarkTransactionQuery()['from'])->toBe('2026-05-16');
+    expect(redbarkTransactionQuery()['from'])->toBe('2026-07-01');
 });
 
 test('a synced account only looks back 7 days', function () {
@@ -1030,10 +1030,10 @@ test('a per-account transaction fetch failure holds back only that account', fun
 
     // Account 1 has a non-null cursor and a non-empty snapshot from the first sync, so
     // it takes the 7-day incremental window; account 2 never got a successful fetch, so
-    // it still takes the 90-day backfill. This is the actual per-account holdback
+    // it still takes the initial sync window. This is the actual per-account holdback
     // guarantee Step 2 exists for — not merely that the two windows differ.
     expect($windows['rb_acc_1'])->toBe('2026-08-07')
-        ->and($windows['rb_acc_2'])->toBe('2026-05-16');
+        ->and($windows['rb_acc_2'])->toBe('2026-07-01');
 });
 
 test('a synced redbark balance stamps the account balance source and timestamp', function () {

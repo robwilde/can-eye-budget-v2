@@ -120,6 +120,49 @@ test('an account already carrying a redbark link is refused without aborting the
     Queue::assertNothingPushed();
 });
 
+test('linking a new account sets the initial sync window', function () {
+    $this->travelTo('2026-08-14 09:00:00');
+
+    [$user, , $redbarkAccount] = wizardFixture(['sync_start_date' => null]);
+
+    Livewire::actingAs($user)
+        ->test(RedbarkAccountSetup::class)
+        ->set("choices.{$redbarkAccount->id}", 'new:transaction')
+        ->call('save')
+        ->assertRedirect(route('accounts'));
+
+    expect($redbarkAccount->fresh()->sync_start_date?->toDateString())->toBe('2026-07-01');
+});
+
+test('linking an existing account sets the initial sync window', function () {
+    $this->travelTo('2026-08-14 09:00:00');
+
+    [$user, , $redbarkAccount] = wizardFixture(['sync_start_date' => null]);
+    $existing = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(RedbarkAccountSetup::class)
+        ->set("choices.{$redbarkAccount->id}", "existing:{$existing->id}")
+        ->call('save')
+        ->assertRedirect(route('accounts'));
+
+    expect($redbarkAccount->fresh()->sync_start_date?->toDateString())->toBe('2026-07-01');
+});
+
+test('linking keeps a sync_start_date the account already has', function () {
+    $this->travelTo('2026-08-14 09:00:00');
+
+    [$user, , $redbarkAccount] = wizardFixture(['sync_start_date' => '2026-01-01']);
+
+    Livewire::actingAs($user)
+        ->test(RedbarkAccountSetup::class)
+        ->set("choices.{$redbarkAccount->id}", 'new:transaction')
+        ->call('save')
+        ->assertRedirect(route('accounts'));
+
+    expect($redbarkAccount->fresh()->sync_start_date?->toDateString())->toBe('2026-01-01');
+});
+
 test('an already linked account is not offered in the existing list', function () {
     [$user, $feed] = wizardFixture();
 

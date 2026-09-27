@@ -15,6 +15,8 @@ use App\Models\Account;
 use App\Models\RedbarkAccount;
 use App\Models\RedbarkFeed;
 use App\Models\RedbarkSyncLog;
+use App\Support\Redbark\InitialSyncWindow;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -238,7 +240,11 @@ final class RedbarkAccountSetup extends Component
 
     private function link(RedbarkAccount $redbarkAccount, Account $account): void
     {
-        $redbarkAccount->update(['account_id' => $account->id, 'ignored' => false]);
+        $redbarkAccount->update([
+            'account_id' => $account->id,
+            'ignored' => false,
+            'sync_start_date' => $redbarkAccount->sync_start_date ?? InitialSyncWindow::start(CarbonImmutable::now()),
+        ]);
         $account->update(['import_source' => ImportSource::Redbark]);
     }
 
