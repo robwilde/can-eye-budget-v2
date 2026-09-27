@@ -63,6 +63,7 @@
 
 <livewire:feedback-widget/>
 <livewire:transaction-modal/>
+<flux:toast/>
 
 @fluxScripts
 </body>
