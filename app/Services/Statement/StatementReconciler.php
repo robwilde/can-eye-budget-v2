@@ -82,6 +82,10 @@ final readonly class StatementReconciler
 
             $candidates = Transaction::query()
                 ->where('account_id', $reconciliation->account_id)
+                // Only rows that came from the bank count as delivered: feed rows, plus CSV
+                // rows (earlier statement imports, including lines resolved here by import).
+                // A hand-entered row must not stand in for a feed row that never arrived.
+                ->whereIn('source', [TransactionSource::Redbark, TransactionSource::Csv])
                 ->whereNull('deleted_at')
                 ->whereBetween('post_date', [
                     $periodStart->subDays(RedbarkTransactionMatcher::DATE_TOLERANCE_DAYS)->toDateString(),

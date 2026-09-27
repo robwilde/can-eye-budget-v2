@@ -145,6 +145,24 @@ test('the Beyond Bank fixture splits into matched, statement-only and feed-only 
         ->and($reconciliation->closing_balance)->toBe(83412);
 });
 
+test('a hand-entered transaction neither matches a statement line nor shows as feed-only', function (TransactionSource $source) {
+    $reconciliation = stmtReconciliation([['05/01/2026', 'WOOLWORTHS 1234 SYDNEY', '-42.50']]);
+    $entered = stmtFeedRow($reconciliation, '2026-01-05', 'WOOLWORTHS 1234 SYDNEY', -4250);
+    $entered->update(['source' => $source]);
+
+    expect(stmtKinds(stmtBuild($reconciliation)))->toBe(['statement_only']);
+})->with([
+    'manual' => [TransactionSource::Manual],
+    'planned' => [TransactionSource::Planned],
+]);
+
+test('a csv row imported earlier still matches', function () {
+    $reconciliation = stmtReconciliation([['05/01/2026', 'WOOLWORTHS 1234 SYDNEY', '-42.50']]);
+    stmtFeedRow($reconciliation, '2026-01-05', 'WOOLWORTHS 1234 SYDNEY', -4250)->update(['source' => TransactionSource::Csv]);
+
+    expect(stmtKinds(stmtBuild($reconciliation)))->toBe(['matched']);
+});
+
 test('an exact amount on the same day with an equal fingerprint matches', function () {
     $reconciliation = stmtReconciliation([['05/01/2026', 'WOOLWORTHS 1234 SYDNEY', '-42.50']]);
     $feed = stmtFeedRow($reconciliation, '2026-01-05', 'WOOLWORTHS 1234 SYDNEY', -4250);
