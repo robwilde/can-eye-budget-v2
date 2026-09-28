@@ -2047,3 +2047,31 @@ test('toggleSplit falls back to blank lines when the linked email has no line it
             ['category_id' => '', 'amount' => '', 'notes' => ''],
         ]);
 });
+
+test('toggleSplit caps a pre-filled note at 255 characters without splitting multibyte text', function () {
+    $user = User::factory()->create();
+    $transaction = splitTransaction($user, -2000);
+    $merchant = str_repeat('é', 300);
+    TransactionEmail::factory()->for($user)->for($transaction)->create(['details' => [
+        'items' => [
+            ['merchant' => $merchant, 'reference' => '1', 'installment' => '1 of 4', 'amount' => 1000],
+            ['merchant' => 'Petbarn', 'reference' => '2', 'installment' => '1 of 4', 'amount' => 1000],
+        ],
+    ]]);
+    $a = Category::factory()->create();
+    $b = Category::factory()->create();
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('toggleSplit', $transaction->id);
+
+    expect($component->get('splitLines.0.notes'))->toBe(str_repeat('é', 255));
+
+    $component
+        ->set('splitLines.0.category_id', (string) $a->id)
+        ->set('splitLines.1.category_id', (string) $b->id)
+        ->call('saveSplit')
+        ->assertSet('splitError', null);
+
+    expect($transaction->fresh()->splits()->count())->toBe(2);
+});
