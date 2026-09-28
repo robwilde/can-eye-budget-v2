@@ -133,6 +133,28 @@ it('merges brand rows that collapse onto one key, keeping the strongest status',
     'vetoed beats unresolved' => ['VISA PATREON MEMBERSHIP INTERNET IE', 'vetoed', 'PATREON MEMBERSHIP INTERNET IE FRGN', 'unresolved', MerchantBrandStatus::Vetoed],
 ]);
 
+// Each case is built so the rules below the one under test would pick the other
+// row: the older, lower-id row wins every tie the tested rule does not settle.
+it('breaks a tie within one status by completeness, then recency, then age', function (array $first, array $second, string $expected) {
+    $this->freezeSecond();
+    $user = User::factory()->create();
+    $rows = [
+        'first' => MerchantBrand::factory()->for($user)->create(['merchant_key' => 'VISA NETFLIX.COM', 'partial' => $first[0], 'updated_at' => now()->subMinutes($first[1])]),
+        'second' => MerchantBrand::factory()->for($user)->create(['merchant_key' => 'NETFLIX.COM', 'partial' => $second[0], 'updated_at' => now()->subMinutes($second[1])]),
+    ];
+
+    $this->artisan('app:backfill-merchant-keys --recompute')->assertSuccessful();
+
+    $survivor = MerchantBrand::query()->where('user_id', $user->id)->sole();
+
+    expect($survivor->id)->toBe($rows[$expected]->id)
+        ->and($survivor->merchant_key)->toBe('NETFLIX.COM');
+})->with([
+    'complete profile beats a newer partial one' => [[true, 0], [false, 60], 'second'],
+    'newer beats older' => [[false, 60], [false, 0], 'second'],
+    'full tie keeps the older row' => [[false, 0], [false, 0], 'first'],
+]);
+
 it('never merges brand rows across users or touches the unknown bucket', function () {
     $alice = User::factory()->create();
     $bob = User::factory()->create();

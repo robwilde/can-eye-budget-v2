@@ -95,13 +95,18 @@ final class BackfillMerchantKeysCommand extends Command
         $userIds = MerchantBrand::query()->distinct()->orderBy('user_id')->pluck('user_id');
 
         foreach ($userIds as $userId) {
-            $groups = MerchantBrand::query()
-                ->where('user_id', $userId)
-                ->where('merchant_key', '!=', Transaction::UNKNOWN_MERCHANT_KEY)
-                ->get()
-                ->groupBy(fn (MerchantBrand $brand): string => MerchantSignature::for($brand->merchant_key));
+            DB::transaction(function () use ($userId, $dryRun, &$rekeyed, &$merged): void {
+                // Read and merge under one lock. The locking read on the
+                // (user_id, merchant_key) index also holds off a concurrent veto or
+                // lookup inserting a key for this user until the merge commits, so
+                // neither can claim a target key or resurrect a loser mid-merge.
+                $groups = MerchantBrand::query()
+                    ->where('user_id', $userId)
+                    ->where('merchant_key', '!=', Transaction::UNKNOWN_MERCHANT_KEY)
+                    ->lockForUpdate()
+                    ->get()
+                    ->groupBy(fn (MerchantBrand $brand): string => MerchantSignature::for($brand->merchant_key));
 
-            DB::transaction(function () use ($groups, $dryRun, &$rekeyed, &$merged): void {
                 foreach ($groups as $key => $brands) {
                     $key = (string) $key;
                     $winner = $this->survivor($brands);
