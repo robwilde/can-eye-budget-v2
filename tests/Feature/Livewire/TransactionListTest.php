@@ -1906,3 +1906,144 @@ test('scanEmail renders PayPal plan payment details', function () {
 
     expect($email->details)->toBe($details);
 });
+
+/**
+ * @return array<string, mixed>
+ */
+function twoItemReceipt(): array
+{
+    return [
+        'total' => 5599,
+        'date' => 'Fri, 3 July 2026',
+        'method' => 'Visa',
+        'last4' => '8357',
+        'items' => [
+            ['merchant' => 'Petbarn', 'reference' => '900438021', 'installment' => '4 of 4', 'amount' => 2124],
+            ['merchant' => 'Addicted To Audio', 'reference' => '917982502', 'installment' => '2 of 4', 'amount' => 3475],
+        ],
+    ];
+}
+
+/**
+ * @return list<array{category_id: string, amount: string, notes: string}>
+ */
+function twoItemReceiptLines(): array
+{
+    return [
+        ['category_id' => '', 'amount' => '21.24', 'notes' => 'Petbarn (4 of 4)'],
+        ['category_id' => '', 'amount' => '34.75', 'notes' => 'Addicted To Audio (2 of 4)'],
+    ];
+}
+
+test('toggleSplit pre-fills lines from a linked receipt email', function () {
+    $user = User::factory()->create();
+    $transaction = splitTransaction($user, -5599);
+    TransactionEmail::factory()->for($user)->for($transaction)->create(['details' => twoItemReceipt()]);
+    $a = Category::factory()->create();
+    $b = Category::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('toggleSplit', $transaction->id)
+        ->assertSet('splitLines', twoItemReceiptLines())
+        ->set('splitLines.0.category_id', (string) $a->id)
+        ->set('splitLines.1.category_id', (string) $b->id)
+        ->call('saveSplit')
+        ->assertSet('splitError', null);
+
+    expect($transaction->fresh()->splitRemainder())->toBe(0);
+});
+
+test('toggleSplit pre-fills lines from an open search result before it is linked', function () {
+    $user = User::factory()->create();
+    $transaction = splitTransaction($user, -5599);
+    $details = twoItemReceipt();
+
+    $this->mock(GmailServiceContract::class, function ($mock) use ($details): void {
+        $mock->shouldReceive('isConfigured')->andReturn(true);
+        $mock->shouldReceive('searchForTransaction')->andReturn(collect([
+            new EmailSearchResult(
+                messageId: 'receipt@mail.gmail.com',
+                subject: 'Your Afterpay payment',
+                fromName: 'Afterpay',
+                fromAddress: 'no-reply@afterpay.com',
+                date: '2026-06-13T10:00:00+10:00',
+                snippet: 'Hi Robert Wilde',
+                gmailUrl: 'https://mail.google.com/mail/u/0/#search/rfc822msgid:receipt',
+                details: $details,
+            ),
+        ]));
+    });
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('scanEmail', $transaction->id)
+        ->call('toggleSplit', $transaction->id)
+        ->assertSet('splitLines', twoItemReceiptLines());
+});
+
+test('toggleSplit prefers the receipt whose items add up to the transaction amount', function () {
+    $user = User::factory()->create();
+    $transaction = splitTransaction($user, -3475);
+    TransactionEmail::factory()->for($user)->for($transaction)->create(['details' => twoItemReceipt()]);
+    TransactionEmail::factory()->for($user)->for($transaction)->create(['details' => [
+        'total' => 3475,
+        'items' => [
+            ['merchant' => 'Addicted To Audio', 'reference' => '917982502', 'installment' => '2 of 4', 'amount' => 3475],
+        ],
+    ]]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('toggleSplit', $transaction->id)
+        ->assertSet('splitLines', [
+            ['category_id' => '', 'amount' => '34.75', 'notes' => 'Addicted To Audio (2 of 4)'],
+            ['category_id' => '', 'amount' => '', 'notes' => ''],
+        ]);
+});
+
+test('toggleSplit keeps saved splits ahead of a linked receipt', function () {
+    $user = User::factory()->create();
+    $transaction = splitTransaction($user, -5599);
+    $groceries = Category::factory()->create();
+    $fuel = Category::factory()->create();
+    $transaction->splits()->createMany([
+        ['category_id' => $groceries->id, 'amount' => -4000, 'notes' => 'food', 'position' => 0],
+        ['category_id' => $fuel->id, 'amount' => -1599, 'notes' => 'fuel', 'position' => 1],
+    ]);
+    TransactionEmail::factory()->for($user)->for($transaction)->create(['details' => twoItemReceipt()]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('toggleSplit', $transaction->id)
+        ->assertSet('splitLines', [
+            ['category_id' => (string) $groceries->id, 'amount' => '40.00', 'notes' => 'food'],
+            ['category_id' => (string) $fuel->id, 'amount' => '15.99', 'notes' => 'fuel'],
+        ]);
+});
+
+test('toggleSplit falls back to blank lines when the linked email has no line items', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->create();
+    $transaction = splitTransaction($user, -1601);
+    $transaction->update(['category_id' => $category->id]);
+    TransactionEmail::factory()->for($user)->for($transaction)->create(['details' => [
+        'total' => 1601,
+        'date' => '25 September 2025',
+        'method' => 'BEYOND BANK AUSTRALIA LIMITED Credit Card',
+        'last4' => '8357',
+        'items' => [],
+        'type' => 'Plan payment',
+        'seller' => 'ONLINE STORE',
+        'balance' => 0,
+        'loanReference' => 'eacfa072-30dc-40eb-a93d-acc70b06d4d2',
+    ]]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('toggleSplit', $transaction->id)
+        ->assertSet('splitLines', [
+            ['category_id' => (string) $category->id, 'amount' => '', 'notes' => ''],
+            ['category_id' => '', 'amount' => '', 'notes' => ''],
+        ]);
+});
