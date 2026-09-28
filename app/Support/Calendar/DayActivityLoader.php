@@ -135,7 +135,7 @@ final readonly class DayActivityLoader
 
                 if ($tx->isSplit()) {
                     foreach ($tx->splits as $split) {
-                        $splitName = $split->category?->name ?? ($tx->description !== '' ? $tx->description : 'Transaction'); // @phpstan-ignore nullsafe.neverNull
+                        $splitName = $split->category?->name ?? self::transactionLabel($tx) ?? ($tx->description !== '' ? $tx->description : 'Transaction'); // @phpstan-ignore nullsafe.neverNull
                         $pips[] = new PayCyclePip(
                             kind: $isCredit ? 'inc' : 'out',
                             name: $splitName,
@@ -153,10 +153,10 @@ final readonly class DayActivityLoader
                 }
 
                 if ($linkedPlan !== null) {
-                    $name = $linkedPlan->category?->name ?? $linkedPlan->description; // @phpstan-ignore nullsafe.neverNull
+                    $name = self::transactionLabel($tx) ?? $linkedPlan->category?->name ?? $linkedPlan->description; // @phpstan-ignore nullsafe.neverNull
                     $icon = $linkedPlan->category?->resolveIcon();
                 } else {
-                    $name = $tx->category?->name ?? ($tx->description !== '' ? $tx->description : 'Transaction'); // @phpstan-ignore nullsafe.neverNull
+                    $name = self::transactionLabel($tx) ?? $tx->category?->name ?? ($tx->description !== '' ? $tx->description : 'Transaction'); // @phpstan-ignore nullsafe.neverNull
                     $icon = $tx->category?->resolveIcon();
                 }
 
@@ -192,6 +192,17 @@ final readonly class DayActivityLoader
         }
 
         return $activity;
+    }
+
+    /**
+     * Extract the clean description from a transaction, if present and non-empty.
+     * Returns trimmed clean_description when non-empty, otherwise null.
+     */
+    private static function transactionLabel(Transaction $tx): ?string
+    {
+        $clean = mb_trim($tx->clean_description ?? '');
+
+        return $clean !== '' ? $clean : null;
     }
 
     /**
