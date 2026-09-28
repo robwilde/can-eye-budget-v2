@@ -253,6 +253,22 @@ test('the auto-apply switch shows the rule\'s current state', function () {
 
 // ─── Run / Apply ──────────────────────────────────────────
 
+test('run button is disabled when the only active rule sits in an inactive group', function () {
+    $inactiveGroup = UserRuleGroup::factory()->for($this->user)->create(['is_active' => false]);
+    UserRule::factory()->for($this->user)->for($inactiveGroup, 'group')->create();
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->assertViewHas('hasActiveRules', false);
+
+    $activeGroup = UserRuleGroup::factory()->for($this->user)->create(['is_active' => true]);
+    UserRule::factory()->for($this->user)->for($activeGroup, 'group')->create();
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->assertViewHas('hasActiveRules', true);
+});
+
 test('runRules queues the analysis job with the manual trigger', function () {
     Queue::fake();
 

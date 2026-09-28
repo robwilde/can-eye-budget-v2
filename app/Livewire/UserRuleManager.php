@@ -18,6 +18,7 @@ use App\Services\UserRuleApplier;
 use Closure;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\Rule;
 use Livewire\Component;
 
@@ -479,7 +480,8 @@ final class UserRuleManager extends Component
     {
         return view('livewire.user-rule-manager', [
             'hasActiveRules' => UserRule::where('user_id', auth()->id())
-                ->where('is_active', true)
+                ->active()
+                ->whereHas('group', fn (Builder $q) => $q->where('is_active', true))
                 ->exists(),
             'groups' => UserRuleGroup::where('user_id', auth()->id())
                 ->ordered()
