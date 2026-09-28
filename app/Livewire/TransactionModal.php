@@ -971,6 +971,8 @@ final class TransactionModal extends Component
             'transfer_to_account_id' => null,
             'amount' => abs($transaction->amount),
             'direction' => $transaction->direction,
+            'account_id' => $transaction->account_id,
+            'description' => filled($transaction->clean_description) ? $transaction->clean_description : $transaction->description,
         ]);
 
         $this->applyCategoriseMatching($transaction);

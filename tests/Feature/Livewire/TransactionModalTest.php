@@ -3029,6 +3029,40 @@ test('planning from a redbark row without a clean description uses the bank desc
         ->and($transaction->fresh()->planned_transaction_id)->toBeNull();
 });
 
+test('planning from a redbark row ignores tampered description and account', function (?string $cleanDescription, string $expected) {
+    $this->travelTo(CarbonImmutable::parse('2026-06-15'));
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $otherAccount = Account::factory()->for($user)->create();
+
+    $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
+        'amount' => 3000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'NETFLIX.COM SYDNEY',
+        'clean_description' => $cleanDescription,
+        'post_date' => '2026-04-20',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('mode', 'plan')
+        ->set('descriptionInput', '30.00 Tampered')
+        ->set('accountId', $otherAccount->id)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $planned = PlannedTransaction::query()->where('user_id', $user->id)->sole();
+
+    expect($planned->account_id)->toBe($account->id)
+        ->and($planned->description)->toBe($expected);
+})->with([
+    'clean description' => ['Netflix', 'Netflix'],
+    'no clean description' => [null, 'NETFLIX.COM SYDNEY'],
+    'empty clean description' => ['', 'NETFLIX.COM SYDNEY'],
+]);
+
 test('a new plan must start after today', function (string $date, bool $valid) {
     $this->travelTo(CarbonImmutable::parse('2026-06-15 10:00'));
 
