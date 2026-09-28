@@ -21,7 +21,10 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Artisan::call('app:backfill-merchant-keys', ['--recompute' => true]);
+        // A failed recompute must fail the deploy, not be recorded as migrated.
+        if (Artisan::call('app:backfill-merchant-keys', ['--recompute' => true]) !== 0) {
+            throw new RuntimeException('app:backfill-merchant-keys --recompute failed: '.Artisan::output());
+        }
     }
 
     /**
