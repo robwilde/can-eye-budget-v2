@@ -241,9 +241,11 @@ final class TransactionModal extends Component
     }
 
     /**
-     * Switching an existing transaction to plan mode defaults the start date to
-     * the first occurrence after today. Switching back to enter restores the
-     * row's date, so saving the entered row never moves its post date.
+     * Switching an existing transaction to plan mode prefills a new plan from
+     * the row: a bank-feed row's description comes from its clean description
+     * (falling back to the bank's), and the start date defaults to the first
+     * occurrence after today. Switching back to enter restores the fields the
+     * prefill overwrote, so saving the entered row never moves its post date.
      */
     public function updatedMode(): void
     {
@@ -259,10 +261,21 @@ final class TransactionModal extends Component
             return;
         }
 
+        $dollars = number_format(abs($transaction->amount) / 100, 2, '.', '');
+
         if ($this->mode !== 'plan') {
+            $description = $transaction->description ?? '';
+            if ($this->isBankFeedTransaction) {
+                $this->descriptionInput = $description !== '' ? "{$dollars} {$description}" : $dollars;
+            }
             $this->date = $transaction->post_date->format('Y-m-d');
 
             return;
+        }
+
+        if ($this->isBankFeedTransaction) {
+            $description = $this->cleanDescription !== '' ? $this->cleanDescription : ($transaction->description ?? '');
+            $this->descriptionInput = $description !== '' ? "{$dollars} {$description}" : $dollars;
         }
 
         $this->date = $this->nextPlanStartDate($transaction->post_date->toImmutable());
@@ -401,8 +414,10 @@ final class TransactionModal extends Component
      */
     private function resolveSave(): bool
     {
-        if ($this->editingTransactionId && $this->mode === 'plan' && ! $this->isBankFeedTransaction) {
-            return $this->convertEnteredToPlanned();
+        if ($this->editingTransactionId && $this->mode === 'plan') {
+            return $this->isBankFeedTransaction
+                ? $this->planFromBankFeedRow()
+                : $this->convertEnteredToPlanned();
         }
 
         if ($this->editingPlannedTransactionId && $this->mode === 'enter') {
@@ -935,6 +950,32 @@ final class TransactionModal extends Component
             'until_date' => $this->untilType === 'until-date' ? $this->untilDate : null,
             'is_active' => true,
         ];
+    }
+
+    /**
+     * Plan a new recurring transaction from a bank-feed row. The bank-feed row
+     * is never modified: no child version and no plan link is recorded on it.
+     */
+    private function planFromBankFeedRow(): bool
+    {
+        $resolved = $this->resolveTransactionWithParsedAmount();
+
+        if ($resolved === false) {
+            return false;
+        }
+
+        [$transaction, $parsed] = $resolved;
+
+        PlannedTransaction::query()->create([
+            ...$this->buildPlannedTransactionData($parsed),
+            'transfer_to_account_id' => null,
+            'amount' => abs($transaction->amount),
+            'direction' => $transaction->direction,
+        ]);
+
+        $this->applyCategoriseMatching($transaction);
+
+        return true;
     }
 
     /** The transaction being edited when it is being switched into a new plan. */

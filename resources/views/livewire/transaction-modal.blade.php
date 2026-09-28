@@ -74,23 +74,21 @@
                 </flux:heading>
             @endif
 
-            {{-- Enter vs Plan toggle (manual only) --}}
-            @if(!$isBankFeedTransaction)
-                <div class="type-toggle" role="group" aria-label="{{ __('Enter vs Plan') }}">
-                    <button type="button"
-                            aria-pressed="{{ $mode === 'enter' ? 'true' : 'false' }}"
-                            class="{{ $mode === 'enter' ? 'active' : '' }}"
-                            wire:click="$set('mode', 'enter')">
-                        {{ __('Enter') }}
-                    </button>
-                    <button type="button"
-                            aria-pressed="{{ $mode === 'plan' ? 'true' : 'false' }}"
-                            class="{{ $mode === 'plan' ? 'active' : '' }}"
-                            wire:click="$set('mode', 'plan')">
-                        {{ __('Plan') }}
-                    </button>
-                </div>
-            @endif
+            {{-- Enter vs Plan toggle --}}
+            <div class="type-toggle" role="group" aria-label="{{ __('Enter vs Plan') }}">
+                <button type="button"
+                        aria-pressed="{{ $mode === 'enter' ? 'true' : 'false' }}"
+                        class="{{ $mode === 'enter' ? 'active' : '' }}"
+                        wire:click="$set('mode', 'enter')">
+                    {{ __('Enter') }}
+                </button>
+                <button type="button"
+                        aria-pressed="{{ $mode === 'plan' ? 'true' : 'false' }}"
+                        class="{{ $mode === 'plan' ? 'active' : '' }}"
+                        wire:click="$set('mode', 'plan')">
+                    {{ __('Plan') }}
+                </button>
+            </div>
 
             {{-- Description / amount-with-description input --}}
             @if($transactionType === 'transfer')
@@ -199,7 +197,6 @@
                     :label="__('Date')"
                     type="date"
                     required
-                    :disabled="$isBankFeedTransaction"
                 />
 
                 <flux:select wire:model.live="frequency" :label="__('Frequency')" required>
@@ -292,7 +289,7 @@
                     variant="primary"
                     class="bg-cib-yellow-400! text-cib-black! border-2! border-cib-black! shadow-pop!"
                 >
-                    @if($editingTransactionId && $mode === 'plan')
+                    @if($editingTransactionId && $mode === 'plan' && !$isBankFeedTransaction)
                         @if($transactionType === 'transfer')
                             {{ __('Convert to planned transfer') }}
                         @elseif($transactionType === 'expense')
@@ -324,7 +321,7 @@
                         @else
                             {{ __('Update planned income') }}
                         @endif
-                    @elseif($editingTransactionId)
+                    @elseif($editingTransactionId && $mode !== 'plan')
                         @if($transactionType === 'transfer')
                             {{ __('Update transfer') }}
                         @elseif($transactionType === 'expense')

@@ -1153,7 +1153,7 @@ test('plan toggle visible when editing planned transaction', function () {
         ->assertSee(__('Enter vs Plan'));
 });
 
-test('plan toggle hidden when editing redbark transaction', function () {
+test('plan toggle visible when editing redbark transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create();
@@ -1161,7 +1161,7 @@ test('plan toggle hidden when editing redbark transaction', function () {
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('edit-transaction', id: $transaction->id)
-        ->assertDontSee(__('Enter vs Plan'));
+        ->assertSee(__('Enter vs Plan'));
 });
 
 test('switching a manual row back from plan to enter restores its date and saving keeps the post date', function () {
@@ -2949,7 +2949,9 @@ test('converting planned transfer to entered preserves notes', function () {
         ->and($credit->notes)->toBe('monthly savings note');
 });
 
-test('redbark transaction cannot convert to plan mode', function () {
+test('planning from a redbark row prefills from the row and creates a new plan without touching the row', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-06-15'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
@@ -2957,25 +2959,74 @@ test('redbark transaction cannot convert to plan mode', function () {
     $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'amount' => 3000,
         'direction' => TransactionDirection::Debit,
+        'description' => 'NETFLIX.COM SYDNEY',
+        'clean_description' => 'Netflix',
+        'category_id' => $category->id,
+        'post_date' => '2026-04-20',
+    ]);
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('mode', 'plan')
+        ->assertSet('descriptionInput', '30.00 Netflix')
+        ->assertSet('date', '2026-06-20')
+        ->assertSee(__('Plan expense'))
+        ->assertDontSee(__('Convert to planned expense'));
+
+    $component->set('frequency', RecurrenceFrequency::EveryWeek->value)
+        ->assertSet('date', '2026-06-22');
+
+    $component->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false)
+        ->assertDispatched('transaction-saved');
+
+    $planned = PlannedTransaction::query()->where('user_id', $user->id)->sole();
+
+    expect($planned->amount)->toBe(3000)
+        ->and($planned->direction)->toBe(TransactionDirection::Debit)
+        ->and($planned->account_id)->toBe($account->id)
+        ->and($planned->category_id)->toBe($category->id)
+        ->and($planned->description)->toBe('Netflix')
+        ->and($planned->start_date->format('Y-m-d'))->toBe('2026-06-20')
+        ->and($planned->frequency)->toBe(RecurrenceFrequency::EveryMonth)
+        ->and($transaction->fresh()->planned_transaction_id)->toBeNull()
+        ->and(Transaction::query()->where('parent_transaction_id', $transaction->id)->exists())->toBeFalse();
+});
+
+test('planning from a redbark row without a clean description uses the bank description', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-06-15'));
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
+        'amount' => 12550,
+        'direction' => TransactionDirection::Credit,
+        'description' => 'SALARY ACME',
+        'clean_description' => null,
+        'post_date' => '2026-06-15',
     ]);
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('edit-transaction', id: $transaction->id)
         ->set('mode', 'plan')
-        ->set('categoryId', $category->id)
+        ->assertSet('descriptionInput', '125.50 SALARY ACME')
+        ->assertSet('date', '2026-07-15')
+        ->set('frequency', RecurrenceFrequency::DontRepeat->value)
+        ->assertSet('date', '2026-06-16')
         ->call('save')
-        ->assertSet('showModal', false)
-        ->assertDispatched('transaction-saved');
+        ->assertHasNoErrors();
 
-    expect(PlannedTransaction::query()->where('user_id', $user->id)->count())->toBe(0);
+    $planned = PlannedTransaction::query()->where('user_id', $user->id)->sole();
 
-    $child = Transaction::query()
-        ->where('parent_transaction_id', $transaction->id)
-        ->first();
-
-    expect($child)->not->toBeNull()
-        ->category_id->toBe($category->id);
+    expect($planned->direction)->toBe(TransactionDirection::Credit)
+        ->and($planned->amount)->toBe(12550)
+        ->and($planned->description)->toBe('SALARY ACME')
+        ->and($transaction->fresh()->planned_transaction_id)->toBeNull();
 });
 
 test('a new plan must start after today', function (string $date, bool $valid) {
