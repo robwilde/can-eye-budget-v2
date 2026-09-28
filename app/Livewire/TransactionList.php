@@ -996,7 +996,7 @@ final class TransactionList extends Component
 
         $transaction = Transaction::query()
             ->where('user_id', auth()->id())
-            ->with('splits')
+            ->with(['splits', 'emails'])
             ->findOrFail($transactionId);
 
         if ($transaction->transfer_pair_id !== null) {
@@ -1014,6 +1014,14 @@ final class TransactionList extends Component
                     'notes' => $split->notes ?? '',
                 ])
                 ->all();
+
+            return;
+        }
+
+        $lines = $this->receiptSplitLines($transaction);
+
+        if ($lines !== []) {
+            $this->splitLines = $lines;
 
             return;
         }
@@ -1339,6 +1347,106 @@ final class TransactionList extends Component
             'identifiableKeys' => $identifiableKeys,
             'creditSummary' => $this->creditSummary(),
         ]);
+    }
+
+    /**
+     * Normalises a receipt's line items into split lines, returning the lines
+     * and the sum of the cents they represent.
+     *
+     * @param  array<string, mixed>  $details
+     * @return array{0: list<array{category_id: string, amount: string, notes: string}>, 1: int}
+     */
+    private static function receiptLines(array $details): array
+    {
+        $items = is_array($details['items'] ?? null) ? $details['items'] : [];
+        $lines = [];
+        $cents = 0;
+
+        foreach ($items as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $merchant = $item['merchant'] ?? null;
+            $amount = $item['amount'] ?? null;
+
+            if (! is_string($merchant) || mb_trim($merchant) === '' || ! is_numeric($amount) || (int) $amount <= 0) {
+                continue;
+            }
+
+            $merchant = mb_trim($merchant);
+            $installment = is_string($item['installment'] ?? null) ? mb_trim($item['installment']) : '';
+            $notes = $installment === '' ? $merchant : "{$merchant} ({$installment})";
+
+            $lines[] = [
+                'category_id' => '',
+                'amount' => number_format((int) $amount / 100, 2, '.', ''),
+                'notes' => mb_substr($notes, 0, 255),
+            ];
+            $cents += (int) $amount;
+        }
+
+        return [$lines, $cents];
+    }
+
+    /**
+     * Seeds split lines from the first receipt attached to the transaction that
+     * carries line items: linked emails first, then the search results currently
+     * open for this row. A receipt whose items sum to the transaction amount wins
+     * over one that does not. Categories are left blank for the user.
+     *
+     * @return list<array{category_id: string, amount: string, notes: string}>
+     */
+    private function receiptSplitLines(Transaction $transaction): array
+    {
+        /** @var list<array<string, mixed>> $candidates */
+        $candidates = [];
+
+        foreach ($transaction->emails as $email) {
+            if (is_array($email->details)) {
+                $candidates[] = $email->details;
+            }
+        }
+
+        if ($this->emailPanelTxnId === $transaction->id) {
+            foreach ($this->emailResults as $result) {
+                if (is_array($result['details'] ?? null)) {
+                    $candidates[] = $result['details'];
+                }
+            }
+        }
+
+        $target = abs((int) $transaction->amount);
+        $fallback = null;
+        $chosen = null;
+
+        foreach ($candidates as $details) {
+            [$lines, $cents] = self::receiptLines($details);
+
+            if ($lines === []) {
+                continue;
+            }
+
+            if ($cents === $target) {
+                $chosen = $lines;
+
+                break;
+            }
+
+            $fallback ??= $lines;
+        }
+
+        $chosen ??= $fallback;
+
+        if ($chosen === null) {
+            return [];
+        }
+
+        if (count($chosen) === 1) {
+            $chosen[] = ['category_id' => '', 'amount' => '', 'notes' => ''];
+        }
+
+        return $chosen;
     }
 
     /**
