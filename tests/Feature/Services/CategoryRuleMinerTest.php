@@ -278,6 +278,26 @@ it('narrows by an amount threshold at the midpoint of the gap when only amounts 
     expect($candidate['extra_triggers'])->toBe([['field' => 'amount', 'operator' => 'less_than_or_equal', 'value' => '45275']]);
 });
 
+it('floors the amount midpoint so a signed negative gap still excludes the contradicting row', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $coffee = Category::factory()->create(['name' => 'Groceries']);
+    $equipment = Category::factory()->create(['name' => 'Shopping']);
+
+    minerTransaction($user, $account, 'ACME COFFEE  BRISBANE', $coffee->id)->update(['amount' => -150]);
+    minerTransaction($user, $account, 'ACME COFFEE  SYDNEY', $coffee->id)->update(['amount' => -101]);
+    $contradicting = minerTransaction($user, $account, 'ACME COFFEE MACHINES  SYDNEY', $equipment->id);
+    $contradicting->update(['amount' => -100]);
+
+    $candidate = collect(app(CategoryRuleMiner::class)->mine($user)['candidates'])->firstWhere('value', 'ACME COFFEE');
+
+    expect($candidate['extra_triggers'])->toBe([['field' => 'amount', 'operator' => 'less_than_or_equal', 'value' => '-101']])
+        ->and(app(RuleEvaluator::class)->matches($contradicting->fresh(), new UserRule([
+            'triggers' => app(CategoryRuleMiner::class)->triggersFor($candidate),
+            'strict_mode' => true,
+        ])))->toBeFalse();
+});
+
 it('does not create a seed rule that contradicts a manual categorisation', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();

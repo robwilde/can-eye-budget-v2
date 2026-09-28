@@ -313,13 +313,13 @@ final class CategoryRuleMiner
 
         // Kept rows all below the contradicting ones: cut at the gap's midpoint.
         if (max($keptAmounts) < min($contraAmounts)) {
-            $threshold = intdiv(max($keptAmounts) + min($contraAmounts), 2);
+            $threshold = (int) floor((max($keptAmounts) + min($contraAmounts)) / 2);
 
             return ['field' => RuleTriggerField::Amount->value, 'operator' => RuleTriggerOperator::LessThanOrEqual->value, 'value' => (string) $threshold];
         }
 
         if (min($keptAmounts) > max($contraAmounts)) {
-            $threshold = intdiv(max($contraAmounts) + min($keptAmounts) + 1, 2);
+            $threshold = (int) floor((max($contraAmounts) + min($keptAmounts) + 1) / 2);
 
             return ['field' => RuleTriggerField::Amount->value, 'operator' => RuleTriggerOperator::GreaterThanOrEqual->value, 'value' => (string) $threshold];
         }
