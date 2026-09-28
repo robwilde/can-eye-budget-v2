@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\CategorySource;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\Category;
@@ -13,6 +14,7 @@ use App\Models\UserRule;
 use App\Models\UserRuleGroup;
 use App\Services\CategoryRuleMiner;
 use App\Services\CategorySeedRules;
+use App\Services\RuleEvaluator;
 
 /**
  * Descriptions use a double-space separator so MerchantMatchValue::for() keys the
@@ -184,4 +186,117 @@ it('reports curated seeds whose category path does not exist here as skipped', f
         ->and($result['skippedSeeds'])->toContain('PRIMEVIDEO → Entertainment / Streaming')
         ->and($result['skippedSeeds'])->toHaveCount(CategorySeedRules::count())
         ->and($result['candidates'])->toBe([]);
+});
+
+it('rejects a candidate whose substring also matches a manual row filed elsewhere that no single trigger separates', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $coffee = Category::factory()->create(['name' => 'Groceries']);
+    $cafe = Category::factory()->create(['name' => 'Dining']);
+
+    // Same direction, same account, and the cafe amount sits between the
+    // coffee amounts: nothing but the description tells them apart.
+    foreach ([500, 2000] as $amount) {
+        minerTransaction($user, $account, 'ACME COFFEE  BRISBANE', $coffee->id)->update(['amount' => $amount]);
+    }
+    minerTransaction($user, $account, 'ACME COFFEE HOUSE CAFE  SYDNEY', $cafe->id)->update(['amount' => 1000]);
+
+    $result = app(CategoryRuleMiner::class)->mine($user);
+
+    $contradiction = collect($result['contradictions'])->firstWhere('value', 'ACME COFFEE');
+
+    expect(array_column($result['candidates'], 'value'))->not->toContain('ACME COFFEE')
+        ->and($contradiction)->not->toBeNull()
+        ->and($contradiction['category_id'])->toBe($coffee->id)
+        ->and($contradiction['source'])->toBe('mined')
+        ->and($contradiction['contradicting'])->toBe(1)
+        ->and($contradiction['contradicting_categories'])->toBe([$cafe->fullPath() => 1]);
+});
+
+it('narrows a contradicted candidate by direction when that separates the manual rows exactly', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $coffee = Category::factory()->create(['name' => 'Groceries']);
+    $refunds = Category::factory()->create(['name' => 'Shopping']);
+
+    $purchase = minerTransaction($user, $account, 'ACME COFFEE  BRISBANE', $coffee->id);
+    $refund = minerTransaction($user, $account, 'ACME COFFEE REFUND  BRISBANE', $refunds->id);
+    $refund->update(['direction' => TransactionDirection::Credit]);
+
+    $miner = app(CategoryRuleMiner::class);
+    $result = $miner->mine($user);
+
+    $candidate = collect($result['candidates'])->firstWhere('value', 'ACME COFFEE');
+
+    expect($candidate)->not->toBeNull()
+        ->and($candidate['extra_triggers'])->toBe([['field' => 'direction', 'operator' => 'is', 'value' => 'debit']])
+        ->and(array_column($result['contradictions'], 'value'))->not->toContain('ACME COFFEE');
+
+    $miner->createRules($user, [$candidate]);
+    $rule = UserRule::query()->where('user_id', $user->id)->sole();
+    $evaluator = app(RuleEvaluator::class);
+
+    // A later feed row shaped like the refund must not be pulled into Groceries.
+    $incomingRefund = Transaction::factory()->for($user)->for($account)->create([
+        'description' => 'ACME COFFEE REFUND  SYDNEY',
+        'direction' => TransactionDirection::Credit,
+        'category_id' => null,
+    ]);
+
+    expect($evaluator->matches($purchase->fresh(), $rule))->toBeTrue()
+        ->and($evaluator->matches($refund->fresh(), $rule))->toBeFalse()
+        ->and($evaluator->matches($incomingRefund, $rule))->toBeFalse();
+});
+
+it('narrows by account when direction does not separate the manual rows', function () {
+    $user = User::factory()->create();
+    $personal = Account::factory()->for($user)->create();
+    $business = Account::factory()->for($user)->create();
+    $coffee = Category::factory()->create(['name' => 'Groceries']);
+    $office = Category::factory()->create(['name' => 'Utilities']);
+
+    minerTransaction($user, $personal, 'ACME COFFEE  BRISBANE', $coffee->id);
+    minerTransaction($user, $business, 'ACME COFFEE WHOLESALE  BRISBANE', $office->id);
+
+    $candidate = collect(app(CategoryRuleMiner::class)->mine($user)['candidates'])->firstWhere('value', 'ACME COFFEE');
+
+    expect($candidate['extra_triggers'])->toBe([['field' => 'account_id', 'operator' => 'is', 'value' => (string) $personal->id]]);
+});
+
+it('narrows by an amount threshold at the midpoint of the gap when only amounts separate the rows', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $coffee = Category::factory()->create(['name' => 'Groceries']);
+    $equipment = Category::factory()->create(['name' => 'Shopping']);
+
+    minerTransaction($user, $account, 'ACME COFFEE  BRISBANE', $coffee->id)->update(['amount' => 450]);
+    minerTransaction($user, $account, 'ACME COFFEE  SYDNEY', $coffee->id)->update(['amount' => 650]);
+    minerTransaction($user, $account, 'ACME COFFEE MACHINES  SYDNEY', $equipment->id)->update(['amount' => 89900]);
+
+    $candidate = collect(app(CategoryRuleMiner::class)->mine($user)['candidates'])->firstWhere('value', 'ACME COFFEE');
+
+    expect($candidate['extra_triggers'])->toBe([['field' => 'amount', 'operator' => 'less_than_or_equal', 'value' => '45275']]);
+});
+
+it('does not create a seed rule that contradicts a manual categorisation', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $entertainment = Category::factory()->create(['name' => 'Entertainment']);
+    Category::factory()->withParent($entertainment)->create(['name' => 'Streaming']);
+    $other = Category::factory()->create(['name' => 'Education']);
+
+    Transaction::factory()->for($user)->for($account)->create([
+        'description' => 'PRIMEVIDEO  COURSE',
+        'category_id' => $other->id,
+        'category_source' => CategorySource::Manual,
+    ]);
+
+    $result = app(CategoryRuleMiner::class)->mine($user);
+
+    $contradiction = collect($result['contradictions'])->firstWhere('value', 'PRIMEVIDEO');
+
+    expect(array_column($result['candidates'], 'value'))->not->toContain('PRIMEVIDEO')
+        ->and($contradiction)->not->toBeNull()
+        ->and($contradiction['source'])->toBe('seed')
+        ->and($contradiction['contradicting_categories'])->toBe([$other->fullPath() => 1]);
 });
