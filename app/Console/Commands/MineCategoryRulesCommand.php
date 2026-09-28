@@ -209,7 +209,13 @@ final class MineCategoryRulesCommand extends Command
      */
     private function reportCoverage(string $coverageDir, Collection $activeRules, array $final, RuleEvaluator $evaluator, CategoryRuleMiner $miner): void
     {
-        $rules = [...$activeRules->all(), ...$this->syntheticRules($final, $miner)];
+        // The coverage CSVs only carry a description, so a candidate narrowed by
+        // direction, account or amount cannot be evaluated faithfully against them:
+        // it would never match (null direction/account) or match everything (amount
+        // compared against a placeholder). Score only what the CSV can represent.
+        $scorable = array_values(array_filter($final, fn (array $entry): bool => ($entry['extra_triggers'] ?? []) === []));
+        $excluded = count($final) - count($scorable);
+        $rules = [...$activeRules->all(), ...$this->syntheticRules($scorable, $miner)];
 
         $files = glob(mb_rtrim($coverageDir, '/').'/*.csv') ?: [];
         sort($files);
@@ -236,6 +242,10 @@ final class MineCategoryRulesCommand extends Command
         $this->line('');
         $this->info('Coverage (non-fee rows) against '.$coverageDir.':');
         $this->table(['File', 'Matched', 'Coverage'], $rows);
+
+        if ($excluded > 0) {
+            $this->line($excluded.' narrowed candidate(s) excluded from coverage: their direction/account/amount trigger is not in the CSV.');
+        }
 
         if ($unmatched === []) {
             return;
