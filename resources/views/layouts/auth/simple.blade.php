@@ -8,7 +8,7 @@
             <div class="flex w-full max-w-sm flex-col gap-5">
                 <a href="{{ route('home') }}" class="flex flex-col items-center gap-2" wire:navigate>
                     <span class="flex size-12 items-center justify-center rounded-xl border-2 border-cib-black bg-white shadow-pop-sm">
-                        <x-app-logo-icon class="size-7 fill-current text-cib-teal-600" />
+                        <x-app-logo-icon class="size-9" />
                     </span>
                     <span class="font-display text-lg font-black text-white">{{ config('app.name', 'Can I Budget') }}</span>
                 </a>

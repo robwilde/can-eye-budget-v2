@@ -9,7 +9,7 @@
         data-flux-sidebar-brand
     >
         <img
-            src="{{ asset('images/cib-logo.png') }}"
+            src="{{ asset('images/cib-logo.svg') }}"
             alt="Can I Budget"
             class="size-10 rounded-lg border-[1.5px] border-cib-black object-cover shrink-0"
         />
@@ -22,7 +22,7 @@
     <flux:brand name="Can I Budget" {{ $attributes }}>
         <x-slot name="logo">
             <img
-                src="{{ asset('images/cib-logo.png') }}"
+                src="{{ asset('images/cib-logo.svg') }}"
                 alt="Can I Budget"
                 class="size-8 rounded-md border-[1.5px] border-cib-black object-cover"
             />

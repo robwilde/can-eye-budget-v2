@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 42" {{ $attributes }}>
-    <path 
-        fill="currentColor" 
-        fill-rule="evenodd" 
-        clip-rule="evenodd"
-        d="M17.2 5.633 8.6.855 0 5.633v26.51l16.2 9 16.2-9v-8.442l7.6-4.223V9.856l-8.6-4.777-8.6 4.777V18.3l-5.6 3.111V5.633ZM38 18.301l-5.6 3.11v-6.157l5.6-3.11V18.3Zm-1.06-7.856-5.54 3.078-5.54-3.079 5.54-3.078 5.54 3.079ZM24.8 18.3v-6.157l5.6 3.111v6.158L24.8 18.3Zm-1 1.732 5.54 3.078-13.14 7.302-5.54-3.078 13.14-7.3v-.002Zm-16.2 7.89 7.6 4.222V38.3L2 30.966V7.92l5.6 3.111v16.892ZM8.6 9.3 3.06 6.222 8.6 3.143l5.54 3.08L8.6 9.3Zm21.8 15.51-13.2 7.334V38.3l13.2-7.334v-6.156ZM9.6 11.034l5.6-3.11v14.6l-5.6 3.11v-14.6Z"
-    />
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" {{ $attributes }}><defs><clipPath id="cib-icon-clip"><rect x="0" y="0" width="120" height="41.5"/></clipPath></defs><g stroke="#111111" stroke-linejoin="round" stroke-linecap="round"><path d="M30 42V100A30 9 0 0 0 90 100V42Z" fill="#3FA69B" stroke-width="5"/><path d="M78 50V101" stroke="#7EC3BC" stroke-width="5"/><ellipse cx="60" cy="42" rx="30" ry="9" fill="#7EC3BC" stroke-width="5"/><rect x="46" y="39.5" width="28" height="5" rx="2.5" fill="#111111" stroke="none"/><g clip-path="url(#cib-icon-clip)"><circle cx="60" cy="27" r="14.5" fill="#F8C93A" stroke-width="4.5"/><path d="M50 26Q60 17.5 70 26Q60 34.5 50 26Z" fill="#FFF7E1" stroke-width="3"/><ellipse cx="60" cy="26" rx="2.3" ry="4.4" fill="#111111" stroke="none"/></g><path d="M70 64Q70 60 60 60Q50 60 50 67Q50 73 60 74Q70 75 70 81Q70 88 60 88Q50 88 50 84M60 56V92" fill="none" stroke-width="11"/><path d="M70 64Q70 60 60 60Q50 60 50 67Q50 73 60 74Q70 75 70 81Q70 88 60 88Q50 88 50 84M60 56V92" fill="none" stroke="#3DC85A" stroke-width="5.5"/></g></svg>
