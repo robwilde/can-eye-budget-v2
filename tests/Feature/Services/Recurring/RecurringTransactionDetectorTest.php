@@ -18,6 +18,9 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
 beforeEach(function () {
+    // Fixtures use fixed 2026 dates; pin "today" shortly after the latest one
+    // so the recency rule keeps them in range.
+    $this->travelTo(CarbonImmutable::parse('2026-03-20'));
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
     $this->detector = app(RecurringTransactionDetector::class);
@@ -84,6 +87,8 @@ test('detects monthly recurring transactions as candidates with payload-compatib
 });
 
 test('detects weekly recurring transactions', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-01-30'));
+
     createDetectorDatedGroup($this->user, $this->account, 'Coffee Club', 550, [
         '2026-01-05',
         '2026-01-12',
@@ -160,4 +165,63 @@ test('detect is pure and creates no suggestions or audit entries', function () {
 
     expect(AnalysisSuggestion::query()->count())->toBe(0)
         ->and(PipelineAuditEntry::query()->count())->toBe(0);
+});
+
+test('detects a monthly series whose last occurrence was 20 days ago', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-04-04'));
+    createDetectorDatedGroup($this->user, $this->account, 'Netflix', 1699, [
+        '2026-01-15', '2026-02-15', '2026-03-15',
+    ]);
+
+    expect($this->detector->detect($this->user))->toHaveCount(1);
+});
+
+test('ignores a monthly series whose last occurrence was 60 days ago', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-05-14'));
+    createDetectorDatedGroup($this->user, $this->account, 'Netflix', 1699, [
+        '2026-01-15', '2026-02-15', '2026-03-15',
+    ]);
+
+    expect($this->detector->detect($this->user))->toBeEmpty();
+});
+
+test('ignores a monthly series that ended four months ago', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-07-15'));
+    createDetectorDatedGroup($this->user, $this->account, 'Netflix', 1699, [
+        '2026-01-15', '2026-02-15', '2026-03-15',
+    ]);
+
+    expect($this->detector->detect($this->user))->toBeEmpty();
+});
+
+test('ignores a weekly series whose last occurrence was 12 days ago', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-02-07'));
+    createDetectorDatedGroup($this->user, $this->account, 'Coffee Club', 550, [
+        '2026-01-05', '2026-01-12', '2026-01-19', '2026-01-26',
+    ]);
+
+    expect($this->detector->detect($this->user))->toBeEmpty();
+});
+
+test('detects a weekly series whose last occurrence was 10 days ago', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-02-05'));
+    createDetectorDatedGroup($this->user, $this->account, 'Coffee Club', 550, [
+        '2026-01-05', '2026-01-12', '2026-01-19', '2026-01-26',
+    ]);
+
+    expect($this->detector->detect($this->user)->first()?->frequency)->toBe(RecurrenceFrequency::EveryWeek);
+});
+
+test('detects a monthly series whose last occurrence is exactly target plus tolerance days ago', function () {
+    // EveryMonth: 30 target + max(4, 30 * 0.2) = 36 days.
+    $this->travelTo(CarbonImmutable::parse('2026-03-15')->addDays(36));
+    createDetectorDatedGroup($this->user, $this->account, 'Netflix', 1699, [
+        '2026-01-15', '2026-02-15', '2026-03-15',
+    ]);
+
+    expect($this->detector->detect($this->user))->toHaveCount(1);
+
+    $this->travelTo(CarbonImmutable::parse('2026-03-15')->addDays(37));
+
+    expect($this->detector->detect($this->user))->toBeEmpty();
 });

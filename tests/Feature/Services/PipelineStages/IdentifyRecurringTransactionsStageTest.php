@@ -22,6 +22,10 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
 beforeEach(function () {
+    // Fixtures use fixed 2026 dates; pin "today" within the detector's recency
+    // window of the default monthly fixture (last hit 2026-03-15). Tests whose
+    // series end elsewhere re-pin the clock themselves.
+    $this->travelTo(CarbonImmutable::parse('2026-03-20'));
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
     $this->pipelineRun = PipelineRun::factory()->for($this->user)->create();
@@ -74,6 +78,7 @@ test('detects monthly recurring transactions', function () {
 });
 
 test('detects weekly recurring transactions', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-01-30'));
     $start = CarbonImmutable::parse('2026-01-05');
 
     for ($i = 0; $i < 4; $i++) {
@@ -94,6 +99,7 @@ test('detects weekly recurring transactions', function () {
 });
 
 test('detects fortnightly recurring transactions', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-02-03'));
     $start = CarbonImmutable::parse('2026-01-03');
 
     for ($i = 0; $i < 3; $i++) {
@@ -114,6 +120,7 @@ test('detects fortnightly recurring transactions', function () {
 });
 
 test('detects quarterly recurring transactions', function () {
+    $this->travelTo(CarbonImmutable::parse('2025-10-05'));
     $start = CarbonImmutable::parse('2025-04-01');
 
     for ($i = 0; $i < 3; $i++) {
@@ -462,6 +469,8 @@ test('PlannedTransaction match uses 5 percent amount tolerance', function () {
 });
 
 test('skips a credit already configured as pay-cycle income despite a differently-normalised description', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-02-15'));
+
     // The income planned transaction stores the non-deduped description as
     // IncomePatternDetector produces it; the recurring detector word-dedups the
     // raw CSV description. The guard must still treat them as the same payee.
@@ -500,6 +509,8 @@ test('skips a credit already configured as pay-cycle income despite a differentl
 });
 
 test('still suggests a different credit that only shares amount and frequency with an existing plan', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-02-15'));
+
     PlannedTransaction::factory()->for($this->user)->create([
         'account_id' => $this->account->id,
         'description' => 'WINABLE PAYROLL',
@@ -618,13 +629,16 @@ test('returns success with empty suggestionIds when no Redbark transactions exis
 // ─── Confidence ─────────────────────────────────────────────────────────
 
 test('higher confidence for more matches', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-02-20'));
     $start = CarbonImmutable::parse('2025-07-15');
+    // Both series must end on the same month (2026-02-15) to be recent.
+    $smallStart = CarbonImmutable::parse('2025-12-15');
 
     for ($i = 0; $i < 3; $i++) {
         createRedbarkTransaction($this->user, $this->account, [
             'merchant_name' => 'SmallGroup',
             'amount' => 2000,
-            'post_date' => $start->addMonthsNoOverflow($i),
+            'post_date' => $smallStart->addMonthsNoOverflow($i),
         ]);
     }
 
@@ -651,6 +665,7 @@ test('higher confidence for more matches', function () {
 });
 
 test('higher confidence for identical amounts versus varying', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-04-20'));
     $start = CarbonImmutable::parse('2026-01-15');
 
     for ($i = 0; $i < 4; $i++) {
@@ -685,6 +700,7 @@ test('higher confidence for identical amounts versus varying', function () {
 });
 
 test('higher confidence for regular intervals', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-04-20'));
     $account2 = Account::factory()->for($this->user)->create();
 
     $regularDates = ['2026-01-15', '2026-02-15', '2026-03-15', '2026-04-15'];
@@ -890,6 +906,7 @@ function createCsvTransaction(User $user, Account $account, string $description,
 }
 
 test('groups recurring payees by signature despite varying reference codes', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-01-24'));
     createCsvTransaction($this->user, $this->account, 'Direct Debit Fair Go Finance - DT.4y16g4 FGF 2472', 8500, '2026-01-06');
     createCsvTransaction($this->user, $this->account, 'Direct Debit Fair Go Finance - DT.4yx8ph FGF 2472', 8500, '2026-01-13');
     createCsvTransaction($this->user, $this->account, 'Direct Debit Fair Go Finance - DT.9zz1aa FGF 2472', 8500, '2026-01-20');
@@ -906,6 +923,7 @@ test('groups recurring payees by signature despite varying reference codes', fun
 // ─── Cadence gap-filling (#263) ─────────────────────────────────────────
 
 test('maps a 24-day cadence (previously an unmatched gap) to three-weekly', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-02-20'));
     $start = CarbonImmutable::parse('2026-01-01');
 
     for ($i = 0; $i < 3; $i++) {
@@ -924,6 +942,7 @@ test('maps a 24-day cadence (previously an unmatched gap) to three-weekly', func
 });
 
 test('maps a 10-day cadence (previously an unmatched gap) to weekly', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-01-25'));
     $start = CarbonImmutable::parse('2026-01-01');
 
     for ($i = 0; $i < 3; $i++) {
@@ -960,6 +979,7 @@ test('snaps wobbling monthly intervals to every month', function () {
 // ─── Noise filtering (#263) ─────────────────────────────────────────────
 
 test('skips round-up transfers as noise even when the amount is constant', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-05-05'));
     $start = CarbonImmutable::parse('2026-01-01');
 
     for ($i = 0; $i < 5; $i++) {
@@ -972,6 +992,7 @@ test('skips round-up transfers as noise even when the amount is constant', funct
 });
 
 test('skips internal account sweeps as noise', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-01-25'));
     $start = CarbonImmutable::parse('2026-01-01');
 
     for ($i = 0; $i < 4; $i++) {
@@ -986,15 +1007,17 @@ test('skips internal account sweeps as noise', function () {
 // ─── Representative statement (acceptance, #263) ─────────────────────────
 
 test('detects the real bill patterns in a mixed statement and ignores noise', function () {
+    // Every real bill series must end within its recency window of "today".
+    $this->travelTo(CarbonImmutable::parse('2026-03-16'));
     $jan = CarbonImmutable::parse('2026-01-02');
 
     // Fair Go Finance: $85 weekly, varying DT.xxxx code each time.
-    foreach (range(0, 7) as $i) {
+    foreach (range(0, 10) as $i) {
         createCsvTransaction($this->user, $this->account, "Direct Debit Fair Go Finance - DT.4y16g{$i} FGF 2472", 8500, $jan->addWeeks($i)->toDateString());
     }
 
     // QBE Insurance: $60.58 monthly, varying bcx:int code each time.
-    foreach (range(0, 3) as $i) {
+    foreach (range(0, 2) as $i) {
         createCsvTransaction($this->user, $this->account, 'Direct Debit QBE Insurance - bcx:int '.(4000 + $i), 6058, $jan->addMonthsNoOverflow($i)->toDateString());
     }
 

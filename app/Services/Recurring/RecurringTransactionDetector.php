@@ -13,7 +13,20 @@ use App\Support\Recurring\MerchantSignature;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use LogicException;
 
+/**
+ * Detects recurring transaction series from unmatched, analysis-eligible rows.
+ *
+ * A group (same merchant signature, direction and account) becomes a candidate when:
+ * - it has at least 2 rows and a dominant amount cluster (>= 60% of rows);
+ * - its median interval maps to a FREQUENCY_TARGETS cadence within tolerance
+ *   (max(4, target * 0.2) days);
+ * - its latest post_date is recent: no more than target + tolerance days before
+ *   today (monthly within 36 days, weekly within 11, yearly within 438), so
+ *   series that have stopped are not suggested;
+ * - its confidence score is at least MIN_CONFIDENCE.
+ */
 final readonly class RecurringTransactionDetector
 {
     private const float MIN_CONFIDENCE = 0.40;
@@ -148,6 +161,14 @@ final readonly class RecurringTransactionDetector
             return null;
         }
 
+        $targetDays = $this->targetDays($frequency);
+        $tolerance = max(4.0, $targetDays * 0.2);
+        $last = CarbonImmutable::instance($group->max('post_date'));
+
+        if (abs($last->diffInDays(CarbonImmutable::today())) > $targetDays + $tolerance) {
+            return null;
+        }
+
         $amountCV = $this->coefficientOfVariation($cluster);
         $intervalCV = $this->coefficientOfVariation($intervals);
         $confidence = $this->calculateConfidence($group->count(), $amountCV, $intervalCV);
@@ -252,6 +273,17 @@ final readonly class RecurringTransactionDetector
         }
 
         return $best;
+    }
+
+    private function targetDays(RecurrenceFrequency $frequency): int
+    {
+        foreach (self::FREQUENCY_TARGETS as [$target, $candidate]) {
+            if ($candidate === $frequency) {
+                return $target;
+            }
+        }
+
+        throw new LogicException("No target interval for frequency {$frequency->value}.");
     }
 
     /** @param Collection<int, mixed> $values */
