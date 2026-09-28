@@ -30,17 +30,9 @@ beforeEach(function (): void {
 
 function applierRule(User $user, int $categoryId, string $match): UserRule
 {
-    $group = UserRuleGroup::query()->create([
-        'user_id' => $user->id,
-        'name' => 'Rules',
-        'order' => 1,
-        'is_active' => true,
-        'stop_processing' => false,
-    ]);
+    $group = UserRuleGroup::factory()->for($user)->create(['order' => 1]);
 
-    return UserRule::query()->create([
-        'user_id' => $user->id,
-        'user_rule_group_id' => $group->id,
+    return UserRule::factory()->for($user)->for($group, 'group')->create([
         'name' => 'Categorise '.$match,
         'triggers' => [[
             'field' => RuleTriggerField::Description->value,
@@ -51,9 +43,6 @@ function applierRule(User $user, int $categoryId, string $match): UserRule
             'type' => RuleActionType::SetCategory->value,
             'value' => (string) $categoryId,
         ]],
-        'strict_mode' => true,
-        'is_auto_apply' => false,
-        'is_active' => true,
         'order' => 1,
     ]);
 }
