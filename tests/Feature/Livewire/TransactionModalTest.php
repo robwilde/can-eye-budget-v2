@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Enums\AccountStatus;
+use App\Enums\CategorySource;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
@@ -3694,4 +3695,37 @@ test('editing a transaction to a negative amount is rejected', function () {
         ->assertHasErrors(['descriptionInput']);
 
     expect(Transaction::query()->where('user_id', $user->id)->current()->first()->amount)->toBe(5000);
+});
+
+test('categorise-matching warns when the match value catches transactions the user filed elsewhere', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Entertainment', 'is_hidden' => false]);
+    $other = Category::factory()->create(['name' => 'Education', 'is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'description' => 'NETFLIX',
+        'post_date' => '2026-03-15',
+        'category_id' => null,
+    ]);
+    Transaction::factory()->for($user)->for($account)->manual()->create([
+        'description' => 'NETFLIX TRAINING COURSE',
+        'post_date' => '2026-02-15',
+        'category_id' => $other->id,
+        'category_source' => CategorySource::Manual,
+    ]);
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('categoryId', $category->id)
+        ->set('categoriseMatching', true)
+        ->set('categoriseMatchValue', 'NETFLIX')
+        ->assertSeeHtml('data-testid="categorise-contradicts"')
+        ->assertSee('1 transaction you categorised yourself is filed differently:')
+        ->assertSee($other->fullPath());
+
+    // Narrowing the match value clears the warning.
+    $component->set('categoriseMatchValue', 'NETFLIX TRAINING XYZ')
+        ->assertDontSeeHtml('data-testid="categorise-contradicts"');
 });

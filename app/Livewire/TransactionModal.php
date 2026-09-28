@@ -66,6 +66,15 @@ final class TransactionModal extends Component
 
     public string $categoriseMatchValue = '';
 
+    /**
+     * Manual rows the pending "categorise matching" rule would contradict:
+     * category full path => count. Display-only, recomputed when the toggle,
+     * match value or category changes.
+     *
+     * @var array<string, int>
+     */
+    public array $categoriseContradictions = [];
+
     #[Locked]
     public bool $originalWasTransfer = false;
 
@@ -329,6 +338,21 @@ final class TransactionModal extends Component
 
         return $occurrence instanceof CarbonImmutable
             && $occurrence->lessThanOrEqualTo(CarbonImmutable::today());
+    }
+
+    public function updatedCategoriseMatching(): void
+    {
+        $this->refreshCategoriseContradictions();
+    }
+
+    public function updatedCategoriseMatchValue(): void
+    {
+        $this->refreshCategoriseContradictions();
+    }
+
+    public function updatedCategoryId(): void
+    {
+        $this->refreshCategoriseContradictions();
     }
 
     /**
@@ -629,6 +653,36 @@ final class TransactionModal extends Component
         }
 
         app(CategoryRuleGenerator::class)->generateAndApply($source, $this->categoryId, $this->categoriseMatchValue);
+    }
+
+    /**
+     * Warn before the rule is created when its match value also catches rows
+     * the user filed elsewhere themselves. Uses the same preview as the
+     * transaction list's rule panel so the two warnings cannot disagree.
+     */
+    private function refreshCategoriseContradictions(): void
+    {
+        $this->categoriseContradictions = [];
+
+        if (! $this->categoriseMatching
+            || $this->categoryId === null
+            || mb_trim($this->categoriseMatchValue) === ''
+            || $this->transactionType === 'transfer'
+            || $this->editingTransactionId === null) {
+            return;
+        }
+
+        $source = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->find($this->editingTransactionId);
+
+        if ($source === null || $source->transfer_pair_id !== null) {
+            return;
+        }
+
+        $this->categoriseContradictions = app(CategoryRuleGenerator::class)
+            ->preview($source, $this->categoryId, $this->categoriseMatchValue)
+            ->contradictingCategories;
     }
 
     /**

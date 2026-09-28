@@ -174,11 +174,21 @@
 
                 @if($categoriseMatching)
                     <flux:input
-                        wire:model="categoriseMatchValue"
+                        wire:model.live.debounce.400ms="categoriseMatchValue"
                         :label="__('Match when description contains')"
                         :description="__('Edit to control which transactions are categorised — keep it specific to this merchant.')"
                         data-testid="transaction-categorise-match-value"
                     />
+
+                    @if($categoriseContradictions !== [])
+                        @php($contradictingCount = array_sum($categoriseContradictions))
+                        <p class="text-sm text-red-700 dark:text-red-400" data-testid="categorise-contradicts">
+                            {{ trans_choice(':count transaction you categorised yourself is filed differently:|:count transactions you categorised yourself are filed differently:', $contradictingCount, ['count' => $contradictingCount]) }}
+                            @foreach($categoriseContradictions as $path => $count)
+                                {{ $path }} ({{ $count }}){{ ! $loop->last ? ', ' : '' }}
+                            @endforeach
+                        </p>
+                    @endif
                 @endif
             @endif
 
