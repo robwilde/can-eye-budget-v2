@@ -126,7 +126,9 @@ it('reports rows protected by a manual category and leaves them untouched', func
     $generator = app(CategoryRuleGenerator::class);
     $preview = $generator->preview($selected, $this->category->id, 'NETFLIX', [$selected->id]);
 
-    expect($preview->protectedByManual)->toBe(1);
+    expect($preview->contradictsManual)->toBe(1)
+        ->and($preview->agreesWithManual)->toBe(0)
+        ->and($preview->protectedByManual())->toBe(1);
 
     $generator->generateAndApply($selected, $this->category->id, 'NETFLIX');
 
@@ -396,7 +398,7 @@ it('treats a categorised row with no recorded source as manual, as the sweep doe
     $preview = $generator->preview($selected, $this->category->id, 'NETFLIX', [$selected->id]);
     $generator->generateAndApply($selected, $this->category->id, 'NETFLIX');
 
-    expect($preview->protectedByManual)->toBe(1)
+    expect($preview->contradictsManual)->toBe(1)
         ->and($preview->wouldChange)->toBe(1)
         ->and($legacy->fresh()->category_id)->toBe($other->id);
 });
@@ -468,4 +470,48 @@ it('surfaces the live preview in the panel view data', function () {
 
     expect($preview)->not->toBeNull()
         ->and($preview->beyondSelection)->toBe(1);
+});
+
+it('splits manual rows that agree with the rule from those it contradicts', function () {
+    $other = Category::factory()->create(['is_hidden' => false]);
+    $selected = ruleTxn($this->user, $this->account, 'NETFLIX.COM');
+    ruleTxn($this->user, $this->account, 'NETFLIX.COM', [
+        'category_id' => $this->category->id,
+        'category_source' => CategorySource::Manual,
+    ]);
+    ruleTxn($this->user, $this->account, 'NETFLIX.COM', [
+        'category_id' => $other->id,
+        'category_source' => CategorySource::Manual,
+    ]);
+    ruleTxn($this->user, $this->account, 'NETFLIX.COM', [
+        'category_id' => $other->id,
+        'category_source' => CategorySource::Manual,
+    ]);
+
+    $preview = app(CategoryRuleGenerator::class)->preview($selected, $this->category->id, 'NETFLIX', [$selected->id]);
+
+    expect($preview->agreesWithManual)->toBe(1)
+        ->and($preview->contradictsManual)->toBe(2)
+        ->and($preview->contradictingCategories)->toBe([$other->fullPath() => 2])
+        ->and($preview->wouldChange)->toBe(1);
+});
+
+it('warns in the panel when the rule contradicts manual categorisations', function () {
+    $other = Category::factory()->create(['is_hidden' => false]);
+    $selected = ruleTxn($this->user, $this->account, 'NETFLIX.COM');
+    ruleTxn($this->user, $this->account, 'NETFLIX.COM', [
+        'category_id' => $other->id,
+        'category_source' => CategorySource::Manual,
+    ]);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('selected', [$selected->id => true])
+        ->set('bulkCategoryId', (string) $this->category->id)
+        ->set('ruleMatchValue', 'NETFLIX')
+        ->call('openRulePanel')
+        ->assertSeeHtml('data-testid="rule-preview-contradicts"')
+        ->assertSee($other->fullPath())
+        ->call('createRuleFromSelection')
+        ->assertSet('bulkNotice', 'Rule created. 1 transaction categorised, 1 left alone because you set them yourself (1 of them you filed under a different category).');
 });

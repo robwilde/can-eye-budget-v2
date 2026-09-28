@@ -6,8 +6,6 @@ namespace App\Console\Commands;
 
 use App\Enums\PipelineTrigger;
 use App\Enums\RuleActionType;
-use App\Enums\RuleTriggerField;
-use App\Enums\RuleTriggerOperator;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
@@ -63,6 +61,7 @@ final class MineCategoryRulesCommand extends Command
         $this->reportCandidates($final, $categoryNames);
         $this->reportAmbiguous($result['ambiguous'], $categoryNames);
         $this->reportConflicts($result['conflicts'], $categoryNames);
+        $this->reportContradictions($result['contradictions'], $categoryNames);
 
         if ($result['skippedSeeds'] !== []) {
             $this->warn(
@@ -90,14 +89,14 @@ final class MineCategoryRulesCommand extends Command
         }
 
         if ($coverageDir !== null && $activeRules !== null) {
-            $this->reportCoverage($coverageDir, $activeRules, $final, $evaluator);
+            $this->reportCoverage($coverageDir, $activeRules, $final, $evaluator, $miner);
         }
 
         return self::SUCCESS;
     }
 
     /**
-     * @param  list<array{value: string, category_id: int, source: string}>  $final
+     * @param  list<array{value: string, category_id: int, source: string, extra_triggers?: list<array{field: string, operator: string, value: string}>}>  $final
      * @param  Collection<int, string>  $categoryNames
      */
     private function reportCandidates(array $final, Collection $categoryNames): void
@@ -110,12 +109,51 @@ final class MineCategoryRulesCommand extends Command
         }
 
         $this->table(
-            ['Value', 'Category', 'Source'],
+            ['Value', 'Category', 'Source', 'Narrowed by'],
             array_map(fn (array $entry): array => [
                 $entry['value'],
                 $entry['category_id'].' '.($categoryNames[$entry['category_id']] ?? '?'),
                 $entry['source'],
+                implode(', ', array_map(
+                    fn (array $trigger): string => $trigger['field'].' '.$trigger['operator'].' '.$trigger['value'],
+                    $entry['extra_triggers'] ?? [],
+                )),
             ], $final),
+        );
+
+        $narrowed = count(array_filter($final, fn (array $entry): bool => ($entry['extra_triggers'] ?? []) !== []));
+
+        if ($narrowed > 0) {
+            $this->line($narrowed.' rule(s) narrowed by an extra trigger to leave your manual categorisations alone.');
+        }
+    }
+
+    /**
+     * @param  list<array{value: string, category_id: int, source: string, contradicting: int, contradicting_categories: array<string, int>}>  $contradictions
+     * @param  Collection<int, string>  $categoryNames
+     */
+    private function reportContradictions(array $contradictions, Collection $categoryNames): void
+    {
+        $this->line('');
+        $this->info('Contradicting manual categorisations (skipped): '.count($contradictions));
+
+        if ($contradictions === []) {
+            return;
+        }
+
+        $this->table(
+            ['Value', 'Candidate category', 'Source', 'Manual rows', 'Filed under'],
+            array_map(fn (array $entry): array => [
+                $entry['value'],
+                $entry['category_id'].' '.($categoryNames[$entry['category_id']] ?? '?'),
+                $entry['source'],
+                (string) $entry['contradicting'],
+                implode(', ', array_map(
+                    fn (string $path, int $count): string => $path.' ('.$count.')',
+                    array_keys($entry['contradicting_categories']),
+                    array_values($entry['contradicting_categories']),
+                )),
+            ], $contradictions),
         );
     }
 
@@ -167,11 +205,17 @@ final class MineCategoryRulesCommand extends Command
 
     /**
      * @param  Collection<int, UserRule>  $activeRules
-     * @param  list<array{value: string, category_id: int, source: string}>  $final
+     * @param  list<array{value: string, category_id: int, source: string, extra_triggers?: list<array{field: string, operator: string, value: string}>}>  $final
      */
-    private function reportCoverage(string $coverageDir, Collection $activeRules, array $final, RuleEvaluator $evaluator): void
+    private function reportCoverage(string $coverageDir, Collection $activeRules, array $final, RuleEvaluator $evaluator, CategoryRuleMiner $miner): void
     {
-        $rules = [...$activeRules->all(), ...$this->syntheticRules($final)];
+        // The coverage CSVs only carry a description, so a candidate narrowed by
+        // direction, account or amount cannot be evaluated faithfully against them:
+        // it would never match (null direction/account) or match everything (amount
+        // compared against a placeholder). Score only what the CSV can represent.
+        $scorable = array_values(array_filter($final, fn (array $entry): bool => ($entry['extra_triggers'] ?? []) === []));
+        $excluded = count($final) - count($scorable);
+        $rules = [...$activeRules->all(), ...$this->syntheticRules($scorable, $miner)];
 
         $files = glob(mb_rtrim($coverageDir, '/').'/*.csv') ?: [];
         sort($files);
@@ -198,6 +242,10 @@ final class MineCategoryRulesCommand extends Command
         $this->line('');
         $this->info('Coverage (non-fee rows) against '.$coverageDir.':');
         $this->table(['File', 'Matched', 'Coverage'], $rows);
+
+        if ($excluded > 0) {
+            $this->line($excluded.' narrowed candidate(s) excluded from coverage: their direction/account/amount trigger is not in the CSV.');
+        }
 
         if ($unmatched === []) {
             return;
@@ -278,17 +326,13 @@ final class MineCategoryRulesCommand extends Command
     }
 
     /**
-     * @param  list<array{value: string, category_id: int, source: string}>  $final
+     * @param  list<array{value: string, category_id: int, source: string, extra_triggers?: list<array{field: string, operator: string, value: string}>}>  $final
      * @return list<UserRule>
      */
-    private function syntheticRules(array $final): array
+    private function syntheticRules(array $final, CategoryRuleMiner $miner): array
     {
         return array_map(fn (array $entry): UserRule => new UserRule([
-            'triggers' => [[
-                'field' => RuleTriggerField::Description->value,
-                'operator' => RuleTriggerOperator::Contains->value,
-                'value' => $entry['value'],
-            ]],
+            'triggers' => $miner->triggersFor($entry),
             'actions' => [[
                 'type' => RuleActionType::SetCategory->value,
                 'value' => (string) $entry['category_id'],

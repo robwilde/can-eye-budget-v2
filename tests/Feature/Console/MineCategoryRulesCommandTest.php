@@ -154,6 +154,28 @@ test('dry run writes no rules and leaves transactions uncategorised', function (
         ->and($sibling->fresh()->category_id)->toBeNull();
 });
 
+test('coverage excludes narrowed candidates the CSV cannot represent instead of scoring them against placeholder fields', function () {
+    $coffee = Category::factory()->create();
+    $equipment = Category::factory()->create();
+    categorised($this->user, $this->account, 'ACME COFFEE  BRISBANE', $coffee->id)->update(['amount' => 450]);
+    categorised($this->user, $this->account, 'ACME COFFEE  SYDNEY', $coffee->id)->update(['amount' => 650]);
+    categorised($this->user, $this->account, 'ACME COFFEE MACHINES  SYDNEY', $equipment->id)->update(['amount' => 89900]);
+
+    $dir = sys_get_temp_dir().'/mine-coverage-'.uniqid();
+    mkdir($dir);
+    file_put_contents($dir.'/machines.csv', "Transaction Description\nACME COFFEE GRINDER  MELBOURNE\n");
+
+    // The amount-narrowed ACME COFFEE rule would match this row against a
+    // placeholder amount of 0; excluded, the row is honestly unmatched.
+    $this->artisan('categories:mine-rules', mineRulesArgs($this->user, $this->account, ['--dry-run' => true, '--coverage-dir' => $dir]))
+        ->expectsOutputToContain('1 narrowed candidate(s) excluded from coverage')
+        ->expectsTable(['File', 'Matched', 'Coverage'], [['machines.csv', '0/1', '0%'], ['TOTAL', '0/1', '0%']])
+        ->assertSuccessful();
+
+    unlink($dir.'/machines.csv');
+    rmdir($dir);
+});
+
 test('creates a rule from the curated seed list', function () {
     $this->artisan('categories:mine-rules', mineRulesArgs($this->user, $this->account))->assertSuccessful();
 

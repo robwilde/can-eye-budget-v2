@@ -42,6 +42,7 @@ final readonly class CategoryRuleGenerator
     public function __construct(
         private RuleEvaluator $evaluator,
         private UserRuleApplier $applier,
+        private ManualContradictionChecker $contradictions,
     ) {}
 
     public function generateAndApply(Transaction $source, int $categoryId, ?string $matchValue = null): UserRule
@@ -92,8 +93,10 @@ final readonly class CategoryRuleGenerator
         $inSelection = 0;
         $beyondSelection = 0;
         $wouldChange = 0;
-        $protectedByManual = 0;
+        $agreesWithManual = 0;
+        $contradictsManual = 0;
         $existingCategories = [];
+        $contradictingCategories = [];
 
         $this->applier->eligible($source->user_id)
             ->with('category.parent.parent')
@@ -105,8 +108,10 @@ final readonly class CategoryRuleGenerator
                 &$inSelection,
                 &$beyondSelection,
                 &$wouldChange,
-                &$protectedByManual,
+                &$agreesWithManual,
+                &$contradictsManual,
                 &$existingCategories,
+                &$contradictingCategories,
             ): void {
                 if (! $this->evaluator->matches($transaction, $draft)) {
                     return;
@@ -117,10 +122,15 @@ final readonly class CategoryRuleGenerator
 
                 // The executor's own guard, so a legacy row with no recorded
                 // source is counted as protected exactly as the sweep treats it.
-                $isProtected = $transaction->categoryProtectedFromRules();
+                $verdict = $this->contradictions->classify($transaction, $categoryId);
+                $isProtected = $verdict !== null;
 
-                if ($isProtected) {
-                    $protectedByManual++;
+                if ($verdict === true) {
+                    $agreesWithManual++;
+                } elseif ($verdict === false) {
+                    $contradictsManual++;
+                    $path = $this->contradictions->pathOf($transaction);
+                    $contradictingCategories[$path] = ($contradictingCategories[$path] ?? 0) + 1;
                 } elseif (
                     $transaction->category_id !== $categoryId
                     // Same category but Feed-sourced: the executor still
@@ -150,14 +160,17 @@ final readonly class CategoryRuleGenerator
             });
 
         arsort($existingCategories);
+        arsort($contradictingCategories);
 
         return new CategoryRulePreview(
             matchValue: $this->resolvedMatchValue($source, $matchValue),
             inSelection: $inSelection,
             beyondSelection: $beyondSelection,
             wouldChange: $wouldChange,
-            protectedByManual: $protectedByManual,
+            agreesWithManual: $agreesWithManual,
+            contradictsManual: $contradictsManual,
             existingCategories: $existingCategories,
+            contradictingCategories: $contradictingCategories,
         );
     }
 

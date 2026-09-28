@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
 use App\Support\Transactions\MerchantMatchValue;
+use BackedEnum;
 use Illuminate\Support\Collection;
 
 final class CategoryRuleMiner
@@ -24,11 +25,17 @@ final class CategoryRuleMiner
         private RuleEvaluator $evaluator,
         private CategoryRuleGenerator $generator,
         private CategorySeedRules $seedRules,
+        private ManualContradictionChecker $contradictionChecker,
     ) {}
 
     /**
+     * Candidates whose `description contains` trigger also matches rows the
+     * user categorised themselves under a different category are narrowed by
+     * one extra trigger when that separates them exactly, and otherwise
+     * reported under `contradictions` instead of being created.
+     *
      * @param  list<int>  $accountIds
-     * @return array{candidates: list<array{value: string, category_id: int, source: string}>, ambiguous: list<array{value: string, categories: list<int>}>, conflicts: list<array{value: string, candidate: int, rule_id: int, rule_category: int}>, skippedSeeds: list<string>, unknownCategoryIds: list<int>}
+     * @return array{candidates: list<array{value: string, category_id: int, source: string, extra_triggers?: list<array{field: string, operator: string, value: string}>}>, ambiguous: list<array{value: string, categories: list<int>}>, conflicts: list<array{value: string, candidate: int, rule_id: int, rule_category: int}>, contradictions: list<array{value: string, category_id: int, source: string, contradicting: int, contradicting_categories: array<string, int>}>, skippedSeeds: list<string>, unknownCategoryIds: list<int>}
      */
     public function mine(User $user, array $accountIds = []): array
     {
@@ -38,8 +45,10 @@ final class CategoryRuleMiner
         $candidates = [];
         $ambiguous = [];
         $conflicts = [];
+        /** @var array<string, list<Transaction>> $motivatingRows */
+        $motivatingRows = [];
 
-        foreach ($this->minedGroups($user, $accountIds) as $group) {
+        foreach ($this->minedGroups($user, $accountIds) as $key => $group) {
             $categoryIds = array_keys($group['category_ids']);
 
             if (count($categoryIds) > 1) {
@@ -69,13 +78,28 @@ final class CategoryRuleMiner
             }
 
             $candidates[] = ['value' => $group['value'], 'category_id' => $categoryId, 'source' => 'mined'];
+            $motivatingRows[$key] = $group['rows'];
         }
 
         $seedResult = $this->seedRules->resolve();
         $seeds = $seedResult['resolved'];
         $skippedSeeds = $seedResult['skipped'];
 
-        $final = $this->dedupeAndSubsume([...$seeds, ...$candidates], $this->existingTriggerValues($activeRules));
+        $deduped = $this->dedupeAndSubsume([...$seeds, ...$candidates], $this->existingTriggerValues($activeRules));
+
+        $final = [];
+        $contradictions = [];
+
+        foreach ($deduped as $entry) {
+            $motivating = $entry['source'] === 'mined' ? ($motivatingRows[mb_strtolower($entry['value'])] ?? []) : [];
+            $resolved = $this->resolveContradictions($user->id, $entry, $motivating);
+
+            if (isset($resolved['contradicting'])) {
+                $contradictions[] = $resolved;
+            } else {
+                $final[] = $resolved;
+            }
+        }
 
         $unknownCategories = $this->unknownCategoryIds($final, $categoryNames);
 
@@ -83,13 +107,34 @@ final class CategoryRuleMiner
             'candidates' => $final,
             'ambiguous' => $ambiguous,
             'conflicts' => $conflicts,
+            'contradictions' => $contradictions,
             'skippedSeeds' => $skippedSeeds,
             'unknownCategoryIds' => $unknownCategories,
         ];
     }
 
     /**
-     * @param  list<array{value: string, category_id: int, source: string}>  $entries
+     * The strict-mode triggers a candidate's rule carries: the description
+     * match plus any narrowing trigger. Shared by createRules() and callers
+     * that simulate candidates without writing them.
+     *
+     * @param  array{value: string, category_id: int, source: string, extra_triggers?: list<array{field: string, operator: string, value: string}>}  $entry
+     * @return list<array{field: string, operator: string, value: string}>
+     */
+    public function triggersFor(array $entry): array
+    {
+        return [
+            [
+                'field' => RuleTriggerField::Description->value,
+                'operator' => RuleTriggerOperator::Contains->value,
+                'value' => $entry['value'],
+            ],
+            ...($entry['extra_triggers'] ?? []),
+        ];
+    }
+
+    /**
+     * @param  list<array{value: string, category_id: int, source: string, extra_triggers?: list<array{field: string, operator: string, value: string}>}>  $entries
      */
     public function createRules(User $user, array $entries): int
     {
@@ -105,11 +150,7 @@ final class CategoryRuleMiner
                 'user_id' => $user->id,
                 'user_rule_group_id' => $group->id,
                 'name' => mb_substr('Categorise '.$entry['value'], 0, 255),
-                'triggers' => [[
-                    'field' => RuleTriggerField::Description->value,
-                    'operator' => RuleTriggerOperator::Contains->value,
-                    'value' => $entry['value'],
-                ]],
+                'triggers' => $this->triggersFor($entry),
                 'actions' => [[
                     'type' => RuleActionType::SetCategory->value,
                     'value' => (string) $entry['category_id'],
@@ -141,7 +182,7 @@ final class CategoryRuleMiner
 
     /**
      * @param  list<int>  $accountIds
-     * @return array<string, array{value: string, category_ids: array<int, bool>, sample: Transaction}>
+     * @return array<string, array{value: string, category_ids: array<int, bool>, sample: Transaction, rows: list<Transaction>}>
      */
     private function minedGroups(User $user, array $accountIds): array
     {
@@ -159,10 +200,11 @@ final class CategoryRuleMiner
                 $key = mb_strtolower($value);
 
                 if (! isset($groups[$key])) {
-                    $groups[$key] = ['value' => $value, 'category_ids' => [], 'sample' => $transaction];
+                    $groups[$key] = ['value' => $value, 'category_ids' => [], 'sample' => $transaction, 'rows' => []];
                 }
 
                 $groups[$key]['category_ids'][(int) $transaction->category_id] = true;
+                $groups[$key]['rows'][] = $transaction;
             });
 
         return $groups;
@@ -200,6 +242,97 @@ final class CategoryRuleMiner
         }
 
         return null;
+    }
+
+    /**
+     * Check a candidate against the user's manual categorisations. Returns the
+     * entry unchanged when nothing contradicts it, the entry with one extra
+     * trigger when that trigger excludes every contradicting row while keeping
+     * every row that must stay matched, or a contradiction report otherwise.
+     *
+     * Rows that must stay matched are the agreeing manual rows plus the mined
+     * group that motivated the candidate; a seed with no agreeing manual rows
+     * has nothing to anchor a narrowing to and is reported rather than guessed.
+     *
+     * @param  array{value: string, category_id: int, source: string}  $entry
+     * @param  list<Transaction>  $motivating
+     * @return array{value: string, category_id: int, source: string, extra_triggers?: list<array{field: string, operator: string, value: string}>}|array{value: string, category_id: int, source: string, contradicting: int, contradicting_categories: array<string, int>}
+     */
+    private function resolveContradictions(int $userId, array $entry, array $motivating): array
+    {
+        $check = $this->contradictionChecker->check($userId, $entry['category_id'], $this->triggersFor($entry));
+
+        if ($check['contradicts']->isEmpty()) {
+            return $entry;
+        }
+
+        $keep = [...$check['agrees']->all(), ...$motivating];
+        $narrowing = $keep === [] ? null : $this->narrowingTrigger($keep, $check['contradicts']->all());
+
+        if ($narrowing !== null) {
+            return [...$entry, 'extra_triggers' => [$narrowing]];
+        }
+
+        return [
+            'value' => $entry['value'],
+            'category_id' => $entry['category_id'],
+            'source' => $entry['source'],
+            'contradicting' => $check['contradicts']->count(),
+            'contradicting_categories' => $check['contradictingCategories'],
+        ];
+    }
+
+    /**
+     * The first single trigger — direction, then account, then an amount
+     * threshold — that every kept row satisfies and no contradicting row does.
+     *
+     * @param  non-empty-list<Transaction>  $keep
+     * @param  non-empty-list<Transaction>  $contradicting
+     * @return array{field: string, operator: string, value: string}|null
+     */
+    private function narrowingTrigger(array $keep, array $contradicting): ?array
+    {
+        foreach ([RuleTriggerField::Direction, RuleTriggerField::AccountId] as $field) {
+            $kept = array_unique(array_map(fn (Transaction $t): string => $this->fieldValue($t, $field), $keep));
+
+            if (count($kept) !== 1) {
+                continue;
+            }
+
+            $value = $kept[array_key_first($kept)];
+
+            if (array_any($contradicting, fn (Transaction $t): bool => $this->fieldValue($t, $field) === $value)) {
+                continue;
+            }
+
+            return ['field' => $field->value, 'operator' => RuleTriggerOperator::Is->value, 'value' => $value];
+        }
+
+        $keptAmounts = array_map(fn (Transaction $t): int => (int) $t->amount, $keep);
+        $contraAmounts = array_map(fn (Transaction $t): int => (int) $t->amount, $contradicting);
+
+        // Kept rows all below the contradicting ones: cut at the gap's midpoint.
+        if (max($keptAmounts) < min($contraAmounts)) {
+            $threshold = (int) floor((max($keptAmounts) + min($contraAmounts)) / 2);
+
+            return ['field' => RuleTriggerField::Amount->value, 'operator' => RuleTriggerOperator::LessThanOrEqual->value, 'value' => (string) $threshold];
+        }
+
+        if (min($keptAmounts) > max($contraAmounts)) {
+            $threshold = (int) floor((max($contraAmounts) + min($keptAmounts) + 1) / 2);
+
+            return ['field' => RuleTriggerField::Amount->value, 'operator' => RuleTriggerOperator::GreaterThanOrEqual->value, 'value' => (string) $threshold];
+        }
+
+        return null;
+    }
+
+    /** The trigger-comparable string form of a direction or account id. */
+    private function fieldValue(Transaction $transaction, RuleTriggerField $field): string
+    {
+        $raw = $transaction->{$field->value};
+
+        return $raw instanceof BackedEnum ? (string) $raw->value : (string) $raw;
     }
 
     /**
