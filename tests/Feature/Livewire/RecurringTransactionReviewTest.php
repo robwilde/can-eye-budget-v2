@@ -51,6 +51,12 @@ function createRecurringReviewMonthlyGroup(
     return $transactions;
 }
 
+beforeEach(function () {
+    // Monthly fixtures end on 2026-03-15; pin "today" within the detector's
+    // recency window so they are still suggested.
+    $this->travelTo(CarbonImmutable::parse('2026-03-20'));
+});
+
 test('mount sets account id to the users primary account id', function () {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
