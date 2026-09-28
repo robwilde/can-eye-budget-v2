@@ -26,16 +26,20 @@ final class CategoryRulePreview extends Dto implements Wireable
      * @param  int  $inSelection  matching rows the user already had selected
      * @param  int  $beyondSelection  matching rows outside the selection — the surprise factor
      * @param  int  $wouldChange  rows that will actually be written
-     * @param  int  $protectedByManual  rows skipped because a human set their category
+     * @param  int  $agreesWithManual  rows skipped because a human already filed them under the rule's category
+     * @param  int  $contradictsManual  rows skipped because a human filed them under a different category
      * @param  array<string, int>  $existingCategories  category full path => count, for rows outside the selection that already have one
+     * @param  array<string, int>  $contradictingCategories  category full path => count, for the manual rows the rule contradicts
      */
     public function __construct(
         public readonly string $matchValue,
         public readonly int $inSelection,
         public readonly int $beyondSelection,
         public readonly int $wouldChange,
-        public readonly int $protectedByManual,
+        public readonly int $agreesWithManual,
+        public readonly int $contradictsManual,
         public readonly array $existingCategories = [],
+        public readonly array $contradictingCategories = [],
     ) {}
 
     /** @param  array<string, mixed>  $value */
@@ -46,14 +50,22 @@ final class CategoryRulePreview extends Dto implements Wireable
             inSelection: (int) $value['inSelection'],
             beyondSelection: (int) $value['beyondSelection'],
             wouldChange: (int) $value['wouldChange'],
-            protectedByManual: (int) $value['protectedByManual'],
+            agreesWithManual: (int) $value['agreesWithManual'],
+            contradictsManual: (int) $value['contradictsManual'],
             existingCategories: array_map(intval(...), (array) $value['existingCategories']),
+            contradictingCategories: array_map(intval(...), (array) $value['contradictingCategories']),
         );
     }
 
     public function totalMatches(): int
     {
         return $this->inSelection + $this->beyondSelection;
+    }
+
+    /** Rows the sweep leaves alone because a human set their category. */
+    public function protectedByManual(): int
+    {
+        return $this->agreesWithManual + $this->contradictsManual;
     }
 
     /** @return array<string, mixed> */
@@ -64,8 +76,10 @@ final class CategoryRulePreview extends Dto implements Wireable
             'inSelection' => $this->inSelection,
             'beyondSelection' => $this->beyondSelection,
             'wouldChange' => $this->wouldChange,
-            'protectedByManual' => $this->protectedByManual,
+            'agreesWithManual' => $this->agreesWithManual,
+            'contradictsManual' => $this->contradictsManual,
             'existingCategories' => $this->existingCategories,
+            'contradictingCategories' => $this->contradictingCategories,
         ];
     }
 }

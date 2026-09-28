@@ -466,9 +466,18 @@
                                     <strong data-testid="rule-preview-change">{{ $rulePreview->wouldChange }}</strong>
                                     will be categorised.
                                 </div>
-                                @if($rulePreview->protectedByManual > 0)
+                                @if($rulePreview->agreesWithManual > 0)
                                     <div class="text-emerald-700 dark:text-emerald-400" data-testid="rule-preview-protected">
-                                        {{ $rulePreview->protectedByManual }} will be left alone because you set their category yourself.
+                                        {{ $rulePreview->agreesWithManual }} you already filed here yourself will be left alone.
+                                    </div>
+                                @endif
+                                @if($rulePreview->contradictsManual > 0)
+                                    <div class="text-red-700 dark:text-red-400" data-testid="rule-preview-contradicts">
+                                        {{ $rulePreview->contradictsManual }} transaction{{ $rulePreview->contradictsManual === 1 ? '' : 's' }}
+                                        you categorised yourself {{ $rulePreview->contradictsManual === 1 ? 'is' : 'are' }} filed differently and will be left alone:
+                                        @foreach($rulePreview->contradictingCategories as $name => $count)
+                                            {{ $name }} ({{ $count }}){{ ! $loop->last ? ', ' : '' }}
+                                        @endforeach
                                     </div>
                                 @endif
                                 @if($rulePreview->existingCategories !== [])

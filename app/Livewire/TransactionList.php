@@ -710,11 +710,14 @@ final class TransactionList extends Component
         $this->resetPage();
 
         $this->bulkNotice = sprintf(
-            'Rule created. %d transaction%s categorised%s.',
+            'Rule created. %d transaction%s categorised%s%s.',
             $preview->wouldChange,
             $preview->wouldChange === 1 ? '' : 's',
-            $preview->protectedByManual > 0
-                ? sprintf(', %d left alone because you set them yourself', $preview->protectedByManual)
+            $preview->protectedByManual() > 0
+                ? sprintf(', %d left alone because you set them yourself', $preview->protectedByManual())
+                : '',
+            $preview->contradictsManual > 0
+                ? sprintf(' (%d of them you filed under a different category)', $preview->contradictsManual)
                 : '',
         );
 
