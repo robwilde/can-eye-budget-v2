@@ -46,7 +46,7 @@ it('queues one lookup per recurring merchant key, not per row', function () {
 
     dispatch_sync(new EnrichMerchantBrandsJob($this->user));
 
-    expect(queuedKeys())->toBe(['NETFLIX.COM', 'VISA WOOLWORTHS SYDNEY']);
+    expect(queuedKeys())->toBe(['NETFLIX.COM', 'WOOLWORTHS SYDNEY']);
     Queue::assertPushedOn(ResolveMerchantBrandJob::QUEUE, ResolveMerchantBrandJob::class);
 });
 
@@ -82,7 +82,7 @@ it('sizes the batch to the remaining budget, most frequent first', function () {
 
     dispatch_sync(new EnrichMerchantBrandsJob($this->user));
 
-    expect(queuedKeys())->toBe(['NETFLIX.COM', 'VISA WOOLWORTHS SYDNEY']);
+    expect(queuedKeys())->toBe(['NETFLIX.COM', 'WOOLWORTHS SYDNEY']);
 });
 
 it('skips keys the gate refuses so they never take a budget slot', function () {
