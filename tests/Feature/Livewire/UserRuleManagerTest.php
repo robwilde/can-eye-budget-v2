@@ -4,14 +4,19 @@
 
 declare(strict_types=1);
 
+use App\Enums\PipelineTrigger;
 use App\Enums\RuleActionType;
 use App\Enums\RuleTriggerField;
 use App\Enums\RuleTriggerOperator;
+use App\Jobs\RunTransactionAnalysisJob;
 use App\Livewire\UserRuleManager;
+use App\Models\Account;
 use App\Models\Category;
+use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
+use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -226,6 +231,107 @@ test('can toggle rule auto_apply', function () {
 
     expect($rule->fresh()->is_auto_apply)->toBeTrue();
 });
+
+test('the auto-apply switch shows the rule\'s current state', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    $auto = UserRule::factory()->for($this->user)->for($group, 'group')->autoApply()->create();
+    $manual = UserRule::factory()->for($this->user)->for($group, 'group')->create();
+
+    $html = Livewire::actingAs($this->user)->test(UserRuleManager::class)->html();
+
+    $switchFor = function (UserRule $rule) use ($html): string {
+        preg_match('/<ui-switch[^>]*toggleRuleAutoApply\('.$rule->id.'\)[^>]*>/', $html, $match);
+
+        return $match[0] ?? '';
+    };
+
+    // Match the attribute, not the data-checked:… class variants in the class list.
+    expect($switchFor($auto))->toMatch('/\sdata-checked[\s>]/')
+        ->and($switchFor($manual))->not->toBe('')
+        ->and($switchFor($manual))->not->toMatch('/\sdata-checked[\s>]/');
+});
+
+// ─── Run / Apply ──────────────────────────────────────────
+
+test('run button is disabled when the only active rule sits in an inactive group', function () {
+    $inactiveGroup = UserRuleGroup::factory()->for($this->user)->create(['is_active' => false]);
+    UserRule::factory()->for($this->user)->for($inactiveGroup, 'group')->create();
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->assertViewHas('hasActiveRules', false);
+
+    $activeGroup = UserRuleGroup::factory()->for($this->user)->create(['is_active' => true]);
+    UserRule::factory()->for($this->user)->for($activeGroup, 'group')->create();
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->assertViewHas('hasActiveRules', true);
+});
+
+test('runRules queues the analysis job with the manual trigger', function () {
+    Queue::fake();
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->call('runRules');
+
+    Queue::assertPushed(
+        RunTransactionAnalysisJob::class,
+        fn (RunTransactionAnalysisJob $job): bool => $job->user->is($this->user)
+            && $job->trigger === PipelineTrigger::Manual,
+    );
+});
+
+test('applyRule categorises every matching transaction for a manual rule', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    $rule = UserRule::factory()->for($this->user)->for($group, 'group')->create([
+        'is_auto_apply' => false,
+        'triggers' => [['field' => RuleTriggerField::Description->value, 'operator' => RuleTriggerOperator::Contains->value, 'value' => 'NETFLIX']],
+        'actions' => [['type' => RuleActionType::SetCategory->value, 'value' => (string) $category->id]],
+    ]);
+    $account = Account::factory()->for($this->user)->create();
+    $matches = Transaction::factory()->for($this->user)->for($account)->count(2)->create([
+        'description' => 'NETFLIX.COM',
+        'category_id' => null,
+        'transfer_pair_id' => null,
+    ]);
+    $other = Transaction::factory()->for($this->user)->for($account)->create([
+        'description' => 'SPOTIFY',
+        'category_id' => null,
+        'transfer_pair_id' => null,
+    ]);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->call('applyRule', $rule->id);
+
+    expect($matches->map->fresh()->pluck('category_id')->all())->toBe([$category->id, $category->id])
+        ->and($other->fresh()->category_id)->toBeNull();
+});
+
+test('applyRule ignores another user\'s rule and an inactive rule', function (bool $foreign) {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $owner = $foreign ? User::factory()->create() : $this->user;
+    $group = UserRuleGroup::factory()->for($owner)->create();
+    $rule = UserRule::factory()->for($owner)->for($group, 'group')->create([
+        'is_active' => $foreign,
+        'triggers' => [['field' => RuleTriggerField::Description->value, 'operator' => RuleTriggerOperator::Contains->value, 'value' => 'NETFLIX']],
+        'actions' => [['type' => RuleActionType::SetCategory->value, 'value' => (string) $category->id]],
+    ]);
+    $txn = Transaction::factory()->for($owner)->for(Account::factory()->for($owner))->create([
+        'description' => 'NETFLIX.COM',
+        'category_id' => null,
+        'transfer_pair_id' => null,
+    ]);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->call('applyRule', $rule->id);
+
+    expect($txn->fresh()->category_id)->toBeNull();
+})->with(['another user\'s rule' => true, 'an inactive rule' => false]);
 
 test('cannot save rule without at least one trigger and one action', function () {
     $group = UserRuleGroup::factory()->for($this->user)->create();

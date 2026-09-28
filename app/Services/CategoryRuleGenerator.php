@@ -13,7 +13,6 @@ use App\Models\Transaction;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
 use App\Support\Recurring\MerchantSignature;
-use Illuminate\Database\Eloquent\Builder;
 
 /**
  * Builds a "categorise this merchant" rule from a source transaction and a
@@ -42,7 +41,7 @@ final readonly class CategoryRuleGenerator
 
     public function __construct(
         private RuleEvaluator $evaluator,
-        private RuleActionExecutor $executor,
+        private UserRuleApplier $applier,
     ) {}
 
     public function generateAndApply(Transaction $source, int $categoryId, ?string $matchValue = null): UserRule
@@ -60,7 +59,7 @@ final readonly class CategoryRuleGenerator
             ...$this->matchAttributes($source, $categoryId, $matchValue),
         ]);
 
-        $this->applyToExisting($source->user_id, $rule);
+        $this->applier->applyToHistory($rule);
 
         return $rule;
     }
@@ -96,7 +95,7 @@ final readonly class CategoryRuleGenerator
         $protectedByManual = 0;
         $existingCategories = [];
 
-        $this->eligible($source->user_id)
+        $this->applier->eligible($source->user_id)
             ->with('category.parent.parent')
             ->lazyById()
             ->each(function (Transaction $transaction) use (
@@ -201,48 +200,6 @@ final readonly class CategoryRuleGenerator
     private function resolvedMatchValue(Transaction $source, ?string $matchValue): string
     {
         return $this->buildTrigger($source, $matchValue)['value'];
-    }
-
-    /**
-     * Transactions a generated rule may legally touch.
-     *
-     * Shared by the sweep and the preview, so the preview counts exactly the
-     * population the sweep will walk.
-     *
-     * Splits and transfers are excluded at the query level as well as in the
-     * executor: a split transaction's category is decided by its parts, and a
-     * transfer is not spending at all. Note whereDoesntHave('splits') is the
-     * split test — parent_transaction_id is createChild() lineage and means
-     * something entirely different.
-     *
-     * @return Builder<Transaction>
-     */
-    private function eligible(int $userId): Builder
-    {
-        return Transaction::query()
-            ->where('user_id', $userId)
-            ->current()
-            ->whereNull('transfer_pair_id')
-            ->whereDoesntHave('splits');
-    }
-
-    private function applyToExisting(int $userId, UserRule $rule): void
-    {
-        // Stream by id rather than loading the whole history into memory. Keying
-        // on the (unchanging) id keeps paging stable even though we mutate rows.
-        $this->eligible($userId)
-            ->lazyById()
-            ->each(function (Transaction $transaction) use ($rule): void {
-                if ($this->evaluator->matches($transaction, $rule)) {
-                    // Write exactly the matched row. The planned-group fan-out
-                    // would rewrite siblings the rule does not match, including
-                    // ones a person categorised, none of which preview() counts.
-                    // applyCategoryToSelection() opts out for the same reason.
-                    $transaction->propagateCategoryChange = false;
-
-                    $this->executor->execute($transaction, $rule->actions);
-                }
-            });
     }
 
     /** @return array<string, string> */

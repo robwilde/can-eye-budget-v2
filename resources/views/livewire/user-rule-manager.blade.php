@@ -7,8 +7,13 @@
 <div class="space-y-6">
     <div class="flex items-center justify-between">
         <flux:heading size="lg">Rules</flux:heading>
-        <flux:button variant="primary" size="sm" wire:click="openAddGroupModal">Add Group</flux:button>
+        <div class="flex items-center gap-2">
+            <flux:button size="sm" icon="play" wire:click="runRules" :disabled="! $hasActiveRules">Run rules now</flux:button>
+            <flux:button variant="primary" size="sm" wire:click="openAddGroupModal">Add Group</flux:button>
+        </div>
     </div>
+
+    <flux:text size="sm" class="text-zinc-500">Auto-apply rules run after every import and when you click Run rules. Other rules turn their matches into suggestions for you to accept.</flux:text>
 
     @forelse($groups as $group)
         <flux:card wire:key="group-{{ $group->id }}">
@@ -76,17 +81,15 @@
                                 @unless($rule->is_active)
                                     <flux:badge size="sm" color="yellow">Inactive</flux:badge>
                                 @endunless
-                                @if($rule->is_auto_apply)
-                                    <flux:badge size="sm" color="green">Auto-apply</flux:badge>
-                                @endif
                             </div>
 
                             <div class="flex shrink-0 items-center gap-2">
                                 <flux:button variant="ghost" size="sm" wire:click="toggleRuleActive({{ $rule->id }})">
                                     {{ $rule->is_active ? 'Disable' : 'Enable' }}
                                 </flux:button>
-                                <flux:button variant="ghost" size="sm" wire:click="toggleRuleAutoApply({{ $rule->id }})">
-                                    {{ $rule->is_auto_apply ? 'Manual' : 'Auto' }}
+                                <flux:switch label="Auto-apply" :checked="$rule->is_auto_apply" wire:click="toggleRuleAutoApply({{ $rule->id }})" />
+                                <flux:button variant="ghost" size="sm" wire:click="applyRule({{ $rule->id }})" :disabled="! $rule->is_active">
+                                    Apply now
                                 </flux:button>
                                 <flux:button variant="ghost" size="sm" wire:click="openEditRuleModal({{ $rule->id }})">
                                     <flux:icon.pencil class="size-4" />

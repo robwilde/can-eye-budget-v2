@@ -41,7 +41,7 @@ test('job has correct tries and timeout configuration', function () {
         ->and($job->timeout)->toBe(300);
 });
 
-test('handle resolves pipeline and calls run', function () {
+test('default trigger is Sync', function () {
     $user = User::factory()->create();
     $job = new RunTransactionAnalysisJob($user);
 
@@ -54,6 +54,15 @@ test('handle resolves pipeline and calls run', function () {
     expect($run)
         ->user_id->toBe($user->id)
         ->trigger->toBe(PipelineTrigger::Sync);
+});
+
+test('handle records the dispatched trigger', function () {
+    $user = User::factory()->create();
+    $job = new RunTransactionAnalysisJob($user, PipelineTrigger::Manual);
+
+    $job->handle(new TransactionAnalysisPipeline(stages: []));
+
+    expect(PipelineRun::sole()->trigger)->toBe(PipelineTrigger::Manual);
 });
 
 test('failed method logs the exception with user context', function () {

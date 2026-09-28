@@ -4,16 +4,21 @@ declare(strict_types=1);
 
 namespace App\Livewire;
 
+use App\Enums\PipelineTrigger;
 use App\Enums\RuleActionType;
 use App\Enums\RuleTriggerField;
 use App\Enums\RuleTriggerOperator;
+use App\Jobs\RunTransactionAnalysisJob;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
+use App\Models\User;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
+use App\Services\UserRuleApplier;
 use Closure;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\Rule;
 use Livewire\Component;
 
@@ -357,6 +362,36 @@ final class UserRuleManager extends Component
         $rule?->update(['is_auto_apply' => ! $rule->is_auto_apply]);
     }
 
+    // ─── Run ─────────────────────────────────────────────
+
+    public function runRules(): void
+    {
+        $user = auth()->user();
+
+        abort_unless($user instanceof User, 403);
+
+        // The job is unique per user for 300 s, so a repeat click while one is
+        // queued is dropped by the queue; the message stays true either way.
+        RunTransactionAnalysisJob::dispatch($user, PipelineTrigger::Manual);
+
+        Flux::toast(text: 'Rules queued — results will show in Suggestions shortly', variant: 'success');
+    }
+
+    public function applyRule(int $ruleId, UserRuleApplier $applier): void
+    {
+        $rule = UserRule::where('id', $ruleId)
+            ->where('user_id', auth()->id())
+            ->first();
+
+        if (! $rule || ! $rule->is_active) {
+            return;
+        }
+
+        $count = $applier->applyToHistory($rule);
+
+        Flux::toast(text: "Applied to {$count} transactions", variant: 'success');
+    }
+
     // ─── Reorder ─────────────────────────────────────────
 
     public function moveGroupUp(int $groupId): void
@@ -444,6 +479,10 @@ final class UserRuleManager extends Component
     public function render(): View
     {
         return view('livewire.user-rule-manager', [
+            'hasActiveRules' => UserRule::where('user_id', auth()->id())
+                ->active()
+                ->whereHas('group', fn (Builder $q) => $q->where('is_active', true))
+                ->exists(),
             'groups' => UserRuleGroup::where('user_id', auth()->id())
                 ->ordered()
                 ->with(['rules' => fn ($q) => $q->ordered()])
