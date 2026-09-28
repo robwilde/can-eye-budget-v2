@@ -666,7 +666,6 @@ final class TransactionModal extends Component
 
         if (! $this->categoriseMatching
             || $this->categoryId === null
-            || mb_trim($this->categoriseMatchValue) === ''
             || $this->transactionType === 'transfer'
             || $this->editingTransactionId === null) {
             return;

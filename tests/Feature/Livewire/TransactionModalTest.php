@@ -3729,3 +3729,33 @@ test('categorise-matching warns when the match value catches transactions the us
     $component->set('categoriseMatchValue', 'NETFLIX TRAINING XYZ')
         ->assertDontSeeHtml('data-testid="categorise-contradicts"');
 });
+
+test('categorise-matching still warns when the match value is blank and the rule falls back to the merchant name', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Entertainment', 'is_hidden' => false]);
+    $other = Category::factory()->create(['name' => 'Education', 'is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'description' => 'NETFLIX',
+        'merchant_name' => 'Netflix',
+        'post_date' => '2026-03-15',
+        'category_id' => null,
+    ]);
+    Transaction::factory()->for($user)->for($account)->manual()->create([
+        'description' => 'NETFLIX TRAINING COURSE',
+        'merchant_name' => 'Netflix',
+        'post_date' => '2026-02-15',
+        'category_id' => $other->id,
+        'category_source' => CategorySource::Manual,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('categoryId', $category->id)
+        ->set('categoriseMatching', true)
+        ->set('categoriseMatchValue', '   ')
+        ->assertSeeHtml('data-testid="categorise-contradicts"')
+        ->assertSee($other->fullPath());
+});
