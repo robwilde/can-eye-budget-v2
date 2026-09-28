@@ -7,6 +7,7 @@ namespace App\Providers;
 use App\Contracts\ContextDevServiceContract;
 use App\Contracts\GitHubServiceContract;
 use App\Contracts\GmailServiceContract;
+use App\Contracts\TypeSafeServiceContract;
 use App\Services\CategoryRuleGenerator;
 use App\Services\ContextDevService;
 use App\Services\GitHubService;
@@ -20,6 +21,7 @@ use App\Services\PipelineStages\SetPayCycleStage;
 use App\Services\PipelineStages\UserRulesStage;
 use App\Services\RedbarkClientFactory;
 use App\Services\TransactionAnalysisPipeline;
+use App\Services\TypeSafeService;
 use App\View\Composers\LayoutShellComposer;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
@@ -49,6 +51,18 @@ final class AppServiceProvider extends ServiceProvider
         });
 
         $this->app->alias(ContextDevServiceContract::class, ContextDevService::class);
+
+        $this->app->singleton(TypeSafeServiceContract::class, function (): TypeSafeService {
+            $apiKey = (string) config('services.typesafe.api_key');
+
+            throw_if(blank($apiKey), RuntimeException::class, 'TYPESAFE_API_KEY is not configured.');
+
+            return new TypeSafeService(
+                apiKey: $apiKey,
+                baseUrl: (string) config('services.typesafe.base_url'),
+                model: (string) config('services.typesafe.model'),
+            );
+        });
 
         $this->app->bind(ContextDevCreditBudget::class, fn (): ContextDevCreditBudget => new ContextDevCreditBudget(
             cache: $this->app->make('cache.store'),
