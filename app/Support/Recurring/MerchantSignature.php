@@ -22,13 +22,64 @@ namespace App\Support\Recurring;
  *
  * If every token is filtered out, the raw normalized string is returned rather
  * than an empty signature, so unrelated all-code descriptions are not merged.
+ *
+ * for() then drops tokens that describe how the card was used rather than who
+ * was paid: a leading card network (VISA -AFTERPAY) and a trailing foreign
+ * marker (… IE FRGN). Banks add them inconsistently, so keeping them splits one
+ * merchant into several keys (#480). Only the edges are touched, and never the
+ * last remaining token, so "ROUND UP … VISA NETFLIX.COM" and a bare "VISA"
+ * keep their meaning. Stripping repeats until nothing changes, which makes a
+ * key map to itself: stored keys can be re-derived without their source row.
  */
 final class MerchantSignature
 {
+    /**
+     * Card networks that lead card-purchase descriptions. MC is deliberately
+     * absent: it opens merchant names ("MC DONALDS"), not only Mastercard ones.
+     */
+    private const array CARD_NETWORK_TOKENS = ['VISA', 'MASTERCARD', 'EFTPOS'];
+
+    private const string FOREIGN_MARKER_TOKEN = 'FRGN';
+
+    /**
+     * The payee key: the redacted descriptor without card-usage edge tokens.
+     */
     public static function for(string $raw): string
     {
-        $normalized = self::normalize($raw);
-        $tokens = preg_split('/\s+/', $normalized) ?: [];
+        $kept = self::payeeTokens($raw);
+
+        if ($kept === []) {
+            return self::normalize($raw);
+        }
+
+        while (count($kept) > 1 && in_array($kept[0], self::CARD_NETWORK_TOKENS, true)) {
+            array_shift($kept);
+        }
+
+        while (count($kept) > 1 && $kept[array_key_last($kept)] === self::FOREIGN_MARKER_TOKEN) {
+            array_pop($kept);
+        }
+
+        return implode(' ', $kept);
+    }
+
+    /**
+     * The descriptor with codes removed but card-usage tokens kept. DescriptorGate
+     * reads its card-scheme marker from here, which for() no longer carries.
+     */
+    public static function redact(string $raw): string
+    {
+        $kept = self::payeeTokens($raw);
+
+        return $kept === [] ? self::normalize($raw) : implode(' ', $kept);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function payeeTokens(string $raw): array
+    {
+        $tokens = preg_split('/\s+/', self::normalize($raw)) ?: [];
 
         $kept = [];
 
@@ -53,7 +104,7 @@ final class MerchantSignature
             $kept[] = $token;
         }
 
-        return $kept === [] ? $normalized : implode(' ', $kept);
+        return $kept;
     }
 
     private static function normalize(string $raw): string

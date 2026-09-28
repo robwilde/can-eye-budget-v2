@@ -37,7 +37,7 @@ function woolworthsRow(User $user, array $attributes = []): Transaction
     ]);
 }
 
-function runResolve(User $user, string $key = 'VISA WOOLWORTHS SYDNEY'): void
+function runResolve(User $user, string $key = 'WOOLWORTHS SYDNEY'): void
 {
     dispatch_sync(new ResolveMerchantBrandJob($user, $key));
 }
@@ -90,7 +90,7 @@ it('records an unresolved verdict and does not pay again inside its window', fun
 
 it('looks a key up again once its retry window has passed', function () {
     woolworthsRow($this->user);
-    MerchantBrand::factory()->for($this->user)->unresolved()->expired()->create(['merchant_key' => 'VISA WOOLWORTHS SYDNEY']);
+    MerchantBrand::factory()->for($this->user)->unresolved()->expired()->create(['merchant_key' => 'WOOLWORTHS SYDNEY']);
     $this->contextDev->shouldReceive('brandFromTransaction')->once()->andReturn(new MerchantBrandData(title: 'Woolworths'));
 
     runResolve($this->user);
@@ -105,8 +105,8 @@ it('makes no call when the lookup is blocked', function (Closure $arrange) {
 
     runResolve($this->user);
 })->with([
-    'vetoed' => [fn (User $user) => MerchantBrand::factory()->for($user)->vetoed()->create(['merchant_key' => 'VISA WOOLWORTHS SYDNEY'])],
-    'fresh resolved row' => [fn (User $user) => MerchantBrand::factory()->for($user)->create(['merchant_key' => 'VISA WOOLWORTHS SYDNEY'])],
+    'vetoed' => [fn (User $user) => MerchantBrand::factory()->for($user)->vetoed()->create(['merchant_key' => 'WOOLWORTHS SYDNEY'])],
+    'fresh resolved row' => [fn (User $user) => MerchantBrand::factory()->for($user)->create(['merchant_key' => 'WOOLWORTHS SYDNEY'])],
     'kill switch off' => [fn () => config(['services.context_dev.enrichment_enabled' => false])],
     'daily cap spent' => [fn () => config(['services.context_dev.daily_credit_cap' => 5])],
 ]);
@@ -139,7 +139,7 @@ it('finds a sendable debit behind more than ten newer refunds for the key', func
 it('does not overwrite a veto made while the lookup was in flight', function () {
     woolworthsRow($this->user);
     $this->contextDev->shouldReceive('brandFromTransaction')->once()->andReturnUsing(function () {
-        MerchantBrand::factory()->for($this->user)->vetoed()->create(['merchant_key' => 'VISA WOOLWORTHS SYDNEY']);
+        MerchantBrand::factory()->for($this->user)->vetoed()->create(['merchant_key' => 'WOOLWORTHS SYDNEY']);
 
         return new MerchantBrandData(title: 'Woolworths');
     });

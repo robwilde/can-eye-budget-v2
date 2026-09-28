@@ -85,9 +85,10 @@ final class DescriptorGate
     /**
      * The text that may leave the app for this transaction, or null when nothing
      * may. Never the raw description: statements carry card masks (#8357), auth
-     * codes, policy and member numbers. MerchantSignature already drops those
-     * code tokens, so its output is sent, and anything still holding a 4+ digit
-     * run (its all-codes fallback returns the raw text) is refused outright.
+     * codes, policy and member numbers. MerchantSignature::redact() drops those
+     * code tokens but keeps the card-scheme marker the checks below read, so its
+     * output is sent, and anything still holding a 4+ digit run (its all-codes
+     * fallback returns the raw text) is refused outright.
      */
     public function sendableDescriptor(Transaction $transaction): ?string
     {
@@ -114,7 +115,7 @@ final class DescriptorGate
             return null;
         }
 
-        $redacted = MerchantSignature::for($raw);
+        $redacted = MerchantSignature::redact($raw);
 
         // Both forms: a code or doubled space can split a phrase in the raw text
         // ("PAYMENT 123456 TO") that only becomes whole once redacted.

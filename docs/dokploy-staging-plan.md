@@ -512,6 +512,10 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
   existing migrations include changes that are not cleanly reversible in practice.
 - After deploying application code that queued workers must pick up, run `php artisan horizon:terminate` so supervisors restart on the new code. Redeploying
   `can-eye-horizon` satisfies this implicitly; a web-only deploy does not.
+- A deploy that changes how `merchant_key` is derived (`MerchantSignature`) carries a data migration that recomputes keys on the web container, but until
+  `can-eye-horizon` and `can-eye-scheduler` are redeployed their old image still writes old-style keys (bank syncs through the model's `saving` hook, and
+  brand lookups already in flight). Once all three services run the new image, run `php artisan app:backfill-merchant-keys --recompute` once from the web
+  container. It is idempotent: it re-keys only rows written in that window and merges their `merchant_brands` rows (#480).
 - Rollback is: redeploy the previous image in Dokploy, then restore the pre-deploy MariaDB snapshot if the failed deploy migrated the schema. Rolling code back
   without rolling the schema back is only safe for additive migrations.
 
