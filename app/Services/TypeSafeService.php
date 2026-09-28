@@ -83,13 +83,19 @@ final readonly class TypeSafeService implements TypeSafeServiceContract
         $answer = $response->json('answers.'.self::QUESTION_ID);
         $choice = is_array($answer) ? ($answer['choice'] ?? null) : null;
         $probabilities = is_array($answer) ? ($answer['probabilities'] ?? null) : null;
+        $offered = array_map(strval(...), $optionIds);
 
-        if (! is_string($choice) || ! in_array($choice, array_map(strval(...), $optionIds), true) || ! is_array($probabilities)) {
+        if (! is_array($answer) || ($answer['type'] ?? null) !== 'choice'
+            || ! is_string($choice) || ! in_array($choice, $offered, true) || ! is_array($probabilities)) {
             throw new TypeSafeException('TypeSafe response has no well-formed choice answer.');
         }
 
         $ranked = [];
         foreach ($probabilities as $id => $probability) {
+            if (! in_array((string) $id, $offered, true) || ! is_int($probability) && ! is_float($probability)) {
+                throw new TypeSafeException('TypeSafe response has a malformed probability map.');
+            }
+
             $ranked[(string) $id] = (float) $probability;
         }
         arsort($ranked);

@@ -1,5 +1,7 @@
 <?php
 
+/** @noinspection StaticClosureCanBeUsedInspection */
+
 declare(strict_types=1);
 
 use App\Exceptions\TypeSafe\TypeSafeException;
@@ -74,3 +76,22 @@ test('rejects an answer whose choice is not one of the options', function () {
     expect(fn () => (new TypeSafeService('ts_key'))->choose(['merchant_name' => 'ALDI'], 'Which?', ['a' => 'A', 'b' => 'B', 'c' => 'C']))
         ->toThrow(TypeSafeException::class);
 });
+
+test('rejects a malformed answer', function (Closure $mutate) {
+    $body = typeSafeChoiceBody();
+    $mutate($body['answers']['answer']);
+    Http::fake(['api.typesafe.ai/*' => Http::response($body)]);
+
+    expect(fn () => (new TypeSafeService('ts_key'))->choose(['merchant_name' => 'ALDI'], 'Which?', ['a' => 'A', 'b' => 'B', 'c' => 'C']))
+        ->toThrow(TypeSafeException::class);
+})->with([
+    'not a choice answer' => [function (array &$answer): void {
+        $answer['type'] = 'number';
+    }],
+    'probability for an option not offered' => [function (array &$answer): void {
+        $answer['probabilities']['z'] = 0.05;
+    }],
+    'non-numeric probability' => [function (array &$answer): void {
+        $answer['probabilities']['a'] = 'high';
+    }],
+]);
