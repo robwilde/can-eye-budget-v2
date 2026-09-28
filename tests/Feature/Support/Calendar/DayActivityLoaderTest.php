@@ -917,6 +917,107 @@ test('uncategorised posted pip whose name equals its description has null toolti
         ->and($day->pips[0]->tooltip)->toBeNull();
 });
 
+// ── Clean description label ───────────────────────────────────────
+
+test('categorised posted pip shows the clean description with the raw description as tooltip', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Groceries']);
+    $date = CarbonImmutable::create(2026, 6, 20);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $category->id,
+        'amount' => -8500,
+        'post_date' => $date,
+        'description' => 'WOOLWORTHS 4232 BRISBANE',
+        'clean_description' => '  Woolworths  ',
+    ]);
+
+    $day = (new DayActivityLoader)->load($date, $date, $user->id)[$date->format('Y-m-d')];
+
+    expect($day->pips)->toHaveCount(1)
+        ->and($day->pips[0]->name)->toBe('Woolworths')
+        ->and($day->pips[0]->tooltip)->toBe('WOOLWORTHS 4232 BRISBANE');
+});
+
+test('categorised posted pip with a blank clean description falls back to the category name', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Groceries']);
+    $date = CarbonImmutable::create(2026, 6, 20);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $category->id,
+        'amount' => -8500,
+        'post_date' => $date,
+        'description' => 'WOOLWORTHS 4232 BRISBANE',
+        'clean_description' => '   ',
+    ]);
+
+    $day = (new DayActivityLoader)->load($date, $date, $user->id)[$date->format('Y-m-d')];
+
+    expect($day->pips[0]->name)->toBe('Groceries');
+});
+
+test('reconciled posted pip shows the clean description ahead of the plan category', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Rent']);
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'category_id' => $category->id,
+        'amount' => 77000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -77000,
+        'post_date' => $date,
+        'description' => 'Ext Tfr - NET#4789778169 Sekisui House',
+        'clean_description' => 'Sekisui House',
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $day = (new DayActivityLoader)->load($date, $date, $user->id)[$date->format('Y-m-d')];
+
+    expect($day->pips)->toHaveCount(1)
+        ->and($day->pips[0]->name)->toBe('Sekisui House')
+        ->and($day->pips[0]->matched)->toBeTrue()
+        ->and($day->pips[0]->tooltip)->toBe('Ext Tfr - NET#4789778169 Sekisui House');
+});
+
+test('split pips keep their category names and fall back to the clean description when uncategorised', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    $transaction = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -10000,
+        'post_date' => $date,
+        'description' => 'WOOLWORTHS 4232 BRISBANE',
+        'clean_description' => 'Woolworths',
+    ]);
+
+    $transaction->splits()->createMany([
+        ['category_id' => $groceries->id, 'amount' => -7000, 'position' => 0],
+        ['category_id' => null, 'amount' => -3000, 'position' => 1],
+    ]);
+
+    $day = (new DayActivityLoader)->load($date, $date, $user->id)[$date->format('Y-m-d')];
+
+    expect($day->pips)->toHaveCount(2)
+        ->and($day->pips[0]->name)->toBe('Groceries')
+        ->and($day->pips[1]->name)->toBe('Woolworths')
+        ->and($day->pips[1]->tooltip)->toBe('WOOLWORTHS 4232 BRISBANE');
+});
+
 test('DayActivity::empty returns a zero-state instance', function () {
     $empty = DayActivity::empty();
 

@@ -39,8 +39,11 @@ final readonly class DayActivityLoader
      * grouped by ISO date. Transfers are excluded. Pips per day are sorted by amount desc.
      *
      * A planned occurrence that has been reconciled to a posted transaction (matched within
-     * ReconciliationPolicy::DATE_TOLERANCE_DAYS) is suppressed: only the posted pip renders,
-     * relabelled with the reconciled plan's category name and icon.
+     * ReconciliationPolicy::DATE_TOLERANCE_DAYS) is suppressed: only the posted pip renders.
+     * Its icon comes from the plan's category; its label follows this precedence:
+     * clean description > (plan) category name > plan description.
+     * Split transactions use: split category > clean description > raw description > 'Transaction'.
+     * Unreconciled posted transactions use: clean description > tx category > raw description > 'Transaction'.
      *
      * @return array<string, DayActivity>
      */
@@ -135,7 +138,7 @@ final readonly class DayActivityLoader
 
                 if ($tx->isSplit()) {
                     foreach ($tx->splits as $split) {
-                        $splitName = $split->category?->name ?? ($tx->description !== '' ? $tx->description : 'Transaction'); // @phpstan-ignore nullsafe.neverNull
+                        $splitName = $split->category?->name ?? self::transactionLabel($tx) ?? ($tx->description !== '' ? $tx->description : 'Transaction'); // @phpstan-ignore nullsafe.neverNull
                         $pips[] = new PayCyclePip(
                             kind: $isCredit ? 'inc' : 'out',
                             name: $splitName,
@@ -153,10 +156,10 @@ final readonly class DayActivityLoader
                 }
 
                 if ($linkedPlan !== null) {
-                    $name = $linkedPlan->category?->name ?? $linkedPlan->description; // @phpstan-ignore nullsafe.neverNull
+                    $name = self::transactionLabel($tx) ?? $linkedPlan->category?->name ?? $linkedPlan->description; // @phpstan-ignore nullsafe.neverNull
                     $icon = $linkedPlan->category?->resolveIcon();
                 } else {
-                    $name = $tx->category?->name ?? ($tx->description !== '' ? $tx->description : 'Transaction'); // @phpstan-ignore nullsafe.neverNull
+                    $name = self::transactionLabel($tx) ?? $tx->category?->name ?? ($tx->description !== '' ? $tx->description : 'Transaction'); // @phpstan-ignore nullsafe.neverNull
                     $icon = $tx->category?->resolveIcon();
                 }
 
@@ -192,6 +195,17 @@ final readonly class DayActivityLoader
         }
 
         return $activity;
+    }
+
+    /**
+     * Extract the clean description from a transaction, if present and non-empty.
+     * Returns trimmed clean_description when non-empty, otherwise null.
+     */
+    private static function transactionLabel(Transaction $tx): ?string
+    {
+        $clean = mb_trim($tx->clean_description ?? '');
+
+        return $clean !== '' ? $clean : null;
     }
 
     /**
