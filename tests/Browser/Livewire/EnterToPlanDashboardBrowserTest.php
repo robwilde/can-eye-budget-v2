@@ -50,7 +50,7 @@ test('enter to plan conversion live-refreshes the dashboard pay-cycle calendar',
     $page->assertPresent('.type-toggle')
         ->click('Plan')
         ->assertSee('Frequency')
-        ->select('[wire\\:model="frequency"]', 'every-week')
+        ->select('[wire\\:model\\.live="frequency"]', 'every-week')
         ->click('Convert to planned expense');
 
     // The converted posting reconciles to the new plan, so today keeps its
