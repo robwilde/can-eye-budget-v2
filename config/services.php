@@ -37,6 +37,14 @@ return [
         'daily_credit_cap' => (int) env('CONTEXT_DEV_DAILY_CREDIT_CAP', 500),
     ],
 
+    'typesafe' => [
+        // Server-side secret for TypeSafe System One (Jev). Only the offline
+        // categories:jev-eval command (#505) calls it; nothing in the request path does.
+        'api_key' => env('TYPESAFE_API_KEY'),
+        'base_url' => env('TYPESAFE_BASE_URL') ?: 'https://api.typesafe.ai',
+        'model' => env('TYPESAFE_MODEL') ?: 'jev-latest',
+    ],
+
     'redbark' => [
         'base_url' => env('REDBARK_BASE_URL') ?: 'https://api.redbark.com/v1',
         'include_pending' => (bool) env('REDBARK_INCLUDE_PENDING', false),
