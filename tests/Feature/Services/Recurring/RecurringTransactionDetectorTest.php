@@ -185,6 +185,15 @@ test('ignores a monthly series whose last occurrence was 60 days ago', function 
     expect($this->detector->detect($this->user))->toBeEmpty();
 });
 
+test('detects a monthly series whose last occurrence is 60 days in the future', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-15')->subDays(60));
+    createDetectorDatedGroup($this->user, $this->account, 'Netflix', 1699, [
+        '2026-01-15', '2026-02-15', '2026-03-15',
+    ]);
+
+    expect($this->detector->detect($this->user))->toHaveCount(1);
+});
+
 test('ignores a monthly series that ended four months ago', function () {
     $this->travelTo(CarbonImmutable::parse('2026-07-15'));
     createDetectorDatedGroup($this->user, $this->account, 'Netflix', 1699, [

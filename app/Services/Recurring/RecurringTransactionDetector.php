@@ -165,7 +165,7 @@ final readonly class RecurringTransactionDetector
         $tolerance = max(4.0, $targetDays * 0.2);
         $last = CarbonImmutable::instance($group->max('post_date'));
 
-        if (abs($last->diffInDays(CarbonImmutable::today())) > $targetDays + $tolerance) {
+        if ($last->diffInDays(CarbonImmutable::today()) > $targetDays + $tolerance) {
             return null;
         }
 
