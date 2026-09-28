@@ -202,7 +202,7 @@
                     :disabled="$isBankFeedTransaction"
                 />
 
-                <flux:select wire:model="frequency" :label="__('Frequency')" required>
+                <flux:select wire:model.live="frequency" :label="__('Frequency')" required>
                     @foreach(RecurrenceFrequency::cases() as $freq)
                         <flux:select.option value="{{ $freq->value }}">
                             {{ $freq->label() }}

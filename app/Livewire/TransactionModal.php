@@ -227,7 +227,9 @@ final class TransactionModal extends Component
      */
     public function save(): void
     {
-        $this->validate($this->formRules());
+        $this->validate($this->formRules(), [
+            'date.after' => __('Planned transactions start after today.'),
+        ]);
 
         if (! $this->resolveSave()) {
             return;
@@ -236,6 +238,45 @@ final class TransactionModal extends Component
         $this->showModal = false;
         $this->resetForm();
         $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * Switching an existing transaction to plan mode defaults the start date to
+     * the first occurrence after today. Switching back to enter restores the
+     * row's date, so saving the entered row never moves its post date.
+     */
+    public function updatedMode(): void
+    {
+        if ($this->editingTransactionId === null) {
+            return;
+        }
+
+        $transaction = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->find($this->editingTransactionId);
+
+        if (! $transaction) {
+            return;
+        }
+
+        if ($this->mode !== 'plan') {
+            $this->date = $transaction->post_date->format('Y-m-d');
+
+            return;
+        }
+
+        $this->date = $this->nextPlanStartDate($transaction->post_date->toImmutable());
+    }
+
+    public function updatedFrequency(): void
+    {
+        $transaction = $this->editingTransactionForPlan();
+
+        if (! $transaction) {
+            return;
+        }
+
+        $this->date = $this->nextPlanStartDate($transaction->post_date->toImmutable());
     }
 
     public function updatedTransactionType(): void
@@ -896,6 +937,42 @@ final class TransactionModal extends Component
         ];
     }
 
+    /** The transaction being edited when it is being switched into a new plan. */
+    private function editingTransactionForPlan(): ?Transaction
+    {
+        if ($this->editingTransactionId === null || $this->mode !== 'plan') {
+            return null;
+        }
+
+        return Transaction::query()
+            ->where('user_id', auth()->id())
+            ->find($this->editingTransactionId);
+    }
+
+    /**
+     * First occurrence of the selected frequency strictly after today, starting
+     * from the row's post date. Non-repeating plans (or a frequency that fails
+     * to advance) default to tomorrow.
+     */
+    private function nextPlanStartDate(CarbonImmutable $from): string
+    {
+        $today = CarbonImmutable::today();
+        $frequency = RecurrenceFrequency::tryFrom($this->frequency);
+        $date = $from->startOfDay();
+
+        while ($date->lessThanOrEqualTo($today)) {
+            $next = $frequency?->nextOccurrence($date);
+
+            if ($next === null || $next->lessThanOrEqualTo($date)) {
+                return $today->addDay()->format('Y-m-d');
+            }
+
+            $date = $next;
+        }
+
+        return $date->format('Y-m-d');
+    }
+
     private function isTransfer(): bool
     {
         return $this->transactionType === 'transfer';
@@ -940,7 +1017,9 @@ final class TransactionModal extends Component
                 'nullable',
                 Rule::exists('categories', 'id')->where('is_hidden', 0),
             ],
-            'date' => ['required', 'date_format:Y-m-d'],
+            'date' => $this->mode === 'plan' && $this->editingPlannedTransactionId === null
+                ? ['required', 'date_format:Y-m-d', 'after:today']
+                : ['required', 'date_format:Y-m-d'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'cleanDescription' => ['nullable', 'string', 'max:255'],
             'transferToAccountId' => $this->isTransfer()

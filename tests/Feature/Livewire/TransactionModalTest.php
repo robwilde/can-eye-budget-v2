@@ -892,6 +892,8 @@ test('plan mode shows date input field', function () {
 });
 
 test('plan mode saves to planned_transactions table', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -915,6 +917,8 @@ test('plan mode saves to planned_transactions table', function () {
 });
 
 test('plan mode stores correct direction for expense', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -932,6 +936,8 @@ test('plan mode stores correct direction for expense', function () {
 });
 
 test('plan mode stores correct direction for income', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -949,6 +955,8 @@ test('plan mode stores correct direction for income', function () {
 });
 
 test('plan mode stores frequency correctly', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -967,6 +975,8 @@ test('plan mode stores frequency correctly', function () {
 });
 
 test('plan mode always sets until_date to null', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -985,6 +995,8 @@ test('plan mode always sets until_date to null', function () {
 });
 
 test('plan mode until-date sets date correctly', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -1004,6 +1016,8 @@ test('plan mode until-date sets date correctly', function () {
 });
 
 test('plan mode validates frequency is valid enum', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -1020,6 +1034,8 @@ test('plan mode validates frequency is valid enum', function () {
 });
 
 test('plan mode validates until_date required when until-date type selected', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -1037,6 +1053,8 @@ test('plan mode validates until_date required when until-date type selected', fu
 });
 
 test('plan mode allows transfer transaction type', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
     $toAccount = Account::factory()->for($user)->create();
@@ -1146,7 +1164,38 @@ test('plan toggle hidden when editing redbark transaction', function () {
         ->assertDontSee(__('Enter vs Plan'));
 });
 
+test('switching a manual row back from plan to enter restores its date and saving keeps the post date', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-06-15'));
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'amount' => 4500,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'Groceries',
+        'post_date' => '2026-05-10',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('mode', 'plan')
+        ->assertSet('date', '2026-07-10')
+        ->set('mode', 'enter')
+        ->assertSet('date', '2026-05-10')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $current = Transaction::findCurrentVersion($transaction->id, $user->id);
+
+    expect($current->post_date->format('Y-m-d'))->toBe('2026-05-10')
+        ->and(PlannedTransaction::query()->where('user_id', $user->id)->exists())->toBeFalse();
+});
+
 test('plan mode dispatches transaction-saved event', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -1226,6 +1275,8 @@ test('deleting planned transaction removes it', function () {
 });
 
 test('plan mode resets form after save', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -1249,6 +1300,8 @@ test('plan mode resets form after save', function () {
 // ── Planned Transfers (#125) ────────────────────────────────────
 
 test('planned transfer requires transfer_to_account_id', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -1265,6 +1318,8 @@ test('planned transfer requires transfer_to_account_id', function () {
 });
 
 test('planned transfer cannot use same account for both sides', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -2321,6 +2376,8 @@ test('redbark transaction cannot be converted to income via tampered transaction
 // ── Enter/Plan Mode Conversion (#136) ─────────────────────────────
 
 test('converting an entered expense to a plan keeps and reconciles the source', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
@@ -2364,6 +2421,8 @@ test('converting an entered expense to a plan keeps and reconciles the source', 
 });
 
 test('converting entered income to planned income preserves credit direction', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -2394,6 +2453,8 @@ test('converting entered income to planned income preserves credit direction', f
 });
 
 test('converting an entered transfer to a plan keeps both sides', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
     $toAccount = Account::factory()->for($user)->create();
@@ -2576,6 +2637,8 @@ test('converting planned transfer to entered transfer creates paired transaction
 });
 
 test('converting entered expense to planned transfer with mode and type change', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
     $toAccount = Account::factory()->for($user)->create();
@@ -2614,6 +2677,8 @@ test('converting entered expense to planned transfer with mode and type change',
 });
 
 test('converting entered transfer to planned expense with mode and type change', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
     $toAccount = Account::factory()->for($user)->create();
@@ -2744,6 +2809,8 @@ test('converting planned transfer to entered expense with mode and type change',
 });
 
 test('converting an edited transaction to a plan keeps and reconciles the current version', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
@@ -2782,6 +2849,8 @@ test('converting an edited transaction to a plan keeps and reconciles the curren
 });
 
 test('converting an edited transfer to a plan keeps the current versions', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
     $toAccount = Account::factory()->for($user)->create();
@@ -2909,7 +2978,38 @@ test('redbark transaction cannot convert to plan mode', function () {
         ->category_id->toBe($category->id);
 });
 
+test('a new plan must start after today', function (string $date, bool $valid) {
+    $this->travelTo(CarbonImmutable::parse('2026-06-15 10:00'));
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-06-15')
+        ->set('mode', 'plan')
+        ->set('descriptionInput', '50 gym')
+        ->set('accountId', $account->id)
+        ->set('date', $date)
+        ->call('save');
+
+    if ($valid) {
+        $component->assertHasNoErrors();
+        expect(PlannedTransaction::query()->where('user_id', $user->id)->count())->toBe(1);
+    } else {
+        $component->assertHasErrors(['date' => 'after'])
+            ->assertSee(__('Planned transactions start after today.'));
+        expect(PlannedTransaction::query()->where('user_id', $user->id)->count())->toBe(0);
+    }
+})->with([
+    'yesterday' => ['2026-06-14', false],
+    'today' => ['2026-06-15', false],
+    'tomorrow' => ['2026-06-16', true],
+]);
+
 test('converting to plan requires frequency', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -2928,6 +3028,8 @@ test('converting to plan requires frequency', function () {
 });
 
 test('converting to plan with until-date validates until date', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -3050,6 +3152,8 @@ test('copy-transaction prefills a new entry from an existing transaction', funct
 });
 
 test('converting an entered transaction to a plan reconciles the source on that date', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
@@ -3221,6 +3325,8 @@ test('entering a past planned transfer occurrence links both legs to the plan', 
 });
 
 test('converting to a plan with categorise-matching ticked creates a rule and categorises matching transactions', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
@@ -3266,6 +3372,8 @@ test('converting to a plan with categorise-matching ticked creates a rule and ca
 });
 
 test('converting to a plan without ticking categorise-matching creates no rule and leaves siblings untouched', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
@@ -3302,6 +3410,8 @@ test('converting to a plan without ticking categorise-matching creates no rule a
 });
 
 test('the categorise-matching value prefills the suggested merchant token and applies an edited value', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
@@ -3608,6 +3718,8 @@ test('editing a zero-amount transaction can set a category', function () {
 });
 
 test('converting a zero-amount transaction to a plan is rejected', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
