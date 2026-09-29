@@ -26,8 +26,14 @@
         ? $transaction->splits->map(fn ($s) => $s->category?->name)->filter()->unique()->join(' · ')
         : null;
     $brand = $merchantBrands[$transaction->id] ?? null;
+    // A transfer whose partner sits on an untracked (hidden) account reads "Transfer → Spaceship".
+    $hiddenPartner = $transaction->transfer_pair_id !== null ? $transaction->transferPair?->account : null;
+    $hiddenTransferLabel = $hiddenPartner !== null && ! $hiddenPartner->is_tracked
+        ? 'Transfer '.($tone === 'inc' ? '←' : '→').' '.$hiddenPartner->name
+        : null;
     $metaParts = array_filter([
         $brand?->title,
+        $hiddenTransferLabel,
         $splitCategoryLabel !== null && $splitCategoryLabel !== '' ? $splitCategoryLabel : $transaction->category?->name,
         $account === null ? $transaction->account?->name : null,
     ]);
@@ -83,8 +89,8 @@
             :logo="$brand?->logo_url"
             :click="'$dispatch(\'edit-transaction\', { id: ' . $transaction->id . ' })'"
         >
-            @if(! empty($metaParts) || $isPlanned || $transaction->emails->isNotEmpty() || $transaction->isSplit())
-                <x-slot:meta>{{ implode(' · ', $metaParts) }}@if($isPlanned) <span class="pill plan">Planned</span>@endif@if($transaction->isSplit()) <span class="pill split">Split ({{ $transaction->splits->count() }})</span>@endif@if($transaction->emails->isNotEmpty()) <span class="pill email">{{ $transaction->emails->count() }} email{{ $transaction->emails->count() > 1 ? 's' : '' }}</span>@endif</x-slot:meta>
+            @if(! empty($metaParts) || $isPlanned || $transaction->emails->isNotEmpty() || $transaction->isSplit() || $transaction->suggested_pair_id !== null)
+                <x-slot:meta>{{ implode(' · ', $metaParts) }}@if($isPlanned) <span class="pill plan">Planned</span>@endif@if($transaction->suggested_pair_id !== null && $transaction->transfer_pair_id === null) <span class="pill split" data-testid="possible-transfer-{{ $transaction->id }}">Possible transfer</span>@endif@if($transaction->isSplit()) <span class="pill split">Split ({{ $transaction->splits->count() }})</span>@endif@if($transaction->emails->isNotEmpty()) <span class="pill email">{{ $transaction->emails->count() }} email{{ $transaction->emails->count() > 1 ? 's' : '' }}</span>@endif</x-slot:meta>
             @endif
             <x-slot:actions>
                 @if($brand !== null)

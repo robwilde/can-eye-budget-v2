@@ -115,6 +115,20 @@
                 wire-model="source"
             />
         @endif
+
+        {{-- Suggested transfers are only "possible" (still counted normally) until
+             confirmed; this filter and the review page show the pending queue. --}}
+        @if($suggestedTransferCount > 0 || $transfers === 'suggested')
+            <x-cib.filter-toggle
+                :options="[
+                    ['value' => 'all', 'label' => 'All transfers'],
+                    ['value' => 'suggested', 'label' => 'Suggested transfers ('.$suggestedTransferCount.')'],
+                ]"
+                :selected="$transfers"
+                wire-model="transfers"
+            />
+        @endif
+        <flux:button variant="ghost" size="sm" icon="arrows-right-left" href="{{ route('transfers.review') }}" wire:navigate>Review transfers</flux:button>
     </div>
 
     <div class="flex flex-wrap items-center gap-3">

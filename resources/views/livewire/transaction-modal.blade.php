@@ -8,10 +8,12 @@
         <form wire:submit="save" class="space-y-5">
             {{-- Header: title + date --}}
             <div class="flex items-start justify-between gap-3">
-                <div>
+                <div class="border-l-4 pl-3 {{ match ($transactionType) { 'income' => 'border-green-500', 'transfer' => 'border-orange-500', default => 'border-red-500' } }}">
                     <flux:heading size="lg" class="font-black">
                         @if($editingPlannedTransactionId)
                             {{ __('Edit planned') }}
+                        @elseif($transactionType === 'transfer')
+                            {{ __('Between Accounts') }}
                         @elseif($editingTransactionId)
                             {{ __('Edit transaction') }}
                         @else
@@ -23,6 +25,42 @@
                             {{ __('Synced from bank') }}
                         </flux:badge>
                     @endif
+                    @php
+                        $typeTone = match ($transactionType) {
+                            'income' => [
+                                'select' => 'text-green-700! border-green-500! bg-green-50!',
+                                'header' => 'border-green-500',
+                                'button' => 'bg-green-600!',
+                            ],
+                            'transfer' => [
+                                'select' => 'text-orange-700! border-orange-500! bg-orange-50!',
+                                'header' => 'border-orange-500',
+                                'button' => 'bg-orange-600!',
+                            ],
+                            default => [
+                                'select' => 'text-red-700! border-red-500! bg-red-50!',
+                                'header' => 'border-red-500',
+                                'button' => 'bg-red-600!',
+                            ],
+                        };
+                        // A bank-feed row's direction is the bank's, so it can only be that
+                        // direction's type or a transfer.
+                        $feedDirection = $isBankFeedTransaction ? $bankFeedTransactionDirection : null;
+                    @endphp
+                    <flux:select
+                        wire:model.live="transactionType"
+                        :aria-label="__('Transaction type')"
+                        class="mt-2 font-bold {{ $typeTone['select'] }}"
+                        data-testid="transaction-type"
+                    >
+                        @if($feedDirection !== 'credit')
+                            <flux:select.option value="expense">{{ __('Expense') }}</flux:select.option>
+                        @endif
+                        @if($feedDirection !== 'debit')
+                            <flux:select.option value="income">{{ __('Income') }}</flux:select.option>
+                        @endif
+                        <flux:select.option value="transfer">{{ __('Transfer between accounts') }}</flux:select.option>
+                    </flux:select>
                 </div>
 
                 <div>
@@ -39,40 +77,6 @@
                     @endif
                 </div>
             </div>
-
-            {{-- Type toggle: three-pill segmented control (manual only) --}}
-            @if(!$isBankFeedTransaction)
-                <div class="type-toggle" role="group" aria-label="{{ __('Transaction type') }}">
-                    <button type="button"
-                            aria-pressed="{{ $transactionType === 'expense' ? 'true' : 'false' }}"
-                            class="{{ $transactionType === 'expense' ? 'active out' : '' }}"
-                            wire:click="$set('transactionType', 'expense')">
-                        {{ __('Expense') }}
-                    </button>
-                    <button type="button"
-                            aria-pressed="{{ $transactionType === 'income' ? 'true' : 'false' }}"
-                            class="{{ $transactionType === 'income' ? 'active inc' : '' }}"
-                            wire:click="$set('transactionType', 'income')">
-                        {{ __('Income') }}
-                    </button>
-                    <button type="button"
-                            aria-pressed="{{ $transactionType === 'transfer' ? 'true' : 'false' }}"
-                            class="{{ $transactionType === 'transfer' ? 'active xfr' : '' }}"
-                            wire:click="$set('transactionType', 'transfer')">
-                        {{ __('Transfer') }}
-                    </button>
-                </div>
-            @else
-                <flux:heading class="font-black">
-                    @if($transactionType === 'transfer')
-                        {{ __('Between Accounts') }}
-                    @elseif($transactionType === 'income')
-                        {{ __('Income') }}
-                    @else
-                        {{ __('Expense') }}
-                    @endif
-                </flux:heading>
-            @endif
 
             {{-- Enter vs Plan toggle --}}
             <div class="type-toggle" role="group" aria-label="{{ __('Enter vs Plan') }}">
@@ -138,22 +142,100 @@
                 :disabled="$isBankFeedTransaction"
             >
                 <flux:select.option value="">{{ __('Select account') }}</flux:select.option>
-                @foreach($accounts as $account)
+                @foreach($fromAccounts as $account)
                     <flux:select.option value="{{ $account->id }}">
                         {{ $account->name }} ({{ $formatMoney($account->balance) }})
                     </flux:select.option>
                 @endforeach
             </flux:select>
 
+            @if($isBankFeedTransaction && $this->isSuggestedTransfer())
+                <div class="flex items-center justify-between gap-2 rounded-md bg-cib-cream-50 px-3 py-2">
+                    <flux:text size="sm" class="font-bold" data-testid="suggested-transfer-note">{{ __('Possible transfer') }}</flux:text>
+                    <div class="flex gap-2">
+                        <flux:button type="button" size="sm" wire:click="confirmSuggestedTransfer">{{ __('Confirm') }}</flux:button>
+                        <flux:button type="button" size="sm" variant="ghost" wire:click="rejectSuggestedTransfer">{{ __('Not a transfer') }}</flux:button>
+                    </div>
+                </div>
+            @endif
+
             @if($transactionType === 'transfer')
-                <flux:select wire:model="transferToAccountId" :label="__('To account')" required>
+                @if(! $isBankFeedTransaction)
+                    <div class="flex justify-center">
+                        <flux:button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            icon="arrows-up-down"
+                            wire:click="swapTransferAccounts"
+                            :aria-label="__('Swap accounts')"
+                            data-testid="swap-transfer-accounts"
+                        />
+                    </div>
+                @endif
+                @php
+                    $bankFeedUnlinkedTransfer = $isBankFeedTransaction && ! $originalWasTransfer;
+                    $trackedAccounts = $accounts->where('is_tracked', true);
+                    $untrackedAccounts = $accounts->where('is_tracked', false);
+                @endphp
+                <flux:select
+                    wire:model.live="transferToAccountId"
+                    :label="$bankFeedUnlinkedTransfer ? __('To account (optional)') : __('To account')"
+                    :required="! $bankFeedUnlinkedTransfer"
+                    :disabled="$isBankFeedTransaction && $originalWasTransfer"
+                    data-testid="transfer-to-account"
+                >
                     <flux:select.option value="">{{ __('Select account') }}</flux:select.option>
-                    @foreach($accounts as $account)
+                    @foreach($trackedAccounts as $account)
                         <flux:select.option value="{{ $account->id }}">
                             {{ $account->name }} ({{ $formatMoney($account->balance) }})
                         </flux:select.option>
                     @endforeach
+                    @if($untrackedAccounts->isNotEmpty() && ! ($bankFeedUnlinkedTransfer && $this->hasOppositeRows()))
+                        <optgroup label="{{ __('Hidden (untracked)') }}">
+                            @foreach($untrackedAccounts as $account)
+                                <flux:select.option value="{{ $account->id }}">
+                                    {{ $account->name }} ({{ $formatMoney($account->balance) }})
+                                </flux:select.option>
+                            @endforeach
+                        </optgroup>
+                    @endif
                 </flux:select>
+
+                @if($bankFeedUnlinkedTransfer)
+                    @php($candidates = $this->transferCandidates())
+                    <div class="rounded-md border-2 border-cib-black bg-cib-cream-50 px-4 py-3 space-y-2" data-testid="transfer-candidates">
+                        @if($candidates->isEmpty())
+                            <flux:text size="sm">
+                                {{ __('No matching transaction found to link. Pick a hidden (untracked) account above to record the other side.') }}
+                            </flux:text>
+                        @else
+                            <flux:text size="sm" class="font-bold">
+                                {{ $candidates->count() === 1 ? __('This will link to the matching transaction:') : __('Several transactions match — choose the other side:') }}
+                            </flux:text>
+                            @foreach($candidates as $candidate)
+                                <label class="flex items-start gap-2 text-sm">
+                                    @if($candidates->count() > 1)
+                                        <input type="radio" wire:model="selectedCandidateId" value="{{ $candidate->id }}" class="mt-1"/>
+                                    @endif
+                                    <span>
+                                        {{ $candidate->account?->name }} · {{ $candidate->post_date->format('D j M Y') }} · {{ $candidate->description }}
+                                    </span>
+                                </label>
+                            @endforeach
+                            @error('selectedCandidateId')
+                                <p class="text-sm text-red-700">{{ $message }}</p>
+                            @enderror
+                        @endif
+                    </div>
+                @endif
+
+                @if($isBankFeedTransaction && $originalWasTransfer)
+                    <div class="flex items-center justify-between gap-2 rounded-md bg-cib-cream-50 px-3 py-2">
+                        <flux:text size="sm">{{ __('Linked transfer') }}</flux:text>
+                        <flux:button type="button" size="sm" variant="ghost" wire:click="unlinkTransfer">{{ __('Unlink transfer') }}</flux:button>
+                    </div>
+                @endif
             @endif
 
             <x-category-combobox
@@ -287,7 +369,8 @@
                 <flux:button
                     type="submit"
                     variant="primary"
-                    class="bg-cib-yellow-400! text-cib-black! border-2! border-cib-black! shadow-pop!"
+                    class="{{ $typeTone['button'] }} border-2! border-cib-black! text-white! shadow-pop!"
+                    data-testid="transaction-submit"
                 >
                     @if($editingTransactionId && $mode === 'plan' && !$isBankFeedTransaction)
                         @if($transactionType === 'transfer')
