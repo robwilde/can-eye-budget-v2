@@ -14,6 +14,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('connect-bank', 'connect-bank')->name('connect-bank');
     Route::view('import-bank', 'import-bank')->name('import-bank');
     Route::view('transactions', 'transactions')->name('transactions');
+    Route::view('transfers/review', 'transfers-review')->name('transfers.review');
     Route::view('calendar', 'calendar')->name('calendar');
     Route::view('reports', 'reports')->name('reports');
     Route::view('accounts', 'accounts')->name('accounts');
