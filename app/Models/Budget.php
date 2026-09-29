@@ -78,7 +78,7 @@ final class Budget extends Model
             return $this->limit_amount;
         }
 
-        $spent = (int) CategoryAttribution::query($this->user_id)
+        $spent = (int) CategoryAttribution::query($this->user_id, excludeUntracked: true)
             ->where('category_id', $this->category_id)
             ->sum('amount');
 

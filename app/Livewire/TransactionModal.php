@@ -5,18 +5,25 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Casts\MoneyCast;
+use App\Enums\AccountStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
+use App\Enums\TransferLinkSource;
+use App\Exceptions\TransferAlreadyLinkedException;
+use App\Exceptions\TransferLinkRefusedException;
+use App\Models\Account;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Services\CategoryRuleGenerator;
 use App\Services\TransactionIngestor;
+use App\Services\Transfers\TransferLinker;
 use App\Support\AmountParser;
 use App\Support\AmountParseResult;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
@@ -33,6 +40,9 @@ final class TransactionModal extends Component
 
     #[Locked]
     public bool $isBankFeedTransaction = false;
+
+    #[Locked]
+    public ?string $bankFeedTransactionDirection = null;
 
     public string $transactionType = 'expense';
 
@@ -78,6 +88,9 @@ final class TransactionModal extends Component
     #[Locked]
     public bool $originalWasTransfer = false;
 
+    /** Explicit choice among several possible opposite legs when linking a bank-feed row. */
+    public ?int $selectedCandidateId = null;
+
     #[On('open-transaction-modal')]
     public function openForAdd(string $date): void
     {
@@ -96,13 +109,23 @@ final class TransactionModal extends Component
             return;
         }
 
-        if ($transaction->transfer_pair_id && $transaction->direction === TransactionDirection::Credit) {
-            $debitSide = Transaction::query()
+        if ($transaction->transfer_pair_id) {
+            $pairRow = Transaction::query()
                 ->where('user_id', auth()->id())
                 ->find($transaction->transfer_pair_id);
 
-            if ($debitSide) {
-                $transaction = $debitSide;
+            if ($pairRow) {
+                $currentIsFeed = $transaction->source->isBankFeed();
+                $pairIsFeed = $pairRow->source->isBankFeed();
+
+                // Edit the debit side, but always edit the imported row of a feed/manual pair
+                // so a manual mirror is never treated as the row to convert or delete.
+                $swap = ($transaction->direction === TransactionDirection::Credit && ! ($currentIsFeed && ! $pairIsFeed))
+                    || (! $currentIsFeed && $pairIsFeed);
+
+                if ($swap) {
+                    $transaction = $pairRow;
+                }
             }
         }
 
@@ -110,6 +133,7 @@ final class TransactionModal extends Component
 
         $this->editingTransactionId = $transaction->id;
         $this->isBankFeedTransaction = $transaction->source->isBankFeed();
+        $this->bankFeedTransactionDirection = $this->isBankFeedTransaction ? $transaction->direction->value : null;
         $this->originalWasTransfer = $transaction->transfer_pair_id !== null;
 
         if ($transaction->transfer_pair_id) {
@@ -299,6 +323,26 @@ final class TransactionModal extends Component
         }
     }
 
+    /** Swaps From/To on a manual transfer; a hidden (untracked) account can never become the From side. */
+    public function swapTransferAccounts(): void
+    {
+        if ($this->isBankFeedTransaction || $this->transferToAccountId === null) {
+            return;
+        }
+
+        $toIsTracked = Account::query()
+            ->where('user_id', auth()->id())
+            ->tracked()
+            ->whereKey($this->transferToAccountId)
+            ->exists();
+
+        if (! $toIsTracked) {
+            return;
+        }
+
+        [$this->accountId, $this->transferToAccountId] = [$this->transferToAccountId, $this->accountId];
+    }
+
     /**
      * @throws Throwable
      */
@@ -318,10 +362,17 @@ final class TransactionModal extends Component
 
         DB::transaction(static function () use ($transaction): void {
             if ($transaction->transfer_pair_id) {
-                Transaction::query()
+                $pair = Transaction::query()
                     ->where('id', $transaction->transfer_pair_id)
                     ->where('user_id', auth()->id())
-                    ->delete();
+                    ->first();
+
+                // Imported rows are never deleted; only a manual/mirror partner goes with this row.
+                if ($pair instanceof Transaction && $pair->source->isBankFeed()) {
+                    app(TransferLinker::class)->unlink($transaction);
+                } else {
+                    $pair?->delete();
+                }
             }
 
             $transaction->delete();
@@ -330,6 +381,110 @@ final class TransactionModal extends Component
         $this->showModal = false;
         $this->resetForm();
         $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * Non-destructive unlink of the bank-feed row being edited (both legs stay).
+     *
+     * @throws Throwable
+     */
+    public function unlinkTransfer(): void
+    {
+        $row = $this->linkedBankFeedRow();
+
+        if (! $row instanceof Transaction) {
+            return;
+        }
+
+        app(TransferLinker::class)->unlink($row);
+
+        $this->showModal = false;
+        $this->resetForm();
+        $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * @throws Throwable
+     */
+    public function confirmSuggestedTransfer(): void
+    {
+        $row = $this->suggestedBankFeedRow();
+
+        if (! $row instanceof Transaction) {
+            return;
+        }
+
+        if (! app(TransferLinker::class)->confirm($row)) {
+            $this->addError('transactionType', __('That pair changed while the window was open. Nothing was confirmed.'));
+
+            return;
+        }
+
+        $this->showModal = false;
+        $this->resetForm();
+        $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * @throws Throwable
+     */
+    public function rejectSuggestedTransfer(): void
+    {
+        $row = $this->suggestedBankFeedRow();
+
+        if (! $row instanceof Transaction) {
+            return;
+        }
+
+        app(TransferLinker::class)->markNotTransfer($row);
+
+        $this->showModal = false;
+        $this->resetForm();
+        $this->dispatch('transaction-saved');
+    }
+
+    /** A pending "possible transfer" suggestion; the row is not a transfer until confirmed. */
+    public function isSuggestedTransfer(): bool
+    {
+        return $this->suggestedBankFeedRow() instanceof Transaction;
+    }
+
+    /**
+     * Whether any real opposite row exists for the bank-feed row being edited (any account).
+     * Takes no client input: the row is always the user-scoped one being edited.
+     */
+    public function hasOppositeRows(): bool
+    {
+        $row = $this->editingTransactionId
+            ? Transaction::query()->where('user_id', auth()->id())->find($this->editingTransactionId)
+            : null;
+
+        return $row instanceof Transaction && $this->isBankFeedTransaction && $this->hasRealOppositeRows($row);
+    }
+
+    /**
+     * Possible opposite legs for the bank-feed row being turned into a transfer,
+     * narrowed to the chosen counterpart account when one is picked.
+     *
+     * @return Collection<int, Transaction>
+     */
+    public function transferCandidates(): Collection
+    {
+        if (! $this->isBankFeedTransaction || $this->originalWasTransfer || $this->transactionType !== 'transfer' || ! $this->editingTransactionId) {
+            return new Collection;
+        }
+
+        $row = Transaction::query()->where('user_id', auth()->id())->find($this->editingTransactionId);
+
+        if (! $row instanceof Transaction) {
+            return new Collection;
+        }
+
+        return app(TransferLinker::class)
+            ->candidatesFor($row, includeRejected: true)
+            ->when($this->transferToAccountId, fn (Collection $c): Collection => $c->where('account_id', $this->transferToAccountId))
+            ->load('account')
+            ->values();
     }
 
     public function render(): View
@@ -346,6 +501,12 @@ final class TransactionModal extends Component
 
         return view('livewire.transaction-modal', [
             'accounts' => $accounts,
+            // Normal entry only offers tracked accounts; a linked bank-feed row keeps showing
+            // its read-only account even when that leg is an untracked mirror.
+            'fromAccounts' => $accounts->filter(
+                fn (Account $account): bool => $account->is_tracked
+                    || ($this->isBankFeedTransaction && $this->originalWasTransfer && $account->id === $this->accountId),
+            ),
             'categories' => $categories,
             'formatMoney' => MoneyCast::format(...),
             'parsedAmount' => $this->descriptionInput !== ''
@@ -409,6 +570,152 @@ final class TransactionModal extends Component
         $this->refreshCategoriseContradictions();
     }
 
+    private function hasRealOppositeRows(Transaction $row): bool
+    {
+        return app(TransferLinker::class)->candidatesFor($row, includeRejected: true)->isNotEmpty();
+    }
+
+    /** The row being edited is an imported (bank-feed) row, judged by its stored source, not the client-held flag. */
+    private function persistedRowIsBankFeed(): bool
+    {
+        $row = Transaction::query()->where('user_id', auth()->id())->find($this->editingTransactionId);
+
+        return $row instanceof Transaction && in_array($row->source, TransactionSource::bankFeed(), true);
+    }
+
+    /**
+     * @throws Throwable
+     */
+    private function saveBankFeedTransaction(): bool
+    {
+        $row = Transaction::query()->where('user_id', auth()->id())->find($this->editingTransactionId);
+
+        if (! $row instanceof Transaction) {
+            return false;
+        }
+
+        $wantsTransfer = $this->transactionType === 'transfer';
+        $isLinked = $row->transfer_pair_id !== null;
+
+        if ($isLinked && $this->originalWasTransfer && ! $wantsTransfer) {
+            // Unlink first so the edit's new version does not inherit the stale pair id.
+            app(TransferLinker::class)->unlink($row);
+
+            return ! $this->bankFeedFieldsChanged($row) || $this->updateTransaction();
+        }
+
+        if (! $isLinked && $wantsTransfer) {
+            return $this->linkBankFeedRow($row);
+        }
+
+        return $this->updateTransaction();
+    }
+
+    private function bankFeedFieldsChanged(Transaction $row): bool
+    {
+        return $row->category_id !== $this->categoryId
+            || ($row->notes ?? '') !== $this->notes
+            || ($row->clean_description ?? '') !== $this->cleanDescription;
+    }
+
+    /**
+     * Links the bank-feed row to a real opposite row (one candidate: automatically;
+     * several: the user's explicit pick) or, when the user chose an untracked account
+     * as counterpart, to a mirror row on it. Never creates a duplicate imported leg.
+     *
+     * @throws Throwable
+     */
+    private function linkBankFeedRow(Transaction $row): bool
+    {
+        $linker = app(TransferLinker::class);
+
+        $counterpart = $this->transferToAccountId
+            ? Account::query()->where('user_id', auth()->id())->find($this->transferToAccountId)
+            : null;
+
+        $untracked = $counterpart instanceof Account && ! $counterpart->is_tracked ? $counterpart : null;
+        $chosen = null;
+
+        // A real opposite row always wins: a hidden account is only for rows with no match,
+        // otherwise a mirror would sit next to the real leg (the duplicate this flow prevents).
+        if ($untracked instanceof Account && $this->hasRealOppositeRows($row)) {
+            $this->addError('transferToAccountId', __('A matching transaction exists. Link to it instead of a hidden account.'));
+
+            return false;
+        }
+
+        if (! $untracked instanceof Account) {
+            $candidates = $this->transferCandidates();
+
+            if ($candidates->isEmpty()) {
+                $this->addError('transferToAccountId', __('No matching transaction found to link. Pick a hidden (untracked) account as the counterpart instead.'));
+
+                return false;
+            }
+
+            $chosen = $candidates->count() === 1
+                ? $candidates->first()
+                : $candidates->firstWhere('id', $this->selectedCandidateId);
+
+            if (! $chosen instanceof Transaction) {
+                $this->addError('selectedCandidateId', __('Several transactions match. Choose which one to link.'));
+
+                return false;
+            }
+        }
+
+        // A refused link must roll back the edit it followed: throw inside the callback so the
+        // transaction rolls back, and translate the refusal into a field error outside it.
+        try {
+            return DB::transaction(function () use ($linker, $untracked, $chosen, $row): bool {
+                $current = $row;
+
+                // Only version the imported row when the user actually edited something.
+                if ($this->bankFeedFieldsChanged($row)) {
+                    if (! $this->updateTransaction()) {
+                        return false;
+                    }
+
+                    $current = Transaction::findCurrentVersion($row->id, (int) auth()->id());
+                }
+
+                if ($untracked instanceof Account) {
+                    $linker->linkToUntrackedAccount($current, $untracked, TransferLinkSource::Manual);
+                } elseif (! $linker->link($current, $chosen, TransferLinkSource::Manual)) {
+                    throw new TransferAlreadyLinkedException(__('That row was just linked elsewhere, please pick again.'));
+                }
+
+                return true;
+            });
+        } catch (TransferLinkRefusedException $e) {
+            $this->addError($untracked instanceof Account ? 'transferToAccountId' : 'selectedCandidateId', $e->getMessage());
+
+            return false;
+        }
+    }
+
+    private function suggestedBankFeedRow(): ?Transaction
+    {
+        if (! $this->isBankFeedTransaction || ! $this->editingTransactionId) {
+            return null;
+        }
+
+        $row = Transaction::query()->where('user_id', auth()->id())->find($this->editingTransactionId);
+
+        return $row instanceof Transaction && $row->suggested_pair_id !== null && $row->transfer_pair_id === null ? $row : null;
+    }
+
+    private function linkedBankFeedRow(): ?Transaction
+    {
+        if (! $this->isBankFeedTransaction || ! $this->originalWasTransfer || ! $this->editingTransactionId) {
+            return null;
+        }
+
+        $row = Transaction::query()->where('user_id', auth()->id())->find($this->editingTransactionId);
+
+        return $row instanceof Transaction && $row->transfer_pair_id !== null ? $row : null;
+    }
+
     /**
      * @throws Throwable
      */
@@ -433,8 +740,8 @@ final class TransactionModal extends Component
         }
 
         if ($this->editingTransactionId) {
-            if ($this->isBankFeedTransaction) {
-                return $this->updateTransaction();
+            if ($this->isBankFeedTransaction || $this->persistedRowIsBankFeed()) {
+                return $this->saveBankFeedTransaction();
             }
 
             $nowIsTransfer = $this->transactionType === 'transfer';
@@ -540,6 +847,9 @@ final class TransactionModal extends Component
                 'notes' => $this->notes !== '' ? $this->notes : null,
                 'clean_description' => $this->cleanDescription !== '' ? $this->cleanDescription : null,
             ]);
+
+            // The partner follows the new version, but only for links that still hold under lock.
+            app(TransferLinker::class)->followVersion($transaction, $child);
         } else {
             $child = $transaction->createChild([
                 'account_id' => $this->accountId,
@@ -584,8 +894,10 @@ final class TransactionModal extends Component
             $debitChild = $debitSide->createChild($shared + ['account_id' => $this->accountId]);
             $creditChild = $creditSide->createChild($shared + ['account_id' => $this->transferToAccountId]);
 
-            $debitChild->update(['transfer_pair_id' => $creditChild->id]);
-            $creditChild->update(['transfer_pair_id' => $debitChild->id]);
+            $manual = ['transfer_link_source' => TransferLinkSource::Manual];
+
+            $debitChild->update(['transfer_pair_id' => $creditChild->id] + $manual);
+            $creditChild->update(['transfer_pair_id' => $debitChild->id] + $manual);
         });
 
         return true;
@@ -626,8 +938,10 @@ final class TransactionModal extends Component
                 'status' => TransactionStatus::Posted,
             ]);
 
-            $debitChild->update(['transfer_pair_id' => $credit->id]);
-            $credit->update(['transfer_pair_id' => $debitChild->id]);
+            $manual = ['transfer_link_source' => TransferLinkSource::Manual];
+
+            $debitChild->update(['transfer_pair_id' => $credit->id] + $manual);
+            $credit->update(['transfer_pair_id' => $debitChild->id] + $manual);
         });
 
         return true;
@@ -651,6 +965,13 @@ final class TransactionModal extends Component
             : TransactionDirection::Credit;
 
         DB::transaction(function () use ($debitSide, $creditSide, $parsed, $direction): void {
+            // An imported row is never deleted: unlink it (stamping both legs) and keep it.
+            $keepCreditSide = $creditSide->source->isBankFeed();
+
+            if ($keepCreditSide) {
+                app(TransferLinker::class)->unlink($debitSide);
+            }
+
             $debitSide->createChild([
                 'account_id' => $this->accountId,
                 'direction' => $direction,
@@ -660,9 +981,12 @@ final class TransactionModal extends Component
                 'category_id' => $this->categoryId,
                 'notes' => $this->notes !== '' ? $this->notes : null,
                 'transfer_pair_id' => null,
+                'transfer_link_source' => $keepCreditSide ? TransferLinkSource::Unlinked : null,
             ]);
 
-            $creditSide->delete();
+            if (! $keepCreditSide) {
+                $creditSide->delete();
+            }
         });
 
         return true;
@@ -923,8 +1247,10 @@ final class TransactionModal extends Component
             'direction' => TransactionDirection::Credit,
         ]);
 
-        $debit->update(['transfer_pair_id' => $credit->id]);
-        $credit->update(['transfer_pair_id' => $debit->id]);
+        $manual = ['transfer_link_source' => TransferLinkSource::Manual];
+
+        $debit->update(['transfer_pair_id' => $credit->id] + $manual);
+        $credit->update(['transfer_pair_id' => $debit->id] + $manual);
     }
 
     /** @return array<string, mixed> */
@@ -1029,6 +1355,7 @@ final class TransactionModal extends Component
         $this->categoriseMatching = false;
         $this->categoriseMatchValue = '';
         $this->isBankFeedTransaction = false;
+        $this->bankFeedTransactionDirection = null;
         $this->transactionType = 'expense';
         $this->descriptionInput = '';
         $this->accountId = null;
@@ -1038,6 +1365,7 @@ final class TransactionModal extends Component
         $this->cleanDescription = '';
         $this->transferToAccountId = null;
         $this->originalWasTransfer = false;
+        $this->selectedCandidateId = null;
         $this->mode = 'enter';
         $this->frequency = 'every-month';
         $this->untilType = 'always';
@@ -1045,16 +1373,38 @@ final class TransactionModal extends Component
         $this->resetValidation();
     }
 
+    /**
+     * A bank-feed row's direction is the bank's: a debit can only be an expense or a
+     * transfer, a credit only income or a transfer. Manual rows may take any type.
+     *
+     * @return list<string>
+     */
+    private function allowedTransactionTypes(): array
+    {
+        return match ($this->isBankFeedTransaction ? $this->bankFeedTransactionDirection : null) {
+            TransactionDirection::Debit->value => ['expense', 'transfer'],
+            TransactionDirection::Credit->value => ['income', 'transfer'],
+            default => ['expense', 'income', 'transfer'],
+        };
+    }
+
     /** @return array<string, mixed> */
     private function formRules(): array
     {
         $rules = [
             'mode' => ['required', Rule::in(['enter', 'plan'])],
-            'transactionType' => ['required', Rule::in(['expense', 'income', 'transfer'])],
+            'transactionType' => ['required', Rule::in($this->allowedTransactionTypes())],
             'descriptionInput' => ['required', 'string', 'max:255'],
             'accountId' => [
                 'required',
-                Rule::exists('accounts', 'id')->where('user_id', auth()->id()),
+                Rule::exists('accounts', 'id')
+                    ->where('user_id', auth()->id())
+                    // Untracked accounts are for transfer counterparts only. A linked
+                    // bank-feed row may already sit on one as its (read-only) other leg.
+                    ->when(
+                        ! ($this->isBankFeedTransaction && $this->originalWasTransfer),
+                        static fn ($rule) => $rule->where('is_tracked', true),
+                    ),
             ],
             'categoryId' => [
                 'nullable',
@@ -1067,15 +1417,17 @@ final class TransactionModal extends Component
             'cleanDescription' => ['nullable', 'string', 'max:255'],
             'transferToAccountId' => $this->isTransfer()
                 ? [
-                    'required',
-                    Rule::exists('accounts', 'id')->where('user_id', auth()->id()),
+                    $this->isBankFeedTransaction && ! $this->originalWasTransfer ? 'nullable' : 'required',
+                    // Any active account of the user, tracked or untracked (hidden).
+                    Rule::exists('accounts', 'id')
+                        ->where('user_id', auth()->id())
+                        ->whereIn('status', [AccountStatus::Active->value, AccountStatus::Available->value]),
                     Rule::notIn([$this->accountId]),
                 ]
                 : ['nullable'],
         ];
 
         if ($this->mode === 'plan') {
-            $rules['transactionType'] = ['required', Rule::in(['expense', 'income', 'transfer'])];
             $rules['frequency'] = ['required', Rule::in(array_column(RecurrenceFrequency::cases(), 'value'))];
             $rules['untilType'] = ['required', Rule::in(['always', 'until-date'])];
             $rules['untilDate'] = $this->untilType === 'until-date'

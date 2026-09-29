@@ -26,6 +26,7 @@ use App\Services\GmailService;
 use App\Services\MerchantBrands\ContextDevCreditBalance;
 use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\MerchantBrands\DescriptorGate;
+use App\Services\Transfers\TransferReviewQueue;
 use App\Support\AmountParser;
 use ContextDev\Core\Exceptions\ContextDevException;
 use Flux\Flux;
@@ -65,6 +66,8 @@ final class TransactionList extends Component
      */
     private const array VALID_SOURCE_FILTERS = ['all', 'manual', 'rule'];
 
+    private const array VALID_TRANSFER_FILTERS = ['all', 'suggested'];
+
     private const array VALID_GROUP_MODES = ['date', 'merchant'];
 
     /**
@@ -93,6 +96,9 @@ final class TransactionList extends Component
 
     #[Url]
     public ?int $account = null;
+
+    #[Url]
+    public string $transfers = 'all';
 
     #[Url]
     public ?int $category = null;
@@ -1237,6 +1243,15 @@ final class TransactionList extends Component
         $this->resetPage();
     }
 
+    public function updatedTransfers(): void
+    {
+        if (! in_array($this->transfers, self::VALID_TRANSFER_FILTERS, true)) {
+            $this->transfers = 'all';
+        }
+
+        $this->resetPage();
+    }
+
     public function updatedAccount(): void
     {
         $this->resetPage();
@@ -1285,6 +1300,7 @@ final class TransactionList extends Component
         $accounts = Account::query()
             ->where('user_id', auth()->id())
             ->active()
+            ->tracked()
             ->get(['id', 'name']);
 
         $grouped = $transactions === null
@@ -1336,6 +1352,7 @@ final class TransactionList extends Component
             'formatMoney' => MoneyCast::format(...),
             'periodLabel' => $periodEnum->label(),
             'hasPayCycle' => auth()->user()->hasPayCycleConfigured(),
+            'suggestedTransferCount' => app(TransferReviewQueue::class)->suggestedPairs(auth()->user())->count(),
             'showCustomRange' => $periodEnum === TransactionPeriod::Custom,
             'gmailEnabled' => app(GmailServiceContract::class)->isConfigured(),
             'splitCategories' => Category::visibleSortedByFullPath(),
@@ -1929,6 +1946,7 @@ final class TransactionList extends Component
             'planned' => $this->planned,
             'categorised' => $this->categorised,
             'source' => $this->source,
+            'transfers' => $this->transfers,
             'period' => $this->period,
             'from' => $this->from,
             'to' => $this->to,
@@ -1966,6 +1984,9 @@ final class TransactionList extends Component
         return Transaction::query()
             ->where('user_id', auth()->id())
             ->current()
+            // Mirror legs on untracked (hidden) accounts are ledger bookkeeping,
+            // never something to list, cluster or total.
+            ->whereHas('account', fn ($a) => $a->where('is_tracked', true))
             ->when($directionEnum, fn ($q, $dir) => $q->where('direction', $dir))
             // Merchant mode renders clusters, and a NULL merchant_key can never
             // be one, so a count or a bulk write taken in that mode must not
@@ -1987,6 +2008,7 @@ final class TransactionList extends Component
                 ->where('category_source', CategorySource::Manual->value))
             ->when(($filters['source'] ?? null) === 'rule', fn ($q) => $q
                 ->where('category_source', CategorySource::Rule->value))
+            ->when(($filters['transfers'] ?? null) === 'suggested', fn ($q) => $q->possibleTransfer())
             ->when($filters['search'] ?? null, fn ($q, $term) => $q->where(function ($q) use ($term) {
                 $q->where('description', 'like', "%{$term}%")
                     ->orWhere('clean_description', 'like', "%{$term}%")

@@ -23,6 +23,18 @@ enum TransactionSource: string
         return [self::Csv, self::Redbark];
     }
 
+    /**
+     * The sources whose rows are bank-feed rows (see isBankFeed()). Transfer detection and
+     * rules work on these only: they are the read-only, link-don't-duplicate rows of the
+     * transaction window. CSV rows stay editable, manual-like rows.
+     *
+     * @return list<self>
+     */
+    public static function bankFeed(): array
+    {
+        return array_values(array_filter(self::cases(), fn (self $source): bool => $source->isBankFeed()));
+    }
+
     public function label(): string
     {
         return match ($this) {

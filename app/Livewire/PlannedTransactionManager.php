@@ -49,7 +49,7 @@ final class PlannedTransactionManager extends Component
     public function mount(): void
     {
         $user = $this->authenticatedUser();
-        $firstAccountId = $user->accounts()->orderBy('id')->value('id');
+        $firstAccountId = $user->accounts()->tracked()->orderBy('id')->value('id');
 
         $this->accountId = $user->primary_account_id ?? ($firstAccountId === null ? null : (int) $firstAccountId);
     }
@@ -196,6 +196,7 @@ final class PlannedTransactionManager extends Component
     {
         return Account::query()
             ->where('user_id', $user->id)
+            ->tracked()
             ->orderBy('name')
             ->get(['id', 'name']);
     }
@@ -238,6 +239,7 @@ final class PlannedTransactionManager extends Component
 
         return Account::query()
             ->where('user_id', $user->id)
+            ->tracked()
             ->whereKey($this->accountId)
             ->exists();
     }

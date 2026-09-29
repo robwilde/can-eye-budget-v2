@@ -131,4 +131,13 @@ final class AccountFactory extends Factory
             'group' => AccountGroup::Hidden,
         ]);
     }
+
+    public function untracked(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'is_tracked' => false,
+            'group' => AccountGroup::LongTermSavings,
+            'import_source' => ImportSource::Manual,
+        ]);
+    }
 }

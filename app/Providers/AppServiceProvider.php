@@ -18,6 +18,7 @@ use App\Services\PipelineStages\IdentifyPrimaryAccountStage;
 use App\Services\PipelineStages\IdentifyRecurringTransactionsStage;
 use App\Services\PipelineStages\MatchPlannedTransactionsStage;
 use App\Services\PipelineStages\SetPayCycleStage;
+use App\Services\PipelineStages\TransferDetectionStage;
 use App\Services\PipelineStages\UserRulesStage;
 use App\Services\RedbarkClientFactory;
 use App\Services\TransactionAnalysisPipeline;
@@ -90,9 +91,14 @@ final class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(TransactionAnalysisPipeline::class, fn (): TransactionAnalysisPipeline => new TransactionAnalysisPipeline(
             stages: [
+                $this->app->make(TransferDetectionStage::class, ['suggest' => false]),
                 $this->app->make(IdentifyPrimaryAccountStage::class),
                 $this->app->make(SetPayCycleStage::class),
                 $this->app->make(UserRulesStage::class),
+                $this->app->make(TransferDetectionStage::class, [
+                    'stageKey' => 'transfer-detection-after-rules',
+                    'stageLabel' => 'Transfer Detection (after rules)',
+                ]),
                 $this->app->make(IdentifyRecurringTransactionsStage::class),
                 $this->app->make(MatchPlannedTransactionsStage::class),
             ],

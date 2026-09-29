@@ -2,10 +2,14 @@
 <div class="space-y-6">
     <div class="flex items-center justify-between">
         <flux:heading size="xl">{{ __('Accounts') }}</flux:heading>
-        <button type="button" wire:click="openAddModal" class="cib-yellow-pill">
-            <flux:icon.plus class="size-4"/>
-            {{ __('Add Account') }}
-        </button>
+        <div class="flex items-center gap-2">
+            <button type="button" wire:click="openAddUntrackedModal" class="text-sm font-bold underline decoration-dotted"
+                    data-test="add-untracked-account">{{ __('Add untracked account') }}</button>
+            <button type="button" wire:click="openAddModal" class="cib-yellow-pill">
+                <flux:icon.plus class="size-4"/>
+                {{ __('Add Account') }}
+            </button>
+        </div>
     </div>
 
     @forelse($grouped as $groupValue => $accounts)
@@ -23,6 +27,12 @@
                             $account->institution,
                         ]);
                         $metaText = implode(' · ', $metaParts);
+                        if (! $account->is_tracked) {
+                            $metaText = trim(($metaText ? $metaText.' · ' : '').($account->reconciled_on !== null
+                                ? __('Reconciled :date', ['date' => $account->reconciled_on->format('j M Y')])
+                                    .' · '.__('Difference').' '.$formatMoney($account->reconcile_difference ?? 0)
+                                : __('Never reconciled')));
+                        }
                         if ($account->credit_limit !== null) {
                             $metaText = trim(($metaText ? $metaText.' · ' : '').'Limit '.$formatMoney($account->credit_limit));
                         }
@@ -38,6 +48,16 @@
                             <x-slot:meta>{{ $metaText }}</x-slot:meta>
                         @endif
                         <x-slot:actions>
+                            @unless ($account->is_tracked)
+                                <x-cib.stat-pill tone="neutral" data-test="account-untracked-{{ $account->id }}">{{ __('Untracked') }}</x-cib.stat-pill>
+                                <button type="button" wire:click="openReconcileModal({{ $account->id }})"
+                                        class="text-sm font-bold underline decoration-dotted"
+                                        data-test="account-untracked-reconcile-{{ $account->id }}">{{ __('Reconcile') }}</button>
+                                <button type="button" wire:click="trackAccount({{ $account->id }})"
+                                        wire:confirm="{{ __('Track this account? Its balance will then count towards your available money.') }}"
+                                        class="text-sm font-bold underline decoration-dotted"
+                                        data-test="account-track-{{ $account->id }}">{{ __('Track this account') }}</button>
+                            @endunless
                             @if ($account->redbarkAccount !== null)
                                 @if ($account->statementReconciliations->contains(fn ($reconciliation) => ! $reconciliation->isOpen()))
                                     <x-cib.stat-pill tone="income" data-test="account-reconciled-{{ $account->id }}">✓ {{ __('Reconciled') }}</x-cib.stat-pill>
@@ -60,6 +80,15 @@
                                     <flux:menu.item icon="pencil" wire:click="openEditModal({{ $account->id }})">
                                         {{ __('Edit') }}
                                     </flux:menu.item>
+                                    @unless ($account->is_tracked)
+                                        <flux:menu.item icon="scale" wire:click="openReconcileModal({{ $account->id }})">
+                                            {{ __('Reconcile') }}
+                                        </flux:menu.item>
+                                        <flux:menu.item icon="arrow-path" wire:click="trackAccount({{ $account->id }})"
+                                                        wire:confirm="{{ __('Track this account? Its balance will then count towards your available money.') }}">
+                                            {{ __('Track this account') }}
+                                        </flux:menu.item>
+                                    @endunless
                                     <flux:menu.item icon="trash" variant="danger" wire:click="confirmDelete({{ $account->id }})">
                                         {{ __('Delete') }}
                                     </flux:menu.item>
@@ -118,6 +147,7 @@
                 />
             </div>
 
+            @unless($isUntracked)
             <flux:field variant="inline">
                 <flux:checkbox wire:model.live="hasCreditLimit"/>
                 <flux:label>{{ __('Credit Limit') }}</flux:label>
@@ -135,6 +165,7 @@
                         required
                 />
             @endif
+            @endunless
 
             <div>
                 <label class="cib-label" for="account-description">{{ __('Description') }}</label>
@@ -155,6 +186,7 @@
                 </flux:select>
             </div>
 
+            @unless($isUntracked)
             <div>
                 <label class="cib-label" for="account-group">{{ __('Account Group') }}</label>
                 <flux:select id="account-group" wire:model="group" required>
@@ -163,7 +195,9 @@
                     @endforeach
                 </flux:select>
             </div>
+            @endunless
 
+            @unless($isUntracked)
             <div>
                 <label class="cib-label" for="account-institution">{{ __('Institution') }}</label>
                 <flux:input
@@ -172,12 +206,34 @@
                         placeholder="e.g. Commonwealth Bank"
                 />
             </div>
+            @endunless
 
             <div class="flex">
                 <flux:spacer/>
                 <flux:button type="submit" variant="primary">
                     {{ $editingAccountId ? __('Update Account') : __('Add Account') }}
                 </flux:button>
+            </div>
+        </form>
+    </flux:modal>
+
+    <flux:modal wire:model="showReconcileModal" class="md:w-96">
+        <form wire:submit="reconcile" class="space-y-6">
+            <div>
+                <flux:heading size="lg">{{ __('Reconcile') }} {{ $reconcilingAccountName }}</flux:heading>
+                <flux:text class="mt-2">{{ __('Enter the balance shown by your provider. The difference from the recorded balance is saved.') }}</flux:text>
+            </div>
+            <div>
+                <label class="cib-label" for="reconcile-balance">{{ __('New Balance') }}</label>
+                <flux:input id="reconcile-balance" wire:model="reconcileBalance" type="number" step="0.01" required/>
+            </div>
+            <div>
+                <label class="cib-label" for="reconcile-date">{{ __('As at') }}</label>
+                <flux:input id="reconcile-date" wire:model="reconcileDate" type="date" required/>
+            </div>
+            <div class="flex">
+                <flux:spacer/>
+                <flux:button type="submit" variant="primary">{{ __('Reconcile') }}</flux:button>
             </div>
         </form>
     </flux:modal>

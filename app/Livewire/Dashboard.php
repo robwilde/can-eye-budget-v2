@@ -9,6 +9,7 @@ use App\Models\Account;
 use App\Models\Budget;
 use App\Models\PlannedTransaction;
 use App\Models\RedbarkFeed;
+use App\Services\Transfers\TransferReviewQueue;
 use App\Support\Transactions\CategoryAttribution;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -64,10 +65,18 @@ final class Dashboard extends Component
     {
         return Account::query()
             ->where('user_id', auth()->id())
+            ->tracked()
             ->statementDueForLastMonth()
             ->orderBy('name')
             ->get()
             ->toBase();
+    }
+
+    /** Suggested transfer pairs plus unmatched Transfer rows still waiting for a decision. */
+    #[Computed]
+    public function pendingTransfers(): int
+    {
+        return app(TransferReviewQueue::class)->pendingCount(auth()->user());
     }
 
     #[Computed]
@@ -135,7 +144,7 @@ final class Dashboard extends Component
                     ];
                 }
 
-                $query = CategoryAttribution::query($budget->user_id)
+                $query = CategoryAttribution::query($budget->user_id, excludeUntracked: true)
                     ->where('direction', TransactionDirection::Debit->value)
                     ->where('category_id', $budget->category_id);
 
