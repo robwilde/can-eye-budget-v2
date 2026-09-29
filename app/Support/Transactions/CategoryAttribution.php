@@ -25,7 +25,7 @@ use Illuminate\Support\Facades\DB;
  */
 final class CategoryAttribution
 {
-    public static function atoms(int $userId): Builder
+    public static function atoms(int $userId, bool $excludeUntracked = false): Builder
     {
         $unsplit = Transaction::query()
             ->current()
@@ -36,6 +36,7 @@ final class CategoryAttribution
                     ->from('transaction_splits as s')
                     ->whereColumn('s.transaction_id', 'transactions.id');
             })
+            ->when($excludeUntracked, fn (Builder $q): Builder => $q->whereNotExists(self::untrackedAccount(...)))
             ->select([
                 'transactions.id as transaction_id',
                 'transactions.category_id as category_id',
@@ -43,6 +44,7 @@ final class CategoryAttribution
                 'transactions.direction as direction',
                 'transactions.post_date as post_date',
                 'transactions.transfer_pair_id as transfer_pair_id',
+                'transactions.transfer_link_source as transfer_link_source',
             ]);
 
         $split = Transaction::query()
@@ -50,6 +52,7 @@ final class CategoryAttribution
             ->where('transactions.user_id', $userId)
             ->toBase()
             ->join('transaction_splits as s', 's.transaction_id', '=', 'transactions.id')
+            ->when($excludeUntracked, fn (Builder $q): Builder => $q->whereNotExists(self::untrackedAccount(...)))
             ->select([
                 'transactions.id as transaction_id',
                 's.category_id as category_id',
@@ -57,13 +60,28 @@ final class CategoryAttribution
                 'transactions.direction as direction',
                 'transactions.post_date as post_date',
                 'transactions.transfer_pair_id as transfer_pair_id',
+                'transactions.transfer_link_source as transfer_link_source',
             ]);
 
         return $unsplit->unionAll($split);
     }
 
-    public static function query(int $userId): Builder
+    /**
+     * @param  bool  $excludeUntracked  Money aggregation (budgets, reports) passes true: rows on
+     *                                  untracked accounts never count as spend or income. Counting
+     *                                  callers (category editor) keep them, matching their lists.
+     */
+    public static function query(int $userId, bool $excludeUntracked = false): Builder
     {
-        return DB::query()->fromSub(self::atoms($userId), 'atoms');
+        return DB::query()->fromSub(self::atoms($userId, $excludeUntracked), 'atoms');
+    }
+
+    /** Untracked accounts hold transfer mirror legs only; they never count as spend or income. */
+    private static function untrackedAccount(Builder $query): void
+    {
+        $query->select('a.id')
+            ->from('accounts as a')
+            ->whereColumn('a.id', 'transactions.account_id')
+            ->where('a.is_tracked', false);
     }
 }
