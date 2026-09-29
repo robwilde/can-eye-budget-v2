@@ -52,6 +52,7 @@ final readonly class IdentifyPrimaryAccountStage implements PipelineStageContrac
     {
         $accounts = $context->user->accounts()
             ->active()
+            ->tracked()
             ->whereIn('type', [AccountClass::Transaction, AccountClass::Savings])
             ->get();
 
@@ -157,6 +158,7 @@ final readonly class IdentifyPrimaryAccountStage implements PipelineStageContrac
     {
         $userAccountIds = $context->user->accounts()
             ->where('id', '!=', $account->id)
+            ->tracked()
             ->pluck('id');
 
         return Transaction::query()

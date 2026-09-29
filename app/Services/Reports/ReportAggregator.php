@@ -132,7 +132,7 @@ final class ReportAggregator
         $monthExpr = $this->monthExpression();
         $transferCategoryIds = $this->transferCategoryIds();
 
-        $rows = CategoryAttribution::query($user->id)
+        $rows = CategoryAttribution::query($user->id, excludeUntracked: true)
             ->whereNull('transfer_pair_id')
             ->when($start, fn ($q, $s) => $q->where('post_date', '>=', $s))
             ->when($end, fn ($q, $e) => $q->where('post_date', '<=', $e))
@@ -140,7 +140,8 @@ final class ReportAggregator
                 $transferCategoryIds !== [],
                 fn ($q) => $q->where(fn ($inner) => $inner
                     ->whereNull('category_id')
-                    ->orWhereNotIn('category_id', $transferCategoryIds)),
+                    ->orWhereNotIn('category_id', $transferCategoryIds)
+                    ->orWhere('transfer_link_source', 'unlinked')),
             )
             ->selectRaw("{$monthExpr} as ym, direction, category_id, SUM(ABS(amount)) as total, COUNT(*) as tx_count")
             ->groupByRaw($monthExpr)
