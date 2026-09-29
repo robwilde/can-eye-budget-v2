@@ -10,6 +10,7 @@ use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
+use App\Enums\TransferLinkSource;
 use App\Livewire\TransactionModal;
 use App\Models\Account;
 use App\Models\Category;
@@ -17,6 +18,7 @@ use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserRule;
+use App\Services\Transfers\TransferLinker;
 use App\Support\Calendar\DayActivityLoader;
 use Carbon\CarbonImmutable;
 use Livewire\Livewire;
@@ -1369,12 +1371,14 @@ test('dropdown type selector shown when adding new transaction', function () {
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
-        ->assertSeeHtml("\$set('transactionType', 'expense')")
-        ->assertSeeHtml("\$set('transactionType', 'income')")
-        ->assertSeeHtml("\$set('transactionType', 'transfer')");
+        ->assertSeeHtml('data-testid="transaction-type"')
+        ->assertSeeHtml('value="expense"')
+        ->assertSeeHtml('value="income"')
+        ->assertSeeHtml('value="transfer"')
+        ->assertSee('Transfer between accounts');
 });
 
-test('static heading shown when editing redbark transaction', function () {
+test('type dropdown is also shown when editing a redbark transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create();
@@ -1382,9 +1386,7 @@ test('static heading shown when editing redbark transaction', function () {
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('edit-transaction', id: $transaction->id)
-        ->assertDontSeeHtml("\$set('transactionType', 'expense')")
-        ->assertDontSeeHtml("\$set('transactionType', 'income')")
-        ->assertDontSeeHtml("\$set('transactionType', 'transfer')");
+        ->assertSeeHtml('data-testid="transaction-type"');
 });
 
 test('editing manual expense shows all type options including transfer', function () {
@@ -1397,9 +1399,10 @@ test('editing manual expense shows all type options including transfer', functio
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('edit-transaction', id: $transaction->id)
-        ->assertSeeHtml("\$set('transactionType', 'expense')")
-        ->assertSeeHtml("\$set('transactionType', 'income')")
-        ->assertSeeHtml("\$set('transactionType', 'transfer')");
+        ->assertSeeHtml('data-testid="transaction-type"')
+        ->assertSeeHtml('value="expense"')
+        ->assertSeeHtml('value="income"')
+        ->assertSeeHtml('value="transfer"');
 });
 
 test('editing transfer shows all type options including expense and income', function () {
@@ -1427,9 +1430,10 @@ test('editing transfer shows all type options including expense and income', fun
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('edit-transaction', id: $debit->id)
-        ->assertSeeHtml("\$set('transactionType', 'expense')")
-        ->assertSeeHtml("\$set('transactionType', 'income')")
-        ->assertSeeHtml("\$set('transactionType', 'transfer')");
+        ->assertSeeHtml('data-testid="transaction-type"')
+        ->assertSeeHtml('value="expense"')
+        ->assertSeeHtml('value="income"')
+        ->assertSeeHtml('value="transfer"');
 });
 
 test('switching expense to income during edit creates child with correct direction', function () {
@@ -1497,64 +1501,69 @@ test('updating planned transfer saves both account ids', function () {
 
 // ── Header Colors (#119) ──────────────────────────────────────
 
-test('expense type renders the active "out" type-toggle pill', function () {
+test('expense type renders the red type dropdown', function () {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('transactionType', 'expense')
-        ->assertSeeHtml('class="active out"')
-        ->assertSeeHtml('aria-pressed="true"');
+        ->assertSeeHtml('text-red-700!')
+        ->assertDontSeeHtml('text-green-700!')
+        ->assertDontSeeHtml('text-orange-700!');
 });
 
-test('income type renders the active "inc" type-toggle pill', function () {
+test('income type renders the green type dropdown', function () {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('transactionType', 'income')
-        ->assertSeeHtml('class="active inc"')
-        ->assertSeeHtml('aria-pressed="true"');
+        ->assertSeeHtml('text-green-700!')
+        ->assertDontSeeHtml('text-red-700!');
 });
 
-test('transfer type renders the active "xfr" type-toggle pill', function () {
+test('transfer type renders the orange type dropdown', function () {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('transactionType', 'transfer')
-        ->assertSeeHtml('class="active xfr"')
-        ->assertSeeHtml('aria-pressed="true"');
-});
-
-test('transfer does not render blue styling from the old theme', function () {
-    $user = User::factory()->create();
-
-    Livewire::actingAs($user)
-        ->test(TransactionModal::class)
-        ->dispatch('open-transaction-modal', date: '2026-03-15')
-        ->set('transactionType', 'transfer')
-        ->assertSeeHtml('active xfr')
+        ->assertSeeHtml('text-orange-700!')
+        ->assertDontSeeHtml('text-red-700!')
         ->assertDontSeeHtml('text-blue-600')
         ->assertDontSeeHtml('bg-amber-50');
 });
 
-test('submit button renders neo-brutalist yellow-pop save across all types', function () {
-    foreach (['expense', 'income', 'transfer'] as $type) {
-        Livewire::actingAs(User::factory()->create())
+test('submit button and header take the colour of the selected type', function () {
+    $tones = ['expense' => 'red', 'income' => 'green', 'transfer' => 'orange'];
+
+    foreach ($tones as $type => $tone) {
+        $component = Livewire::actingAs(User::factory()->create())
             ->test(TransactionModal::class)
             ->dispatch('open-transaction-modal', date: '2026-03-15')
             ->set('transactionType', $type)
-            ->assertSeeHtml('bg-cib-yellow-400!')
-            ->assertSeeHtml('border-cib-black!')
-            ->assertSeeHtml('text-cib-black!')
-            ->assertDontSeeHtml('bg-red-600!')
-            ->assertDontSeeHtml('bg-green-600!')
-            ->assertDontSeeHtml('bg-amber-600!');
+            ->assertSeeHtml("bg-{$tone}-600!")
+            ->assertSeeHtml("border-{$tone}-500");
+
+        foreach (array_diff_key($tones, [$type => true]) as $otherTone) {
+            $component->assertDontSeeHtml("bg-{$otherTone}-600!");
+        }
     }
+});
+
+test('the transfer type is titled Between Accounts with From and To selects and a swap control', function () {
+    Livewire::actingAs(User::factory()->create())
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->assertDontSee('Between Accounts')
+        ->set('transactionType', 'transfer')
+        ->assertSee('Between Accounts')
+        ->assertSee('From account')
+        ->assertSee('To account')
+        ->assertSeeHtml('data-testid="swap-transfer-accounts"');
 });
 
 test('expense type hides notes field', function () {
@@ -1760,9 +1769,10 @@ test('editing planned expense shows all type options including transfer', functi
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('edit-planned-transaction', id: $planned->id)
-        ->assertSeeHtml("\$set('transactionType', 'expense')")
-        ->assertSeeHtml("\$set('transactionType', 'income')")
-        ->assertSeeHtml("\$set('transactionType', 'transfer')");
+        ->assertSeeHtml('data-testid="transaction-type"')
+        ->assertSeeHtml('value="expense"')
+        ->assertSeeHtml('value="income"')
+        ->assertSeeHtml('value="transfer"');
 });
 
 test('editing planned transfer shows all type options including expense and income', function () {
@@ -1782,9 +1792,10 @@ test('editing planned transfer shows all type options including expense and inco
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('edit-planned-transaction', id: $planned->id)
-        ->assertSeeHtml("\$set('transactionType', 'expense')")
-        ->assertSeeHtml("\$set('transactionType', 'income')")
-        ->assertSeeHtml("\$set('transactionType', 'transfer')");
+        ->assertSeeHtml('data-testid="transaction-type"')
+        ->assertSeeHtml('value="expense"')
+        ->assertSeeHtml('value="income"')
+        ->assertSeeHtml('value="transfer"');
 });
 
 // ── Parent-Child Architecture (#134) ─────────────────────────────
@@ -2307,7 +2318,7 @@ test('planned transfer can be converted to planned expense', function () {
         ->and($planned->direction)->toBe(TransactionDirection::Debit);
 });
 
-test('redbark transaction cannot be converted to transfer via tampered transactionType', function () {
+test('redbark transaction with no opposite row to link cannot become a transfer and creates nothing', function () {
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
     $toAccount = Account::factory()->for($user)->create();
@@ -2324,22 +2335,14 @@ test('redbark transaction cannot be converted to transfer via tampered transacti
         ->set('transferToAccountId', $toAccount->id)
         ->set('categoryId', $category->id)
         ->call('save')
-        ->assertSet('showModal', false)
-        ->assertDispatched('transaction-saved');
+        ->assertHasErrors(['transferToAccountId'])
+        ->assertSet('showModal', true);
 
-    expect(Transaction::query()->where('transfer_pair_id', '!=', null)->count())->toBe(0);
-
-    $child = Transaction::query()
-        ->where('parent_transaction_id', $transaction->id)
-        ->first();
-
-    expect($child)
-        ->not->toBeNull()
-        ->category_id->toBe($category->id)
-        ->transfer_pair_id->toBeNull();
+    expect(Transaction::query()->count())->toBe(1)
+        ->and(Transaction::query()->whereNotNull('transfer_pair_id')->count())->toBe(0);
 });
 
-test('redbark transaction cannot be converted to income via tampered transactionType', function () {
+test('redbark debit cannot be saved as income via tampered transactionType', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
@@ -2355,22 +2358,12 @@ test('redbark transaction cannot be converted to income via tampered transaction
         ->set('categoryId', $category->id)
         ->set('notes', 'Tampered direction')
         ->call('save')
-        ->assertSet('showModal', false)
-        ->assertDispatched('transaction-saved');
+        ->assertHasErrors(['transactionType'])
+        ->assertSet('showModal', true)
+        ->assertNotDispatched('transaction-saved');
 
-    $transaction->refresh();
-    expect($transaction->direction)->toBe(TransactionDirection::Debit);
-
-    $child = Transaction::query()
-        ->where('parent_transaction_id', $transaction->id)
-        ->first();
-
-    expect($child)
-        ->not->toBeNull()
-        ->category_id->toBe($category->id)
-        ->notes->toBe('Tampered direction')
-        ->direction->toBe(TransactionDirection::Debit)
-        ->amount->toBe(5000);
+    expect(Transaction::query()->where('parent_transaction_id', $transaction->id)->exists())->toBeFalse()
+        ->and($transaction->fresh()->direction)->toBe(TransactionDirection::Debit);
 });
 
 // ── Enter/Plan Mode Conversion (#136) ─────────────────────────────
@@ -3955,4 +3948,538 @@ test('categorise-matching still warns when the match value is blank and the rule
         ->set('categoriseMatchValue', '   ')
         ->assertSeeHtml('data-testid="categorise-contradicts"')
         ->assertSee($other->fullPath());
+});
+
+// ── Bank-feed transfers link, never duplicate (#519) ─────────────
+
+function modalFeedRow(User $user, Account $account, int $cents, string $date, string $description = 'Transfer'): Transaction
+{
+    return Transaction::factory()->for($user)->fromRedbark()->create([
+        'account_id' => $account->id,
+        'direction' => $cents < 0 ? TransactionDirection::Debit : TransactionDirection::Credit,
+        'amount' => $cents,
+        'post_date' => $date,
+        'description' => $description,
+    ]);
+}
+
+test('bank-feed debit changed to transfer links to the existing opposite row without creating rows', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $debit = modalFeedRow($user, $from, -5000, '2026-09-10');
+    $credit = modalFeedRow($user, $to, 5000, '2026-09-11');
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->set('transactionType', 'transfer')
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    expect(Transaction::query()->count())->toBe(2)
+        ->and($debit->fresh()->transfer_pair_id)->toBe($credit->id)
+        ->and($credit->fresh()->transfer_pair_id)->toBe($debit->id)
+        ->and($debit->fresh()->transfer_link_source)->toBe(TransferLinkSource::Manual)
+        ->and($credit->fresh()->transfer_link_source)->toBe(TransferLinkSource::Manual);
+});
+
+test('unlinking a bank-feed transfer keeps both rows, stamps them unlinked and detection never relinks', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $debit = modalFeedRow($user, $from, -5000, '2026-09-10');
+    $credit = modalFeedRow($user, $to, 5000, '2026-09-11');
+    $debit->forceFill(['transfer_pair_id' => $credit->id, 'transfer_link_source' => TransferLinkSource::Manual])->save();
+    $credit->forceFill(['transfer_pair_id' => $debit->id, 'transfer_link_source' => TransferLinkSource::Manual])->save();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->assertSet('transactionType', 'transfer')
+        ->call('unlinkTransfer')
+        ->assertSet('showModal', false);
+
+    $this->artisan('transfers:detect')->assertSuccessful();
+
+    expect(Transaction::query()->count())->toBe(2)
+        ->and($debit->fresh()->transfer_pair_id)->toBeNull()
+        ->and($credit->fresh()->transfer_pair_id)->toBeNull()
+        ->and($debit->fresh()->transfer_link_source)->toBe(TransferLinkSource::Unlinked)
+        ->and($credit->fresh()->transfer_link_source)->toBe(TransferLinkSource::Unlinked);
+});
+
+test('changing a linked bank-feed transfer back to expense unlinks without deleting either row', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $debit = modalFeedRow($user, $from, -5000, '2026-09-10');
+    $credit = modalFeedRow($user, $to, 5000, '2026-09-11');
+    $debit->forceFill(['transfer_pair_id' => $credit->id, 'transfer_link_source' => TransferLinkSource::Manual])->save();
+    $credit->forceFill(['transfer_pair_id' => $debit->id, 'transfer_link_source' => TransferLinkSource::Manual])->save();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->set('transactionType', 'expense')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(Transaction::query()->count())->toBe(2)
+        ->and($debit->fresh()->transfer_pair_id)->toBeNull()
+        ->and($credit->fresh()->transfer_pair_id)->toBeNull()
+        ->and($credit->fresh()->transfer_link_source)->toBe(TransferLinkSource::Unlinked);
+});
+
+test('several matching opposite rows require an explicit choice', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $toA = Account::factory()->for($user)->create();
+    $toB = Account::factory()->for($user)->create();
+    $debit = modalFeedRow($user, $from, -5000, '2026-09-10');
+    $creditA = modalFeedRow($user, $toA, 5000, '2026-09-10', 'From A');
+    $creditB = modalFeedRow($user, $toB, 5000, '2026-09-11', 'From B');
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->set('transactionType', 'transfer')
+        ->assertSee('From A')
+        ->assertSee('From B')
+        ->call('save')
+        ->assertHasErrors(['selectedCandidateId'])
+        ->assertSet('showModal', true);
+
+    expect($debit->fresh()->transfer_pair_id)->toBeNull();
+
+    $component
+        ->set('selectedCandidateId', $creditB->id)
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    expect($debit->fresh()->transfer_pair_id)->toBe($creditB->id)
+        ->and($creditB->fresh()->transfer_pair_id)->toBe($debit->id)
+        ->and($creditA->fresh()->transfer_pair_id)->toBeNull();
+});
+
+test('picking an untracked account creates a mirror leg and pairs it', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create(['name' => 'Offset Vault']);
+    $debit = modalFeedRow($user, $from, -5000, '2026-09-10');
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->set('transactionType', 'transfer')
+        ->assertSee('Hidden (untracked)')
+        ->set('transferToAccountId', $hidden->id)
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    $mirror = Transaction::query()->where('account_id', $hidden->id)->first();
+
+    expect(Transaction::query()->count())->toBe(2)
+        ->and($mirror)->not->toBeNull()
+        ->and($mirror->amount)->toBe(5000)
+        ->and($mirror->direction)->toBe(TransactionDirection::Credit)
+        ->and($debit->fresh()->transfer_pair_id)->toBe($mirror->id)
+        ->and($mirror->transfer_pair_id)->toBe($debit->id)
+        ->and($debit->fresh()->transfer_link_source)->toBe(TransferLinkSource::Manual);
+});
+
+test('a suggested bank-feed row shows a possible-transfer note, is not a transfer, and can be confirmed', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $debit = modalFeedRow($user, $from, -5000, '2026-09-10');
+    $credit = modalFeedRow($user, $to, 5000, '2026-09-10');
+    app(TransferLinker::class)->suggest($debit, $credit);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->assertSet('transactionType', 'expense')
+        ->assertSeeHtml('data-testid="suggested-transfer-note"')
+        ->call('confirmSuggestedTransfer');
+
+    expect($debit->fresh()->transfer_pair_id)->toBe($credit->id)
+        ->and($credit->fresh()->transfer_pair_id)->toBe($debit->id)
+        ->and($debit->fresh()->transfer_link_source)->toBe(TransferLinkSource::Confirmed)
+        ->and($credit->fresh()->transfer_link_source)->toBe(TransferLinkSource::Confirmed);
+});
+
+test('rejecting a suggested bank-feed row keeps both rows and remembers it', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $debit = modalFeedRow($user, $from, -5000, '2026-09-10');
+    $credit = modalFeedRow($user, $to, 5000, '2026-09-10');
+    app(TransferLinker::class)->suggest($debit, $credit);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->call('rejectSuggestedTransfer');
+
+    expect(Transaction::query()->count())->toBe(2)
+        ->and($debit->fresh()->suggested_pair_id)->toBeNull()
+        ->and($debit->fresh()->transfer_pair_id)->toBeNull()
+        ->and($credit->fresh()->transfer_link_source)->toBe(TransferLinkSource::Unlinked);
+});
+
+// ── Type direction, provenance, tracked accounts, imported-row safety (#519) ──
+
+test('a debit bank-feed row only offers Expense and Transfer, a credit row only Income and Transfer', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $debit = modalFeedRow($user, $account, -5000, '2026-09-10');
+    $credit = modalFeedRow($user, $account, 5000, '2026-09-10');
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->assertSeeHtml('value="expense"')
+        ->assertSeeHtml('value="transfer"')
+        ->assertDontSeeHtml('value="income"');
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $credit->id)
+        ->assertSeeHtml('value="income"')
+        ->assertSeeHtml('value="transfer"')
+        ->assertDontSeeHtml('value="expense"');
+});
+
+test('a credit bank-feed row rejects a forged expense type and manual rows keep all three types', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $credit = modalFeedRow($user, $account, 5000, '2026-09-10');
+    $manual = Transaction::factory()->for($user)->for($account)->create(['direction' => TransactionDirection::Debit, 'amount' => 1000]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $credit->id)
+        ->set('transactionType', 'expense')
+        ->call('save')
+        ->assertHasErrors(['transactionType']);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $manual->id)
+        ->assertSeeHtml('value="expense"')
+        ->assertSeeHtml('value="income"')
+        ->assertSeeHtml('value="transfer"');
+});
+
+test('a newly created manual transfer is stamped Manual on both legs', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '25 savings')
+        ->set('accountId', $from->id)
+        ->set('transferToAccountId', $to->id)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $legs = Transaction::query()->whereNotNull('transfer_pair_id')->get();
+
+    expect($legs)->toHaveCount(2)
+        ->and($legs->pluck('transfer_link_source')->unique()->all())->toBe([TransferLinkSource::Manual]);
+});
+
+test('converting a manual expense to a transfer stamps Manual on both legs', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $expense = Transaction::factory()->for($user)->for($from)->create(['direction' => TransactionDirection::Debit, 'amount' => 4000]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $expense->id)
+        ->set('transactionType', 'transfer')
+        ->set('transferToAccountId', $to->id)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $legs = Transaction::query()->whereNotNull('transfer_pair_id')->get();
+
+    expect($legs)->toHaveCount(2)
+        ->and($legs->pluck('transfer_link_source')->unique()->all())->toBe([TransferLinkSource::Manual]);
+});
+
+test('the main account is tracked-only while the transfer counterpart offers hidden accounts', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create(['name' => 'Everyday Tracked']);
+    Account::factory()->for($user)->untracked()->create(['name' => 'Spaceship Hidden']);
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15');
+
+    $html = $component->html();
+    $main = mb_substr($html, mb_strpos($html, 'Select account'));
+
+    // Expense: the only account list is the main selector.
+    expect($main)->toContain('Everyday Tracked')->not->toContain('Spaceship Hidden');
+
+    $component->set('transactionType', 'transfer')
+        ->assertSee('Hidden (untracked)')
+        ->assertSee('Spaceship Hidden');
+});
+
+test('an untracked account is rejected as the main account, but accepted as a transfer counterpart', function () {
+    $user = User::factory()->create();
+    $tracked = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('descriptionInput', '10 coffee')
+        ->set('accountId', $hidden->id)
+        ->call('save')
+        ->assertHasErrors(['accountId']);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'transfer')
+        ->set('descriptionInput', '10 to vault')
+        ->set('accountId', $tracked->id)
+        ->set('transferToAccountId', $hidden->id)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(Transaction::query()->whereNotNull('transfer_pair_id')->count())->toBe(2);
+});
+
+test('planned entry also rejects an untracked account and a closed or foreign counterpart', function () {
+    $user = User::factory()->create();
+    $tracked = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+    $closed = Account::factory()->for($user)->closed()->create();
+    $foreign = Account::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2099-01-15')
+        ->set('mode', 'plan')
+        ->set('descriptionInput', '10 rent')
+        ->set('accountId', $hidden->id)
+        ->call('save')
+        ->assertHasErrors(['accountId']);
+
+    foreach ([$closed, $foreign] as $bad) {
+        Livewire::actingAs($user)
+            ->test(TransactionModal::class)
+            ->dispatch('open-transaction-modal', date: '2026-03-15')
+            ->set('transactionType', 'transfer')
+            ->set('descriptionInput', '10 move')
+            ->set('accountId', $tracked->id)
+            ->set('transferToAccountId', $bad->id)
+            ->call('save')
+            ->assertHasErrors(['transferToAccountId']);
+    }
+});
+
+test('deleting a manual mirror keeps the imported partner and unlinks it', function () {
+    $user = User::factory()->create();
+    $main = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+    $feed = modalFeedRow($user, $main, -5000, '2026-09-10');
+    $mirror = app(TransferLinker::class)->linkToUntrackedAccount($feed, $hidden, TransferLinkSource::Manual);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->set('editingTransactionId', $mirror->id)
+        ->call('deleteTransaction');
+
+    expect(Transaction::query()->whereKey($mirror->id)->exists())->toBeFalse()
+        ->and(Transaction::query()->whereKey($feed->id)->exists())->toBeTrue()
+        ->and($feed->fresh()->transfer_pair_id)->toBeNull();
+});
+
+test('deleting an imported-row child never deletes the imported partner', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $debit = modalFeedRow($user, $from, -5000, '2026-09-10');
+    $credit = modalFeedRow($user, $to, 5000, '2026-09-10');
+    app(TransferLinker::class)->link($debit, $credit, TransferLinkSource::Manual);
+    $child = $debit->createChild(['notes' => 'edited']);
+    Transaction::query()->whereKey($credit->id)->update(['transfer_pair_id' => $child->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->set('editingTransactionId', $child->id)
+        ->call('deleteTransaction');
+
+    expect(Transaction::query()->whereKey($credit->id)->exists())->toBeTrue()
+        ->and($credit->fresh()->transfer_pair_id)->toBeNull();
+});
+
+test('convertFromTransfer keeps an imported credit leg and unlinks it', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $manualDebit = Transaction::factory()->for($user)->for($from)->create(['direction' => TransactionDirection::Debit, 'amount' => 5000]);
+    $credit = Transaction::factory()->for($user)->for($to)->create(['direction' => TransactionDirection::Credit, 'amount' => 5000]);
+    app(TransferLinker::class)->link($manualDebit, $credit, TransferLinkSource::Manual);
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $manualDebit->id);
+
+    // The partner turns out to be an imported row by the time the user saves.
+    Transaction::query()->whereKey($credit->id)->update(['source' => TransactionSource::Redbark->value]);
+
+    $component->set('transactionType', 'expense')->call('save')->assertHasNoErrors();
+
+    expect(Transaction::query()->whereKey($credit->id)->exists())->toBeTrue()
+        ->and($credit->fresh()->transfer_pair_id)->toBeNull()
+        ->and($credit->fresh()->transfer_link_source)->toBe(TransferLinkSource::Unlinked);
+});
+
+test('a hidden account cannot be chosen while a real opposite row exists', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+    $debit = modalFeedRow($user, $from, -5000, '2026-09-10');
+    $credit = modalFeedRow($user, $to, 5000, '2026-09-10');
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->set('transactionType', 'transfer')
+        ->set('transferToAccountId', $hidden->id);
+
+    expect($component->instance()->hasOppositeRows())->toBeTrue();
+
+    $component->call('save')->assertHasErrors('transferToAccountId');
+
+    expect(Transaction::query()->where('account_id', $hidden->id)->count())->toBe(0)
+        ->and($debit->fresh()->transfer_pair_id)->toBeNull()
+        ->and($credit->fresh()->transfer_pair_id)->toBeNull();
+});
+
+test('editing a bank-feed leg keeps its pending suggestion symmetric', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $debit = modalFeedRow($user, $from, -5000, '2026-09-10');
+    $credit = modalFeedRow($user, $to, 5000, '2026-09-10');
+    app(TransferLinker::class)->suggest($debit, $credit);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $credit->id)
+        ->set('notes', 'edited note')
+        ->call('save');
+
+    $currentCredit = Transaction::findCurrentVersion($credit->id, $user->id);
+
+    expect($currentCredit->id)->not->toBe($credit->id)
+        ->and($currentCredit->suggested_pair_id)->toBe($debit->id)
+        ->and($debit->fresh()->suggested_pair_id)->toBe($currentCredit->id);
+});
+
+test('a link refused after an edit rolls the edit back instead of keeping a stray version', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $debit = modalFeedRow($user, $from, -5000, '2026-09-10');
+    $credit = modalFeedRow($user, $to, 5000, '2026-09-10');
+    $rival = modalFeedRow($user, $from, -5000, '2026-09-11');
+
+    // The credit is claimed elsewhere at the moment the edit's new version is written.
+    $armed = new stdClass;
+    $armed->on = true;
+    Transaction::created(function (Transaction $created) use ($armed, $credit, $rival): void {
+        if ($armed->on && $created->parent_transaction_id !== null) {
+            DB::table('transactions')->where('id', $credit->id)->update(['transfer_pair_id' => $rival->id]);
+        }
+    });
+
+    try {
+        Livewire::actingAs($user)
+            ->test(TransactionModal::class)
+            ->dispatch('edit-transaction', id: $debit->id)
+            ->set('transactionType', 'transfer')
+            ->set('transferToAccountId', $to->id)
+            ->set('notes', 'an edit that must not stick')
+            ->call('save')
+            ->assertHasErrors('selectedCandidateId');
+    } finally {
+        $armed->on = false;
+    }
+
+    expect(Transaction::query()->where('parent_transaction_id', $debit->id)->count())->toBe(0)
+        ->and($debit->fresh()->notes)->toBeNull()
+        ->and($debit->fresh()->transfer_pair_id)->toBeNull();
+});
+
+test('a forged hasOppositeRows argument cannot probe another users row', function () {
+    $user = User::factory()->create();
+    $mine = modalFeedRow($user, Account::factory()->for($user)->create(), -1234, '2026-09-10');
+    $other = User::factory()->create();
+    $theirDebit = modalFeedRow($other, Account::factory()->for($other)->create(), -5000, '2026-09-10');
+    modalFeedRow($other, Account::factory()->for($other)->create(), 5000, '2026-09-10');
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $mine->id)
+        ->call('hasOppositeRows', $theirDebit->id)
+        ->assertReturned(false);
+});
+
+test('rows once unlinked can be linked again from the modal, and a manual positive debit matches a feed credit', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $credit = modalFeedRow($user, $to, 5000, '2026-09-10');
+    $manualDebit = Transaction::factory()->for($user)->for($from)->manual()->create([
+        'direction' => TransactionDirection::Debit, 'amount' => 5000, 'post_date' => '2026-09-10',
+    ]);
+    $manualDebit->forceFill(['transfer_link_source' => TransferLinkSource::Unlinked])->save();
+
+    $candidates = Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $credit->id)
+        ->set('transactionType', 'transfer')
+        ->instance()
+        ->transferCandidates();
+
+    expect($candidates->pluck('id')->all())->toBe([$manualDebit->id]);
+});
+
+test('saving a note on a feed row never unlinks a pair a rule linked while the modal was open', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $debit = modalFeedRow($user, $from, -5000, '2026-09-10');
+    $credit = modalFeedRow($user, $to, 5000, '2026-09-10');
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id);
+
+    app(TransferLinker::class)->link($debit->fresh(), $credit->fresh(), TransferLinkSource::Rule);
+
+    $component->set('notes', 'just a note')->call('save')->assertHasNoErrors();
+
+    $current = Transaction::findCurrentVersion($debit->id, $user->id);
+
+    expect($current->transfer_pair_id)->toBe($credit->id)
+        ->and($credit->fresh()->transfer_pair_id)->toBe($current->id)
+        ->and($current->transfer_link_source)->toBe(TransferLinkSource::Rule);
 });

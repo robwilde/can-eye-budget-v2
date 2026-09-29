@@ -13,7 +13,7 @@ $openModal = <<<'JS'
     Livewire.dispatch('open-transaction-modal', { date: '2026-04-19' })
 JS;
 
-test('transaction modal renders the neo-brutalist type-toggle three-pill control', function () use ($openModal) {
+test('transaction modal renders the type dropdown and the enter/plan toggle', function () use ($openModal) {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
 
@@ -23,11 +23,11 @@ test('transaction modal renders the neo-brutalist type-toggle three-pill control
 
     $page->script($openModal);
 
-    $page->assertPresent('.type-toggle')
+    $page->assertPresent('[data-testid="transaction-type"]')
         ->assertPresent('.type-toggle button[aria-pressed="true"]')
-        ->assertSee('Expense')
-        ->assertSee('Income')
-        ->assertSee('Transfer');
+        ->assertPresent('option[value="expense"]')
+        ->assertPresent('option[value="income"]')
+        ->assertPresent('option[value="transfer"]');
 });
 
 test('transaction modal renders the category combobox', function () use ($openModal) {
@@ -77,7 +77,7 @@ test('rule-suggest card appears in plan mode for non-transfer types', function (
         ->assertSee('Make this a rule?');
 });
 
-test('modal yellow-pop Save button renders with new neo-brutalist classes', function () use ($openModal) {
+test('modal submit button takes the selected type colour', function () use ($openModal) {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
 
@@ -87,5 +87,5 @@ test('modal yellow-pop Save button renders with new neo-brutalist classes', func
 
     $page->script($openModal);
 
-    $page->assertPresent('button.bg-cib-yellow-400\\!');
+    $page->assertPresent('button[data-testid="transaction-submit"].bg-red-600\\!');
 });

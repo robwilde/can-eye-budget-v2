@@ -328,3 +328,17 @@ test('when embedded in onboarding a finished setup redirects to the dashboard', 
 
     expect($feed->fresh()->pending_account_setup)->toBeFalse();
 });
+
+test('a forged choice cannot link an untracked account to the feed', function () {
+    [$user, , $redbarkAccount] = wizardFixture();
+    $untracked = Account::factory()->for($user)->untracked()->create();
+
+    Livewire::actingAs($user)
+        ->test(RedbarkAccountSetup::class)
+        ->set("choices.{$redbarkAccount->id}", "existing:{$untracked->id}")
+        ->call('save')
+        ->assertForbidden();
+
+    expect($redbarkAccount->fresh()->account_id)->toBeNull()
+        ->and($untracked->fresh()->import_source)->toBe(ImportSource::Manual);
+});

@@ -458,3 +458,37 @@ test('uploading a csv for an account with no prior imports shows no continuity m
         ->assertDontSeeHtml('data-testid="import-bank-continuity-gap"')
         ->assertDontSeeHtml('data-testid="import-bank-continuity-ok"');
 });
+
+test('a forged upload cannot target an untracked account', function () {
+    $user = User::factory()->create();
+    $untracked = Account::factory()->for($user)->untracked()->create();
+
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'existing')
+        ->set('accountId', $untracked->id)
+        ->set('file', fixtureUpload())
+        ->call('uploadAndDetectHeaders')
+        ->assertSet('step', 1);
+
+    expect(BankImport::query()->count())->toBe(0);
+});
+
+test('confirming with a swapped account id is refused for an import that belongs elsewhere', function () {
+    $user = User::factory()->create();
+    $original = Account::factory()->for($user)->csvImport()->create();
+    $swapped = Account::factory()->for($user)->csvImport()->create();
+
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'existing')
+        ->set('accountId', $original->id)
+        ->set('file', fixtureUpload())
+        ->call('uploadAndDetectHeaders')
+        ->set('accountId', $swapped->id)
+        ->call('confirmImport')
+        ->assertHasErrors('account_id')
+        ->assertSet('step', 2);
+
+    Queue::assertNothingPushed();
+});
