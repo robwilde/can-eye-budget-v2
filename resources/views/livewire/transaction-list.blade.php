@@ -385,6 +385,7 @@
                             :categories="$splitCategories"
                             placeholder="Category"
                             size="sm"
+                            dropdown="up"
                         />
                     </div>
 
