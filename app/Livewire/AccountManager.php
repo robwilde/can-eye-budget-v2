@@ -10,8 +10,14 @@ use App\Enums\AccountGroup;
 use App\Enums\AccountStatus;
 use App\Enums\ImportSource;
 use App\Models\Account;
+use App\Models\User;
+use App\Services\Transfers\TransferLinker;
+use App\Services\Transfers\UntrackedAccountCreator;
+use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
 final class AccountManager extends Component
@@ -44,11 +50,34 @@ final class AccountManager extends Component
 
     public string $institution = '';
 
+    /** The form is creating/editing an untracked (manual-balance, long-term) account. Server-set only. */
+    #[Locked]
+    public bool $isUntracked = false;
+
+    public bool $showReconcileModal = false;
+
+    public ?int $reconcilingAccountId = null;
+
+    public string $reconcilingAccountName = '';
+
+    public string $reconcileBalance = '';
+
+    public string $reconcileDate = '';
+
     public function openAddModal(): void
     {
         $this->resetForm();
         $this->group = AccountGroup::DayToDay->value;
         $this->type = AccountClass::Transaction->value;
+        $this->showFormModal = true;
+    }
+
+    public function openAddUntrackedModal(): void
+    {
+        $this->resetForm();
+        $this->isUntracked = true;
+        $this->group = AccountGroup::LongTermSavings->value;
+        $this->type = AccountClass::Savings->value;
         $this->showFormModal = true;
     }
 
@@ -71,11 +100,23 @@ final class AccountManager extends Component
         $this->type = $account->type->value;
         $this->group = $account->group->value;
         $this->institution = $account->institution ?? '';
+        $this->isUntracked = ! $account->is_tracked;
         $this->showFormModal = true;
     }
 
     public function save(): void
     {
+        // When editing, the persisted account decides the mode, never the form state.
+        $untracked = $this->editingAccountId
+            ? $this->findUserAccount($this->editingAccountId)?->is_tracked === false
+            : $this->isUntracked;
+
+        if ($untracked) {
+            $this->saveUntracked();
+
+            return;
+        }
+
         $validated = $this->validate($this->formRules());
 
         $mutableData = [
@@ -109,6 +150,73 @@ final class AccountManager extends Component
 
         $this->showFormModal = false;
         $this->resetForm();
+    }
+
+    public function openReconcileModal(int $accountId): void
+    {
+        $account = $this->findUserAccount($accountId);
+
+        if ($account === null || $account->is_tracked) {
+            return;
+        }
+
+        $this->resetValidation();
+        $this->reconcilingAccountId = $account->id;
+        $this->reconcilingAccountName = $account->name;
+        $this->reconcileBalance = number_format($account->balance / 100, 2, '.', '');
+        $this->reconcileDate = CarbonImmutable::today()->toDateString();
+        $this->showReconcileModal = true;
+    }
+
+    public function reconcile(): void
+    {
+        $validated = $this->validate([
+            'reconcileBalance' => ['required', 'numeric'],
+            'reconcileDate' => ['required', 'date', 'before_or_equal:today'],
+        ]);
+
+        $account = $this->reconcilingAccountId ? $this->findUserAccount($this->reconcilingAccountId) : null;
+
+        if ($account === null || $account->is_tracked) {
+            return;
+        }
+
+        $account->reconcileManualBalance(
+            (int) round((float) $validated['reconcileBalance'] * 100),
+            CarbonImmutable::parse($validated['reconcileDate']),
+        );
+
+        $this->showReconcileModal = false;
+        $this->reconcilingAccountId = null;
+        $this->reconcilingAccountName = '';
+        $this->reconcileBalance = '';
+        $this->reconcileDate = '';
+    }
+
+    /** Converts an untracked account into a tracked manual account; its transactions are kept. */
+    public function trackAccount(int $accountId): void
+    {
+        $account = $this->findUserAccount($accountId);
+
+        if ($account === null || $account->is_tracked) {
+            return;
+        }
+
+        // The account becomes tracked first so its own rows count as real candidates. A hidden
+        // transfer is never re-exposed: a mirror is replaced only when exactly one real
+        // opposite row exists, otherwise the pair stays (the mirror becomes a manual row).
+        DB::transaction(function () use ($account): void {
+            // Same account lock as TransferLinker::linkToUntrackedAccount: a mirror being
+            // created concurrently either lands before this (and is kept/replaced) or is refused.
+            $locked = Account::query()->whereKey($account->id)->lockForUpdate()->first();
+
+            if (! $locked instanceof Account || $locked->is_tracked) {
+                return;
+            }
+
+            $locked->update(['is_tracked' => true]);
+            app(TransferLinker::class)->releaseMirrors($locked);
+        });
     }
 
     public function confirmDelete(int $accountId): void
@@ -164,6 +272,45 @@ final class AccountManager extends Component
         ]);
     }
 
+    private function saveUntracked(): void
+    {
+        $validated = $this->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'balance' => ['required', 'numeric'],
+            'description' => ['nullable', 'string', 'max:1000'],
+            'type' => ['required', Rule::enum(AccountClass::class)],
+        ]);
+
+        $type = AccountClass::from($validated['type']);
+        $cents = (int) round((float) $validated['balance'] * 100);
+        $description = $validated['description'] ?: null;
+
+        if ($this->editingAccountId) {
+            $account = $this->findUserAccount($this->editingAccountId);
+
+            if ($account === null || $account->is_tracked) {
+                return;
+            }
+
+            $account->update(['name' => $validated['name'], 'type' => $type, 'description' => $description]);
+
+            if ($cents !== $account->balance) {
+                $account->reconcileManualBalance($cents);
+            }
+        } else {
+            app(UntrackedAccountCreator::class)->create(
+                $this->authenticatedUser(),
+                $validated['name'],
+                $type,
+                $cents,
+                $description,
+            );
+        }
+
+        $this->showFormModal = false;
+        $this->resetForm();
+    }
+
     private function resetForm(): void
     {
         $this->editingAccountId = null;
@@ -175,6 +322,7 @@ final class AccountManager extends Component
         $this->type = '';
         $this->group = '';
         $this->institution = '';
+        $this->isUntracked = false;
         $this->resetValidation();
     }
 
@@ -190,6 +338,14 @@ final class AccountManager extends Component
             'group' => ['required', Rule::enum(AccountGroup::class)],
             'institution' => ['nullable', 'string', 'max:255'],
         ];
+    }
+
+    private function authenticatedUser(): User
+    {
+        /** @var User $user */
+        $user = auth()->user();
+
+        return $user;
     }
 
     private function findUserAccount(int $accountId): ?Account

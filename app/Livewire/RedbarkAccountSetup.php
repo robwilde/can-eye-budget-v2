@@ -86,6 +86,7 @@ final class RedbarkAccountSetup extends Component
     {
         return Account::query()
             ->where('user_id', Auth::id())
+            ->tracked()
             ->whereDoesntHave('redbarkAccount')
             ->orderBy('name')
             ->get();
@@ -202,7 +203,7 @@ final class RedbarkAccountSetup extends Component
         if (str_starts_with($choice, 'existing:')) {
             $account = Account::query()->findOrFail((int) mb_substr($choice, mb_strlen('existing:')));
 
-            abort_unless($account->user_id === Auth::id(), 403);
+            abort_unless($account->user_id === Auth::id() && $account->is_tracked, 403);
 
             if ($account->redbarkAccount()->exists()) {
                 throw new RuntimeException(__('That account is already connected to Redbark.'));

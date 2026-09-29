@@ -121,6 +121,7 @@ final class ImportBank extends Component
         $account = Account::query()
             ->whereKey($this->accountId)
             ->where('user_id', auth()->id())
+            ->tracked()
             ->first();
 
         if ($account === null || ! $account->acceptsCsvImports()) {
@@ -147,6 +148,14 @@ final class ImportBank extends Component
         $bankImport = BankImport::query()
             ->where('user_id', auth()->id())
             ->findOrFail($this->bankImportId);
+
+        // accountId is a mutable Livewire property: the persisted import must belong to the
+        // very (tracked) account being confirmed, or a forged swap could redirect it.
+        if ($bankImport->account_id !== $account->id) {
+            $this->addError('account_id', 'This import belongs to a different account.');
+
+            return;
+        }
 
         $bankImport->update([
             'status' => BankImportStatus::Pending,
@@ -226,7 +235,7 @@ final class ImportBank extends Component
 
     public function render(CsvParserService $parser): View
     {
-        $userAccounts = auth()->user()->accounts()->visible()->get();
+        $userAccounts = auth()->user()->accounts()->tracked()->visible()->get();
         $bankImport = $this->bankImportId !== null
             ? BankImport::query()->where('user_id', auth()->id())->find($this->bankImportId)
             : null;
@@ -293,7 +302,7 @@ final class ImportBank extends Component
                 return null;
             }
 
-            $account = Account::query()->whereKey($this->accountId)->where('user_id', $user->id)->first();
+            $account = Account::query()->whereKey($this->accountId)->where('user_id', $user->id)->tracked()->first();
 
             if ($account === null) {
                 $this->errorMessage = 'That account is not yours.';
