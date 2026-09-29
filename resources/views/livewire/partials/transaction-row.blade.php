@@ -35,7 +35,9 @@
     $bulkExcluded = $this->isBulkExcluded($transaction);
     $bulkReason = $this->bulkExclusionReason($transaction);
 @endphp
-<div wire:key="txn-wrap-{{ $transaction->id }}" class="flex items-start gap-2">
+{{-- Grid, not flex: the checkbox centres on the tx-row's own row only, so an
+     open email/split panel (column 2, below) never drags it downward. --}}
+<div wire:key="txn-wrap-{{ $transaction->id }}" class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2">
     {{-- Distinct wire:key per branch. The wrapper key is the same either way,
          so without these Livewire would morph one checkbox into the other in
          place — stripping wire:model.live and adding disabled on a live
@@ -55,7 +57,7 @@
             wire:key="select-{{ $transaction->id }}-off"
             disabled
             :aria-disabled="'true'"
-            class="mt-5 shrink-0"
+            class="shrink-0"
             :aria-label="'Cannot select ' . $transaction->description"
             aria-describedby="select-reason-{{ $transaction->id }}"
             :title="$bulkReason"
@@ -66,12 +68,12 @@
         <flux:checkbox
             wire:key="select-{{ $transaction->id }}-on"
             wire:model.live="selected.{{ $transaction->id }}"
-            class="mt-5 shrink-0"
+            class="shrink-0"
             :aria-label="'Select ' . $transaction->description"
             data-testid="select-{{ $transaction->id }}"
         />
     @endif
-    <div class="min-w-0 flex-1">
+    <div class="min-w-0">
         <x-cib.tx-row
             wire:key="txn-{{ $transaction->id }}"
             :name="$transaction->description"
@@ -110,6 +112,8 @@
                 @endif
             </x-slot:actions>
         </x-cib.tx-row>
+    </div>
+    <div class="col-start-2 min-w-0">
         @if($emailPanelTxnId === $transaction->id)
             @php
                 $linkedMessageIds = $transaction->emails->pluck('gmail_message_id');
@@ -217,5 +221,5 @@
                 </div>
             </div>
         @endif
-    </div>{{-- /min-w-0 flex-1 --}}
+    </div>{{-- /panels --}}
 </div>{{-- /txn-wrap --}}
