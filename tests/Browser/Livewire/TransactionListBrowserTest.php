@@ -207,3 +207,63 @@ test('period filter changes update the list', function () {
     $page->assertSee('RECENT PURCHASE')
         ->assertDontSee('OLD PURCHASE');
 });
+
+test('bulk bar category dropdown opens above the input and stays on screen', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    Category::factory()->create(['name' => 'Groceries']);
+
+    $transaction = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => null,
+        'description' => 'WOOLWORTHS SYDNEY',
+        'post_date' => now()->startOfMonth(),
+    ]);
+
+    $this->actingAs($user);
+
+    $input = '[data-testid="bulk-bar"] [role="combobox"] input';
+
+    visit('/transactions')
+        ->click("[data-testid=\"select-{$transaction->id}\"]")
+        ->assertPresent('[data-testid="bulk-bar"]')
+        ->click($input)
+        ->type($input, 'gro')
+        ->assertSee('Groceries')
+        ->assertScript(<<<'JS'
+            (() => {
+                const input = document.querySelector('[data-testid="bulk-bar"] [role="combobox"] input').getBoundingClientRect();
+                const list = document.querySelector('[data-testid="bulk-bar"] [role="listbox"]').getBoundingClientRect();
+                return list.height > 0 && list.bottom <= input.top && list.top >= 0;
+            })()
+            JS);
+});
+
+test('row checkbox stays centred on its row when the split panel opens', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $transaction = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => null,
+        'description' => 'WOOLWORTHS SYDNEY',
+        'post_date' => now()->startOfMonth(),
+    ]);
+
+    $this->actingAs($user);
+
+    $centred = <<<JS
+        (() => {
+            const box = document.querySelector('[data-testid="select-{$transaction->id}"]');
+            const cb = box.getBoundingClientRect();
+            const row = box.parentElement.querySelector(':scope > .min-w-0').getBoundingClientRect();
+            return Math.abs((cb.top + cb.height / 2) - (row.top + row.height / 2)) <= 2;
+        })()
+        JS;
+
+    visit('/transactions')
+        ->assertScript($centred)
+        ->click("[data-testid=\"split-{$transaction->id}\"]")
+        ->assertPresent("[data-testid=\"split-panel-{$transaction->id}\"]")
+        ->assertScript($centred);
+});
