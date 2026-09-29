@@ -45,7 +45,7 @@ final class LayoutShellComposer
         $this->user = $user;
 
         if ($user !== null) {
-            $this->accountCount = $user->accounts()->active()->count();
+            $this->accountCount = $user->accounts()->active()->tracked()->count();
             $this->daysUntilNextPay = $user->daysUntilNextPay();
             $this->latestSync = RedbarkSyncLog::query()
                 ->where('user_id', $user->id)
