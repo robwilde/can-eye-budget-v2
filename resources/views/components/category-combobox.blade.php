@@ -3,6 +3,9 @@
     'label' => null,
     'placeholder' => 'No category',
     'size' => null,
+    // 'up' anchors the popover above the input: needed where the field sits at
+    // the viewport bottom (the sticky bulk bar), where dropping down is off-screen.
+    'dropdown' => 'down',
 ])
 
 @php
@@ -23,6 +26,7 @@
         selectedLabel: '',
         items: {{ Js::from($items) }},
         wireModel: '{{ $wireModel }}',
+        dropUp: {{ Js::from($dropdown === 'up') }},
 
         init() {
             this.syncFromWire();
@@ -88,7 +92,13 @@
                 if (el && typeof el.showPopover === 'function') {
                     const rect = this.$refs.input.getBoundingClientRect();
                     el.style.position = 'fixed';
-                    el.style.top = (rect.bottom + 4) + 'px';
+                    if (this.dropUp) {
+                        el.style.top = 'auto';
+                        el.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+                    } else {
+                        el.style.bottom = 'auto';
+                        el.style.top = (rect.bottom + 4) + 'px';
+                    }
                     el.style.left = rect.left + 'px';
                     el.style.width = rect.width + 'px';
                     el.showPopover();
@@ -105,7 +115,7 @@
             }
         },
     }"
-    {{ $attributes->except(['wire:model', 'wire:model.live', 'wire:model.blur', 'wire:model.defer', 'categories', 'label', 'placeholder', 'size'])->class('relative') }}
+    {{ $attributes->except(['wire:model', 'wire:model.live', 'wire:model.blur', 'wire:model.defer', 'categories', 'label', 'placeholder', 'size', 'dropdown'])->class('relative') }}
     role="combobox"
     aria-haspopup="listbox"
     :aria-expanded="open"
