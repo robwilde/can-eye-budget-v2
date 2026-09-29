@@ -180,6 +180,7 @@ final class User extends Authenticatable
     {
         return $this->accounts()
             ->active()
+            ->tracked()
             ->where(static function ($query): void {
                 $query->whereIn('type', [AccountClass::CreditCard, AccountClass::Loan])
                     ->orWhereNotNull('credit_limit');
@@ -192,6 +193,7 @@ final class User extends Authenticatable
     {
         return $this->accounts()
             ->active()
+            ->tracked()
             ->get()
             ->filter(fn (Account $a) => $a->type->isSpendable())
             ->sum(fn (Account $a) => $a->availableBalance());

@@ -9,6 +9,7 @@ use App\Enums\CategorySource;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
+use App\Enums\TransferLinkSource;
 use App\Events\TransactionCategoryUpdated;
 use App\Support\Recurring\MerchantSignature;
 use Carbon\CarbonImmutable;
@@ -42,6 +43,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property array<string, mixed>|null $enrich_data
  * @property TransactionSource $source
  * @property int|null $transfer_pair_id
+ * @property TransferLinkSource|null $transfer_link_source
+ * @property int|null $suggested_pair_id
  * @property int|null $planned_transaction_id
  * @property int|null $parent_transaction_id
  * @property int|null $folded_into_transaction_id
@@ -107,6 +110,8 @@ final class Transaction extends Model
         'enrich_data',
         'source',
         'transfer_pair_id',
+        'transfer_link_source',
+        'suggested_pair_id',
         'planned_transaction_id',
         'parent_transaction_id',
         'folded_into_transaction_id',
@@ -184,6 +189,17 @@ final class Transaction extends Model
         return $this->belongsTo(self::class, 'transfer_pair_id');
     }
 
+    /**
+     * The row this one is only *suggested* to be a transfer with. A suggestion does not
+     * count as a transfer (transfer_pair_id stays null) until it is confirmed.
+     *
+     * @return BelongsTo<self, $this>
+     */
+    public function suggestedPair(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'suggested_pair_id');
+    }
+
     /** @return BelongsTo<self, $this> */
     public function parent(): BelongsTo
     {
@@ -254,6 +270,45 @@ final class Transaction extends Model
     }
 
     /**
+     * Rows carrying a pending "possible transfer" suggestion whose partner is still a live
+     * (not deleted) row pointing back: a dangling pointer never counts as a suggestion.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopePossibleTransfer(Builder $query): Builder
+    {
+        $table = $query->getModel()->getTable();
+
+        return $query
+            ->whereNotNull("{$table}.suggested_pair_id")
+            ->whereNull("{$table}.transfer_pair_id")
+            ->whereExists(fn ($partner) => $partner
+                ->selectRaw('1')
+                ->from("{$table} as suggested_partner")
+                ->whereColumn('suggested_partner.id', "{$table}.suggested_pair_id")
+                ->whereColumn('suggested_partner.suggested_pair_id', "{$table}.id")
+                ->whereNull('suggested_partner.deleted_at'));
+    }
+
+    /**
+     * Rows that may still be paired as a transfer: not linked, not rejected by the user
+     * (Unlinked / "not a transfer"), and sitting on a tracked account.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeLinkable(Builder $query): Builder
+    {
+        return $query
+            ->whereNull('transfer_pair_id')
+            ->where(fn (Builder $q): Builder => $q
+                ->whereNull('transfer_link_source')
+                ->orWhere('transfer_link_source', '!=', TransferLinkSource::Unlinked->value))
+            ->whereHas('account', fn (Builder $a): Builder => $a->where('is_tracked', true));
+    }
+
+    /**
      * @param  Builder<self>  $query
      * @return Builder<self>
      */
@@ -263,6 +318,9 @@ final class Transaction extends Model
     }
 
     /**
+     * Rows that are not internal transfers: unpaired, not Transfer-categorised, and
+     * not held on an untracked account (whose legs only exist as transfer mirrors).
+     *
      * @param  Builder<self>  $query
      * @return Builder<self>
      */
@@ -270,13 +328,26 @@ final class Transaction extends Model
     {
         return $query
             ->whereNull('transfer_pair_id')
-            ->whereDoesntHave('category', function (Builder $q): void {
-                $q->where('name', 'Transfer')
-                    ->orWhereHas(
-                        'parent',
-                        fn (Builder $p): Builder => $p->where('name', 'Transfer'),
-                    );
-            });
+            ->onTrackedAccounts()
+            // A user's explicit "not a transfer" / unlink decision overrides the category rule.
+            ->where(fn (Builder $q): Builder => $q
+                ->where('transfer_link_source', TransferLinkSource::Unlinked->value)
+                ->orWhereDoesntHave('category', function (Builder $c): void {
+                    $c->where('name', 'Transfer')
+                        ->orWhereHas(
+                            'parent',
+                            fn (Builder $p): Builder => $p->where('name', 'Transfer'),
+                        );
+                }));
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeOnTrackedAccounts(Builder $query): Builder
+    {
+        return $query->whereDoesntHave('account', fn (Builder $q): Builder => $q->where('is_tracked', false));
     }
 
     /**
@@ -310,7 +381,7 @@ final class Transaction extends Model
      */
     public function scopeWithRelations(Builder $query): Builder
     {
-        return $query->with(['account', 'category.parent.parent']);
+        return $query->with(['account', 'category.parent.parent', 'transferPair.account']);
     }
 
     /**
@@ -373,6 +444,14 @@ final class Transaction extends Model
             $transaction->category_source ??= CategorySource::Manual;
         });
 
+        // A suggestion cannot outlive a leg: soft deletes never fire the FK's nullOnDelete, so
+        // clear the partner's pointer here (a hold expiring, a manual delete, ...).
+        self::deleted(static function (Transaction $transaction): void {
+            self::withoutEvents(fn (): int => self::query()
+                ->where('suggested_pair_id', $transaction->id)
+                ->update(['suggested_pair_id' => null, 'transfer_link_source' => null]));
+        });
+
         self::updated(static function (Transaction $transaction): void {
             if ($transaction->wasChanged('category_id')) {
                 event(new TransactionCategoryUpdated(
@@ -392,6 +471,7 @@ final class Transaction extends Model
         return [
             'source' => TransactionSource::class,
             'category_source' => CategorySource::class,
+            'transfer_link_source' => TransferLinkSource::class,
             'direction' => TransactionDirection::class,
             'status' => TransactionStatus::class,
             'amount' => MoneyCast::class,

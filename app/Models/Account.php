@@ -38,6 +38,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property array<string, string>|null $column_mapping
  * @property AccountGroup $group
  * @property AccountStatus $status
+ * @property bool $is_tracked
+ * @property CarbonImmutable|null $reconciled_on
+ * @property int|null $reconcile_difference
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
  */
@@ -66,6 +69,9 @@ final class Account extends Model
         'column_mapping',
         'group',
         'status',
+        'is_tracked',
+        'reconciled_on',
+        'reconcile_difference',
     ];
 
     /** @return BelongsTo<User, $this> */
@@ -146,6 +152,35 @@ final class Account extends Model
     }
 
     /**
+     * Tracked accounts feed the ledger, calendar, reports and balances. Untracked
+     * ("hidden") accounts only exist as the counterpart of an external transfer and
+     * carry a manually entered balance.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeTracked(Builder $query): Builder
+    {
+        return $query->where('is_tracked', true);
+    }
+
+    /**
+     * Manual-only balance: never touched by linked transfers. A monthly reconcile
+     * records the date and the difference between the old and the newly entered balance.
+     */
+    public function reconcileManualBalance(int $newBalance, ?CarbonImmutable $on = null): void
+    {
+        $difference = $newBalance - $this->balance;
+
+        $this->forceFill([
+            'balance' => $newBalance,
+            'balance_updated_at' => CarbonImmutable::now(),
+            'reconciled_on' => ($on ?? CarbonImmutable::today())->toDateString(),
+            'reconcile_difference' => $difference,
+        ])->save();
+    }
+
+    /**
      * Eager-loads the Redbark link and only last month's statement reconciliation, so a
      * list of accounts can show its reconcile state without a query per account.
      *
@@ -222,6 +257,9 @@ final class Account extends Model
             'balance' => MoneyCast::class,
             'balance_source' => ImportSource::class,
             'balance_updated_at' => 'immutable_datetime',
+            'is_tracked' => 'boolean',
+            'reconciled_on' => 'immutable_date',
+            'reconcile_difference' => 'integer',
             'credit_limit' => MoneyCast::class,
             'available_funds' => MoneyCast::class,
             'column_mapping' => 'array',
