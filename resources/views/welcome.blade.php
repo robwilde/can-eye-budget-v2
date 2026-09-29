@@ -8,9 +8,9 @@
 
     <title>{{ config('app.name', 'Can Eye Budget') }} — Self-hosted budgeting for Australians</title>
 
-    <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="any">
-    <link rel="icon" href="{{ asset('favicon.svg') }}" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
+    <link rel="icon" href="{{ asset('favicon.ico') }}?v=2" sizes="any">
+    <link rel="icon" href="{{ asset('favicon.svg') }}?v=2" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}?v=2">
 
     <link rel="preconnect" href="https://fonts.bunny.net">
     <link href="https://fonts.bunny.net/css?family=fraunces:400,500,600,700|instrument-sans:400,500,600&display=swap" rel="stylesheet">
@@ -132,8 +132,8 @@
 <nav class="max-w-6xl mx-auto px-6 lg:px-10 pt-8 flex items-center justify-between">
     <a href="{{ route('home') }}" class="flex items-center gap-3 focus-ring">
         <img
-                src="{{ asset('images/can-eye-bugget-logo.webp') }}"
-                alt="Can Eye Budget"
+                src="{{ asset('images/cib-mark.svg') }}"
+                alt="Can I Budget"
                 width="40"
                 height="40"
                 loading="eager"
@@ -247,8 +247,10 @@
 
                 <div class="rounded-3xl overflow-hidden bg-teal-soft" style="box-shadow: 12px 12px 0 var(--ce-ink);">
                     <img
-                            src="{{ asset('images/can-eye-bugget-logo.webp') }}"
-                            alt="Can Eye Budget — a playful tin can, eyeball, and dollar sign mascot"
+                            src="{{ asset('images/cib-hero.webp') }}"
+                            alt="Can I Budget: a money tin with an eye on the coin going in"
+                            width="900"
+                            height="1000"
                             class="w-full h-auto"
                             loading="eager"
                             fetchpriority="high"
