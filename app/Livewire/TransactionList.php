@@ -1998,12 +1998,17 @@ final class TransactionList extends Component
                 ->orWhereHas('splits', fn ($s) => $s->where('category_id', $id))))
             ->when(($filters['planned'] ?? null) === 'planned', fn ($q) => $q->whereNotNull('planned_transaction_id'))
             ->when(($filters['planned'] ?? null) === 'unplanned', fn ($q) => $q->whereNull('planned_transaction_id'))
+            // A linked transfer is one item: the modal opens the partner leg for a credit,
+            // so a leg whose partner carries a category counts as categorised here too.
+            // Otherwise the list offers a row as uncategorised that opens with a category.
             ->when(($filters['categorised'] ?? null) === 'categorised', fn ($q) => $q->where(fn ($q) => $q
                 ->whereNotNull('category_id')
-                ->orWhereHas('splits')))
+                ->orWhereHas('splits')
+                ->orWhereHas('transferPair', fn ($p) => $p->whereNotNull('category_id'))))
             ->when(($filters['categorised'] ?? null) === 'uncategorised', fn ($q) => $q
                 ->whereNull('category_id')
-                ->whereDoesntHave('splits'))
+                ->whereDoesntHave('splits')
+                ->whereDoesntHave('transferPair', fn ($p) => $p->whereNotNull('category_id')))
             ->when(($filters['source'] ?? null) === 'manual', fn ($q) => $q
                 ->where('category_source', CategorySource::Manual->value))
             ->when(($filters['source'] ?? null) === 'rule', fn ($q) => $q
