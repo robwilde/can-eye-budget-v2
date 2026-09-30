@@ -1329,6 +1329,47 @@ test('uncategorised filter shows only transactions without a category', function
         ->assertDontSee('WOOLWORTHS CATEGORISED');
 });
 
+test('a linked transfer leg whose partner is categorised is categorised, not uncategorised', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $category = Category::factory()->create();
+
+    $debit = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $from->id,
+        'category_id' => $category->id,
+        'description' => 'PAIRED DEBIT LEG',
+        'post_date' => now()->subDays(5),
+    ]);
+    $credit = Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $to->id,
+        'category_id' => null,
+        'description' => 'PAIRED CREDIT LEG',
+        'post_date' => now()->subDays(5),
+        'transfer_pair_id' => $debit->id,
+    ]);
+    $debit->update(['transfer_pair_id' => $credit->id]);
+
+    Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $to->id,
+        'category_id' => null,
+        'description' => 'LONE UNCATEGORISED',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['categorised' => 'uncategorised'])
+        ->assertSee('LONE UNCATEGORISED')
+        ->assertDontSee('PAIRED CREDIT LEG')
+        ->assertDontSee('PAIRED DEBIT LEG');
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['categorised' => 'categorised'])
+        ->assertSee('PAIRED CREDIT LEG')
+        ->assertSee('PAIRED DEBIT LEG')
+        ->assertDontSee('LONE UNCATEGORISED');
+});
+
 test('invalid categorised value normalizes to all', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
