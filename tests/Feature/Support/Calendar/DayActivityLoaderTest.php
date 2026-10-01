@@ -1018,6 +1018,64 @@ test('split pips keep their category names and fall back to the clean descriptio
         ->and($day->pips[1]->tooltip)->toBe('WOOLWORTHS 4232 BRISBANE');
 });
 
+test('split pips carry tone, full nested category path and the clean-description fallback', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $root = Category::factory()->create(['name' => 'Personal']);
+    $mid = Category::factory()->create(['name' => 'Food', 'parent_id' => $root->id]);
+    $leaf = Category::factory()->create(['name' => 'Groceries', 'parent_id' => $mid->id]);
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    $transaction = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -10000,
+        'post_date' => $date,
+        'description' => 'WOOLWORTHS 4232 BRISBANE',
+        'clean_description' => 'Woolworths',
+    ]);
+    $transaction->splits()->createMany([
+        ['category_id' => $leaf->id, 'amount' => -7000, 'position' => 0],
+        ['category_id' => null, 'amount' => -3000, 'position' => 1],
+    ]);
+
+    $day = (new DayActivityLoader)->load($date, $date, $user->id)[$date->format('Y-m-d')];
+
+    expect($day->pips[0]->tone)->toBe('out')
+        ->and($day->pips[0]->categoryPath)->toBe('Personal / Food / Groceries')
+        ->and($day->pips[0]->detail)->toBe('Woolworths')
+        ->and($day->pips[1]->categoryPath)->toBeNull()
+        ->and($day->pips[1]->detail)->toBe('Woolworths');
+});
+
+test('category paths of any depth load without per-pip queries', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    $parent = null;
+    foreach (['A', 'B', 'C', 'D'] as $name) {
+        $parent = Category::factory()->create(['name' => $name, 'parent_id' => $parent?->id]);
+    }
+
+    foreach ([1, 2, 3] as $i) {
+        Transaction::factory()->for($user)->debit()->create([
+            'account_id' => $account->id,
+            'category_id' => $parent->id,
+            'amount' => -100 * $i,
+            'post_date' => $date,
+        ]);
+    }
+
+    DB::enableQueryLog();
+    $day = (new DayActivityLoader)->load($date, $date, $user->id)[$date->format('Y-m-d')];
+    $queries = count(DB::getQueryLog());
+    DB::disableQueryLog();
+
+    expect($day->pips)->toHaveCount(3)
+        ->and($day->pips[0]->categoryPath)->toBe('A / B / C / D')
+        ->and($queries)->toBeLessThan(15);
+});
+
 test('DayActivity::empty returns a zero-state instance', function () {
     $empty = DayActivity::empty();
 

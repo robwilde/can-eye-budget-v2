@@ -544,6 +544,7 @@ test('inactive planned transactions are excluded', function () {
 });
 
 test('posted credit pip carries inc tone, parent-child category path and the description', function () {
+    $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $parent = Category::factory()->create(['name' => 'Income']);
