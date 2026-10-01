@@ -72,6 +72,8 @@
     --color-money-planned-soft:   #FCF0D6;
     --color-money-owed-strong:    #C62F34;
     --color-money-available-strong: #137A31;
+    --color-money-transfer-strong: #B45309;
+    --color-money-transfer-soft:   #FDEBD6;
 
     /* Surfaces + foreground (semantic aliases) */
     --color-bg-page:       #F7F8F7;
@@ -261,6 +263,7 @@ select:focus[data-flux-control] {
     .tx-ico.out { background: var(--color-money-owed-soft); color: var(--color-money-owed); }
     .tx-ico.inc { background: var(--color-money-available-soft); color: var(--color-cib-green-600); }
     .tx-ico.plan { background: var(--color-money-planned-soft); color: var(--color-money-planned); }
+    .tx-ico.xfer { background: var(--color-money-transfer-soft); color: var(--color-money-transfer-strong); }
     .tx-ico svg { width: 18px; height: 18px; }
     /* Merchant brand logo from Context.dev (#465): neutral tile so any logo colour reads. */
     .tx-ico.has-logo { background: #fff; overflow: hidden; }
@@ -271,6 +274,7 @@ select:focus[data-flux-control] {
     .tx-amt.out { color: var(--color-money-owed); }
     .tx-amt.inc { color: var(--color-cib-green-600); }
     .tx-amt.plan { color: var(--color-money-planned); }
+    .tx-amt.xfer { color: var(--color-money-transfer-strong); }
     .tx-meta .pill,
     .cluster-head .pill {
         display: inline-block;
@@ -569,13 +573,16 @@ select:focus[data-flux-control] {
     .tx-row.planned .tx-ico.out { background: var(--color-money-owed-strong); color: var(--color-cib-white); }
     .tx-row.planned .tx-ico.inc { background: var(--color-money-available-strong); color: var(--color-cib-white); }
     .tx-row.planned .tx-amt.out,
-    .tx-row.planned .tx-amt.inc {
+    .tx-row.planned .tx-amt.inc,
+    .tx-row.planned .tx-amt.xfer {
         color: var(--color-cib-white);
         padding: 4px 8px;
         border-radius: 6px;
     }
     .tx-row.planned .tx-amt.out { background: var(--color-money-owed-strong); }
     .tx-row.planned .tx-amt.inc { background: var(--color-money-available-strong); }
+    .tx-row.planned .tx-amt.xfer { background: var(--color-money-transfer-strong); }
+    .tx-row.planned .tx-ico.xfer { background: var(--color-money-transfer-strong); color: var(--color-cib-white); }
 
     /* ---------- Reports page (Ticket #327) ---------- */
 
@@ -1039,9 +1046,11 @@ select:focus[data-flux-control] {
     }
     .cyc-pip.tone-out .cyc-pip-amt { color: var(--color-money-owed-strong); }
     .cyc-pip.tone-inc .cyc-pip-amt { color: var(--color-money-available-strong); }
+    .cyc-pip.tone-xfer .cyc-pip-amt { color: var(--color-money-transfer-strong); }
     .cyc-pip.is-planned .cyc-pip-amt { color: var(--color-cib-white); padding: 1px 5px; }
     .cyc-pip.is-planned.tone-out .cyc-pip-amt { background: var(--color-money-owed-strong); }
     .cyc-pip.is-planned.tone-inc .cyc-pip-amt { background: var(--color-money-available-strong); }
+    .cyc-pip.is-planned.tone-xfer .cyc-pip-amt { background: var(--color-money-transfer-strong); }
     .cyc-pip-name {
         overflow: hidden;
         text-overflow: ellipsis;
