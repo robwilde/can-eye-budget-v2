@@ -23,6 +23,8 @@ use App\Services\PipelineStages\UserRulesStage;
 use App\Services\RedbarkClientFactory;
 use App\Services\TransactionAnalysisPipeline;
 use App\Services\TypeSafeService;
+use App\Support\Email\ScheduleParser;
+use App\Support\Email\Schedules\PayPalReceiptStrategy;
 use App\View\Composers\LayoutShellComposer;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
@@ -80,6 +82,10 @@ final class AppServiceProvider extends ServiceProvider
         );
 
         $this->app->alias(GmailServiceContract::class, GmailService::class);
+
+        $this->app->singleton(ScheduleParser::class, fn (): ScheduleParser => new ScheduleParser([
+            new PayPalReceiptStrategy,
+        ]));
 
         $this->app->singleton(GitHubServiceContract::class, fn (): GitHubService => new GitHubService(
             token: (string) config('services.github.token'),
