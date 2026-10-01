@@ -22,13 +22,13 @@ Use `search-docs` for detailed Livewire 4 patterns and documentation.
 
 # Creates: resources/views/components/⚡create-post.blade.php
 
-op make.livewire create-post
+php artisan make:livewire create-post
 
 # Page component (SFC - Full Page in v4)
 
 # Creates: resources/views/pages/⚡create-post.blade.php
 
-op make.livewire pages::create-post
+php artisan make:livewire pages::create-post
 
 # Multi-file component (MFC)
 
@@ -36,22 +36,22 @@ op make.livewire pages::create-post
 
 #          resources/views/components/⚡create-post/create-post.blade.php
 
-op make.livewire create-post --mfc
+php artisan make:livewire create-post --mfc
 
 # Class-based component (v3 style)
 
 # Creates: app/Livewire/CreatePost.php AND resources/views/livewire/create-post.blade.php
 
-op make.livewire create-post --class
+php artisan make:livewire create-post --class
 
 # With namespace
 
-op make.livewire Posts/CreatePost
+php artisan make:livewire Posts/CreatePost
 ```
 
 ### Converting Between Formats
 
-Use `ddev exec php artisan livewire:convert create-post` to convert between single-file, multi-file, and class-based formats.
+Use `php artisan livewire:convert create-post` to convert between single-file, multi-file, and class-based formats.
 
 ### Choosing a Component Format
 
@@ -61,13 +61,13 @@ Also check `config/livewire.php` for `make_command.type`, `make_command.emoji`, 
 
 ### Component Format Reference
 
-| Format            | Flag                 | Class Path                                                 | View Path                                                                               |
-|-------------------|----------------------|------------------------------------------------------------|-----------------------------------------------------------------------------------------|
-| Single-file (SFC) | default              | —                                                          | `resources/views/components/⚡create-post.blade.php` (PHP + Blade in one file)          |
-| Full Page SFC     | `pages::name`        | —                                                          | `resources/views/pages/⚡create-post.blade.php`                                         |
-| Multi-file (MFC)  | `--mfc`              | `resources/views/components/⚡create-post/create-post.php` | `resources/views/components/⚡create-post/create-post.blade.php`                        |
-| Class-based       | `--class`            | `app/Livewire/CreatePost.php`                              | `resources/views/livewire/create-post.blade.php`                                        |
-| View-based        | default (Blade-only) | —                                                          | `resources/views/components/⚡create-post.blade.php` (Blade-only with functional state) |
+| Format | Flag | Class Path | View Path |
+|--------|------|------------|-----------|
+| Single-file (SFC) | default | — | `resources/views/components/⚡create-post.blade.php` (PHP + Blade in one file) |
+| Full Page SFC | `pages::name` | — | `resources/views/pages/⚡create-post.blade.php` |
+| Multi-file (MFC) | `--mfc` | `resources/views/components/⚡create-post/create-post.php` | `resources/views/components/⚡create-post/create-post.blade.php` |
+| Class-based | `--class` | `app/Livewire/CreatePost.php` | `resources/views/livewire/create-post.blade.php` |
+| View-based | default (Blade-only) | — | `resources/views/components/⚡create-post.blade.php` (Blade-only with functional state) |
 
 > **Important:** The ⚡ prefix shown above is the **default** behavior in Livewire v4 — it is **configurable**. Check `config/livewire.php` for the `make_command.emoji` setting. When `true` (default), always include the ⚡ prefix in filenames you create. When `false`, omit the ⚡ prefix from all paths above.
 
@@ -112,25 +112,25 @@ These things changed in Livewire 4, but may not have been updated in this applic
 - Islands (`@island`) for isolated updates; async actions (`wire:click.async`, `#[Async]`) for parallel execution.
 - Deferred/bundled loading: `defer`, `lazy.bundle` for optimized component loading.
 
-| Feature  | Usage                            | Purpose                 |
-|----------|----------------------------------|-------------------------|
-| Islands  | `@island(name: 'stats')`         | Isolated update regions |
-| Async    | `wire:click.async` or `#[Async]` | Non-blocking actions    |
-| Deferred | `defer` attribute                | Load after page render  |
-| Bundled  | `lazy.bundle`                    | Load multiple together  |
+| Feature | Usage | Purpose |
+|---------|-------|---------|
+| Islands | `@island(name: 'stats')` | Isolated update regions |
+| Async | `wire:click.async` or `#[Async]` | Non-blocking actions |
+| Deferred | `defer` attribute | Load after page render |
+| Bundled | `lazy.bundle` | Load multiple together |
 
 ### New Directives
 
 - `wire:sort`, `wire:intersect`, `wire:ref`, `.renderless`, `.preserve-scroll` are available for use.
 - `data-loading` attribute automatically added to elements triggering network requests.
 
-| Directive          | Purpose                         |
-|--------------------|---------------------------------|
-| `wire:sort`        | Drag-and-drop sorting           |
-| `wire:intersect`   | Viewport intersection detection |
-| `wire:ref`         | Element references for JS       |
-| `.renderless`      | Component without rendering     |
-| `.preserve-scroll` | Preserve scroll position        |
+| Directive | Purpose |
+|-----------|---------|
+| `wire:sort` | Drag-and-drop sorting |
+| `wire:intersect` | Viewport intersection detection |
+| `wire:ref` | Element references for JS |
+| `.renderless` | Component without rendering |
+| `.preserve-scroll` | Preserve scroll position |
 
 ## Best Practices
 

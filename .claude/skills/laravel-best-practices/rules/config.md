@@ -33,8 +33,8 @@ AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI
 
 Correct:
 ```bash
-ddev exec php artisan env:encrypt --env=production --readable
-ddev exec php artisan env:decrypt --env=production
+php artisan env:encrypt --env=production --readable
+php artisan env:decrypt --env=production
 ```
 
 For cloud deployments, prefer the platform's native secret store (AWS Secrets Manager, Vault, etc.) and inject at runtime.

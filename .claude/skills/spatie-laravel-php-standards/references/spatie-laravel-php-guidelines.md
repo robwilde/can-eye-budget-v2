@@ -255,7 +255,7 @@ Validator::extend('organisation_type', function ($attribute, $value) {
 - Routes: kebab-case (`/open-source`, `/user-profile`)
 - Config files: kebab-case (`pdf-generator.php`)
 - Config keys: snake_case (`chrome_path`)
-- Artisan command names: kebab-case (`delete-old-records`)
+- Artisan commands: kebab-case (`php artisan delete-old-records`)
 
 ### File Structure
 

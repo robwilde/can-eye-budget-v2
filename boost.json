@@ -1,17 +1,16 @@
 {
     "agents": [
-        "junie",
-        "claude_code",
-        "codex"
+        "claude_code"
     ],
     "cloud": false,
     "guidelines": true,
-    "herd_mcp": false,
     "mcp": true,
-    "nightwatch_mcp": false,
+    "nightwatch": false,
     "packages": [
         "spatie/laravel-ray",
-        "spatie/boost-spatie-guidelines"
+        "spatie/boost-spatie-guidelines",
+        "livewire/blaze",
+        "mrpunyapal/laravel-auditor"
     ],
     "sail": false,
     "skills": [
@@ -22,6 +21,16 @@
         "livewire-development",
         "pest-testing",
         "tailwindcss-development",
+        "blaze-optimize",
+        "laravel-audit",
+        "laravel-audit-architecture",
+        "laravel-audit-conventions",
+        "laravel-audit-database",
+        "laravel-audit-dsa",
+        "laravel-audit-performance",
+        "laravel-audit-security",
+        "laravel-audit-testing",
+        "laravel-auditor-development",
         "spatie-laravel-php-standards",
         "debugging-output-and-previewing-html-using-ray",
         "clean-test-pro"

@@ -1,0 +1,142 @@
+<?php
+
+declare(strict_types=1);
+
+return [
+
+    /*
+    |--------------------------------------------------------------------------
+    | Enabled Audit Domains
+    |--------------------------------------------------------------------------
+    |
+    | Domains scoped for an audit. The agent will use the workflow skill to
+    | select the relevant domains for the actual application, but this list
+    | defines the default scope and the domains advertised in reports.
+    |
+    */
+
+    'domains' => [
+        'security',
+        'performance',
+        'architecture',
+        'database',
+        'testing',
+        'conventions',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Rule Discovery
+    |--------------------------------------------------------------------------
+    |
+    | Directories (relative to the application base) that contain additional
+    | rule definition files. Rules follow the same schema as the package's
+    | built-in rules.
+    |
+    */
+
+    'rules' => [
+        // base_path('auditor/rules'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Standalone Agent Resources Target
+    |--------------------------------------------------------------------------
+    |
+    | Where the standalone installer publishes agent-facing resources when
+    | Laravel Boost is not present. When Boost is installed, resources are
+    | consumed through Boost instead.
+    |
+    */
+
+    'resources_target' => '.ai',
+
+    /*
+    |--------------------------------------------------------------------------
+    | Default Agents
+    |--------------------------------------------------------------------------
+    |
+    | Agents configured when `auditor:install` runs non-interactively. When
+    | empty, the installer detects agents from project markers. When nothing
+    | is configured or detected, no agents are wired. Accepted values are
+    | built-in keys (opencode, claude_code, cursor, copilot, gemini, codex,
+    | junie, zed) or any key from custom_agents.
+    |
+    */
+
+    'agents' => [],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Custom Agents
+    |--------------------------------------------------------------------------
+    |
+    | Additional standalone installer targets beyond the built-in Boost-aligned
+    | agents. Each entry uses the same shape the installer already understands:
+    | a guidelines file, a native skills directory, optional JSON or TOML MCP
+    | config, and project markers used for detection. Use this for any agent
+    | that is not in the built-in list.
+    |
+    | MCP auto-registration only writes JSON or TOML files. Leave
+    | mcp_config_path empty when the agent has no project-local MCP config.
+    |
+    */
+
+    'custom_agents' => [
+        // 'my_agent' => [
+        //     'display_name' => 'My Agent',
+        //     'guidelines_path' => 'AGENTS.md',
+        //     'skills_path' => '.my-agent/skills',
+        //     'mcp_config_path' => '.my-agent/mcp.json',
+        //     'mcp_config_key' => 'mcpServers',
+        //     'detect_files' => [],
+        //     'detect_paths' => ['.my-agent'],
+        // ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Context Collector Options
+    |--------------------------------------------------------------------------
+    |
+    | Toggles for individual context collectors. These affect read-only data
+    | gathering only; nothing here ever mutates the audited application.
+    |
+    */
+
+    'context' => [
+        /*
+        | Best-effort `composer audit` call from the dependencies collector.
+        | On by default so AUD-DEP-001 can use advisory data instead of an
+        | empty payload that agents misread as "no vulnerabilities". The
+        | collector still fails soft (no throw) when Composer, the network,
+        | or a lock file is missing. The call hits the network and waits up
+        | to 60 seconds per collection; set this to false to skip the
+        | shell-out when context collection must stay fully offline or fast.
+        */
+        'composer_audit' => true,
+
+        /*
+        | Best-effort `pest --list-tests` / `phpunit --list-tests` call from
+        | the tests collector to report accurate test case counts. Off by
+        | default so context collection does not launch the test runner; the
+        | collector then falls back to counting test files.
+        */
+        'test_listing' => false,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Report Defaults
+    |--------------------------------------------------------------------------
+    |
+    | Default renderer used by `auditor:report` when --format is omitted.
+    |
+    */
+
+    'report' => [
+        'format' => 'markdown',
+    ],
+
+];

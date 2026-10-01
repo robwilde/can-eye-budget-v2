@@ -16,13 +16,13 @@ Use `search-docs` for detailed Pest 4 patterns and documentation.
 
 ### Creating Tests
 
-All tests must be written using Pest. Use `op make.test {name}`.
+All tests must be written using Pest. Use `php artisan make:test --pest {name}`.
 
 The `{name}` argument should include only the path and test name, but should not include the test suite.
-- Incorrect: `op make.test Feature/SomeFeatureTest` will generate `tests/Feature/Feature/SomeFeatureTest.php`
-- Correct: `op make.test SomeControllerTest` will generate `tests/Feature/SomeControllerTest.php`
-- Incorrect: `op make.test --unit Unit/SomeServiceTest` will generate `tests/Unit/Unit/SomeServiceTest.php`
-- Correct: `op make.test --unit SomeServiceTest` will generate `tests/Unit/SomeServiceTest.php`
+- Incorrect: `php artisan make:test --pest Feature/SomeFeatureTest` will generate `tests/Feature/Feature/SomeFeatureTest.php`
+- Correct: `php artisan make:test --pest SomeControllerTest` will generate `tests/Feature/SomeControllerTest.php`
+- Incorrect: `php artisan make:test --pest --unit Unit/SomeServiceTest` will generate `tests/Unit/Unit/SomeServiceTest.php`
+- Correct: `php artisan make:test --pest --unit SomeServiceTest` will generate `tests/Unit/SomeServiceTest.php`
 
 ### Test Organization
 
@@ -43,9 +43,9 @@ it('is true', function () {
 
 ### Running Tests
 
-- Run minimal tests with filter before finalizing: `op test.filter testName`.
-- Run all tests: `op test`.
-- Run file: `ddev exec php artisan test --compact tests/Feature/ExampleTest.php`.
+- Run minimal tests with filter before finalizing: `php artisan test --compact --filter=testName`.
+- Run all tests: `php artisan test --compact`.
+- Run file: `php artisan test --compact tests/Feature/ExampleTest.php`.
 
 ## Assertions
 
@@ -58,11 +58,11 @@ it('returns all', function () {
 });
 ```
 
-| Use                  | Instead of          |
-|----------------------|---------------------|
+| Use | Instead of |
+|-----|------------|
 | `assertSuccessful()` | `assertStatus(200)` |
-| `assertNotFound()`   | `assertStatus(404)` |
-| `assertForbidden()`  | `assertStatus(403)` |
+| `assertNotFound()` | `assertStatus(404)` |
+| `assertForbidden()` | `assertStatus(403)` |
 
 ## Mocking
 
@@ -84,13 +84,13 @@ it('has emails', function (string $email) {
 
 ## Pest 4 Features
 
-| Feature              | Purpose                                 |
-|----------------------|-----------------------------------------|
-| Browser Testing      | Full integration tests in real browsers |
-| Smoke Testing        | Validate multiple pages quickly         |
-| Visual Regression    | Compare screenshots for visual changes  |
-| Test Sharding        | Parallel CI runs                        |
-| Architecture Testing | Enforce code conventions                |
+| Feature | Purpose |
+|---------|---------|
+| Browser Testing | Full integration tests in real browsers |
+| Smoke Testing | Validate multiple pages quickly |
+| Visual Regression | Compare screenshots for visual changes |
+| Test Sharding | Parallel CI runs |
+| Architecture Testing | Enforce code conventions |
 
 ### Browser Test Example
 
