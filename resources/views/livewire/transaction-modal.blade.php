@@ -134,10 +134,17 @@
                 </div>
             </div>
 
-            {{-- Account selection --}}
+            {{-- Account selection. A bank-feed row's own account is locked; on an unlinked
+                 credit (deposit) it is the receiving side, so the picker below chooses "From". --}}
+            @php
+                $incomingFeedTransfer = $isBankFeedTransaction && ! $originalWasTransfer && $bankFeedTransactionDirection === 'credit';
+                $ownAccountLabel = $transactionType !== 'transfer'
+                    ? __('Account')
+                    : ($incomingFeedTransfer ? __('To account') : __('From account'));
+            @endphp
             <flux:select
                 wire:model="accountId"
-                :label="$transactionType === 'transfer' ? __('From account') : __('Account')"
+                :label="$ownAccountLabel"
                 required
                 :disabled="$isBankFeedTransaction"
             >
@@ -177,10 +184,15 @@
                     $bankFeedUnlinkedTransfer = $isBankFeedTransaction && ! $originalWasTransfer;
                     $trackedAccounts = $accounts->where('is_tracked', true);
                     $untrackedAccounts = $accounts->where('is_tracked', false);
+                    $counterpartLabel = match (true) {
+                        $bankFeedUnlinkedTransfer && $incomingFeedTransfer => __('From account (optional)'),
+                        $bankFeedUnlinkedTransfer => __('To account (optional)'),
+                        default => __('To account'),
+                    };
                 @endphp
                 <flux:select
                     wire:model.live="transferToAccountId"
-                    :label="$bankFeedUnlinkedTransfer ? __('To account (optional)') : __('To account')"
+                    :label="$counterpartLabel"
                     :required="! $bankFeedUnlinkedTransfer"
                     :disabled="$isBankFeedTransaction && $originalWasTransfer"
                     data-testid="transfer-to-account"
