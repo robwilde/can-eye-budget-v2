@@ -4115,13 +4115,14 @@ test('a suggested bank-feed row shows a possible-transfer note, is not a transfe
 test('an unlinked incoming bank-feed transfer locks its own account as To and lets the user pick From', function () {
     $user = User::factory()->create();
     $own = Account::factory()->for($user)->create();
-    $hidden = Account::factory()->for($user)->create(['is_tracked' => false]);
+    $hidden = Account::factory()->for($user)->untracked()->create();
     $credit = modalFeedRow($user, $own, 450000, '2026-09-10');
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('edit-transaction', id: $credit->id)
         ->set('transactionType', 'transfer')
+        ->assertSee('To account')
         ->assertSee('From account (optional)')
         ->assertDontSee('To account (optional)')
         ->assertSet('accountId', $own->id)
