@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\Category;
@@ -1116,6 +1117,34 @@ test('a posting just outside the range still suppresses its in-range planned occ
 })->with([
     'lower edge' => ['2026-06-01', '2026-05-31'],
     'upper edge' => ['2026-07-05', '2026-07-08'],
+]);
+
+test('an out-of-range posting pairs with its exact out-of-range occurrence and leaves the adjacent in-range occurrence unpaid', function (string $planStart, string $planEnd, string $posted, string $rangeStart, string $rangeEnd, string $unpaid) {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->create([
+        'amount' => 7000,
+        'direction' => TransactionDirection::Debit,
+        'frequency' => RecurrenceFrequency::Everyday,
+        'start_date' => $planStart,
+        'until_date' => $planEnd,
+    ]);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -7000,
+        'post_date' => $posted,
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $activity = (new DayActivityLoader)->load(CarbonImmutable::parse($rangeStart), CarbonImmutable::parse($rangeEnd), $user->id);
+
+    expect(array_keys($activity))->toBe([$unpaid])
+        ->and($activity[$unpaid]->pips)->toHaveCount(1)
+        ->and($activity[$unpaid]->pips[0]->kind)->toBe('plan');
+})->with([
+    'lower edge' => ['2026-05-31', '2026-06-01', '2026-05-31', '2026-06-01', '2026-06-30', '2026-06-01'],
+    'upper edge' => ['2026-06-29', '2026-06-30', '2026-06-30', '2026-06-01', '2026-06-29', '2026-06-29'],
 ]);
 
 test('a posting beyond the reconciliation tolerance outside the range does not suppress the occurrence', function () {
