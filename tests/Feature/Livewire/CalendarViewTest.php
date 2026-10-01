@@ -340,6 +340,30 @@ test('projectedTotals does not count a planned occurrence already reconciled to 
         ->and($component->get('monthTotals')['spend'])->toBe(5000);
 });
 
+test('projectedTotals excludes an occurrence reconciled to a posting just before the grid starts', function () {
+    $this->travelTo('2026-06-10');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'amount' => 7000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => '2026-06-01',
+        'until_date' => '2026-06-01',
+    ]);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -7000,
+        'post_date' => '2026-05-31',
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    expect($component->get('projectedTotals'))->toBe(['income' => 0, 'spend' => 0])
+        ->and($component->get('monthTotals')['spend'])->toBe(0);
+});
+
 test('quickline renders projected pills on the left and actual pills on the right', function () {
     $this->travelTo('2026-10-15');
     $user = User::factory()->create();
