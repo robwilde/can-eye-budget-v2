@@ -1047,33 +1047,48 @@ test('split pips carry tone, full nested category path and the clean-description
         ->and($day->pips[1]->detail)->toBe('Woolworths');
 });
 
-test('category paths of any depth load without per-pip queries', function () {
-    $user = User::factory()->create();
-    $account = Account::factory()->for($user)->create();
+test('category paths and inherited icons at any depth cost the same queries regardless of pip count', function () {
     $date = CarbonImmutable::create(2026, 6, 14);
 
-    $parent = null;
-    foreach (['A', 'B', 'C', 'D'] as $name) {
-        $parent = Category::factory()->create(['name' => $name, 'parent_id' => $parent?->id]);
-    }
+    $measure = function (int $pipCount) use ($date): array {
+        $user = User::factory()->create();
+        $account = Account::factory()->for($user)->create();
 
-    foreach ([1, 2, 3] as $i) {
-        Transaction::factory()->for($user)->debit()->create([
-            'account_id' => $account->id,
-            'category_id' => $parent->id,
-            'amount' => -100 * $i,
-            'post_date' => $date,
-        ]);
-    }
+        foreach (range(1, $pipCount) as $i) {
+            $leaf = null;
+            foreach (['A', 'B', 'C', 'D'] as $name) {
+                $leaf = Category::factory()->create([
+                    'name' => $name,
+                    'parent_id' => $leaf?->id,
+                    'icon' => $name === 'A' ? 'star' : null,
+                ]);
+            }
 
-    DB::enableQueryLog();
-    $day = (new DayActivityLoader)->load($date, $date, $user->id)[$date->format('Y-m-d')];
-    $queries = count(DB::getQueryLog());
-    DB::disableQueryLog();
+            Transaction::factory()->for($user)->debit()->create([
+                'account_id' => $account->id,
+                'category_id' => $leaf->id,
+                'amount' => -100 * $i,
+                'post_date' => $date,
+            ]);
+        }
 
-    expect($day->pips)->toHaveCount(3)
-        ->and($day->pips[0]->categoryPath)->toBe('A / B / C / D')
-        ->and($queries)->toBeLessThan(15);
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $day = (new DayActivityLoader)->load($date, $date, $user->id)[$date->format('Y-m-d')];
+        $queries = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        return [$day, $queries];
+    };
+
+    [$one, $oneQueries] = $measure(1);
+    [$many, $manyQueries] = $measure(5);
+
+    expect($many->pips)->toHaveCount(5)
+        ->and($many->pips[0]->categoryPath)->toBe('A / B / C / D')
+        ->and($many->pips[0]->icon)->toBe('star')
+        ->and($one->pips[0]->icon)->toBe('star')
+        ->and($manyQueries)->toBe($oneQueries);
 });
 
 test('DayActivity::empty returns a zero-state instance', function () {
