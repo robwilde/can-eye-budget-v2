@@ -288,6 +288,74 @@ test('monthTotals only sums current-month days', function () {
         ->and($totals['net'])->toBe(75000);
 });
 
+test('projectedTotals splits planned occurrences by direction and ignores out-of-month grid days', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'amount' => 300000,
+        'direction' => TransactionDirection::Credit,
+        'start_date' => '2026-10-08',
+    ]);
+    PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'amount' => 150000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => '2026-10-02',
+    ]);
+    PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'amount' => 99999,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => '2026-09-30',
+        'until_date' => '2026-09-30',
+    ]);
+
+    $totals = Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->get('projectedTotals');
+
+    expect($totals)->toBe(['income' => 300000, 'spend' => 150000]);
+});
+
+test('projectedTotals does not count a planned occurrence already reconciled to a posted transaction', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'amount' => 5000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => '2026-10-10',
+    ]);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -5000,
+        'post_date' => '2026-10-10',
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    expect($component->get('projectedTotals'))->toBe(['income' => 0, 'spend' => 0])
+        ->and($component->get('monthTotals')['spend'])->toBe(5000);
+});
+
+test('quickline renders projected pills on the left and actual pills on the right', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'amount' => 123400,
+        'direction' => TransactionDirection::Credit,
+        'start_date' => '2026-10-20',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->assertSeeHtmlInOrder(['data-testid="calendar-projected"', '1,234.00', 'data-testid="calendar-actuals"']);
+});
+
 test('previous month navigation works', function () {
     $user = User::factory()->create();
 
