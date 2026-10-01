@@ -20,22 +20,34 @@
     </header>
 
     <div class="quickline">
-        <span class="pill pill-income">
-            <span class="pill-label">Income</span>
-            <span class="pill-value tabular-nums">{{ $formatMoney($this->monthTotals['income']) }}</span>
-        </span>
-        <span class="pill pill-posted">
-            <span class="pill-label">Spend</span>
-            <span class="pill-value tabular-nums">{{ $formatMoney($this->monthTotals['spend']) }}</span>
-        </span>
-        <span @class([
-            'pill',
-            'pill-buffer-pos' => $this->monthTotals['net'] >= 0,
-            'pill-buffer-neg' => $this->monthTotals['net'] < 0,
-        ])>
-            <span class="pill-label">Net</span>
-            <span class="pill-value tabular-nums">{{ $formatMoney($this->monthTotals['net']) }}</span>
-        </span>
+        <div class="quickline-group" data-testid="calendar-projected">
+            <span class="pill pill-proj-income">
+                <span class="pill-label">Proj. income</span>
+                <span class="pill-value tabular-nums">{{ $formatMoney($this->projectedTotals['income']) }}</span>
+            </span>
+            <span class="pill pill-proj-spend">
+                <span class="pill-label">Proj. spend</span>
+                <span class="pill-value tabular-nums">{{ $formatMoney($this->projectedTotals['spend']) }}</span>
+            </span>
+        </div>
+        <div class="quickline-group quickline-actuals" data-testid="calendar-actuals">
+            <span class="pill pill-income">
+                <span class="pill-label">Income</span>
+                <span class="pill-value tabular-nums">{{ $formatMoney($this->monthTotals['income']) }}</span>
+            </span>
+            <span class="pill pill-posted">
+                <span class="pill-label">Spend</span>
+                <span class="pill-value tabular-nums">{{ $formatMoney($this->monthTotals['spend']) }}</span>
+            </span>
+            <span @class([
+                'pill',
+                'pill-buffer-pos' => $this->monthTotals['net'] >= 0,
+                'pill-buffer-neg' => $this->monthTotals['net'] < 0,
+            ])>
+                <span class="pill-label">Net</span>
+                <span class="pill-value tabular-nums">{{ $formatMoney($this->monthTotals['net']) }}</span>
+            </span>
+        </div>
     </div>
 
     <div class="cyc-grid" role="grid">

@@ -451,6 +451,14 @@ select:focus[data-flux-control] {
     .quickline .pill-buffer-neg { background: var(--color-money-owed-soft); }
     .quickline .pill-buffer-neg .pill-value { color: var(--color-money-owed); }
     .quickline .pill-buffer-empty { background: var(--color-cib-n-100); }
+    .quickline-group { display: flex; gap: 8px; }
+    .quickline-actuals { margin-left: auto; }
+    .quickline .pill-proj-income,
+    .quickline .pill-proj-spend { border-style: dashed; }
+    .quickline .pill-proj-income { background: var(--color-money-available-soft); }
+    .quickline .pill-proj-income .pill-value { color: var(--color-cib-green-600); }
+    .quickline .pill-proj-spend { background: var(--color-money-owed-soft); }
+    .quickline .pill-proj-spend .pill-value { color: var(--color-money-owed); }
     .quickline .pill-buffer-empty .pill-value { color: var(--color-fg-3); font-weight: 700; font-size: 11px; }
 
     .week-strip {
