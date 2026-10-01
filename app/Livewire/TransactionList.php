@@ -2004,11 +2004,15 @@ final class TransactionList extends Component
             ->when(($filters['categorised'] ?? null) === 'categorised', fn ($q) => $q->where(fn ($q) => $q
                 ->whereNotNull('category_id')
                 ->orWhereHas('splits')
-                ->orWhereHas('transferPair', fn ($p) => $p->whereNotNull('category_id'))))
+                ->orWhereHas('transferPair', fn ($p) => $p->where(fn ($p) => $p
+                    ->whereNotNull('category_id')
+                    ->orWhereHas('splits')))))
             ->when(($filters['categorised'] ?? null) === 'uncategorised', fn ($q) => $q
                 ->whereNull('category_id')
                 ->whereDoesntHave('splits')
-                ->whereDoesntHave('transferPair', fn ($p) => $p->whereNotNull('category_id')))
+                ->whereDoesntHave('transferPair', fn ($p) => $p->where(fn ($p) => $p
+                    ->whereNotNull('category_id')
+                    ->orWhereHas('splits'))))
             ->when(($filters['source'] ?? null) === 'manual', fn ($q) => $q
                 ->where('category_source', CategorySource::Manual->value))
             ->when(($filters['source'] ?? null) === 'rule', fn ($q) => $q

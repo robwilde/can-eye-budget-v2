@@ -1370,6 +1370,68 @@ test('a linked transfer leg whose partner is categorised is categorised, not unc
         ->assertDontSee('LONE UNCATEGORISED');
 });
 
+test('a linked transfer pair with neither leg categorised stays uncategorised', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+
+    $debit = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $from->id,
+        'category_id' => null,
+        'description' => 'BARE PAIR DEBIT',
+        'post_date' => now()->subDays(5),
+    ]);
+    $credit = Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $to->id,
+        'category_id' => null,
+        'description' => 'BARE PAIR CREDIT',
+        'post_date' => now()->subDays(5),
+        'transfer_pair_id' => $debit->id,
+    ]);
+    $debit->update(['transfer_pair_id' => $credit->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['categorised' => 'uncategorised'])
+        ->assertSee('BARE PAIR DEBIT')
+        ->assertSee('BARE PAIR CREDIT');
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['categorised' => 'categorised'])
+        ->assertDontSee('BARE PAIR DEBIT')
+        ->assertDontSee('BARE PAIR CREDIT');
+});
+
+test('a linked transfer leg whose partner is split is categorised, not uncategorised', function () {
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    $category = Category::factory()->create();
+
+    $debit = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $from->id,
+        'category_id' => null,
+        'description' => 'SPLIT PARTNER DEBIT',
+        'post_date' => now()->subDays(5),
+    ]);
+    $credit = Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $to->id,
+        'category_id' => null,
+        'description' => 'UNSPLIT CREDIT LEG',
+        'post_date' => now()->subDays(5),
+        'transfer_pair_id' => $debit->id,
+    ]);
+    $debit->update(['transfer_pair_id' => $credit->id]);
+    $debit->splits()->create(['category_id' => $category->id, 'amount' => $debit->amount]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['categorised' => 'uncategorised'])
+        ->assertDontSee('UNSPLIT CREDIT LEG');
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['categorised' => 'categorised'])
+        ->assertSee('UNSPLIT CREDIT LEG');
+});
+
 test('invalid categorised value normalizes to all', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
