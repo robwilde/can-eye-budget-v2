@@ -13,7 +13,8 @@ namespace App\Support\Email;
  * The returned shape is JSON-serialisable and rendered directly:
  *
  * @phpstan-type ReceiptLineItem array{merchant: string, reference: string|null, installment: string|null, amount: int}
- * @phpstan-type Receipt array{total: int|null, date: string|null, method: string|null, last4: string|null, items: list<ReceiptLineItem>, type: string|null, seller: string|null, balance: int|null, loanReference: string|null}
+ * @phpstan-type ReceiptScheduleEntry array{date: string, amount: int}
+ * @phpstan-type Receipt array{total: int|null, date: string|null, method: string|null, last4: string|null, items: list<ReceiptLineItem>, type: string|null, seller: string|null, balance: int|null, loanReference: string|null, schedule: list<ReceiptScheduleEntry>}
  */
 final class ReceiptParser
 {
@@ -78,6 +79,7 @@ final class ReceiptParser
             'seller' => null,
             'balance' => null,
             'loanReference' => null,
+            'schedule' => [],
         ];
     }
 
@@ -108,6 +110,7 @@ final class ReceiptParser
             'seller' => $seller,
             'balance' => self::money($text, '/Current balance\s+\$([\d,]+\.\d{2})/i'),
             'loanReference' => $loanReference,
+            'schedule' => self::upcomingSchedule($text),
         ];
     }
 
@@ -151,6 +154,35 @@ final class ReceiptParser
         }
 
         return null;
+    }
+
+    /**
+     * The instalments still to come, as listed under PayPal's "upcoming
+     * payment schedule" paragraph, in document order. Responsive HTML repeats
+     * rows, so entries are de-duplicated on their date. Dates stay as the raw
+     * "4 August 2026" string, like the receipt's own `date` field.
+     *
+     * @return list<array{date: string, amount: int}>
+     */
+    private static function upcomingSchedule(string $text): array
+    {
+        if (preg_match_all('/\$\s?([\d,]+\.\d{2})\s*AUD\s+(?:will\s+be\s+charged\s+)?on\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})/i', $text, $matches, PREG_SET_ORDER) === false) {
+            return [];
+        }
+
+        $schedule = [];
+        $seen = [];
+
+        foreach ($matches as $match) {
+            if (isset($seen[$match[2]])) {
+                continue;
+            }
+
+            $seen[$match[2]] = true;
+            $schedule[] = ['date' => $match[2], 'amount' => self::centsFromString($match[1])];
+        }
+
+        return $schedule;
     }
 
     /**
