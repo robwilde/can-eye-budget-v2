@@ -39,19 +39,30 @@ final readonly class DayActivityLoader
      * clean description > (plan) category name > plan description.
      * Split transactions use: split category > clean description > raw description > 'Transaction'.
      * Unreconciled posted transactions use: clean description > tx category > raw description > 'Transaction'.
+     * Reconciliation candidates are read over the range widened by the tolerance on both sides so a
+     * posting just outside the range still suppresses its in-range occurrence; only postings inside the
+     * range are rendered or counted.
      *
      * @return array<string, DayActivity>
      */
     public function load(CarbonImmutable $start, CarbonImmutable $end, int $userId): array
     {
-        $transactions = Transaction::query()
+        $tolerance = ReconciliationPolicy::DATE_TOLERANCE_DAYS;
+
+        $withinTolerance = Transaction::query()
             ->where('user_id', $userId)
             ->current()
             ->excludingTransfers()
-            ->whereBetween('post_date', [$start, $end])
+            ->whereBetween('post_date', [$start->subDays($tolerance), $end->addDays($tolerance)])
             ->with([...self::CATEGORY_EAGER_LOAD, ...self::LINKED_PLAN_EAGER_LOAD, ...self::SPLIT_EAGER_LOAD])
             ->orderBy('post_date')
             ->get();
+
+        $startKey = $start->format('Y-m-d');
+        $endKey = $end->format('Y-m-d');
+        $transactions = $withinTolerance
+            ->filter(static fn (Transaction $t): bool => $t->post_date->format('Y-m-d') >= $startKey && $t->post_date->format('Y-m-d') <= $endKey)
+            ->values();
 
         $plannedTransactions = PlannedTransaction::query()
             ->where('user_id', $userId)
@@ -75,7 +86,7 @@ final readonly class DayActivityLoader
         /** @var array<int, list<Transaction>> $reconciledByPlanned */
         $reconciledByPlanned = [];
 
-        foreach ($transactions as $tx) {
+        foreach ($withinTolerance as $tx) {
             if ($tx->planned_transaction_id !== null) {
                 $reconciledByPlanned[$tx->planned_transaction_id][] = $tx;
             }
