@@ -89,9 +89,12 @@
                     </div>
                     <div class="cyc-day-body">
                         @foreach (array_slice($day->pips, 0, CalendarView::MAX_PIPS_PER_DAY) as $pip)
-                            <div @class(['cyc-pip', $pip->kind]) @if($pip->tooltip !== null) title="{{ $pip->tooltip }}" @endif>
-                                <span class="cyc-pip-dot"></span>
-                                <span class="cyc-pip-name">{{ $pip->name }}</span>
+                            <div @class(['cyc-pip', 'tone-'.$pip->tone, 'is-planned' => $pip->kind === 'plan']) @if($pip->tooltip !== null) title="{{ $pip->tooltip }}" @endif>
+                                <span class="cyc-pip-amt tabular-nums">{{ $pip->tone === 'out' ? '−' : '' }}{{ $formatMoney($pip->amount) }}</span>
+                                @if ($pip->categoryPath !== null)
+                                    <em class="cyc-pip-cat">{{ $pip->categoryPath }}</em>
+                                @endif
+                                <span class="cyc-pip-name">{{ $pip->detail ?? ($pip->categoryPath === null ? $pip->name : '') }}</span>
                             </div>
                         @endforeach
                         @if ($day->hiddenCount > 0)
@@ -128,20 +131,13 @@
             </div>
             <div class="cyc-detail-body">
                 @forelse ($this->selectedDay['pips'] as $pip)
-                    @php
-                        $rowTone = match ($pip->kind) {
-                            'inc' => 'inc',
-                            'plan' => 'plan',
-                            default => 'out',
-                        };
-                    @endphp
                     <x-cib.tx-row
                             :transaction-id="$pip->transactionId"
                             :planned-transaction-id="$pip->plannedTransactionId"
                             :occurrence-date="$pip->occurrenceDate"
                             :name="$pip->name"
                             :amount="$pip->amount"
-                            :tone="$rowTone"
+                            :tone="$pip->tone"
                             :icon="$pip->icon"
                             :matched="$pip->matched"
                             :title="$pip->tooltip"

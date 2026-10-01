@@ -70,6 +70,7 @@
     --color-money-needed-soft:    #EEF0EF;
     --color-money-planned:        #F1A51C;
     --color-money-planned-soft:   #FCF0D6;
+    --color-money-owed-strong:    #C62F34;
 
     /* Surfaces + foreground (semantic aliases) */
     --color-bg-page:       #F7F8F7;
@@ -564,6 +565,16 @@ select:focus[data-flux-control] {
     }
     .tx-row.planned .tx-ico { background: var(--color-money-planned-soft); color: var(--color-money-planned); }
     .tx-row.planned .tx-amt { color: var(--color-money-planned); }
+    .tx-row.planned .tx-ico.out { background: var(--color-money-owed-strong); color: var(--color-cib-white); }
+    .tx-row.planned .tx-ico.inc { background: var(--color-cib-green-600); color: var(--color-cib-white); }
+    .tx-row.planned .tx-amt.out,
+    .tx-row.planned .tx-amt.inc {
+        color: var(--color-cib-white);
+        padding: 4px 8px;
+        border-radius: 6px;
+    }
+    .tx-row.planned .tx-amt.out { background: var(--color-money-owed-strong); }
+    .tx-row.planned .tx-amt.inc { background: var(--color-cib-green-600); }
 
     /* ---------- Reports page (Ticket #327) ---------- */
 
@@ -1017,6 +1028,19 @@ select:focus[data-flux-control] {
     .cyc-pip.out .cyc-pip-dot { background: var(--color-money-owed); }
     .cyc-pip.inc .cyc-pip-dot { background: var(--color-cib-green-500); }
     .cyc-pip.plan .cyc-pip-dot { background: var(--color-money-planned); }
+    .cyc-pip-amt { font-weight: 900; flex-shrink: 0; border-radius: 4px; }
+    .cyc-pip-cat {
+        font-style: italic;
+        color: var(--color-fg-1);
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .cyc-pip.tone-out .cyc-pip-amt { color: var(--color-money-owed-strong); }
+    .cyc-pip.tone-inc .cyc-pip-amt { color: var(--color-cib-green-600); }
+    .cyc-pip.is-planned .cyc-pip-amt { color: var(--color-cib-white); padding: 1px 5px; }
+    .cyc-pip.is-planned.tone-out .cyc-pip-amt { background: var(--color-money-owed-strong); }
+    .cyc-pip.is-planned.tone-inc .cyc-pip-amt { background: var(--color-cib-green-600); }
     .cyc-pip-name {
         overflow: hidden;
         text-overflow: ellipsis;
