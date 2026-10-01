@@ -13,4 +13,5 @@ enum BnplOrderEventType: string
     case AutoApproved = 'auto_approved';
     case CategorySet = 'category_set';
     case Rejected = 'rejected';
+    case PaymentLinked = 'payment_linked';
 }
