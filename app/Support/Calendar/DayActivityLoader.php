@@ -6,6 +6,7 @@ namespace App\Support\Calendar;
 
 use App\Enums\TransactionDirection;
 use App\Livewire\Dashboard\Data\PayCyclePip;
+use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Services\ReconciliationPolicy;
@@ -16,22 +17,22 @@ final readonly class DayActivityLoader
 {
     private const array CATEGORY_EAGER_LOAD = [
         'category:id,name,icon,parent_id',
-        'category.parent:id,name,icon,parent_id',
-        'category.parent.parent:id,name,icon,parent_id',
+        'category.parent:id,icon,parent_id',
+        'category.parent.parent:id,icon,parent_id',
     ];
 
     private const array LINKED_PLAN_EAGER_LOAD = [
         'plannedTransaction:id,category_id,description',
         'plannedTransaction.category:id,name,icon,parent_id',
-        'plannedTransaction.category.parent:id,name,icon,parent_id',
-        'plannedTransaction.category.parent.parent:id,name,icon,parent_id',
+        'plannedTransaction.category.parent:id,icon,parent_id',
+        'plannedTransaction.category.parent.parent:id,icon,parent_id',
     ];
 
     private const array SPLIT_EAGER_LOAD = [
         'splits:id,transaction_id,category_id,amount,position',
         'splits.category:id,name,icon,parent_id',
-        'splits.category.parent:id,name,icon,parent_id',
-        'splits.category.parent.parent:id,name,icon,parent_id',
+        'splits.category.parent:id,icon,parent_id',
+        'splits.category.parent.parent:id,icon,parent_id',
     ];
 
     /**
@@ -66,6 +67,11 @@ final readonly class DayActivityLoader
             ->where(static fn ($q) => $q->whereNull('until_date')->orWhere('until_date', '>=', $start))
             ->with(self::CATEGORY_EAGER_LOAD)
             ->get();
+
+        $linkedCategories = Category::allWithLinkedParents()->keyBy('id');
+        $pathFor = static fn (?Category $category): ?string => $category === null
+            ? null
+            : ($linkedCategories[$category->id] ?? $category)->fullPath();
 
         /** @var Collection<string, Collection<int, Transaction>> $txByDate */
         $txByDate = $transactions->groupBy(static fn (Transaction $t) => $t->post_date->format('Y-m-d'));
@@ -105,7 +111,7 @@ final readonly class DayActivityLoader
                     plannedTransactionId: $planned->id,
                     occurrenceDate: $key,
                     tooltip: $planned->category !== null ? $planned->description : null,
-                    categoryPath: $planned->category?->fullPath(),
+                    categoryPath: $pathFor($planned->category),
                     detail: $planned->description !== '' ? $planned->description : null,
                 );
             }
@@ -153,7 +159,7 @@ final readonly class DayActivityLoader
                             occurrenceDate: null,
                             matched: $linkedPlan !== null,
                             tooltip: ($tx->description !== '' && $tx->description !== $splitName) ? $tx->description : null,
-                            categoryPath: $split->category?->fullPath(),
+                            categoryPath: $pathFor($split->category),
                             detail: self::transactionLabel($tx) ?? ($tx->description !== '' ? $tx->description : null),
                         );
                     }
@@ -164,11 +170,11 @@ final readonly class DayActivityLoader
                 if ($linkedPlan !== null) {
                     $name = self::transactionLabel($tx) ?? $linkedPlan->category?->name ?? $linkedPlan->description; // @phpstan-ignore nullsafe.neverNull
                     $icon = $linkedPlan->category?->resolveIcon();
-                    $categoryPath = $linkedPlan->category?->fullPath();
+                    $categoryPath = $pathFor($linkedPlan->category);
                 } else {
                     $name = self::transactionLabel($tx) ?? $tx->category?->name ?? ($tx->description !== '' ? $tx->description : 'Transaction'); // @phpstan-ignore nullsafe.neverNull
                     $icon = $tx->category?->resolveIcon();
-                    $categoryPath = $tx->category?->fullPath();
+                    $categoryPath = $pathFor($tx->category);
                 }
 
                 $pips[] = new PayCyclePip(
