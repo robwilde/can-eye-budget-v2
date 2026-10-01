@@ -1,6 +1,6 @@
 @use('App\Livewire\CalendarView')
 
-<div data-testid="calendar-view" class="pay-cycle-cal">
+<div data-testid="calendar-view" class="pay-cycle-cal calendar-page">
     <header class="cyc-head">
         <div>
             <h1 class="cyc-title">{{ $this->headerLabel['label'] }}</h1>
