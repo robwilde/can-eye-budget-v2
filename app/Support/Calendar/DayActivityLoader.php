@@ -100,10 +100,20 @@ final readonly class DayActivityLoader
         /** @var array<int, list<Transaction>> $reconciledByPlanned */
         $reconciledByPlanned = [];
 
+        // Both legs of a tracked pair can carry the same planned_transaction_id; keep one so a single
+        // entered transfer cannot suppress two occurrences.
+        $transferIds = array_flip($transferRows->modelKeys());
+
         foreach ($withinTolerance->concat($transferRows) as $tx) {
-            if ($tx->planned_transaction_id !== null) {
-                $reconciledByPlanned[$tx->planned_transaction_id][] = $tx;
+            if ($tx->planned_transaction_id === null) {
+                continue;
             }
+
+            if ($tx->transfer_pair_id !== null && $tx->id > $tx->transfer_pair_id && isset($transferIds[$tx->transfer_pair_id])) {
+                continue;
+            }
+
+            $reconciledByPlanned[$tx->planned_transaction_id][] = $tx;
         }
 
         /** @var array<string, list<PayCyclePip>> $plannedPipsByDate */
