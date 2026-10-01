@@ -6,7 +6,7 @@ Laravel auto-discovers listeners by reading `handle(EventType $event)` type-hint
 
 ## Run `event:cache` in Production Deploy
 
-Event discovery scans the filesystem per-request in dev. Cache it in production: `ddev exec php artisan optimize` or `ddev exec php artisan event:cache`.
+Event discovery scans the filesystem per-request in dev. Cache it in production: `php artisan optimize` or `php artisan event:cache`.
 
 ## Use `ShouldDispatchAfterCommit` Inside Transactions
 

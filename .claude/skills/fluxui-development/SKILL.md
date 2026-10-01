@@ -41,7 +41,7 @@ Flux includes [Heroicons](https://heroicons.com/) as its default icon set. Searc
 For icons not available in Heroicons, use [Lucide](https://lucide.dev/). Import the icons you need with the Artisan command:
 
 ```bash
-ddev exec php artisan flux:icon crown grip-vertical github
+php artisan flux:icon crown grip-vertical github
 ```
 
 ## Common Patterns

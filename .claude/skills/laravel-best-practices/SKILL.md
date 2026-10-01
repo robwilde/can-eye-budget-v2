@@ -152,7 +152,7 @@ Check sibling files, related controllers, models, or tests for established patte
 
 ### 16. Migrations → `rules/migrations.md`
 
-- Generate migrations with `op make.migration` (or `ddev exec php artisan make:migration` when an alias does not fit)
+- Generate migrations with `php artisan make:migration`
 - `constrained()` for foreign keys
 - Never modify migrations that have run in production
 - Add indexes in the migration, not as an afterthought
