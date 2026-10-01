@@ -8,6 +8,7 @@ final readonly class PayCyclePip
 {
     public function __construct(
         public string $kind,
+        public string $tone,
         public string $name,
         public int $amount,
         public ?string $icon,
@@ -16,5 +17,7 @@ final readonly class PayCyclePip
         public ?string $occurrenceDate,
         public bool $matched = false,
         public ?string $tooltip = null,
+        public ?string $categoryPath = null,
+        public ?string $detail = null,
     ) {}
 }

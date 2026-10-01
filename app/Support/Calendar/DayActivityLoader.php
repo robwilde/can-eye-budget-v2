@@ -6,6 +6,7 @@ namespace App\Support\Calendar;
 
 use App\Enums\TransactionDirection;
 use App\Livewire\Dashboard\Data\PayCyclePip;
+use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Services\ReconciliationPolicy;
@@ -16,22 +17,16 @@ final readonly class DayActivityLoader
 {
     private const array CATEGORY_EAGER_LOAD = [
         'category:id,name,icon,parent_id',
-        'category.parent:id,icon,parent_id',
-        'category.parent.parent:id,icon,parent_id',
     ];
 
     private const array LINKED_PLAN_EAGER_LOAD = [
         'plannedTransaction:id,category_id,description',
         'plannedTransaction.category:id,name,icon,parent_id',
-        'plannedTransaction.category.parent:id,icon,parent_id',
-        'plannedTransaction.category.parent.parent:id,icon,parent_id',
     ];
 
     private const array SPLIT_EAGER_LOAD = [
         'splits:id,transaction_id,category_id,amount,position',
         'splits.category:id,name,icon,parent_id',
-        'splits.category.parent:id,icon,parent_id',
-        'splits.category.parent.parent:id,icon,parent_id',
     ];
 
     /**
@@ -67,6 +62,13 @@ final readonly class DayActivityLoader
             ->with(self::CATEGORY_EAGER_LOAD)
             ->get();
 
+        $linkedCategories = Category::allWithLinkedParents()->keyBy('id');
+        $linked = static fn (?Category $category): ?Category => $category === null
+            ? null
+            : ($linkedCategories[$category->id] ?? $category);
+        $pathFor = static fn (?Category $category): ?string => $linked($category)?->fullPath();
+        $iconFor = static fn (?Category $category): ?string => $linked($category)?->resolveIcon();
+
         /** @var Collection<string, Collection<int, Transaction>> $txByDate */
         $txByDate = $transactions->groupBy(static fn (Transaction $t) => $t->post_date->format('Y-m-d'));
 
@@ -97,13 +99,16 @@ final readonly class DayActivityLoader
                 $plannedPipsByDate[$key] ??= [];
                 $plannedPipsByDate[$key][] = new PayCyclePip(
                     kind: 'plan',
+                    tone: $planned->direction === TransactionDirection::Credit ? 'inc' : 'out',
                     name: $planned->category?->name ?? $planned->description, // @phpstan-ignore nullsafe.neverNull
                     amount: abs((int) $planned->amount),
-                    icon: $planned->category?->resolveIcon(),
+                    icon: $iconFor($planned->category),
                     transactionId: null,
                     plannedTransactionId: $planned->id,
                     occurrenceDate: $key,
                     tooltip: $planned->category !== null ? $planned->description : null,
+                    categoryPath: $pathFor($planned->category),
+                    detail: $planned->description !== '' ? $planned->description : null,
                 );
             }
         }
@@ -141,14 +146,17 @@ final readonly class DayActivityLoader
                         $splitName = $split->category?->name ?? self::transactionLabel($tx) ?? ($tx->description !== '' ? $tx->description : 'Transaction'); // @phpstan-ignore nullsafe.neverNull
                         $pips[] = new PayCyclePip(
                             kind: $isCredit ? 'inc' : 'out',
+                            tone: $isCredit ? 'inc' : 'out',
                             name: $splitName,
                             amount: abs($split->amount),
-                            icon: $split->category?->resolveIcon(),
+                            icon: $iconFor($split->category),
                             transactionId: $tx->id,
                             plannedTransactionId: null,
                             occurrenceDate: null,
                             matched: $linkedPlan !== null,
                             tooltip: ($tx->description !== '' && $tx->description !== $splitName) ? $tx->description : null,
+                            categoryPath: $pathFor($split->category),
+                            detail: self::transactionLabel($tx) ?? ($tx->description !== '' ? $tx->description : null),
                         );
                     }
 
@@ -157,14 +165,17 @@ final readonly class DayActivityLoader
 
                 if ($linkedPlan !== null) {
                     $name = self::transactionLabel($tx) ?? $linkedPlan->category?->name ?? $linkedPlan->description; // @phpstan-ignore nullsafe.neverNull
-                    $icon = $linkedPlan->category?->resolveIcon();
+                    $icon = $iconFor($linkedPlan->category);
+                    $categoryPath = $pathFor($linkedPlan->category);
                 } else {
                     $name = self::transactionLabel($tx) ?? $tx->category?->name ?? ($tx->description !== '' ? $tx->description : 'Transaction'); // @phpstan-ignore nullsafe.neverNull
-                    $icon = $tx->category?->resolveIcon();
+                    $icon = $iconFor($tx->category);
+                    $categoryPath = $pathFor($tx->category);
                 }
 
                 $pips[] = new PayCyclePip(
                     kind: $isCredit ? 'inc' : 'out',
+                    tone: $isCredit ? 'inc' : 'out',
                     name: $name,
                     amount: $absAmount,
                     icon: $icon,
@@ -173,6 +184,8 @@ final readonly class DayActivityLoader
                     occurrenceDate: null,
                     matched: $linkedPlan !== null,
                     tooltip: ($tx->description !== '' && $tx->description !== $name) ? $tx->description : null,
+                    categoryPath: $categoryPath,
+                    detail: self::transactionLabel($tx) ?? ($tx->description !== '' ? $tx->description : null),
                 );
             }
 

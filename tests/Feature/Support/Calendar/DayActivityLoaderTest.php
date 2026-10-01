@@ -1018,6 +1018,79 @@ test('split pips keep their category names and fall back to the clean descriptio
         ->and($day->pips[1]->tooltip)->toBe('WOOLWORTHS 4232 BRISBANE');
 });
 
+test('split pips carry tone, full nested category path and the clean-description fallback', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $root = Category::factory()->create(['name' => 'Personal']);
+    $mid = Category::factory()->create(['name' => 'Food', 'parent_id' => $root->id]);
+    $leaf = Category::factory()->create(['name' => 'Groceries', 'parent_id' => $mid->id]);
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    $transaction = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -10000,
+        'post_date' => $date,
+        'description' => 'WOOLWORTHS 4232 BRISBANE',
+        'clean_description' => 'Woolworths',
+    ]);
+    $transaction->splits()->createMany([
+        ['category_id' => $leaf->id, 'amount' => -7000, 'position' => 0],
+        ['category_id' => null, 'amount' => -3000, 'position' => 1],
+    ]);
+
+    $day = (new DayActivityLoader)->load($date, $date, $user->id)[$date->format('Y-m-d')];
+
+    expect($day->pips[0]->tone)->toBe('out')
+        ->and($day->pips[0]->categoryPath)->toBe('Personal / Food / Groceries')
+        ->and($day->pips[0]->detail)->toBe('Woolworths')
+        ->and($day->pips[1]->categoryPath)->toBeNull()
+        ->and($day->pips[1]->detail)->toBe('Woolworths');
+});
+
+test('category paths and inherited icons at any depth cost the same queries regardless of pip count', function () {
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    $measure = function (int $pipCount) use ($date): array {
+        $user = User::factory()->create();
+        $account = Account::factory()->for($user)->create();
+
+        foreach (range(1, $pipCount) as $i) {
+            $leaf = null;
+            foreach (['A', 'B', 'C', 'D'] as $name) {
+                $leaf = Category::factory()->create([
+                    'name' => $name,
+                    'parent_id' => $leaf?->id,
+                    'icon' => $name === 'A' ? 'star' : null,
+                ]);
+            }
+
+            Transaction::factory()->for($user)->debit()->create([
+                'account_id' => $account->id,
+                'category_id' => $leaf->id,
+                'amount' => -100 * $i,
+                'post_date' => $date,
+            ]);
+        }
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $day = (new DayActivityLoader)->load($date, $date, $user->id)[$date->format('Y-m-d')];
+        $queries = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        return [$day, $queries];
+    };
+
+    [$one, $oneQueries] = $measure(1);
+    [$many, $manyQueries] = $measure(5);
+
+    expect($many->pips)->toHaveCount(5)
+        ->and($many->pips[0]->categoryPath)->toBe('A / B / C / D')
+        ->and($many->pips[0]->icon)->toBe('star')
+        ->and($one->pips[0]->icon)->toBe('star')
+        ->and($manyQueries)->toBe($oneQueries);
+});
+
 test('DayActivity::empty returns a zero-state instance', function () {
     $empty = DayActivity::empty();
 

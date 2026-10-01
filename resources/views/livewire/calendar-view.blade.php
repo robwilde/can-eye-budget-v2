@@ -1,6 +1,6 @@
 @use('App\Livewire\CalendarView')
 
-<div data-testid="calendar-view" class="pay-cycle-cal">
+<div data-testid="calendar-view" class="pay-cycle-cal calendar-page">
     <header class="cyc-head">
         <div>
             <h1 class="cyc-title">{{ $this->headerLabel['label'] }}</h1>
@@ -20,22 +20,34 @@
     </header>
 
     <div class="quickline">
-        <span class="pill pill-income">
-            <span class="pill-label">Income</span>
-            <span class="pill-value tabular-nums">{{ $formatMoney($this->monthTotals['income']) }}</span>
-        </span>
-        <span class="pill pill-posted">
-            <span class="pill-label">Spend</span>
-            <span class="pill-value tabular-nums">{{ $formatMoney($this->monthTotals['spend']) }}</span>
-        </span>
-        <span @class([
-            'pill',
-            'pill-buffer-pos' => $this->monthTotals['net'] >= 0,
-            'pill-buffer-neg' => $this->monthTotals['net'] < 0,
-        ])>
-            <span class="pill-label">Net</span>
-            <span class="pill-value tabular-nums">{{ $formatMoney($this->monthTotals['net']) }}</span>
-        </span>
+        <div class="quickline-group" data-testid="calendar-projected">
+            <span class="pill pill-proj-income">
+                <span class="pill-label">Proj. income</span>
+                <span class="pill-value tabular-nums">{{ $formatMoney($this->projectedTotals['income']) }}</span>
+            </span>
+            <span class="pill pill-proj-spend">
+                <span class="pill-label">Proj. spend</span>
+                <span class="pill-value tabular-nums">{{ $formatMoney($this->projectedTotals['spend']) }}</span>
+            </span>
+        </div>
+        <div class="quickline-group quickline-actuals" data-testid="calendar-actuals">
+            <span class="pill pill-income">
+                <span class="pill-label">Income</span>
+                <span class="pill-value tabular-nums">{{ $formatMoney($this->monthTotals['income']) }}</span>
+            </span>
+            <span class="pill pill-posted">
+                <span class="pill-label">Spend</span>
+                <span class="pill-value tabular-nums">{{ $formatMoney($this->monthTotals['spend']) }}</span>
+            </span>
+            <span @class([
+                'pill',
+                'pill-buffer-pos' => $this->monthTotals['net'] >= 0,
+                'pill-buffer-neg' => $this->monthTotals['net'] < 0,
+            ])>
+                <span class="pill-label">Net</span>
+                <span class="pill-value tabular-nums">{{ $formatMoney($this->monthTotals['net']) }}</span>
+            </span>
+        </div>
     </div>
 
     <div class="cyc-grid" role="grid">
@@ -77,9 +89,12 @@
                     </div>
                     <div class="cyc-day-body">
                         @foreach (array_slice($day->pips, 0, CalendarView::MAX_PIPS_PER_DAY) as $pip)
-                            <div @class(['cyc-pip', $pip->kind]) @if($pip->tooltip !== null) title="{{ $pip->tooltip }}" @endif>
-                                <span class="cyc-pip-dot"></span>
-                                <span class="cyc-pip-name">{{ $pip->name }}</span>
+                            <div @class(['cyc-pip', 'tone-'.$pip->tone, 'is-planned' => $pip->kind === 'plan']) @if($pip->tooltip !== null) title="{{ $pip->tooltip }}" @endif>
+                                <span class="cyc-pip-amt tabular-nums">{{ $pip->tone === 'out' ? '−' : '' }}{{ $formatMoney($pip->amount) }}</span>
+                                @if ($pip->categoryPath !== null)
+                                    <em class="cyc-pip-cat">{{ $pip->categoryPath }}</em>
+                                @endif
+                                <span class="cyc-pip-name">{{ $pip->detail ?? ($pip->categoryPath === null ? $pip->name : '') }}</span>
                             </div>
                         @endforeach
                         @if ($day->hiddenCount > 0)
@@ -116,20 +131,13 @@
             </div>
             <div class="cyc-detail-body">
                 @forelse ($this->selectedDay['pips'] as $pip)
-                    @php
-                        $rowTone = match ($pip->kind) {
-                            'inc' => 'inc',
-                            'plan' => 'plan',
-                            default => 'out',
-                        };
-                    @endphp
                     <x-cib.tx-row
                             :transaction-id="$pip->transactionId"
                             :planned-transaction-id="$pip->plannedTransactionId"
                             :occurrence-date="$pip->occurrenceDate"
                             :name="$pip->name"
                             :amount="$pip->amount"
-                            :tone="$rowTone"
+                            :tone="$pip->tone"
                             :icon="$pip->icon"
                             :matched="$pip->matched"
                             :title="$pip->tooltip"
