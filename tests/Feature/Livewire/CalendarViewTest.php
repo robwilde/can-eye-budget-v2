@@ -543,6 +543,67 @@ test('inactive planned transactions are excluded', function () {
     expect($planPips)->toBeEmpty();
 });
 
+test('posted credit pip carries inc tone, parent-child category path and the description', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $parent = Category::factory()->create(['name' => 'Income']);
+    $child = Category::factory()->create(['name' => 'Salary', 'parent_id' => $parent->id]);
+    $date = CarbonImmutable::now()->startOfMonth()->addDays(5);
+
+    Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $account->id,
+        'category_id' => $child->id,
+        'amount' => 558100,
+        'description' => 'Trade Co payroll',
+        'clean_description' => null,
+        'post_date' => $date,
+    ]);
+
+    /** @var CalendarView $instance */
+    $instance = Livewire::actingAs($user)->test(CalendarView::class)->instance();
+    $pip = collect($instance->days())->firstWhere('iso', $date->format('Y-m-d'))->pips[0];
+
+    expect($pip->tone)->toBe('inc')
+        ->and($pip->categoryPath)->toBe('Income / Salary')
+        ->and($pip->detail)->toBe('Trade Co payroll');
+});
+
+test('grid colours entered pips by direction and flags only planned pips as filled', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Rent']);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -1400,
+        'description' => 'Coffee',
+        'post_date' => '2026-10-05',
+    ]);
+    PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'category_id' => $category->id,
+        'amount' => 250000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'Landlord',
+        'start_date' => '2026-10-20',
+    ]);
+    PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'amount' => 700,
+        'direction' => TransactionDirection::Credit,
+        'description' => 'Cashback',
+        'start_date' => '2026-10-22',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->assertSeeHtml('cyc-pip tone-out"')
+        ->assertSeeHtml('cyc-pip tone-out is-planned"')
+        ->assertSeeHtml('cyc-pip tone-inc is-planned"')
+        ->assertSeeHtml('<em class="cyc-pip-cat">Rent</em>')
+        ->assertSeeHtml('>−$14.00</span>')
+        ->assertSeeHtml('>$7.00</span>');
+});
+
 test('actual and planned on same day both render', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
