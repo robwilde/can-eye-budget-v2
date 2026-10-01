@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Enums\PayFrequency;
+use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Livewire\CalendarView;
 use App\Livewire\Data\CalendarDayData;
@@ -875,6 +876,7 @@ test('planned transfers count toward projected spend only when they leave the tr
         ['account' => $everyday, 'to' => $spaceship, 'amount' => 25000, 'start' => '2026-10-20'],
         ['account' => $everyday, 'to' => $savings, 'amount' => 11100, 'start' => '2026-10-21'],
         ['account' => $spaceship, 'to' => $ubank, 'amount' => 22200, 'start' => '2026-10-22'],
+        ['account' => $spaceship, 'to' => $everyday, 'amount' => 33300, 'start' => '2026-10-23'],
     ] as $plan) {
         PlannedTransaction::factory()->for($user)->for($plan['account'])->monthly()->create([
             'transfer_to_account_id' => $plan['to']->id,
@@ -889,9 +891,35 @@ test('planned transfers count toward projected spend only when they leave the tr
     $days = $component->instance()->days();
     $pips = collect($days)->flatMap(fn (CalendarDayData $d) => $d->pips)->where('tone', 'xfer');
 
-    expect($pips->pluck('amount')->sort()->values()->all())->toBe([11100, 25000])
-        ->and($component->get('projectedTotals'))->toBe(['income' => 0, 'spend' => 25000])
+    expect($pips->pluck('amount')->sort()->values()->all())->toBe([11100, 25000, 33300])
+        ->and($component->get('projectedTotals'))->toBe(['income' => 33300, 'spend' => 25000])
         ->and($component->get('monthTotals'))->toBe(['income' => 0, 'spend' => 0, 'net' => 0]);
+});
+
+test('an entered tracked-to-tracked transfer reconciles one planned occurrence, not two', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $everyday = Account::factory()->for($user)->create();
+    $savings = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->for($everyday)->create([
+        'transfer_to_account_id' => $savings->id,
+        'direction' => TransactionDirection::Debit,
+        'frequency' => RecurrenceFrequency::Everyday,
+        'amount' => 5000,
+        'start_date' => '2026-10-08',
+        'until_date' => '2026-10-09',
+    ]);
+    [$debit, $credit] = calendarPairedTransfer($user, $everyday, $savings, '2026-10-09', 5000);
+    $debit->update(['planned_transaction_id' => $planned->id]);
+    $credit->update(['planned_transaction_id' => $planned->id]);
+
+    /** @var list<CalendarDayData> $days */
+    $days = Livewire::actingAs($user)->test(CalendarView::class)->instance()->days();
+    $planPips = collect($days)->flatMap(fn (CalendarDayData $d) => $d->pips)->where('kind', 'plan');
+
+    expect($planPips)->toHaveCount(1)
+        ->and($planPips->first()->occurrenceDate)->toBe('2026-10-08');
 });
 
 test('transfer pips render with the transfer tone, filled when planned', function () {
