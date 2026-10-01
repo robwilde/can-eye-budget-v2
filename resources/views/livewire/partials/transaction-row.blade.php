@@ -38,6 +38,8 @@
         $account === null ? $transaction->account?->name : null,
     ]);
     $isPlanned = $transaction->planned_transaction_id !== null;
+    $hasCleanDescription = filled($transaction->clean_description);
+    $displayName = $hasCleanDescription ? $transaction->clean_description : $transaction->description;
     $bulkExcluded = $this->isBulkExcluded($transaction);
     $bulkReason = $this->bulkExclusionReason($transaction);
 @endphp
@@ -64,7 +66,7 @@
             disabled
             :aria-disabled="'true'"
             class="shrink-0"
-            :aria-label="'Cannot select ' . $transaction->description"
+            :aria-label="'Cannot select ' . $displayName"
             aria-describedby="select-reason-{{ $transaction->id }}"
             :title="$bulkReason"
             data-testid="select-excluded-{{ $transaction->id }}"
@@ -75,14 +77,15 @@
             wire:key="select-{{ $transaction->id }}-on"
             wire:model.live="selected.{{ $transaction->id }}"
             class="shrink-0"
-            :aria-label="'Select ' . $transaction->description"
+            :aria-label="'Select ' . $displayName"
             data-testid="select-{{ $transaction->id }}"
         />
     @endif
     <div class="min-w-0">
         <x-cib.tx-row
             wire:key="txn-{{ $transaction->id }}"
-            :name="$transaction->description"
+            :name="$displayName"
+            :title="$hasCleanDescription ? $transaction->description : null"
             :amount="$transaction->amount"
             :tone="$tone"
             :icon="$transaction->category?->resolveIcon()"
