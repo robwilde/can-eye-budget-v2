@@ -17,5 +17,7 @@ final readonly class PayCyclePip
         public ?string $occurrenceDate,
         public bool $matched = false,
         public ?string $tooltip = null,
+        public ?string $categoryPath = null,
+        public ?string $detail = null,
     ) {}
 }

@@ -16,22 +16,22 @@ final readonly class DayActivityLoader
 {
     private const array CATEGORY_EAGER_LOAD = [
         'category:id,name,icon,parent_id',
-        'category.parent:id,icon,parent_id',
-        'category.parent.parent:id,icon,parent_id',
+        'category.parent:id,name,icon,parent_id',
+        'category.parent.parent:id,name,icon,parent_id',
     ];
 
     private const array LINKED_PLAN_EAGER_LOAD = [
         'plannedTransaction:id,category_id,description',
         'plannedTransaction.category:id,name,icon,parent_id',
-        'plannedTransaction.category.parent:id,icon,parent_id',
-        'plannedTransaction.category.parent.parent:id,icon,parent_id',
+        'plannedTransaction.category.parent:id,name,icon,parent_id',
+        'plannedTransaction.category.parent.parent:id,name,icon,parent_id',
     ];
 
     private const array SPLIT_EAGER_LOAD = [
         'splits:id,transaction_id,category_id,amount,position',
         'splits.category:id,name,icon,parent_id',
-        'splits.category.parent:id,icon,parent_id',
-        'splits.category.parent.parent:id,icon,parent_id',
+        'splits.category.parent:id,name,icon,parent_id',
+        'splits.category.parent.parent:id,name,icon,parent_id',
     ];
 
     /**
@@ -105,6 +105,8 @@ final readonly class DayActivityLoader
                     plannedTransactionId: $planned->id,
                     occurrenceDate: $key,
                     tooltip: $planned->category !== null ? $planned->description : null,
+                    categoryPath: $planned->category?->fullPath(),
+                    detail: $planned->description !== '' ? $planned->description : null,
                 );
             }
         }
@@ -151,6 +153,8 @@ final readonly class DayActivityLoader
                             occurrenceDate: null,
                             matched: $linkedPlan !== null,
                             tooltip: ($tx->description !== '' && $tx->description !== $splitName) ? $tx->description : null,
+                            categoryPath: $split->category?->fullPath(),
+                            detail: self::transactionLabel($tx) ?? ($tx->description !== '' ? $tx->description : null),
                         );
                     }
 
@@ -160,9 +164,11 @@ final readonly class DayActivityLoader
                 if ($linkedPlan !== null) {
                     $name = self::transactionLabel($tx) ?? $linkedPlan->category?->name ?? $linkedPlan->description; // @phpstan-ignore nullsafe.neverNull
                     $icon = $linkedPlan->category?->resolveIcon();
+                    $categoryPath = $linkedPlan->category?->fullPath();
                 } else {
                     $name = self::transactionLabel($tx) ?? $tx->category?->name ?? ($tx->description !== '' ? $tx->description : 'Transaction'); // @phpstan-ignore nullsafe.neverNull
                     $icon = $tx->category?->resolveIcon();
+                    $categoryPath = $tx->category?->fullPath();
                 }
 
                 $pips[] = new PayCyclePip(
@@ -176,6 +182,8 @@ final readonly class DayActivityLoader
                     occurrenceDate: null,
                     matched: $linkedPlan !== null,
                     tooltip: ($tx->description !== '' && $tx->description !== $name) ? $tx->description : null,
+                    categoryPath: $categoryPath,
+                    detail: self::transactionLabel($tx) ?? ($tx->description !== '' ? $tx->description : null),
                 );
             }
 
