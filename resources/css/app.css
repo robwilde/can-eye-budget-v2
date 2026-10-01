@@ -71,6 +71,7 @@
     --color-money-planned:        #F1A51C;
     --color-money-planned-soft:   #FCF0D6;
     --color-money-owed-strong:    #C62F34;
+    --color-money-available-strong: #137A31;
 
     /* Surfaces + foreground (semantic aliases) */
     --color-bg-page:       #F7F8F7;
@@ -566,7 +567,7 @@ select:focus[data-flux-control] {
     .tx-row.planned .tx-ico { background: var(--color-money-planned-soft); color: var(--color-money-planned); }
     .tx-row.planned .tx-amt { color: var(--color-money-planned); }
     .tx-row.planned .tx-ico.out { background: var(--color-money-owed-strong); color: var(--color-cib-white); }
-    .tx-row.planned .tx-ico.inc { background: var(--color-cib-green-600); color: var(--color-cib-white); }
+    .tx-row.planned .tx-ico.inc { background: var(--color-money-available-strong); color: var(--color-cib-white); }
     .tx-row.planned .tx-amt.out,
     .tx-row.planned .tx-amt.inc {
         color: var(--color-cib-white);
@@ -574,7 +575,7 @@ select:focus[data-flux-control] {
         border-radius: 6px;
     }
     .tx-row.planned .tx-amt.out { background: var(--color-money-owed-strong); }
-    .tx-row.planned .tx-amt.inc { background: var(--color-cib-green-600); }
+    .tx-row.planned .tx-amt.inc { background: var(--color-money-available-strong); }
 
     /* ---------- Reports page (Ticket #327) ---------- */
 
@@ -1037,10 +1038,10 @@ select:focus[data-flux-control] {
         text-overflow: ellipsis;
     }
     .cyc-pip.tone-out .cyc-pip-amt { color: var(--color-money-owed-strong); }
-    .cyc-pip.tone-inc .cyc-pip-amt { color: var(--color-cib-green-600); }
+    .cyc-pip.tone-inc .cyc-pip-amt { color: var(--color-money-available-strong); }
     .cyc-pip.is-planned .cyc-pip-amt { color: var(--color-cib-white); padding: 1px 5px; }
     .cyc-pip.is-planned.tone-out .cyc-pip-amt { background: var(--color-money-owed-strong); }
-    .cyc-pip.is-planned.tone-inc .cyc-pip-amt { background: var(--color-cib-green-600); }
+    .cyc-pip.is-planned.tone-inc .cyc-pip-amt { background: var(--color-money-available-strong); }
     .cyc-pip-name {
         overflow: hidden;
         text-overflow: ellipsis;
