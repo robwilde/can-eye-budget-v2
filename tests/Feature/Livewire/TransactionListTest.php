@@ -235,6 +235,42 @@ test('search matches clean_description field', function () {
         ->assertDontSee('TXN REF 67890');
 });
 
+test('row shows clean description with raw description as tooltip, and search matches the raw text', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'VISA -WARP.DEV WARP.DEV US FRGN AMT-40.000000',
+        'clean_description' => 'Warp Terminal',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSeeHtml('title="VISA -WARP.DEV WARP.DEV US FRGN AMT-40.000000"')
+        ->assertSeeHtml('Warp Terminal')
+        ->set('search', 'FRGN AMT')
+        ->assertSee('Warp Terminal');
+});
+
+test('row falls back to the raw description with no tooltip when clean_description is blank', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'description' => 'RAW ONLY DESCRIPTION',
+        'clean_description' => '',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSee('RAW ONLY DESCRIPTION')
+        ->assertDontSeeHtml('title="RAW ONLY DESCRIPTION"');
+});
+
 test('search matches merchant_name field', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
