@@ -4112,6 +4112,34 @@ test('a suggested bank-feed row shows a possible-transfer note, is not a transfe
         ->and($credit->fresh()->transfer_link_source)->toBe(TransferLinkSource::Confirmed);
 });
 
+test('an unlinked incoming bank-feed transfer locks its own account as To and lets the user pick From', function () {
+    $user = User::factory()->create();
+    $own = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+    $credit = modalFeedRow($user, $own, 450000, '2026-09-10');
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $credit->id)
+        ->set('transactionType', 'transfer')
+        ->assertSee('To account')
+        ->assertSee('From account (optional)')
+        ->assertDontSee('To account (optional)')
+        ->assertSet('accountId', $own->id)
+        ->assertSet('transferToAccountId', null)
+        ->set('transferToAccountId', $hidden->id)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $mirror = Transaction::query()->where('account_id', $hidden->id)->first();
+
+    expect($mirror)->not->toBeNull()
+        ->and($mirror->direction)->toBe(TransactionDirection::Debit)
+        ->and($mirror->amount)->toBe(-450000)
+        ->and($credit->fresh()->transfer_pair_id)->toBe($mirror->id)
+        ->and($mirror->transfer_pair_id)->toBe($credit->id);
+});
+
 test('rejecting a suggested bank-feed row keeps both rows and remembers it', function () {
     $user = User::factory()->create();
     $from = Account::factory()->for($user)->create();
