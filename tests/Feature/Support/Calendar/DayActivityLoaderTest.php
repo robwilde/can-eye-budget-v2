@@ -1109,12 +1109,13 @@ test('a posting just outside the range still suppresses its in-range planned occ
         'planned_transaction_id' => $planned->id,
     ]);
 
-    $activity = (new DayActivityLoader)->load(CarbonImmutable::create(2026, 6, 1), CarbonImmutable::create(2026, 6, 30), $user->id);
+    // June 2026 calendar grid: Monday 1 June through Sunday 5 July.
+    $activity = (new DayActivityLoader)->load(CarbonImmutable::create(2026, 6, 1), CarbonImmutable::create(2026, 7, 5), $user->id);
 
     expect($activity)->toBe([]);
 })->with([
     'lower edge' => ['2026-06-01', '2026-05-31'],
-    'upper edge' => ['2026-06-30', '2026-07-02'],
+    'upper edge' => ['2026-07-05', '2026-07-08'],
 ]);
 
 test('a posting beyond the reconciliation tolerance outside the range does not suppress the occurrence', function () {
