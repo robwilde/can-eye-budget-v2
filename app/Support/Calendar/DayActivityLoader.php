@@ -11,6 +11,7 @@ use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Services\ReconciliationPolicy;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 
 final readonly class DayActivityLoader
@@ -43,9 +44,13 @@ final readonly class DayActivityLoader
      * Postings and occurrences up to the tolerance outside the range are fetched only to decide
      * matches (each posting pairs with its nearest occurrence); they are never rendered or counted.
      *
+     * With $includeTransfers, transfers are added as 'xfer' pips: legs paired with an untracked account
+     * are counted as spend/income (and appear in the day totals), tracked-to-tracked pairs show once and
+     * are not counted. The default leaves transfers out entirely.
+     *
      * @return array<string, DayActivity>
      */
-    public function load(CarbonImmutable $start, CarbonImmutable $end, int $userId): array
+    public function load(CarbonImmutable $start, CarbonImmutable $end, int $userId, bool $includeTransfers = false): array
     {
         $tolerance = ReconciliationPolicy::DATE_TOLERANCE_DAYS;
 
@@ -58,13 +63,16 @@ final readonly class DayActivityLoader
             ->orderBy('post_date')
             ->get();
 
+        $transferRows = $includeTransfers
+            ? $this->transferRows($userId, $start, $end, $withinTolerance->modelKeys())
+            : new EloquentCollection;
+
         $startKey = $start->format('Y-m-d');
         $endKey = $end->format('Y-m-d');
-        $transactions = $withinTolerance
-            ->filter(static fn (Transaction $t): bool => $t->post_date->format('Y-m-d') >= $startKey && $t->post_date->format('Y-m-d') <= $endKey)
-            ->values();
+        $inRange = static fn (Transaction $t): bool => $t->post_date->format('Y-m-d') >= $startKey && $t->post_date->format('Y-m-d') <= $endKey;
+        $transactions = $withinTolerance->filter($inRange)->values();
 
-        $plannedTransactions = PlannedTransaction::query()
+        $ordinaryPlanned = PlannedTransaction::query()
             ->where('user_id', $userId)
             ->where('is_active', true)
             ->excludingTransfers()
@@ -72,6 +80,12 @@ final readonly class DayActivityLoader
             ->where(static fn ($q) => $q->whereNull('until_date')->orWhere('until_date', '>=', $start))
             ->with(self::CATEGORY_EAGER_LOAD)
             ->get();
+
+        $transferPlanned = $includeTransfers
+            ? $this->plannedTransferRows($userId, $start, $end, $ordinaryPlanned->modelKeys())
+            : new EloquentCollection;
+        $transferPlannedIds = array_flip($transferPlanned->modelKeys());
+        $plannedTransactions = $ordinaryPlanned->concat($transferPlanned);
 
         $linkedCategories = Category::allWithLinkedParents()->keyBy('id');
         $linked = static fn (?Category $category): ?Category => $category === null
@@ -86,16 +100,80 @@ final readonly class DayActivityLoader
         /** @var array<int, list<Transaction>> $reconciledByPlanned */
         $reconciledByPlanned = [];
 
-        foreach ($withinTolerance as $tx) {
-            if ($tx->planned_transaction_id !== null) {
-                $reconciledByPlanned[$tx->planned_transaction_id][] = $tx;
+        // Both legs of a tracked pair can carry the same planned_transaction_id; keep one so a single
+        // entered transfer cannot suppress two occurrences.
+        $transferIds = array_flip($transferRows->modelKeys());
+
+        foreach ($withinTolerance->concat($transferRows) as $tx) {
+            if ($tx->planned_transaction_id === null) {
+                continue;
             }
+
+            if ($tx->transfer_pair_id !== null && $tx->id > $tx->transfer_pair_id && isset($transferIds[$tx->transfer_pair_id])) {
+                continue;
+            }
+
+            $reconciledByPlanned[$tx->planned_transaction_id][] = $tx;
         }
 
         /** @var array<string, list<PayCyclePip>> $plannedPipsByDate */
         $plannedPipsByDate = [];
 
+        /** @var array<string, list<PayCyclePip>> $transferPipsByDate */
+        $transferPipsByDate = [];
+
+        /** @var array<string, int> $transferIncomeByDate */
+        $transferIncomeByDate = [];
+
+        /** @var array<string, int> $transferSpendByDate */
+        $transferSpendByDate = [];
+
+        foreach ($transferRows->filter($inRange) as $transfer) {
+            [$show, $flow] = $this->postedTransferShape($transfer, $startKey, $endKey);
+
+            if (! $show) {
+                continue;
+            }
+
+            $key = $transfer->post_date->format('Y-m-d');
+            $name = self::transactionLabel($transfer) ?? $transfer->category?->name ?? ($transfer->description !== '' ? $transfer->description : 'Transfer'); // @phpstan-ignore nullsafe.neverNull
+            $amount = abs((int) $transfer->amount);
+
+            $transferPipsByDate[$key][] = new PayCyclePip(
+                kind: 'xfer',
+                tone: 'xfer',
+                name: $name,
+                amount: $amount,
+                icon: $iconFor($transfer->category),
+                transactionId: $transfer->id,
+                plannedTransactionId: null,
+                occurrenceDate: null,
+                matched: $transfer->plannedTransaction !== null,
+                tooltip: ($transfer->description !== '' && $transfer->description !== $name) ? $transfer->description : null,
+                categoryPath: $pathFor($transfer->category),
+                detail: self::transactionLabel($transfer) ?? ($transfer->description !== '' ? $transfer->description : null),
+                transferFlow: $flow,
+            );
+
+            if ($flow === 'out') {
+                $transferSpendByDate[$key] = ($transferSpendByDate[$key] ?? 0) + $amount;
+            } elseif ($flow === 'inc') {
+                $transferIncomeByDate[$key] = ($transferIncomeByDate[$key] ?? 0) + $amount;
+            }
+        }
+
         foreach ($plannedTransactions as $planned) {
+            $isTransfer = isset($transferPlannedIds[$planned->id]);
+            $planFlow = null;
+
+            if ($isTransfer) {
+                [$show, $planFlow] = $this->plannedTransferShape($planned);
+
+                if (! $show) {
+                    continue;
+                }
+            }
+
             $candidates = $reconciledByPlanned[$planned->id] ?? [];
             $occurrences = $planned->occurrencesBetween($start->subDays($tolerance), $end->addDays($tolerance));
             $matchedKeys = $this->matchedOccurrenceKeys($candidates, $occurrences);
@@ -110,7 +188,7 @@ final readonly class DayActivityLoader
                 $plannedPipsByDate[$key] ??= [];
                 $plannedPipsByDate[$key][] = new PayCyclePip(
                     kind: 'plan',
-                    tone: $planned->direction === TransactionDirection::Credit ? 'inc' : 'out',
+                    tone: $isTransfer ? 'xfer' : ($planned->direction === TransactionDirection::Credit ? 'inc' : 'out'),
                     name: $planned->category?->name ?? $planned->description, // @phpstan-ignore nullsafe.neverNull
                     amount: abs((int) $planned->amount),
                     icon: $iconFor($planned->category),
@@ -120,6 +198,7 @@ final readonly class DayActivityLoader
                     tooltip: $planned->category !== null ? $planned->description : null,
                     categoryPath: $pathFor($planned->category),
                     detail: $planned->description !== '' ? $planned->description : null,
+                    transferFlow: $planFlow,
                 );
             }
         }
@@ -127,6 +206,7 @@ final readonly class DayActivityLoader
         $allKeys = array_unique(array_merge(
             $txByDate->keys()->all(),
             array_keys($plannedPipsByDate),
+            array_keys($transferPipsByDate),
         ));
 
         $activity = [];
@@ -200,6 +280,13 @@ final readonly class DayActivityLoader
                 );
             }
 
+            foreach ($transferPipsByDate[$key] ?? [] as $transferPip) {
+                $pips[] = $transferPip;
+            }
+
+            $incomeCents += $transferIncomeByDate[$key] ?? 0;
+            $postedCents += $transferSpendByDate[$key] ?? 0;
+
             foreach ($plannedPipsByDate[$key] ?? [] as $plannedPip) {
                 $plannedCents += $plannedPip->amount;
                 $pips[] = $plannedPip;
@@ -230,6 +317,105 @@ final readonly class DayActivityLoader
         $clean = mb_trim($tx->clean_description ?? '');
 
         return $clean !== '' ? $clean : null;
+    }
+
+    /**
+     * Transfer-classified rows on tracked accounts, i.e. everything excludingTransfers() removed
+     * except legs held on untracked accounts (those only exist as mirrors of a tracked leg).
+     *
+     * @param  list<int|string>  $ordinaryIds
+     * @return EloquentCollection<int, Transaction>
+     */
+    private function transferRows(int $userId, CarbonImmutable $start, CarbonImmutable $end, array $ordinaryIds): EloquentCollection
+    {
+        $tolerance = ReconciliationPolicy::DATE_TOLERANCE_DAYS;
+
+        return Transaction::query()
+            ->where('user_id', $userId)
+            ->current()
+            ->onTrackedAccounts()
+            ->whereNotIn('id', $ordinaryIds)
+            ->whereBetween('post_date', [$start->subDays($tolerance), $end->addDays($tolerance)])
+            ->with([
+                ...self::CATEGORY_EAGER_LOAD,
+                ...self::LINKED_PLAN_EAGER_LOAD,
+                'transferPair:id,account_id,post_date',
+                'transferPair.account:id,is_tracked',
+            ])
+            ->orderBy('post_date')
+            ->get();
+    }
+
+    /**
+     * @param  list<int|string>  $ordinaryIds
+     * @return EloquentCollection<int, PlannedTransaction>
+     */
+    private function plannedTransferRows(int $userId, CarbonImmutable $start, CarbonImmutable $end, array $ordinaryIds): EloquentCollection
+    {
+        return PlannedTransaction::query()
+            ->where('user_id', $userId)
+            ->where('is_active', true)
+            ->whereNotIn('id', $ordinaryIds)
+            ->where('start_date', '<=', $end)
+            ->where(static fn ($q) => $q->whereNull('until_date')->orWhere('until_date', '>=', $start))
+            ->with([...self::CATEGORY_EAGER_LOAD, 'account:id,is_tracked', 'transferToAccount:id,is_tracked'])
+            ->get();
+    }
+
+    /**
+     * Whether a posted transfer leg is shown, and how it moves the totals.
+     *
+     * A leg paired with a row on an untracked account is real money leaving (or entering) the
+     * tracked accounts: shown and counted ('out' = spend, 'inc' = income). A pair of two tracked
+     * legs nets to zero: shown once (the debit leg, or the credit leg when the debit falls outside
+     * the range) and never counted. A Transfer-categorised row with no pair has no known
+     * counterpart: shown, not counted.
+     *
+     * @return array{0: bool, 1: 'inc'|'out'|null}
+     */
+    private function postedTransferShape(Transaction $transfer, string $startKey, string $endKey): array
+    {
+        $pair = $transfer->transfer_pair_id !== null ? $transfer->transferPair : null;
+
+        if (! $pair instanceof Transaction) {
+            return [true, null];
+        }
+
+        $isDebit = $transfer->direction === TransactionDirection::Debit;
+
+        if (! $pair->account->is_tracked) {
+            return [true, $isDebit ? 'out' : 'inc'];
+        }
+
+        $pairKey = $pair->post_date->format('Y-m-d');
+        $pairInRange = $pairKey >= $startKey && $pairKey <= $endKey;
+
+        return [$isDebit || ! $pairInRange, null];
+    }
+
+    /**
+     * Planned counterpart of postedTransferShape(): classified by which side of the transfer is
+     * tracked. Tracked -> untracked is spend, untracked -> tracked is income, tracked -> tracked and
+     * transfers without a destination are shown but not counted; untracked -> untracked is hidden.
+     *
+     * @return array{0: bool, 1: 'inc'|'out'|null}
+     */
+    private function plannedTransferShape(PlannedTransaction $planned): array
+    {
+        $destination = $planned->transferToAccount;
+
+        if ($destination === null) { // @phpstan-ignore identical.alwaysFalse
+            return [true, null];
+        }
+
+        $sourceTracked = $planned->account->is_tracked;
+
+        return match (true) {
+            $sourceTracked && $destination->is_tracked => [true, null],
+            $sourceTracked => [true, 'out'],
+            $destination->is_tracked => [true, 'inc'],
+            default => [false, null],
+        };
     }
 
     /**

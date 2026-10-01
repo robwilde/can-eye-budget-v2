@@ -106,7 +106,7 @@ final class CalendarView extends Component
         $userId = (int) auth()->id();
         $user = auth()->user();
 
-        $activity = (new DayActivityLoader)->load($gridStart, $gridEnd, $userId);
+        $activity = (new DayActivityLoader)->load($gridStart, $gridEnd, $userId, includeTransfers: true);
 
         $paydays = $user instanceof User
             ? $this->paydaysWithinGrid($gridStart, $gridEnd, $user)
@@ -206,9 +206,11 @@ final class CalendarView extends Component
                     continue;
                 }
 
-                if ($pip->tone === 'inc') {
+                $flow = $pip->flow();
+
+                if ($flow === 'inc') {
                     $income += $pip->amount;
-                } else {
+                } elseif ($flow === 'out') {
                     $spend += $pip->amount;
                 }
             }

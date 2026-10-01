@@ -19,5 +19,15 @@ final readonly class PayCyclePip
         public ?string $tooltip = null,
         public ?string $categoryPath = null,
         public ?string $detail = null,
+        public ?string $transferFlow = null,
     ) {}
+
+    /**
+     * How this pip moves the Income / Spend totals: 'inc', 'out', or null when it does not.
+     * Regular pips follow their tone; a transfer follows its transferFlow (null = neutral).
+     */
+    public function flow(): ?string
+    {
+        return $this->tone === 'xfer' ? $this->transferFlow : $this->tone;
+    }
 }

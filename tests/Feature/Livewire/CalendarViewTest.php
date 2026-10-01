@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Enums\PayFrequency;
+use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Livewire\CalendarView;
 use App\Livewire\Data\CalendarDayData;
@@ -761,39 +762,196 @@ test('days inside the active pay cycle are flagged isInActiveCycle', function ()
 
 // ── Transfers ─────────────────────────────────────────────────────
 
-test('transfer-pair transactions are excluded from pips', function () {
-    $user = User::factory()->create();
-    $fromAccount = Account::factory()->for($user)->create();
-    $toAccount = Account::factory()->for($user)->create();
-    $date = CarbonImmutable::now()->startOfMonth()->addDays(3);
-
-    $debit = Transaction::factory()->for($user)->create([
-        'account_id' => $fromAccount->id,
-        'direction' => TransactionDirection::Debit,
-        'amount' => -1000,
+/**
+ * Debit leg on $from paired with a credit leg on $to (both rows on their own account).
+ *
+ * @return array{0: Transaction, 1: Transaction}
+ */
+function calendarPairedTransfer(User $user, Account $from, Account $to, string $date, int $cents): array
+{
+    $debit = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $from->id,
+        'amount' => -$cents,
         'post_date' => $date,
+        'description' => 'Transfer out',
     ]);
-
-    $credit = Transaction::factory()->for($user)->create([
-        'account_id' => $toAccount->id,
-        'direction' => TransactionDirection::Credit,
-        'amount' => 1000,
+    $credit = Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $to->id,
+        'amount' => $cents,
         'post_date' => $date,
+        'description' => 'Transfer in',
         'transfer_pair_id' => $debit->id,
     ]);
-
     $debit->update(['transfer_pair_id' => $credit->id]);
 
-    /** @var CalendarView $instance */
-    $instance = Livewire::actingAs($user)
-        ->test(CalendarView::class)
-        ->instance();
+    return [$debit, $credit];
+}
+
+test('a transfer between two tracked accounts shows one neutral pip and is not counted', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $from = Account::factory()->for($user)->create();
+    $to = Account::factory()->for($user)->create();
+    [$debit] = calendarPairedTransfer($user, $from, $to, '2026-10-06', 1000);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
     /** @var list<CalendarDayData> $days */
-    $days = $instance->days();
+    $days = $component->instance()->days();
+    $cell = collect($days)->firstWhere('iso', '2026-10-06');
 
-    $cell = collect($days)->firstWhere('iso', $date->format('Y-m-d'));
+    expect($cell->pips)->toHaveCount(1)
+        ->and($cell->pips[0]->tone)->toBe('xfer')
+        ->and($cell->pips[0]->transactionId)->toBe($debit->id)
+        ->and($cell->pips[0]->flow())->toBeNull()
+        ->and($component->get('monthTotals'))->toBe(['income' => 0, 'spend' => 0, 'net' => 0]);
+});
 
-    expect($cell->pips)->toBeEmpty();
+test('a transfer out to an untracked account is shown as a transfer and counted as spend', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $everyday = Account::factory()->for($user)->create();
+    $spaceship = Account::factory()->for($user)->untracked()->create();
+    calendarPairedTransfer($user, $everyday, $spaceship, '2026-10-06', 25000);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+    /** @var list<CalendarDayData> $days */
+    $days = $component->instance()->days();
+    $cell = collect($days)->firstWhere('iso', '2026-10-06');
+
+    expect($cell->pips)->toHaveCount(1)
+        ->and($cell->pips[0]->tone)->toBe('xfer')
+        ->and($cell->pips[0]->flow())->toBe('out')
+        ->and($cell->postedCents)->toBe(25000)
+        ->and($component->get('monthTotals'))->toBe(['income' => 0, 'spend' => 25000, 'net' => -25000]);
+});
+
+test('a transfer in from an untracked account is counted as income', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $everyday = Account::factory()->for($user)->create();
+    $investment = Account::factory()->for($user)->untracked()->create();
+    calendarPairedTransfer($user, $investment, $everyday, '2026-10-06', 40000);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+    /** @var list<CalendarDayData> $days */
+    $days = $component->instance()->days();
+    $cell = collect($days)->firstWhere('iso', '2026-10-06');
+
+    expect($cell->pips)->toHaveCount(1)
+        ->and($cell->pips[0]->flow())->toBe('inc')
+        ->and($component->get('monthTotals'))->toBe(['income' => 40000, 'spend' => 0, 'net' => 40000]);
+});
+
+test('a Transfer-categorised row with no pair is shown but not counted', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['name' => 'Transfer']);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $category->id,
+        'amount' => -9000,
+        'post_date' => '2026-10-06',
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+    /** @var list<CalendarDayData> $days */
+    $days = $component->instance()->days();
+    $cell = collect($days)->firstWhere('iso', '2026-10-06');
+
+    expect($cell->pips)->toHaveCount(1)
+        ->and($cell->pips[0]->tone)->toBe('xfer')
+        ->and($component->get('monthTotals')['spend'])->toBe(0);
+});
+
+test('planned transfers count toward projected spend only when they leave the tracked accounts', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $everyday = Account::factory()->for($user)->create();
+    $savings = Account::factory()->for($user)->create();
+    $spaceship = Account::factory()->for($user)->untracked()->create();
+    $ubank = Account::factory()->for($user)->untracked()->create();
+
+    foreach ([
+        ['account' => $everyday, 'to' => $spaceship, 'amount' => 25000, 'start' => '2026-10-20'],
+        ['account' => $everyday, 'to' => $savings, 'amount' => 11100, 'start' => '2026-10-21'],
+        ['account' => $spaceship, 'to' => $ubank, 'amount' => 22200, 'start' => '2026-10-22'],
+        ['account' => $spaceship, 'to' => $everyday, 'amount' => 33300, 'start' => '2026-10-23'],
+    ] as $plan) {
+        PlannedTransaction::factory()->for($user)->for($plan['account'])->monthly()->create([
+            'transfer_to_account_id' => $plan['to']->id,
+            'direction' => TransactionDirection::Debit,
+            'amount' => $plan['amount'],
+            'start_date' => $plan['start'],
+        ]);
+    }
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+    /** @var list<CalendarDayData> $days */
+    $days = $component->instance()->days();
+    $pips = collect($days)->flatMap(fn (CalendarDayData $d) => $d->pips)->where('tone', 'xfer');
+
+    expect($pips->pluck('amount')->sort()->values()->all())->toBe([11100, 25000, 33300])
+        ->and($component->get('projectedTotals'))->toBe(['income' => 33300, 'spend' => 25000])
+        ->and($component->get('monthTotals'))->toBe(['income' => 0, 'spend' => 0, 'net' => 0]);
+});
+
+test('an entered tracked-to-tracked transfer reconciles one planned occurrence, not two', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $everyday = Account::factory()->for($user)->create();
+    $savings = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->for($everyday)->create([
+        'transfer_to_account_id' => $savings->id,
+        'direction' => TransactionDirection::Debit,
+        'frequency' => RecurrenceFrequency::Everyday,
+        'amount' => 5000,
+        'start_date' => '2026-10-08',
+        'until_date' => '2026-10-09',
+    ]);
+    [$debit, $credit] = calendarPairedTransfer($user, $everyday, $savings, '2026-10-09', 5000);
+    $debit->update(['planned_transaction_id' => $planned->id]);
+    $credit->update(['planned_transaction_id' => $planned->id]);
+
+    /** @var list<CalendarDayData> $days */
+    $days = Livewire::actingAs($user)->test(CalendarView::class)->instance()->days();
+    $planPips = collect($days)->flatMap(fn (CalendarDayData $d) => $d->pips)->where('kind', 'plan');
+
+    expect($planPips)->toHaveCount(1)
+        ->and($planPips->first()->occurrenceDate)->toBe('2026-10-08');
+});
+
+test('transfer pips render with the transfer tone, filled when planned', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $everyday = Account::factory()->for($user)->create();
+    $ubank = Account::factory()->for($user)->untracked()->create();
+    calendarPairedTransfer($user, $everyday, $ubank, '2026-10-06', 50000);
+    PlannedTransaction::factory()->for($user)->for($everyday)->monthly()->create([
+        'transfer_to_account_id' => $ubank->id,
+        'direction' => TransactionDirection::Debit,
+        'amount' => 25000,
+        'start_date' => '2026-10-20',
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->assertSeeHtml('cyc-pip tone-xfer"')
+        ->assertSeeHtml('cyc-pip tone-xfer is-planned"')
+        ->assertSeeHtml('>$500.00</span>')
+        ->assertSeeHtml('>$250.00</span>');
+});
+
+test('the pay-cycle loader default still leaves transfers out', function () {
+    $user = User::factory()->create();
+    $everyday = Account::factory()->for($user)->create();
+    $spaceship = Account::factory()->for($user)->untracked()->create();
+    calendarPairedTransfer($user, $everyday, $spaceship, '2026-10-06', 25000);
+
+    $activity = (new App\Support\Calendar\DayActivityLoader)->load(CarbonImmutable::parse('2026-10-01'), CarbonImmutable::parse('2026-10-31'), $user->id);
+
+    expect($activity)->toBe([]);
 });
 
 test('selecting a day shows its detail panel with an add-transaction button and does not open the modal', function () {
