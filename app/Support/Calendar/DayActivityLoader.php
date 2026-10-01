@@ -40,18 +40,29 @@ final readonly class DayActivityLoader
      * Split transactions use: split category > clean description > raw description > 'Transaction'.
      * Unreconciled posted transactions use: clean description > tx category > raw description > 'Transaction'.
      *
+     * Postings and occurrences up to the tolerance outside the range are fetched only to decide
+     * matches (each posting pairs with its nearest occurrence); they are never rendered or counted.
+     *
      * @return array<string, DayActivity>
      */
     public function load(CarbonImmutable $start, CarbonImmutable $end, int $userId): array
     {
-        $transactions = Transaction::query()
+        $tolerance = ReconciliationPolicy::DATE_TOLERANCE_DAYS;
+
+        $withinTolerance = Transaction::query()
             ->where('user_id', $userId)
             ->current()
             ->excludingTransfers()
-            ->whereBetween('post_date', [$start, $end])
+            ->whereBetween('post_date', [$start->subDays($tolerance), $end->addDays($tolerance)])
             ->with([...self::CATEGORY_EAGER_LOAD, ...self::LINKED_PLAN_EAGER_LOAD, ...self::SPLIT_EAGER_LOAD])
             ->orderBy('post_date')
             ->get();
+
+        $startKey = $start->format('Y-m-d');
+        $endKey = $end->format('Y-m-d');
+        $transactions = $withinTolerance
+            ->filter(static fn (Transaction $t): bool => $t->post_date->format('Y-m-d') >= $startKey && $t->post_date->format('Y-m-d') <= $endKey)
+            ->values();
 
         $plannedTransactions = PlannedTransaction::query()
             ->where('user_id', $userId)
@@ -75,27 +86,27 @@ final readonly class DayActivityLoader
         /** @var array<int, list<Transaction>> $reconciledByPlanned */
         $reconciledByPlanned = [];
 
-        foreach ($transactions as $tx) {
+        foreach ($withinTolerance as $tx) {
             if ($tx->planned_transaction_id !== null) {
                 $reconciledByPlanned[$tx->planned_transaction_id][] = $tx;
             }
         }
-
-        /** @var array<int, bool> $claimedTransactionIds */
-        $claimedTransactionIds = [];
 
         /** @var array<string, list<PayCyclePip>> $plannedPipsByDate */
         $plannedPipsByDate = [];
 
         foreach ($plannedTransactions as $planned) {
             $candidates = $reconciledByPlanned[$planned->id] ?? [];
+            $occurrences = $planned->occurrencesBetween($start->subDays($tolerance), $end->addDays($tolerance));
+            $matchedKeys = $this->matchedOccurrenceKeys($candidates, $occurrences);
 
-            foreach ($planned->occurrencesBetween($start, $end) as $occurrence) {
-                if ($this->claimReconciledTransaction($candidates, $claimedTransactionIds, $occurrence)) {
+            foreach ($occurrences as $occurrence) {
+                $key = $occurrence->format('Y-m-d');
+
+                if (isset($matchedKeys[$key]) || $key < $startKey || $key > $endKey) {
                     continue;
                 }
 
-                $key = $occurrence->format('Y-m-d');
                 $plannedPipsByDate[$key] ??= [];
                 $plannedPipsByDate[$key][] = new PayCyclePip(
                     kind: 'plan',
@@ -222,41 +233,43 @@ final readonly class DayActivityLoader
     }
 
     /**
-     * Greedily claim the nearest unclaimed reconciled transaction within the reconciliation
-     * date tolerance for the given occurrence. A claimed transaction is consumed so each
-     * posting suppresses at most one occurrence. Returns true when a claim is made.
+     * Pair postings with occurrences so each posting suppresses at most one occurrence and each
+     * occurrence is suppressed by at most one posting. Pairs within the reconciliation tolerance are
+     * assigned smallest date gap first, so a posting always lands on its nearest occurrence even when
+     * that occurrence (or a competing one) lies outside the rendered range.
      *
      * @param  list<Transaction>  $candidates
-     * @param  array<int, bool>  $claimedTransactionIds
+     * @param  Collection<int, CarbonImmutable>  $occurrences
+     * @return array<string, true> Occurrence dates (Y-m-d) that have a matching posting.
      */
-    private function claimReconciledTransaction(array $candidates, array &$claimedTransactionIds, CarbonImmutable $occurrence): bool
+    private function matchedOccurrenceKeys(array $candidates, Collection $occurrences): array
     {
-        $nearestId = null;
-        $nearestDiff = null;
+        $pairs = [];
 
-        foreach ($candidates as $candidate) {
-            if (isset($claimedTransactionIds[$candidate->id])) {
-                continue;
-            }
+        foreach ($occurrences as $occurrence) {
+            foreach ($candidates as $candidate) {
+                $diff = (int) abs($candidate->post_date->diffInDays($occurrence));
 
-            $diff = (int) abs($candidate->post_date->diffInDays($occurrence));
-
-            if ($diff > ReconciliationPolicy::DATE_TOLERANCE_DAYS) {
-                continue;
-            }
-
-            if ($nearestDiff === null || $diff < $nearestDiff) {
-                $nearestDiff = $diff;
-                $nearestId = $candidate->id;
+                if ($diff <= ReconciliationPolicy::DATE_TOLERANCE_DAYS) {
+                    $pairs[] = [$diff, $occurrence->format('Y-m-d'), $candidate->id];
+                }
             }
         }
 
-        if ($nearestId === null) {
-            return false;
+        usort($pairs, static fn (array $a, array $b): int => [$a[0], $a[1], $a[2]] <=> [$b[0], $b[1], $b[2]]);
+
+        $matched = [];
+        $usedTransactions = [];
+
+        foreach ($pairs as [, $occurrenceKey, $transactionId]) {
+            if (isset($matched[$occurrenceKey]) || isset($usedTransactions[$transactionId])) {
+                continue;
+            }
+
+            $matched[$occurrenceKey] = true;
+            $usedTransactions[$transactionId] = true;
         }
 
-        $claimedTransactionIds[$nearestId] = true;
-
-        return true;
+        return $matched;
     }
 }

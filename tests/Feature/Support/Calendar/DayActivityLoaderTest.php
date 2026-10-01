@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\Category;
@@ -11,6 +12,7 @@ use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\ReconciliationMatcher;
+use App\Services\ReconciliationPolicy;
 use App\Support\Calendar\DayActivity;
 use App\Support\Calendar\DayActivityLoader;
 use Carbon\CarbonImmutable;
@@ -1089,6 +1091,84 @@ test('category paths and inherited icons at any depth cost the same queries rega
         ->and($many->pips[0]->icon)->toBe('star')
         ->and($one->pips[0]->icon)->toBe('star')
         ->and($manyQueries)->toBe($oneQueries);
+});
+
+test('a posting just outside the range still suppresses its in-range planned occurrence without being rendered', function (string $occurrence, string $posted) {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'amount' => 7000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $occurrence,
+        'until_date' => $occurrence,
+    ]);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -7000,
+        'post_date' => $posted,
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    // June 2026 calendar grid: Monday 1 June through Sunday 5 July.
+    $activity = (new DayActivityLoader)->load(CarbonImmutable::create(2026, 6, 1), CarbonImmutable::create(2026, 7, 5), $user->id);
+
+    expect($activity)->toBe([]);
+})->with([
+    'lower edge' => ['2026-06-01', '2026-05-31'],
+    'upper edge' => ['2026-07-05', '2026-07-08'],
+]);
+
+test('an out-of-range posting pairs with its exact out-of-range occurrence and leaves the adjacent in-range occurrence unpaid', function (string $planStart, string $planEnd, string $posted, string $rangeStart, string $rangeEnd, string $unpaid) {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->create([
+        'amount' => 7000,
+        'direction' => TransactionDirection::Debit,
+        'frequency' => RecurrenceFrequency::Everyday,
+        'start_date' => $planStart,
+        'until_date' => $planEnd,
+    ]);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -7000,
+        'post_date' => $posted,
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $activity = (new DayActivityLoader)->load(CarbonImmutable::parse($rangeStart), CarbonImmutable::parse($rangeEnd), $user->id);
+
+    expect(array_keys($activity))->toBe([$unpaid])
+        ->and($activity[$unpaid]->pips)->toHaveCount(1)
+        ->and($activity[$unpaid]->pips[0]->kind)->toBe('plan');
+})->with([
+    'lower edge' => ['2026-05-31', '2026-06-01', '2026-05-31', '2026-06-01', '2026-06-30', '2026-06-01'],
+    'upper edge' => ['2026-06-29', '2026-06-30', '2026-06-30', '2026-06-01', '2026-06-29', '2026-06-29'],
+]);
+
+test('a posting beyond the reconciliation tolerance outside the range does not suppress the occurrence', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $occurrence = CarbonImmutable::create(2026, 6, 1);
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'amount' => 7000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $occurrence,
+        'until_date' => $occurrence,
+    ]);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -7000,
+        'post_date' => $occurrence->subDays(ReconciliationPolicy::DATE_TOLERANCE_DAYS + 1),
+        'planned_transaction_id' => $planned->id,
+    ]);
+
+    $activity = (new DayActivityLoader)->load($occurrence, CarbonImmutable::create(2026, 6, 30), $user->id);
+
+    expect($activity['2026-06-01']->pips)->toHaveCount(1)
+        ->and($activity['2026-06-01']->pips[0]->kind)->toBe('plan');
 });
 
 test('DayActivity::empty returns a zero-state instance', function () {
