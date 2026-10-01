@@ -97,6 +97,7 @@ final readonly class DayActivityLoader
                 $plannedPipsByDate[$key] ??= [];
                 $plannedPipsByDate[$key][] = new PayCyclePip(
                     kind: 'plan',
+                    tone: $planned->direction === TransactionDirection::Credit ? 'inc' : 'out',
                     name: $planned->category?->name ?? $planned->description, // @phpstan-ignore nullsafe.neverNull
                     amount: abs((int) $planned->amount),
                     icon: $planned->category?->resolveIcon(),
@@ -141,6 +142,7 @@ final readonly class DayActivityLoader
                         $splitName = $split->category?->name ?? self::transactionLabel($tx) ?? ($tx->description !== '' ? $tx->description : 'Transaction'); // @phpstan-ignore nullsafe.neverNull
                         $pips[] = new PayCyclePip(
                             kind: $isCredit ? 'inc' : 'out',
+                            tone: $isCredit ? 'inc' : 'out',
                             name: $splitName,
                             amount: abs($split->amount),
                             icon: $split->category?->resolveIcon(),
@@ -165,6 +167,7 @@ final readonly class DayActivityLoader
 
                 $pips[] = new PayCyclePip(
                     kind: $isCredit ? 'inc' : 'out',
+                    tone: $isCredit ? 'inc' : 'out',
                     name: $name,
                     amount: $absAmount,
                     icon: $icon,

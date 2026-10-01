@@ -184,6 +184,40 @@ final class CalendarView extends Component
     }
 
     /**
+     * Sum of the visible month's unreconciled planned occurrences, split by direction.
+     * Reconciled plans are already suppressed by DayActivityLoader, so these never double-count
+     * against the posted totals.
+     *
+     * @return array{income: int, spend: int}
+     */
+    #[Computed]
+    public function projectedTotals(): array
+    {
+        $income = 0;
+        $spend = 0;
+
+        foreach ($this->days as $day) { // @phpstan-ignore property.notFound
+            if (! $day->isCurrentMonth) {
+                continue;
+            }
+
+            foreach ($day->pips as $pip) {
+                if ($pip->kind !== 'plan') {
+                    continue;
+                }
+
+                if ($pip->tone === 'inc') {
+                    $income += $pip->amount;
+                } else {
+                    $spend += $pip->amount;
+                }
+            }
+        }
+
+        return ['income' => $income, 'spend' => $spend];
+    }
+
+    /**
      * @return array{iso: string, dayLabel: string, dateLabel: string, pips: list<PayCyclePip>, netCents: int, isToday: bool, isPastPayday: bool, isNextPayday: bool}|null
      */
     #[Computed]
@@ -324,6 +358,6 @@ final class CalendarView extends Component
 
     private function bustCache(): void
     {
-        unset($this->days, $this->monthTotals, $this->selectedDay, $this->headerLabel, $this->importEdgeIso); // @phpstan-ignore property.notFound
+        unset($this->days, $this->monthTotals, $this->projectedTotals, $this->selectedDay, $this->headerLabel, $this->importEdgeIso); // @phpstan-ignore property.notFound
     }
 }

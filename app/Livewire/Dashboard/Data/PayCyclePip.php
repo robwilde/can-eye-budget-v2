@@ -8,6 +8,7 @@ final readonly class PayCyclePip
 {
     public function __construct(
         public string $kind,
+        public string $tone,
         public string $name,
         public int $amount,
         public ?string $icon,
