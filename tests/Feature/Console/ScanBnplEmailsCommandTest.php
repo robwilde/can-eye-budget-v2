@@ -9,6 +9,8 @@ use App\DTOs\RawEmail;
 use App\Models\Account;
 use App\Models\BnplOrder;
 use App\Models\PlannedTransaction;
+use App\Models\Transaction;
+use App\Models\TransactionEmail;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Scheduling\Event;
@@ -132,7 +134,7 @@ test('the scan imports receipts into orders and plans and reports the counts', f
     ]);
 
     $this->artisan('app:scan-bnpl-emails')
-        ->expectsOutput('Scanned 2 email(s): 1 order(s) created, 1 plan(s) created, 1 skipped, 0 failed.')
+        ->expectsOutput('Scanned 2 email(s): 1 order(s) created, 1 plan(s) created, 0 instalment(s) linked, 0 ambiguous, 1 skipped, 0 failed.')
         ->assertSuccessful();
 
     expect($source->queries)->toBe(['from:paypal.com.au subject:(Pay in 4 payment went through) after:2026/07/14'])
@@ -146,7 +148,7 @@ test('a re-run over the same window creates nothing new', function () {
     $this->artisan('app:scan-bnpl-emails')->assertSuccessful();
 
     $this->artisan('app:scan-bnpl-emails')
-        ->expectsOutput('Scanned 2 email(s): 0 order(s) created, 0 plan(s) created, 0 skipped, 0 failed.')
+        ->expectsOutput('Scanned 2 email(s): 0 order(s) created, 0 plan(s) created, 0 instalment(s) linked, 0 ambiguous, 0 skipped, 0 failed.')
         ->assertSuccessful();
 
     expect(BnplOrder::query()->count())->toBe(1)
@@ -213,10 +215,41 @@ test('an email that cannot be imported is reported and the run continues', funct
     fakeScheduleSource([payPalReceiptEmail()]);
 
     $this->artisan('app:scan-bnpl-emails')
-        ->expectsOutput('Scanned 1 email(s): 0 order(s) created, 0 plan(s) created, 0 skipped, 1 failed.')
+        ->expectsOutput('Scanned 1 email(s): 0 order(s) created, 0 plan(s) created, 0 instalment(s) linked, 0 ambiguous, 0 skipped, 1 failed.')
         ->assertSuccessful();
 
     expect(BnplOrder::query()->count())->toBe(0);
+});
+
+test('the scan links each receipt to its posted instalment and counts it once', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-08-06 04:00'));
+    $card = Account::factory()->for($this->user)->creditCard()->create();
+    $first = Transaction::factory()->for($this->user)->for($card)->debit()->create([
+        'amount' => -5025, 'description' => 'VISA -PAYPAL *PYPL PAYIN4 4029357733 AU #8357', 'post_date' => '2026-07-22',
+    ]);
+    $second = Transaction::factory()->for($this->user)->for($card)->debit()->create([
+        'amount' => -5025, 'description' => 'VISA -PAYPAL *PYPL PAYIN4 4029357733 AU #8357', 'post_date' => '2026-08-05',
+    ]);
+    fakeScheduleSource([payPalInstalmentReceiptEmail(2), payPalReceiptEmail()]);
+
+    $this->artisan('app:scan-bnpl-emails', ['--since' => '2026-07-01'])
+        ->expectsOutput('Scanned 2 email(s): 1 order(s) created, 1 plan(s) created, 2 instalment(s) linked, 0 ambiguous, 0 skipped, 0 failed.')
+        ->assertSuccessful();
+
+    $planId = BnplOrder::query()->sole()->planned_transaction_id;
+
+    expect($first->fresh()->planned_transaction_id)->toBe($planId)
+        ->and($second->fresh()->planned_transaction_id)->toBe($planId)
+        ->and(TransactionEmail::query()->pluck('gmail_message_id', 'transaction_id')->all())->toBe([
+            $first->id => 'paypal-receipt-first@mail.test',
+            $second->id => 'paypal-receipt-2@mail.test',
+        ]);
+
+    $this->artisan('app:scan-bnpl-emails', ['--since' => '2026-07-01'])
+        ->expectsOutput('Scanned 2 email(s): 0 order(s) created, 0 plan(s) created, 0 instalment(s) linked, 0 ambiguous, 0 skipped, 0 failed.')
+        ->assertSuccessful();
+
+    expect(TransactionEmail::query()->count())->toBe(2);
 });
 
 test('the scan is scheduled nightly at 04:00 without overlapping', function () {
