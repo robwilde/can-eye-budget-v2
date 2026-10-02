@@ -7,7 +7,9 @@ namespace App\Providers;
 use App\Contracts\ContextDevServiceContract;
 use App\Contracts\GitHubServiceContract;
 use App\Contracts\GmailServiceContract;
+use App\Contracts\ScheduleSource;
 use App\Contracts\TypeSafeServiceContract;
+use App\Services\Bnpl\GmailScheduleSource;
 use App\Services\CategoryRuleGenerator;
 use App\Services\ContextDevService;
 use App\Services\GitHubService;
@@ -23,6 +25,7 @@ use App\Services\PipelineStages\UserRulesStage;
 use App\Services\RedbarkClientFactory;
 use App\Services\TransactionAnalysisPipeline;
 use App\Services\TypeSafeService;
+use App\Support\Email\GmailMailbox;
 use App\Support\Email\ScheduleParser;
 use App\Support\Email\Schedules\PayPalReceiptStrategy;
 use App\View\Composers\LayoutShellComposer;
@@ -78,7 +81,7 @@ final class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(
             GmailServiceContract::class,
-            fn (): GmailService => new GmailService(app(CategoryRuleGenerator::class)),
+            fn (): GmailService => new GmailService(app(CategoryRuleGenerator::class), app(GmailMailbox::class)),
         );
 
         $this->app->alias(GmailServiceContract::class, GmailService::class);
@@ -86,6 +89,8 @@ final class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ScheduleParser::class, fn (): ScheduleParser => new ScheduleParser([
             new PayPalReceiptStrategy,
         ]));
+
+        $this->app->bind(ScheduleSource::class, GmailScheduleSource::class);
 
         $this->app->singleton(GitHubServiceContract::class, fn (): GitHubService => new GitHubService(
             token: (string) config('services.github.token'),
