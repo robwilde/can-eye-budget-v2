@@ -39,6 +39,7 @@ charged to the Credit Card ending in x-8357 on 25 September 2025.</p>
   <tr><td>Current balance</td><td>$0.00 AUD</td></tr>
   <tr><td>Loan reference number</td><td>eacfa072-30dc-40eb-a93d-acc70b06d4d2</td></tr>
 </table>
+<p>As a reminder, here's your upcoming payment schedule: $16.01 AUD on 9 October 2025 $16.01 AUD on 23 October 2025 $16.02 AUD on 6 November 2025</p>
 <p><a href="https://www.paypal.com/myaccount/ppcredit/plans/eacfa072-30dc-40eb-a93d-acc70b06d4d2">To make early payments, or to review your PayPal Pay in 4 Contract, log in to your PayPal account.</a></p>
 </body></html>
 HTML;
@@ -134,4 +135,33 @@ test('Afterpay receipts leave the PayPal-only fields null', function () use ($af
         ->and($receipt['seller'])->toBeNull()
         ->and($receipt['balance'])->toBeNull()
         ->and($receipt['loanReference'])->toBeNull();
+});
+
+test('extracts the upcoming PayPal payment schedule in document order', function () use ($paypalHtml) {
+    $receipt = ReceiptParser::parse(null, $paypalHtml);
+
+    expect($receipt['schedule'])->toBe([
+        ['date' => '9 October 2025', 'amount' => 1601],
+        ['date' => '23 October 2025', 'amount' => 1601],
+        ['date' => '6 November 2025', 'amount' => 1602],
+    ]);
+});
+
+test('deduplicates a schedule repeated by responsive markup', function () use ($paypalHtml) {
+    $html = preg_replace('/(<p>As a reminder.*?<\/p>)/s', '$1$1', $paypalHtml);
+
+    expect(ReceiptParser::parse(null, $html)['schedule'])->toHaveCount(3);
+});
+
+test('a final PayPal instalment receipt has an empty schedule', function () use ($paypalHtml) {
+    $html = preg_replace('/<p>As a reminder.*?<\/p>/s', '', $paypalHtml);
+
+    $receipt = ReceiptParser::parse(null, $html);
+
+    expect($receipt)->not->toBeNull()
+        ->and($receipt['schedule'])->toBe([]);
+});
+
+test('Afterpay receipts carry an empty schedule', function () use ($afterpayHtml) {
+    expect(ReceiptParser::parse(null, $afterpayHtml)['schedule'])->toBe([]);
 });

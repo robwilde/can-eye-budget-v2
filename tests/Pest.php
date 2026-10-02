@@ -4,10 +4,12 @@
 
 declare(strict_types=1);
 
+use App\DTOs\RawEmail;
 use App\Enums\ImportSource;
 use App\Models\Account;
 use App\Models\RedbarkAccount;
 use App\Models\RedbarkFeed;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Http;
 
@@ -178,4 +180,35 @@ function linkedRedbarkFeed(array $feedOverrides = [], array $redbarkAccountOverr
     ]);
 
     return [$feed, $redbarkAccount, $account];
+}
+
+/*
+| BNPL schedule emails, shared by the receipt strategy, importer, scan and linker tests.
+*/
+
+/**
+ * A PayPal Pay in 4 receipt built from tests/Fixtures/emails/paypal-payin4-receipt-<fixture>.html.
+ * The fixtures are synthetic: loan eacfa072-…, seller "Umart Online", four
+ * fortnightly instalments from 21 July 2026 ('first') or the final one on
+ * 1 September 2026 ('last').
+ *
+ * @param  array<string, string>  $replace  search => replacement applied to the HTML
+ */
+function payPalReceiptEmail(
+    string $fixture = 'first',
+    string $messageId = 'paypal-receipt-first@mail.test',
+    array $replace = [],
+    ?CarbonImmutable $date = null,
+): RawEmail {
+    $html = (string) file_get_contents(base_path("tests/Fixtures/emails/paypal-payin4-receipt-$fixture.html"));
+
+    return new RawEmail(
+        messageId: $messageId,
+        subject: 'Your PayPal Pay in 4 payment went through',
+        fromName: 'PayPal',
+        fromAddress: 'service@paypal.com.au',
+        date: $date ?? CarbonImmutable::parse($fixture === 'last' ? '2026-08-31 18:00' : '2026-07-20 18:00'),
+        textBody: null,
+        htmlBody: strtr($html, $replace),
+    );
 }
