@@ -22,4 +22,16 @@ enum BnplProvider: string
             self::Humm => 'Humm',
         };
     }
+
+    /**
+     * SQL LIKE pattern that identifies this provider's instalments on a bank
+     * statement; null when none is known yet.
+     */
+    public function bankDescriptionPattern(): ?string
+    {
+        return match ($this) {
+            self::Paypal => '%PAYIN4%',
+            default => null,
+        };
+    }
 }
