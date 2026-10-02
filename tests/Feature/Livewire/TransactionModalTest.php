@@ -3449,7 +3449,7 @@ test('converting to a plan with categorise-matching ticked creates a rule and ca
         ->and($sibling->fresh()->category_id)->toBe($category->id);
 });
 
-test('converting to a plan without ticking categorise-matching creates no rule and leaves siblings untouched', function () {
+test('converting to a plan with categorise-matching unticked creates no rule and leaves siblings untouched', function () {
     $this->travelTo(CarbonImmutable::parse('2026-03-01'));
 
     $user = User::factory()->create();
@@ -3479,6 +3479,7 @@ test('converting to a plan without ticking categorise-matching creates no rule a
         ->set('transactionType', 'expense')
         ->set('descriptionInput', '15.99 NETFLIX')
         ->set('categoryId', $category->id)
+        ->set('categoriseMatching', false)
         ->set('frequency', RecurrenceFrequency::EveryMonth->value)
         ->call('save')
         ->assertHasNoErrors();
@@ -3643,7 +3644,7 @@ test('editing a transaction with categorise-matching ticked creates a rule and c
         ->and($sibling->fresh()->category_id)->toBe($category->id);
 });
 
-test('editing a transaction without ticking categorise-matching creates no rule and leaves siblings untouched', function () {
+test('editing a transaction with categorise-matching unticked creates no rule and leaves siblings untouched', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
@@ -3670,6 +3671,7 @@ test('editing a transaction without ticking categorise-matching creates no rule 
         ->dispatch('edit-transaction', id: $source->id)
         ->set('descriptionInput', '15.99 NETFLIX')
         ->set('categoryId', $category->id)
+        ->set('categoriseMatching', false)
         ->call('save')
         ->assertHasNoErrors()
         ->assertSet('showModal', false);
@@ -3765,6 +3767,143 @@ test('the categorise-matching checkbox shows when editing in enter mode and not 
         ->test(TransactionModal::class)
         ->dispatch('edit-transaction', id: $debit->id)
         ->assertDontSee('Also categorise matching transactions');
+});
+
+test('opening an uncategorised transaction pre-ticks categorise matching', function () {
+    $user = User::factory()->create();
+    $transaction = Transaction::factory()->for($user)->fromRedbark()->create(['category_id' => null]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->assertSet('categoriseMatching', true);
+});
+
+test('opening a categorised transaction leaves categorise matching unticked', function () {
+    $user = User::factory()->create();
+    $transaction = Transaction::factory()->for($user)->fromRedbark()->withCategory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->assertSet('categoriseMatching', false);
+});
+
+test('opening a transfer leaves categorise matching unticked', function () {
+    $user = User::factory()->create();
+
+    $debit = Transaction::factory()->for($user)->create([
+        'account_id' => Account::factory()->for($user)->create()->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'savings transfer',
+        'source' => TransactionSource::Manual,
+        'category_id' => null,
+    ]);
+    $credit = Transaction::factory()->for($user)->create([
+        'account_id' => Account::factory()->for($user)->create()->id,
+        'amount' => 10000,
+        'direction' => TransactionDirection::Credit,
+        'description' => 'savings transfer',
+        'source' => TransactionSource::Manual,
+        'category_id' => null,
+        'transfer_pair_id' => $debit->id,
+    ]);
+    $debit->update(['transfer_pair_id' => $credit->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $credit->id)
+        ->assertSet('transactionType', 'transfer')
+        ->assertSet('categoriseMatching', false);
+});
+
+test('opening a split transaction leaves categorise matching unticked and saving a category creates no rule', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $split = Transaction::factory()->for($user)->for($account)->fromRedbark()->debit()->create([
+        'merchant_name' => 'Netflix',
+        'description' => 'NETFLIX.COM SYDNEY AU',
+        'amount' => -10000,
+        'category_id' => null,
+    ]);
+    $split->splits()->createMany([
+        ['category_id' => Category::factory()->create()->id, 'amount' => -6000, 'position' => 0],
+        ['category_id' => Category::factory()->create()->id, 'amount' => -4000, 'position' => 1],
+    ]);
+    $sibling = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
+        'merchant_name' => 'Netflix',
+        'description' => 'NETFLIX.COM SYDNEY AU',
+        'category_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $split->id)
+        ->assertSet('categoriseMatching', false)
+        ->set('categoryId', $category->id)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(UserRule::query()->where('user_id', $user->id)->exists())->toBeFalse()
+        ->and($sibling->fresh()->category_id)->toBeNull();
+});
+
+test('categorising an uncategorised transaction creates the rule without ticking the box', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $sibling = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
+        'merchant_name' => 'Netflix',
+        'description' => 'NETFLIX.COM SYDNEY AU',
+        'post_date' => '2026-02-15',
+        'category_id' => null,
+    ]);
+    $source = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
+        'merchant_name' => 'Netflix',
+        'description' => 'NETFLIX.COM SYDNEY AU',
+        'post_date' => '2026-03-15',
+        'category_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('categoryId', $category->id)
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    $rule = UserRule::query()->where('user_id', $user->id)->sole();
+    $sibling->refresh();
+
+    expect($rule->is_auto_apply)->toBeTrue()
+        ->and($rule->is_active)->toBeTrue()
+        ->and($rule->triggers[0])->toBe([
+            'field' => 'description',
+            'operator' => 'contains',
+            'value' => 'Netflix',
+        ])
+        ->and($sibling->category_id)->toBe($category->id)
+        ->and($sibling->category_source)->toBe(CategorySource::Rule);
+});
+
+test('saving an uncategorised transaction without a category creates no rule', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create(['category_id' => null]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->assertSet('categoriseMatching', true)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(UserRule::query()->count())->toBe(0);
 });
 
 test('editing a zero-amount transaction can set a category', function () {

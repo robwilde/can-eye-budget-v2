@@ -1910,6 +1910,67 @@ test('categorised filter treats a split transaction as categorised', function ()
         ->assertDontSee('UNCATEGORISED BNPL');
 });
 
+test('each row shows its category in its own cell', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['name' => 'Everyday']);
+    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $catA = Category::factory()->create(['name' => 'Cat A']);
+    $catB = Category::factory()->create(['name' => 'Cat B']);
+
+    $categorised = Transaction::factory()->for($user)->for($account)->debit()->create([
+        'category_id' => $groceries->id,
+        'description' => 'CATEGORISED ROW',
+        'post_date' => now()->subDays(1),
+    ]);
+    $uncategorised = Transaction::factory()->for($user)->for($account)->debit()->create([
+        'category_id' => null,
+        'description' => 'UNCATEGORISED ROW',
+        'post_date' => now()->subDays(2),
+    ]);
+    $split = Transaction::factory()->for($user)->for($account)->debit()->create([
+        'category_id' => null,
+        'amount' => -10000,
+        'description' => 'SPLIT ROW',
+        'post_date' => now()->subDays(3),
+    ]);
+    $split->splits()->createMany([
+        ['category_id' => $catA->id, 'amount' => -6000, 'position' => 0],
+        ['category_id' => $catB->id, 'amount' => -4000, 'position' => 1],
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSeeHtml('data-testid="category-'.$categorised->id.'">Groceries</span>')
+        ->assertSeeHtml('class="empty" data-testid="category-'.$uncategorised->id.'">Uncategorised</span>')
+        ->assertSeeHtml('data-testid="category-'.$split->id.'">Cat A · Cat B</span>')
+        ->assertSeeHtml('<span class="tx-cat-inline"> · Groceries</span>')
+        ->assertSeeHtml('<span class="tx-cat-inline"> · Uncategorised</span>')
+        ->assertDontSeeHtml('Everyday · Groceries')
+        ->assertDontSeeHtml('class="tx-meta phone-only"');
+});
+
+test('a row whose meta line would only carry its category keeps the label for phones alone', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $groceries = Category::factory()->create(['name' => 'Groceries']);
+
+    Transaction::factory()->for($user)->for($account)->debit()->create([
+        'category_id' => $groceries->id,
+        'description' => 'CATEGORISED ROW',
+        'post_date' => now()->subDays(1),
+    ]);
+    Transaction::factory()->for($user)->for($account)->debit()->create([
+        'category_id' => null,
+        'description' => 'UNCATEGORISED ROW',
+        'post_date' => now()->subDays(2),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class, ['account' => $account->id])
+        ->assertSeeHtml('<div class="tx-meta phone-only"><span class="tx-cat-inline">Groceries</span>')
+        ->assertSeeHtml('<div class="tx-meta phone-only"><span class="tx-cat-inline">Uncategorised</span>');
+});
+
 test('a transfer-paired transaction cannot be split', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
