@@ -25,3 +25,8 @@ Schedule::command('app:expire-redbark-holds')
     ->dailyAt('03:15')
     ->name('redbark:expire-holds')
     ->withoutOverlapping();
+
+Schedule::command('app:scan-bnpl-emails')
+    ->dailyAt('04:00')
+    ->name('bnpl:scan-emails')
+    ->withoutOverlapping();

@@ -50,6 +50,16 @@ final class BnplOrder extends Model
     use HasFactory;
 
     /**
+     * review_note values. No category: the retailer had no remembered category,
+     * so the order (and its plan, when one was created) is uncategorised.
+     * Unsupported cadence: the instalment dates fit no recurrence, so no plan
+     * was created.
+     */
+    public const string REVIEW_NOTE_NO_CATEGORY = 'no_category';
+
+    public const string REVIEW_NOTE_UNSUPPORTED_CADENCE = 'unsupported_cadence';
+
+    /**
      * @var list<string>
      */
     protected $fillable = [
