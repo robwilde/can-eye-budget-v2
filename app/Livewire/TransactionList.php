@@ -26,6 +26,7 @@ use App\Services\GmailService;
 use App\Services\MerchantBrands\ContextDevCreditBalance;
 use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\MerchantBrands\DescriptorGate;
+use App\Services\TransactionEmailLinker;
 use App\Services\Transfers\TransferReviewQueue;
 use App\Support\AmountParser;
 use ContextDev\Core\Exceptions\ContextDevException;
@@ -946,7 +947,7 @@ final class TransactionList extends Component
         }
     }
 
-    public function linkEmail(int $transactionId, int $index): void
+    public function linkEmail(int $transactionId, int $index, TransactionEmailLinker $emails): void
     {
         if ($this->emailPanelTxnId !== $transactionId || ! isset($this->emailResults[$index])) {
             return;
@@ -966,22 +967,16 @@ final class TransactionList extends Component
             ->where('user_id', auth()->id())
             ->findOrFail($transactionId);
 
-        TransactionEmail::query()->firstOrCreate(
-            [
-                'transaction_id' => $transaction->id,
-                'gmail_message_id' => $messageId,
-            ],
-            [
-                'user_id' => auth()->id(),
-                'subject' => is_string($result['subject'] ?? null) ? $result['subject'] : '',
-                'from_name' => is_string($result['fromName'] ?? null) ? $result['fromName'] : null,
-                'from_address' => is_string($result['fromAddress'] ?? null) ? $result['fromAddress'] : '',
-                'email_date' => is_string($result['date'] ?? null) ? $result['date'] : null,
-                'snippet' => is_string($result['snippet'] ?? null) ? $result['snippet'] : null,
-                'gmail_url' => GmailService::deepLink($messageId),
-                'details' => is_array($result['details'] ?? null) ? $result['details'] : null,
-            ],
-        );
+        $emails->link($transaction, new EmailSearchResult(
+            messageId: $messageId,
+            subject: is_string($result['subject'] ?? null) ? $result['subject'] : '',
+            fromName: is_string($result['fromName'] ?? null) ? $result['fromName'] : null,
+            fromAddress: is_string($result['fromAddress'] ?? null) ? $result['fromAddress'] : '',
+            date: is_string($result['date'] ?? null) ? $result['date'] : null,
+            snippet: is_string($result['snippet'] ?? null) ? $result['snippet'] : null,
+            gmailUrl: GmailService::deepLink($messageId),
+            details: is_array($result['details'] ?? null) ? $result['details'] : null,
+        ));
     }
 
     public function unlinkEmail(int $emailId): void
