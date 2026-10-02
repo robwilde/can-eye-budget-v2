@@ -8,6 +8,7 @@ use App\Contracts\ScheduleSource;
 use App\DTOs\RawEmail;
 use App\Models\User;
 use App\Services\Bnpl\BnplOrderImporter;
+use App\Services\Bnpl\BnplReceiptLinker;
 use App\Support\Email\GmailMailbox;
 use App\Support\Email\ScheduleParser;
 use Carbon\CarbonImmutable;
@@ -28,8 +29,13 @@ final class ScanBnplEmailsCommand extends Command
 
     protected $description = 'Scan the Gmail mailbox for BNPL schedule emails and create planned transactions';
 
-    public function handle(ScheduleParser $parser, ScheduleSource $source, BnplOrderImporter $importer, GmailMailbox $mailbox): int
-    {
+    public function handle(
+        ScheduleParser $parser,
+        ScheduleSource $source,
+        BnplOrderImporter $importer,
+        BnplReceiptLinker $linker,
+        GmailMailbox $mailbox,
+    ): int {
         if (config('budget.bnpl_email_import') !== true) {
             $this->info('BNPL email import is disabled (BUDGET_BNPL_EMAIL_IMPORT).');
 
@@ -52,7 +58,7 @@ final class ScanBnplEmailsCommand extends Command
         }
 
         $dryRun = (bool) $this->option('dry-run');
-        $counts = ['scanned' => 0, 'parsed' => 0, 'orders' => 0, 'plans' => 0, 'skipped' => 0, 'failed' => 0];
+        $counts = ['scanned' => 0, 'parsed' => 0, 'orders' => 0, 'plans' => 0, 'linked' => 0, 'ambiguous' => 0, 'skipped' => 0, 'failed' => 0];
 
         foreach ($parser->strategies() as $strategy) {
             try {
@@ -86,6 +92,13 @@ final class ScanBnplEmailsCommand extends Command
 
                 try {
                     $order = $importer->import($user, $email, $schedule);
+
+                    if ($order->wasRecentlyCreated) {
+                        $counts['orders']++;
+                        $counts['plans'] += $order->planned_transaction_id === null ? 0 : 1;
+                    }
+
+                    $link = $linker->link($order, $email, $schedule);
                 } catch (Throwable $e) {
                     report($e);
                     $counts['failed']++;
@@ -93,20 +106,20 @@ final class ScanBnplEmailsCommand extends Command
                     continue;
                 }
 
-                if ($order->wasRecentlyCreated) {
-                    $counts['orders']++;
-                    $counts['plans'] += $order->planned_transaction_id === null ? 0 : 1;
-                }
+                $counts['linked'] += $link->transaction === null ? 0 : 1;
+                $counts['ambiguous'] += $link->ambiguous ? 1 : 0;
             }
         }
 
         $this->info($dryRun
             ? sprintf('Dry run: scanned %d email(s): %d schedule(s) parsed, %d skipped; nothing written.', $counts['scanned'], $counts['parsed'], $counts['skipped'])
             : sprintf(
-                'Scanned %d email(s): %d order(s) created, %d plan(s) created, %d skipped, %d failed.',
+                'Scanned %d email(s): %d order(s) created, %d plan(s) created, %d instalment(s) linked, %d ambiguous, %d skipped, %d failed.',
                 $counts['scanned'],
                 $counts['orders'],
                 $counts['plans'],
+                $counts['linked'],
+                $counts['ambiguous'],
                 $counts['skipped'],
                 $counts['failed'],
             ));
