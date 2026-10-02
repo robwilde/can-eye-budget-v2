@@ -48,7 +48,7 @@ final readonly class BnplAccountResolver
 
     private function latestInstalmentAccount(User $user, BnplProvider $provider): ?int
     {
-        $pattern = $this->bankDescriptionPattern($provider);
+        $pattern = $provider->bankDescriptionPattern();
 
         if ($pattern === null) {
             return null;
@@ -64,17 +64,5 @@ final readonly class BnplAccountResolver
             ->value('account_id');
 
         return $accountId === null ? null : (int) $accountId;
-    }
-
-    /**
-     * SQL LIKE pattern that identifies the provider's instalments on a bank
-     * statement; null when the provider has none known yet.
-     */
-    private function bankDescriptionPattern(BnplProvider $provider): ?string
-    {
-        return match ($provider) {
-            BnplProvider::Paypal => '%PAYIN4%',
-            default => null,
-        };
     }
 }
