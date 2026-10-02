@@ -6,26 +6,15 @@ namespace App\Services;
 
 use App\Contracts\GmailServiceContract;
 use App\DTOs\EmailSearchResult;
+use App\DTOs\RawEmail;
 use App\Exceptions\GmailSearchException;
 use App\Models\Transaction;
+use App\Support\Email\GmailMailbox;
 use App\Support\Email\ReceiptParser;
 use Carbon\CarbonImmutable;
-use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
-use RuntimeException;
 use Throwable;
-use Webklex\IMAP\Facades\Client;
-use Webklex\PHPIMAP\Address;
-use Webklex\PHPIMAP\Client as ImapClient;
-use Webklex\PHPIMAP\Exceptions\AuthFailedException;
-use Webklex\PHPIMAP\Exceptions\ConnectionFailedException;
-use Webklex\PHPIMAP\Exceptions\GetMessagesFailedException;
-use Webklex\PHPIMAP\Exceptions\ImapBadRequestException;
-use Webklex\PHPIMAP\Exceptions\ImapServerErrorException;
-use Webklex\PHPIMAP\Exceptions\InvalidWhereQueryCriteriaException;
-use Webklex\PHPIMAP\Exceptions\ResponseException;
-use Webklex\PHPIMAP\Folder;
 use Webklex\PHPIMAP\Message;
 use Webklex\PHPIMAP\Support\MessageCollection;
 
@@ -54,15 +43,10 @@ final class GmailService implements GmailServiceContract
         'humm' => 'humm',
     ];
 
-    /**
-     * Gmail folders searched, in priority order. All Mail covers archived
-     * receipts; INBOX is the fallback for non-English locales / hidden folders.
-     *
-     * @var list<string>
-     */
-    private const array FOLDER_PATHS = ['[Gmail]/All Mail', 'INBOX'];
-
-    public function __construct(private readonly CategoryRuleGenerator $ruleGenerator) {}
+    public function __construct(
+        private readonly CategoryRuleGenerator $ruleGenerator,
+        private readonly GmailMailbox $mailbox,
+    ) {}
 
     /**
      * Build a readable snippet from an email's text and HTML bodies. Flattens
@@ -98,8 +82,7 @@ final class GmailService implements GmailServiceContract
 
     public function isConfigured(): bool
     {
-        return (string) config('imap.accounts.gmail.username') !== ''
-            && (string) config('imap.accounts.gmail.password') !== '';
+        return $this->mailbox->isConfigured();
     }
 
     /**
@@ -131,27 +114,16 @@ final class GmailService implements GmailServiceContract
             throw GmailSearchException::notConfigured();
         }
 
-        $client = null;
-
         try {
-            $client = Client::account('gmail');
-            $client->connect();
-            $folder = $this->resolveFolder($client);
-
-            $messages = $this->runQuery($folder, $this->buildQuery($transaction));
+            $messages = $this->mailbox->search($this->buildQuery($transaction), self::MAX_RESULTS);
 
             if ($messages->isEmpty()) {
-                $messages = $this->runQuery($folder, $this->buildQuery($transaction, withAmount: false));
+                $messages = $this->mailbox->search($this->buildQuery($transaction, withAmount: false), self::MAX_RESULTS);
             }
 
             return $this->rank($messages, $transaction->post_date);
         } catch (Throwable $e) {
             throw GmailSearchException::wrap($e);
-        } finally {
-            try {
-                $client?->disconnect();
-            } catch (Throwable) {
-            }
         }
     }
 
@@ -183,104 +155,21 @@ final class GmailService implements GmailServiceContract
         return $highlights;
     }
 
-    private function resolveFolder(ImapClient $client): Folder
-    {
-        foreach (self::FOLDER_PATHS as $path) {
-            try {
-                $folder = $client->getFolderByPath($path);
-
-                if ($folder instanceof Folder) {
-                    return $folder;
-                }
-            } catch (Throwable) {
-                // Try the next candidate folder.
-            }
-        }
-
-        throw new RuntimeException('No searchable Gmail folder found ('.implode(', ', self::FOLDER_PATHS).').');
-    }
-
-    /**
-     * @throws \Webklex\PHPIMAP\Exceptions\RuntimeException
-     * @throws GetMessagesFailedException
-     * @throws ResponseException
-     * @throws InvalidWhereQueryCriteriaException
-     * @throws ImapBadRequestException
-     * @throws ConnectionFailedException
-     * @throws AuthFailedException
-     * @throws ImapServerErrorException
-     */
-    private function runQuery(Folder $folder, string $query): MessageCollection
-    {
-        return $folder->query()
-            ->where('CUSTOM X-GM-RAW', $query)
-            ->limit(self::MAX_RESULTS)
-            ->get();
-    }
-
     /**
      * @return Collection<int, EmailSearchResult>
      */
     private function rank(MessageCollection $messages, CarbonImmutable $postDate): Collection
     {
         return $messages
-            ->map(fn (Message $message): ?array => $this->mapMessage($message))
+            ->map(static fn (Message $message): ?RawEmail => GmailMailbox::rawEmail($message))
             ->filter()
-            ->map(static function (array $row) use ($postDate): array {
-                $row['proximity'] = $row['date'] instanceof CarbonImmutable
-                    ? abs($row['date']->diffInSeconds($postDate))
-                    : PHP_INT_MAX;
-
-                return $row;
-            })
-            ->sortBy('proximity')
-            ->map(static fn (array $row): EmailSearchResult => $row['result'])
+            ->sortBy(static fn (RawEmail $email): int => $email->date instanceof CarbonImmutable
+                ? (int) abs($email->date->diffInSeconds($postDate))
+                : PHP_INT_MAX)
+            ->map(static fn (RawEmail $email): EmailSearchResult => $email->toSearchResult(
+                ReceiptParser::parse($email->textBody, $email->htmlBody),
+            ))
             ->values();
-    }
-
-    /**
-     * @return array{result: EmailSearchResult, date: ?CarbonImmutable}|null
-     */
-    private function mapMessage(Message $message): ?array
-    {
-        $messageId = mb_trim((string) $message->getMessageId(), "<> \t\n\r\0\x0B");
-
-        if ($messageId === '') {
-            return null;
-        }
-
-        $from = $message->getFrom()->first();
-        $fromName = $from instanceof Address && $from->personal !== '' ? $from->personal : null;
-        $fromAddress = $from instanceof Address ? $from->mail : '';
-
-        $date = $this->messageDate($message);
-        $textBody = $message->getTextBody();
-        $htmlBody = $message->getHTMLBody();
-
-        return [
-            'result' => new EmailSearchResult(
-                messageId: $messageId,
-                subject: (string) $message->getSubject(),
-                fromName: $fromName,
-                fromAddress: $fromAddress,
-                date: $date?->toIso8601String(),
-                snippet: self::snippetFromBodies($textBody, $htmlBody),
-                gmailUrl: self::deepLink($messageId),
-                details: ReceiptParser::parse($textBody, $htmlBody),
-            ),
-            'date' => $date,
-        ];
-    }
-
-    private function messageDate(Message $message): ?CarbonImmutable
-    {
-        $raw = $message->getDate()->first();
-
-        if ($raw instanceof CarbonInterface) {
-            return CarbonImmutable::instance($raw);
-        }
-
-        return null;
     }
 
     /**
