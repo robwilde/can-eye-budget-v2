@@ -26,9 +26,9 @@
 @endphp
 
 @if ($isPassive)
-    <div {{ $attributes->class(['tx-row', 'passive']) }}>
+    <div {{ $attributes->class(['tx-row', 'passive', 'has-category' => isset($category) && $click === null]) }}>
         @if ($click !== null)
-            <button type="button" class="tx-row-hit" wire:click="{{ $click }}">
+            <button type="button" @class(['tx-row-hit', 'has-category' => isset($category)]) wire:click="{{ $click }}">
                 <div @class(['tx-ico', $tone, 'has-logo' => $logo])>
                     @if ($logo)
                         <img src="{{ $logo }}" alt="" loading="lazy" referrerpolicy="no-referrer" class="tx-logo">
@@ -44,9 +44,12 @@
                         @endif
                     </div>
                     @isset($meta)
-                        <div class="tx-meta">{{ $meta }}</div>
+                        <div {{ $meta->attributes->class('tx-meta') }}>{{ $meta }}</div>
                     @endisset
                 </div>
+                @isset($category)
+                    <div class="tx-cat">{{ $category }}</div>
+                @endisset
                 <div @class(['tx-amt', $tone])>{{ MoneyCast::format((int) $amount) }}</div>
             </button>
         @else
@@ -65,9 +68,12 @@
                     @endif
                 </div>
                 @isset($meta)
-                    <div class="tx-meta">{{ $meta }}</div>
+                    <div {{ $meta->attributes->class('tx-meta') }}>{{ $meta }}</div>
                 @endisset
             </div>
+            @isset($category)
+                <div class="tx-cat">{{ $category }}</div>
+            @endisset
             <div @class(['tx-amt', $tone])>{{ MoneyCast::format((int) $amount) }}</div>
         @endif
         @isset($actions)
@@ -76,7 +82,7 @@
     </div>
 @else
     <button type="button"
-            {{ $attributes->class(['tx-row', 'planned' => $isPlanned]) }}
+            {{ $attributes->class(['tx-row', 'planned' => $isPlanned, 'has-category' => isset($category)]) }}
             @if ($isPlanned)
                 wire:click="$dispatch('edit-planned-transaction', { id: {{ (int) $plannedTransactionId }}, occurrenceDate: {{ Js::from($occurrenceDate !== null ? (string) $occurrenceDate : null) }} })"
             @else
@@ -98,9 +104,12 @@
                 @endif
             </div>
             @isset($meta)
-                <div class="tx-meta">{{ $meta }}</div>
+                <div {{ $meta->attributes->class('tx-meta') }}>{{ $meta }}</div>
             @endisset
         </div>
+        @isset($category)
+            <div class="tx-cat">{{ $category }}</div>
+        @endisset
         <div @class(['tx-amt', $tone])>{{ MoneyCast::format((int) $amount) }}</div>
     </button>
 @endif

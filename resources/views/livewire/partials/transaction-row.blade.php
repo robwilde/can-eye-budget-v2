@@ -25,6 +25,7 @@
     $splitCategoryLabel = $transaction->isSplit()
         ? $transaction->splits->map(fn ($s) => $s->category?->name)->filter()->unique()->join(' · ')
         : null;
+    $categoryLabel = $splitCategoryLabel !== null && $splitCategoryLabel !== '' ? $splitCategoryLabel : $transaction->category?->name;
     $brand = $merchantBrands[$transaction->id] ?? null;
     // A transfer whose partner sits on an untracked (hidden) account reads "Transfer → Spaceship".
     $hiddenPartner = $transaction->transfer_pair_id !== null ? $transaction->transferPair?->account : null;
@@ -34,10 +35,11 @@
     $metaParts = array_filter([
         $brand?->title,
         $hiddenTransferLabel,
-        $splitCategoryLabel !== null && $splitCategoryLabel !== '' ? $splitCategoryLabel : $transaction->category?->name,
         $account === null ? $transaction->account?->name : null,
     ]);
     $isPlanned = $transaction->planned_transaction_id !== null;
+    $isPossibleTransfer = $transaction->suggested_pair_id !== null && $transaction->transfer_pair_id === null;
+    $hasDesktopMeta = $metaParts !== [] || $isPlanned || $isPossibleTransfer || $transaction->isSplit() || $transaction->emails->isNotEmpty();
     $hasCleanDescription = filled($transaction->clean_description);
     $displayName = $hasCleanDescription ? $transaction->clean_description : $transaction->description;
     $bulkExcluded = $this->isBulkExcluded($transaction);
@@ -92,9 +94,10 @@
             :logo="$brand?->logo_url"
             :click="'$dispatch(\'edit-transaction\', { id: ' . $transaction->id . ' })'"
         >
-            @if(! empty($metaParts) || $isPlanned || $transaction->emails->isNotEmpty() || $transaction->isSplit() || $transaction->suggested_pair_id !== null)
-                <x-slot:meta>{{ implode(' · ', $metaParts) }}@if($isPlanned) <span class="pill plan">Planned</span>@endif@if($transaction->suggested_pair_id !== null && $transaction->transfer_pair_id === null) <span class="pill split" data-testid="possible-transfer-{{ $transaction->id }}">Possible transfer</span>@endif@if($transaction->isSplit()) <span class="pill split">Split ({{ $transaction->splits->count() }})</span>@endif@if($transaction->emails->isNotEmpty()) <span class="pill email">{{ $transaction->emails->count() }} email{{ $transaction->emails->count() > 1 ? 's' : '' }}</span>@endif</x-slot:meta>
-            @endif
+            <x-slot:category>
+                <span @class(['empty' => $categoryLabel === null]) data-testid="category-{{ $transaction->id }}">{{ $categoryLabel ?? 'Uncategorised' }}</span>
+            </x-slot:category>
+            <x-slot:meta :class="$hasDesktopMeta ? null : 'phone-only'">{{ implode(' · ', $metaParts) }}<span class="tx-cat-inline">{{ $metaParts !== [] ? ' · ' : '' }}{{ $categoryLabel ?? 'Uncategorised' }}</span>@if($isPlanned) <span class="pill plan">Planned</span>@endif@if($isPossibleTransfer) <span class="pill split" data-testid="possible-transfer-{{ $transaction->id }}">Possible transfer</span>@endif@if($transaction->isSplit()) <span class="pill split">Split ({{ $transaction->splits->count() }})</span>@endif@if($transaction->emails->isNotEmpty()) <span class="pill email">{{ $transaction->emails->count() }} email{{ $transaction->emails->count() > 1 ? 's' : '' }}</span>@endif</x-slot:meta>
             <x-slot:actions>
                 @if($brand !== null)
                     <flux:button variant="ghost" size="sm" icon="no-symbol"
