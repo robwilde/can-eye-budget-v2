@@ -212,3 +212,34 @@ function payPalReceiptEmail(
         htmlBody: strtr($html, $replace),
     );
 }
+
+/**
+ * The receipt for instalment $number (1–4) of the fixture loan: $50.25 on
+ * 21 July, 4 August and 18 August 2026, $50.24 on 1 September 2026. Sent the
+ * evening before its Posted-on date, as PayPal does. Instalments 2 and 3 are
+ * derived from the first fixture (Posted on, balance and remaining schedule).
+ */
+function payPalInstalmentReceiptEmail(int $number, ?string $messageId = null): RawEmail
+{
+    $messageId ??= "paypal-receipt-$number@mail.test";
+    $schedule = '$50.25&nbsp;AUD on 4 August 2026 $50.25&nbsp;AUD on 18 August 2026 $50.24&nbsp;AUD on 1 September 2026';
+
+    [$postedOn, $balance, $remaining] = match ($number) {
+        1 => ['21 July 2026', '$150.74', $schedule],
+        2 => ['4 August 2026', '$100.49', '$50.25&nbsp;AUD on 18 August 2026 $50.24&nbsp;AUD on 1 September 2026'],
+        3 => ['18 August 2026', '$50.24', '$50.24&nbsp;AUD on 1 September 2026'],
+        4 => ['1 September 2026', '$0.00', ''],
+    };
+
+    $date = CarbonImmutable::createFromFormat('!j F Y', $postedOn)->subDay()->setTime(18, 0);
+
+    if ($number === 4) {
+        return payPalReceiptEmail('last', $messageId, date: $date);
+    }
+
+    return payPalReceiptEmail('first', $messageId, [
+        '21 July 2026' => $postedOn,
+        '$150.74' => $balance,
+        $schedule => $remaining,
+    ], $date);
+}
