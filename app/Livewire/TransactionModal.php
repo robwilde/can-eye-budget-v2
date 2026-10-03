@@ -86,11 +86,37 @@ final class TransactionModal extends Component
      */
     public array $categoriseContradictions = [];
 
+    /**
+     * The contradicting rows listed under the warning. Locked because their ids
+     * are what a consented move may touch: the form must not be able to widen
+     * that set.
+     *
+     * @var list<array{id: int, description: string, date: string, category: string}>
+     */
+    #[Locked]
+    public array $categoriseContradictionRows = [];
+
+    /** The chosen category and the sorted listed ids: the value the move checkbox submits. */
+    #[Locked]
+    public string $categoriseContradictionKey = '';
+
+    /**
+     * Keys of the lists the user ticked "move" for. A tick given for an earlier
+     * list does not hold the current key, so it renders unticked and moves
+     * nothing, even when it reached the server after the list changed.
+     *
+     * @var list<string>
+     */
+    public array $categoriseMoveConsent = [];
+
     #[Locked]
     public bool $originalWasTransfer = false;
 
     /** Explicit choice among several possible opposite legs when linking a bank-feed row. */
     public ?int $selectedCandidateId = null;
+
+    /** Per request: this request's own updates changed a list the user had ticked. */
+    private bool $categoriseConsentWithdrawn = false;
 
     #[On('open-transaction-modal')]
     public function openForAdd(string $date): void
@@ -255,6 +281,12 @@ final class TransactionModal extends Component
      */
     public function save(): void
     {
+        if ($this->categoriseConsentWithdrawn) {
+            $this->addError('categoriseMoveConsent', __('The matching transactions changed. Check the list and tick again to move them.'));
+
+            return;
+        }
+
         $this->validate($this->formRules(), [
             'date.after' => __('Planned transactions start after today.'),
         ]);
@@ -297,6 +329,7 @@ final class TransactionModal extends Component
                 $this->descriptionInput = $description !== '' ? "{$dollars} {$description}" : $dollars;
             }
             $this->date = $transaction->post_date->format('Y-m-d');
+            $this->refreshCategoriseContradictions();
 
             return;
         }
@@ -307,6 +340,7 @@ final class TransactionModal extends Component
         }
 
         $this->date = $this->nextPlanStartDate($transaction->post_date->toImmutable());
+        $this->refreshCategoriseContradictions();
     }
 
     public function updatedFrequency(): void
@@ -325,6 +359,8 @@ final class TransactionModal extends Component
         if ($this->transactionType !== 'transfer' && ! $this->isBankFeedTransaction) {
             $this->notes = '';
         }
+
+        $this->refreshCategoriseContradictions();
     }
 
     /** Swaps From/To on a manual transfer; a hidden (untracked) account can never become the From side. */
@@ -570,6 +606,16 @@ final class TransactionModal extends Component
     }
 
     public function updatedCategoryId(): void
+    {
+        $this->refreshCategoriseContradictions();
+    }
+
+    public function updatedDescriptionInput(): void
+    {
+        $this->refreshCategoriseContradictions();
+    }
+
+    public function updatedCleanDescription(): void
     {
         $this->refreshCategoriseContradictions();
     }
@@ -849,7 +895,7 @@ final class TransactionModal extends Component
             $child = $transaction->createChild([
                 'category_id' => $this->categoryId,
                 'notes' => $this->notes !== '' ? $this->notes : null,
-                'clean_description' => $this->cleanDescription !== '' ? $this->cleanDescription : null,
+                ...$this->editedDescriptors($transaction),
             ]);
 
             // The partner follows the new version, but only for links that still hold under lock.
@@ -862,7 +908,7 @@ final class TransactionModal extends Component
                 'direction' => $this->transactionType === 'expense'
                     ? TransactionDirection::Debit
                     : TransactionDirection::Credit,
-                'description' => $parsed->description,
+                ...$this->editedDescriptors($transaction),
                 'post_date' => $this->date,
                 'notes' => $this->notes !== '' ? $this->notes : null,
             ]);
@@ -871,6 +917,20 @@ final class TransactionModal extends Component
         $this->applyCategoriseMatching($child);
 
         return true;
+    }
+
+    /**
+     * The descriptor fields updateTransaction() gives the new version. A rule
+     * with a blank match value falls back to them, so the contradiction
+     * preview applies them too.
+     *
+     * @return array<string, string|null>
+     */
+    private function editedDescriptors(Transaction $transaction): array
+    {
+        return $transaction->source->isBankFeed()
+            ? ['clean_description' => $this->cleanDescription !== '' ? $this->cleanDescription : null]
+            : ['description' => AmountParser::parse($this->descriptionInput)->description];
     }
 
     /**
@@ -1027,6 +1087,9 @@ final class TransactionModal extends Component
         return true;
     }
 
+    /**
+     * @throws Throwable
+     */
     private function applyCategoriseMatching(Transaction $source): void
     {
         if (! $this->categoriseMatching
@@ -1036,23 +1099,78 @@ final class TransactionModal extends Component
             return;
         }
 
-        app(CategoryRuleGenerator::class)->generateAndApply($source, $this->categoryId, $this->categoriseMatchValue);
+        $generator = app(CategoryRuleGenerator::class);
+        $generator->generateAndApply($source, $this->categoryId, $this->categoriseMatchValue);
+
+        if ($this->categoriseContradictionKey !== ''
+            && in_array($this->categoriseContradictionKey, $this->categoriseMoveConsent, true)) {
+            $generator->moveManualContradictions(
+                $source,
+                $this->categoryId,
+                $this->categoriseMatchValue,
+                array_column($this->categoriseContradictionRows, 'id'),
+            );
+        }
     }
 
     /**
      * Warn before the rule is created when its match value also catches rows
-     * the user filed elsewhere themselves. Uses the same preview as the
-     * transaction list's rule panel so the two warnings cannot disagree.
+     * the user filed elsewhere themselves, and list them. Built on
+     * ManualContradictionChecker, which also classifies rows for the
+     * transaction list's rule preview, so the two warnings cannot disagree.
      */
     private function refreshCategoriseContradictions(): void
     {
-        $this->categoriseContradictions = [];
+        $source = $this->categoriseContradictionSource();
 
+        // Saving in enter mode re-files the edited row itself, so it cannot
+        // contradict its own rule; plan mode leaves it filed where it is.
+        $contradictions = $source === null
+            ? collect()
+            : app(CategoryRuleGenerator::class)
+                ->manualContradictions($source, $this->categoryId, $this->categoriseMatchValue)
+                ->reject(fn (Transaction $transaction): bool => $this->mode === 'enter' && $transaction->id === $source->id)
+                ->sortByDesc('post_date');
+
+        $this->categoriseContradictions = $contradictions
+            ->countBy(fn (Transaction $transaction): string => $transaction->category->fullPath())
+            ->sortDesc()
+            ->all();
+
+        $this->categoriseContradictionRows = $contradictions
+            ->map(fn (Transaction $transaction): array => [
+                'id' => $transaction->id,
+                'description' => $transaction->description,
+                'date' => $transaction->post_date->format('D j M Y'),
+                'category' => $transaction->category->fullPath(),
+            ])
+            ->values()
+            ->all();
+
+        $ids = array_column($this->categoriseContradictionRows, 'id');
+        sort($ids);
+        $key = $ids === [] ? '' : $this->categoryId.':'.implode(',', $ids);
+
+        if ($key !== $this->categoriseContradictionKey) {
+            $this->categoriseConsentWithdrawn = $this->categoriseConsentWithdrawn
+                || ($key !== '' && in_array($this->categoriseContradictionKey, $this->categoriseMoveConsent, true));
+            $this->categoriseMoveConsent = [];
+            $this->categoriseContradictionKey = $key;
+        }
+    }
+
+    /**
+     * The row the pending rule will be built from, as save will see it: in
+     * enter mode that is the new version carrying the edited descriptors; in
+     * plan mode the persisted row itself. Never saved.
+     */
+    private function categoriseContradictionSource(): ?Transaction
+    {
         if (! $this->categoriseMatching
             || $this->categoryId === null
             || $this->transactionType === 'transfer'
             || $this->editingTransactionId === null) {
-            return;
+            return null;
         }
 
         $source = Transaction::query()
@@ -1060,12 +1178,14 @@ final class TransactionModal extends Component
             ->find($this->editingTransactionId);
 
         if ($source === null || $source->transfer_pair_id !== null) {
-            return;
+            return null;
         }
 
-        $this->categoriseContradictions = app(CategoryRuleGenerator::class)
-            ->preview($source, $this->categoryId, $this->categoriseMatchValue)
-            ->contradictingCategories;
+        if ($this->mode === 'enter') {
+            $source->fill($this->editedDescriptors($source));
+        }
+
+        return $source;
     }
 
     /**
@@ -1358,6 +1478,10 @@ final class TransactionModal extends Component
         $this->occurrenceDate = null;
         $this->categoriseMatching = false;
         $this->categoriseMatchValue = '';
+        $this->categoriseContradictions = [];
+        $this->categoriseContradictionRows = [];
+        $this->categoriseContradictionKey = '';
+        $this->categoriseMoveConsent = [];
         $this->isBankFeedTransaction = false;
         $this->bankFeedTransactionDirection = null;
         $this->transactionType = 'expense';
