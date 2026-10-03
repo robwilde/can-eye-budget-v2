@@ -21,6 +21,8 @@ use App\Models\UserRule;
 use App\Services\Transfers\TransferLinker;
 use App\Support\Calendar\DayActivityLoader;
 use Carbon\CarbonImmutable;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
+use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 
 test('component renders for authenticated user', function () {
@@ -4087,6 +4089,319 @@ test('categorise-matching still warns when the match value is blank and the rule
         ->set('categoriseMatchValue', '   ')
         ->assertSeeHtml('data-testid="categorise-contradicts"')
         ->assertSee($other->fullPath());
+});
+
+// ── Listing and moving contradicting transactions (#549) ──────────
+
+function contradictionSetup(): array
+{
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $target = Category::factory()->create(['name' => 'Entertainment', 'is_hidden' => false]);
+    $other = Category::factory()->create(['name' => 'Education', 'is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'description' => 'NETFLIX',
+        'amount' => 1599,
+        'direction' => TransactionDirection::Debit,
+        'post_date' => '2026-03-15',
+        'category_id' => null,
+    ]);
+
+    return [$user, $account, $target, $other, $source];
+}
+
+/** @param  array<string, mixed>  $attributes */
+function contradictingRow(User $user, Account $account, Category $category, string $description, array $attributes = []): Transaction
+{
+    return Transaction::factory()->for($user)->for($account)->manual()->create([
+        'description' => $description,
+        'clean_description' => 'Tidied name',
+        'post_date' => '2026-02-15',
+        'category_id' => $category->id,
+        'category_source' => CategorySource::Manual,
+        ...$attributes,
+    ]);
+}
+
+function tickMoveContradictions(Testable $component): Testable
+{
+    return $component->set('categoriseMoveConsent', [$component->get('categoriseContradictionKey')]);
+}
+
+test('categorise-matching lists each contradicting transaction by its original description', function () {
+    [$user, $account, $target, $other, $source] = contradictionSetup();
+    $course = contradictingRow($user, $account, $other, 'NETFLIX TRAINING COURSE');
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('categoryId', $target->id)
+        ->set('categoriseMatchValue', 'NETFLIX')
+        ->assertSeeHtml('data-testid="categorise-contradicts-list"')
+        ->assertSee('NETFLIX TRAINING COURSE')
+        ->assertDontSee('Tidied name')
+        ->assertSet('categoriseContradictionRows.0.id', $course->id)
+        ->assertSet('categoriseMoveConsent', []);
+});
+
+test('in enter mode the transaction being edited is not listed as a contradiction of its own rule', function () {
+    [$user, $account, $target, $other] = contradictionSetup();
+    $filed = contradictingRow($user, $account, $other, 'NETFLIX');
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $filed->id)
+        ->set('categoriseMatching', true)
+        ->set('categoryId', $target->id)
+        ->set('categoriseMatchValue', 'NETFLIX')
+        ->assertDontSeeHtml('data-testid="categorise-contradicts"')
+        ->assertSet('categoriseContradictionRows', []);
+});
+
+test('in plan mode the transaction being edited keeps its category, so it is listed and can be moved', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
+    [$user, $account, $target, $other] = contradictionSetup();
+    $filed = contradictingRow($user, $account, $other, 'NETFLIX', [
+        'amount' => 1599,
+        'direction' => TransactionDirection::Debit,
+    ]);
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $filed->id)
+        ->set('mode', 'plan')
+        ->set('descriptionInput', '15.99 NETFLIX')
+        ->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->set('categoriseMatching', true)
+        ->set('categoryId', $target->id)
+        ->set('categoriseMatchValue', 'NETFLIX')
+        ->assertSet('categoriseContradictionRows.0.id', $filed->id);
+
+    tickMoveContradictions($component)
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    expect($filed->fresh()->category_id)->toBe($target->id)
+        ->and($filed->fresh()->category_source)->toBe(CategorySource::Manual);
+});
+
+test('saving re-files the listed contradicting transactions only when the move box is ticked', function (bool $move, string $expectedCategory) {
+    [$user, $account, $target, $other, $source] = contradictionSetup();
+    $course = contradictingRow($user, $account, $other, 'NETFLIX TRAINING COURSE');
+    $categories = ['target' => $target, 'other' => $other];
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('descriptionInput', '15.99 NETFLIX')
+        ->set('categoryId', $target->id)
+        ->set('categoriseMatchValue', 'NETFLIX');
+
+    if ($move) {
+        tickMoveContradictions($component);
+    }
+
+    $component->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    expect(UserRule::query()->where('user_id', $user->id)->exists())->toBeTrue()
+        ->and($course->fresh()->category_id)->toBe($categories[$expectedCategory]->id)
+        ->and($course->fresh()->category_source)->toBe(CategorySource::Manual);
+})->with([
+    'ticked moves them' => [true, 'target'],
+    'unticked leaves them' => [false, 'other'],
+]);
+
+test('a transaction that starts contradicting after the list was shown is not moved', function () {
+    [$user, $account, $target, $other, $source] = contradictionSetup();
+    $shown = contradictingRow($user, $account, $other, 'NETFLIX TRAINING COURSE');
+
+    $component = tickMoveContradictions(Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('descriptionInput', '15.99 NETFLIX')
+        ->set('categoryId', $target->id)
+        ->set('categoriseMatchValue', 'NETFLIX'));
+
+    $unseen = contradictingRow($user, $account, $other, 'NETFLIX BOOK CLUB');
+
+    $component->call('save')->assertHasNoErrors();
+
+    expect($shown->fresh()->category_id)->toBe($target->id)
+        ->and($unseen->fresh()->category_id)->toBe($other->id);
+});
+
+test('the move tick is cleared when the listed transactions change and kept when they do not', function () {
+    [$user, $account, $target, $other, $source] = contradictionSetup();
+    contradictingRow($user, $account, $other, 'NETFLIX TRAINING COURSE');
+    contradictingRow($user, $account, $other, 'NETFLIX BOOK CLUB');
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('categoryId', $target->id)
+        ->set('categoriseMatchValue', 'NETFLIX');
+    $bothKey = $component->get('categoriseContradictionKey');
+
+    tickMoveContradictions($component)
+        ->set('categoriseMatchValue', 'NETFLIX ')
+        ->assertSet('categoriseMoveConsent', [$bothKey])
+        ->set('categoriseMatchValue', 'NETFLIX TRAINING')
+        ->assertSet('categoriseMoveConsent', [])
+        ->assertDontSee('NETFLIX BOOK CLUB');
+});
+
+test('changing the category clears the move tick even when the same transactions stay listed', function () {
+    [$user, $account, $target, $other, $source] = contradictionSetup();
+    $music = Category::factory()->create(['name' => 'Music', 'is_hidden' => false]);
+    $course = contradictingRow($user, $account, $other, 'NETFLIX TRAINING COURSE');
+
+    tickMoveContradictions(Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('descriptionInput', '15.99 NETFLIX')
+        ->set('categoryId', $target->id)
+        ->set('categoriseMatchValue', 'NETFLIX'))
+        ->set('categoryId', $music->id)
+        ->assertSet('categoriseContradictionRows.0.id', $course->id)
+        ->assertSet('categoriseMoveConsent', [])
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($course->fresh()->category_id)->toBe($other->id);
+});
+
+test('a tick given for an earlier list moves nothing', function () {
+    [$user, $account, $target, $other, $source] = contradictionSetup();
+    $course = contradictingRow($user, $account, $other, 'NETFLIX TRAINING COURSE');
+    $club = contradictingRow($user, $account, $other, 'NETFLIX BOOK CLUB');
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('descriptionInput', '15.99 NETFLIX')
+        ->set('categoryId', $target->id)
+        ->set('categoriseMatchValue', 'NETFLIX TRAINING');
+    $earlierKey = $component->get('categoriseContradictionKey');
+
+    // The tick reaches the server only after the list has already changed,
+    // as it does when it is given while a preview request is in flight.
+    $component->set('categoriseMatchValue', 'NETFLIX')
+        ->set('categoriseMoveConsent', [$earlierKey])
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    expect($course->fresh()->category_id)->toBe($other->id)
+        ->and($club->fresh()->category_id)->toBe($other->id);
+});
+
+test('saving stays open when the same request changes a list the user ticked', function () {
+    [$user, $account, $target, $other, $source] = contradictionSetup();
+    $course = contradictingRow($user, $account, $other, 'NETFLIX TRAINING COURSE');
+    $spotify = contradictingRow($user, $account, $other, 'SPOTIFY PREMIUM');
+
+    $component = Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('categoryId', $target->id)
+        ->set('categoriseMatchValue', '');
+    $netflixKey = $component->get('categoriseContradictionKey');
+
+    // A deferred description edit and the tick arrive with Save, so the list
+    // the user ticked is replaced inside the save request itself.
+    $component->update(
+        calls: [['method' => 'save', 'params' => [], 'path' => '']],
+        updates: ['descriptionInput' => '15.99 SPOTIFY', 'categoriseMoveConsent' => [$netflixKey]],
+    )
+        ->assertHasErrors('categoriseMoveConsent')
+        ->assertSee('The matching transactions changed.')
+        ->assertSet('showModal', true)
+        ->assertSet('categoriseContradictionRows.0.id', $spotify->id)
+        ->assertSet('categoriseMoveConsent', []);
+
+    expect($course->fresh()->category_id)->toBe($other->id)
+        ->and($spotify->fresh()->category_id)->toBe($other->id)
+        ->and(UserRule::query()->where('user_id', $user->id)->exists())->toBeFalse();
+});
+
+test('the listed contradictions cannot be widened from the client', function () {
+    [$user, $account, $target, $other, $source] = contradictionSetup();
+    $shown = contradictingRow($user, $account, $other, 'NETFLIX TRAINING COURSE');
+    $hidden = contradictingRow($user, $account, $other, 'NETFLIX BOOK CLUB');
+
+    $component = tickMoveContradictions(Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('descriptionInput', '15.99 NETFLIX')
+        ->set('categoryId', $target->id)
+        ->set('categoriseMatchValue', 'NETFLIX TRAINING'));
+
+    expect(fn () => $component->set('categoriseContradictionRows.0.id', $hidden->id))
+        ->toThrow(CannotUpdateLockedPropertyException::class)
+        ->and(fn () => $component->set('categoriseContradictionKey', "{$shown->id},{$hidden->id}"))
+        ->toThrow(CannotUpdateLockedPropertyException::class);
+
+    $component->call('save')->assertHasNoErrors();
+
+    expect($shown->fresh()->category_id)->toBe($target->id)
+        ->and($hidden->fresh()->category_id)->toBe($other->id);
+});
+
+test('moving a contradicting transaction leaves its planned group untouched', function () {
+    [$user, $account, $target, $other, $source] = contradictionSetup();
+    $plan = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create(['category_id' => $other->id]);
+    $listed = contradictingRow($user, $account, $other, 'NETFLIX TRAINING COURSE', ['planned_transaction_id' => $plan->id]);
+    $sibling = contradictingRow($user, $account, $other, 'GYM MEMBERSHIP', ['planned_transaction_id' => $plan->id]);
+
+    tickMoveContradictions(Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('descriptionInput', '15.99 NETFLIX')
+        ->set('categoryId', $target->id)
+        ->set('categoriseMatchValue', 'NETFLIX'))
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($listed->fresh()->category_id)->toBe($target->id)
+        ->and($sibling->fresh()->category_id)->toBe($other->id)
+        ->and($plan->fresh()->category_id)->toBe($other->id);
+});
+
+test('with a blank match value the contradiction list follows the edited description', function () {
+    [$user, $account, $target, $other, $source] = contradictionSetup();
+    contradictingRow($user, $account, $other, 'NETFLIX TRAINING COURSE');
+    $spotify = contradictingRow($user, $account, $other, 'SPOTIFY PREMIUM');
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('categoryId', $target->id)
+        ->set('categoriseMatchValue', '')
+        ->assertSee('NETFLIX TRAINING COURSE')
+        ->set('descriptionInput', '15.99 SPOTIFY')
+        ->assertSet('categoriseContradictionRows.0.id', $spotify->id)
+        ->assertDontSee('NETFLIX TRAINING COURSE');
+});
+
+test('switching back from a transfer rebuilds the contradiction list', function () {
+    [$user, $account, $target, $other, $source] = contradictionSetup();
+    $course = contradictingRow($user, $account, $other, 'NETFLIX TRAINING COURSE');
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('categoryId', $target->id)
+        ->set('categoriseMatchValue', 'NETFLIX')
+        ->set('transactionType', 'transfer')
+        ->set('mode', 'plan')
+        ->set('mode', 'enter')
+        ->set('transactionType', 'expense')
+        ->assertSet('categoriseContradictionRows.0.id', $course->id);
 });
 
 // ── Bank-feed transfers link, never duplicate (#519) ─────────────
