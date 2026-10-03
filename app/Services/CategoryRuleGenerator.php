@@ -47,8 +47,17 @@ final readonly class CategoryRuleGenerator
         private ManualContradictionChecker $contradictions,
     ) {}
 
-    public function generateAndApply(Transaction $source, int $categoryId, ?string $matchValue = null): UserRule
-    {
+    /**
+     * A non-blank $cleanDescription adds a SetCleanDescription action: the
+     * sweep renames every match and the import pipeline names new ones. The
+     * raw description, which the triggers read, is never written.
+     */
+    public function generateAndApply(
+        Transaction $source,
+        int $categoryId,
+        ?string $matchValue = null,
+        ?string $cleanDescription = null,
+    ): UserRule {
         $group = $this->group($source->user_id);
 
         $rule = UserRule::query()->create([
@@ -59,7 +68,7 @@ final readonly class CategoryRuleGenerator
             'is_auto_apply' => true,
             'is_active' => true,
             'order' => $this->nextRuleOrder($group->id),
-            ...$this->matchAttributes($source, $categoryId, $matchValue),
+            ...$this->matchAttributes($source, $categoryId, $matchValue, $cleanDescription),
         ]);
 
         $this->applier->applyToHistory($rule);
@@ -251,19 +260,30 @@ final readonly class CategoryRuleGenerator
     }
 
     /**
-     * The trigger and action a generated rule carries. Shared by the commit
+     * The trigger and actions a generated rule carries. Shared by the commit
      * path and the preview so the two cannot diverge.
      *
      * @return array{triggers: array<int, array<string, string>>, actions: array<int, array<string, string>>}
      */
-    private function matchAttributes(Transaction $source, int $categoryId, ?string $matchValue): array
+    private function matchAttributes(Transaction $source, int $categoryId, ?string $matchValue, ?string $cleanDescription = null): array
     {
+        $actions = [[
+            'type' => RuleActionType::SetCategory->value,
+            'value' => (string) $categoryId,
+        ]];
+
+        $cleanDescription = $cleanDescription !== null ? mb_trim($cleanDescription) : '';
+
+        if ($cleanDescription !== '') {
+            $actions[] = [
+                'type' => RuleActionType::SetCleanDescription->value,
+                'value' => $cleanDescription,
+            ];
+        }
+
         return [
             'triggers' => [$this->buildTrigger($source, $matchValue)],
-            'actions' => [[
-                'type' => RuleActionType::SetCategory->value,
-                'value' => (string) $categoryId,
-            ]],
+            'actions' => $actions,
         ];
     }
 

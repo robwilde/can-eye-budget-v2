@@ -118,7 +118,7 @@
 
             @if($isBankFeedTransaction)
                 <flux:input
-                    wire:model.blur="cleanDescription"
+                    wire:model.live.blur="cleanDescription"
                     :label="__('Clean description')"
                     :placeholder="__('Your description for this transaction')"
                 />
@@ -261,7 +261,13 @@
                 <flux:field variant="inline">
                     <flux:checkbox wire:model.live="categoriseMatching"/>
                     <flux:label>{{ __('Also categorise matching transactions') }}</flux:label>
-                    <flux:description>{{ __('Creates a rule that applies this category to past and future transactions from the same merchant.') }}</flux:description>
+                    <flux:description data-testid="categorise-matching-description">
+                        @if($isBankFeedTransaction && mb_trim($cleanDescription) !== '')
+                            {{ __('Creates a rule that applies this category to past and future transactions from the same merchant, and renames them to “:name”.', ['name' => mb_trim($cleanDescription)]) }}
+                        @else
+                            {{ __('Creates a rule that applies this category to past and future transactions from the same merchant.') }}
+                        @endif
+                    </flux:description>
                 </flux:field>
 
                 @if($categoriseMatching)

@@ -141,7 +141,7 @@ final readonly class UserRulesStage implements PipelineStageContract
             return;
         }
 
-        $applied = $this->executor->execute($transaction, $rule->actions);
+        $applied = $this->executor->execute($transaction, $rule->actions, overwriteCleanDescription: false);
 
         // Only record the audit entry when the rule actually took effect. An
         // ineffective auto-apply (e.g. an orphan fee whose parent has not been

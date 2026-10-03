@@ -1100,7 +1100,12 @@ final class TransactionModal extends Component
         }
 
         $generator = app(CategoryRuleGenerator::class);
-        $generator->generateAndApply($source, $this->categoryId, $this->categoriseMatchValue);
+        $generator->generateAndApply(
+            $source,
+            $this->categoryId,
+            $this->categoriseMatchValue,
+            $source->source->isBankFeed() ? $this->cleanDescription : null,
+        );
 
         if ($this->categoriseContradictionKey !== ''
             && in_array($this->categoriseContradictionKey, $this->categoriseMoveConsent, true)) {

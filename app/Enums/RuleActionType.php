@@ -8,6 +8,7 @@ enum RuleActionType: string
 {
     case SetCategory = 'set_category';
     case SetDescription = 'set_description';
+    case SetCleanDescription = 'set_clean_description';
     case AppendNotes = 'append_notes';
     case SetNotes = 'set_notes';
     case LinkToPlannedTransaction = 'link_to_planned_transaction';
@@ -18,6 +19,7 @@ enum RuleActionType: string
         return match ($this) {
             self::SetCategory => 'Set Category',
             self::SetDescription => 'Set Description',
+            self::SetCleanDescription => 'Set Clean Description',
             self::AppendNotes => 'Append Notes',
             self::SetNotes => 'Set Notes',
             self::LinkToPlannedTransaction => 'Link to Planned Transaction',
@@ -30,6 +32,7 @@ enum RuleActionType: string
         return match ($this) {
             self::SetCategory => 'category_id',
             self::SetDescription => 'description',
+            self::SetCleanDescription => 'clean_description',
             self::AppendNotes => 'notes',
             self::SetNotes => 'notes',
             self::LinkToPlannedTransaction => 'planned_transaction_id',

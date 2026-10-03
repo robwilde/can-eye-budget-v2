@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\CategorySource;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\Category;
@@ -180,6 +181,80 @@ test('an explicit match value builds a description-contains rule and categorises
         ->and($wooliesPurchase->fresh()->category_id)->toBe($category->id)
         ->and($netflix->fresh()->category_id)->toBeNull();
 });
+
+test('a clean description renames every match, including rows filed by hand, and keeps their raw descriptions', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $other = Category::factory()->create(['is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'description' => 'ACME SOFTWARE PTY LTD 1833',
+        'category_id' => null,
+    ]);
+    $named = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
+        'merchant_name' => null,
+        'clean_description' => 'Acme old name',
+        'description' => 'ACME SOFTWARE PTY LTD 1902',
+        'category_id' => null,
+    ]);
+    $filedByHand = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'description' => 'ACME SOFTWARE PTY LTD 2011',
+        'category_id' => $other->id,
+        'category_source' => CategorySource::Manual,
+    ]);
+    $unrelated = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'description' => 'SPOTIFY P0A1B2',
+        'category_id' => null,
+    ]);
+
+    $rule = app(CategoryRuleGenerator::class)
+        ->generateAndApply($source, $category->id, 'ACME SOFTWARE', '  Acme hosting  ');
+
+    expect($rule->actions)->toBe([
+        ['type' => 'set_category', 'value' => (string) $category->id],
+        ['type' => 'set_clean_description', 'value' => 'Acme hosting'],
+    ]);
+
+    expect($source->fresh()->clean_description)->toBe('Acme hosting')
+        ->and($named->fresh()->clean_description)->toBe('Acme hosting')
+        ->and($filedByHand->fresh()->clean_description)->toBe('Acme hosting')
+        ->and($filedByHand->fresh()->category_id)->toBe($other->id)
+        ->and($unrelated->fresh()->clean_description)->toBeNull()
+        ->and(collect([$source, $named, $filedByHand])->map->fresh()->pluck('description')->all())->toBe([
+            'ACME SOFTWARE PTY LTD 1833',
+            'ACME SOFTWARE PTY LTD 1902',
+            'ACME SOFTWARE PTY LTD 2011',
+        ]);
+});
+
+test('a blank clean description leaves the rule with only set_category and existing names untouched', function (string $cleanDescription) {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
+        'merchant_name' => 'Netflix',
+        'category_id' => null,
+    ]);
+    $named = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
+        'merchant_name' => 'Netflix',
+        'clean_description' => 'My streaming',
+        'category_id' => null,
+    ]);
+
+    $rule = app(CategoryRuleGenerator::class)->generateAndApply($source, $category->id, null, $cleanDescription);
+
+    expect($rule->actions)->toBe([['type' => 'set_category', 'value' => (string) $category->id]])
+        ->and($named->fresh()->clean_description)->toBe('My streaming')
+        ->and($named->fresh()->category_id)->toBe($category->id);
+})->with(['empty' => '', 'whitespace' => '   ']);
 
 test('suggestMatchValue prefers the merchant name, else the longest description token', function () {
     $user = User::factory()->create();

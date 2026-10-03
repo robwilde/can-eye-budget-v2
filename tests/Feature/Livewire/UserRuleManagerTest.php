@@ -311,6 +311,31 @@ test('applyRule categorises every matching transaction for a manual rule', funct
         ->and($other->fresh()->category_id)->toBeNull();
 });
 
+test('applyRule renames every matching transaction, replacing an existing clean description', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    $rule = UserRule::factory()->for($this->user)->for($group, 'group')->create([
+        'triggers' => [['field' => RuleTriggerField::Description->value, 'operator' => RuleTriggerOperator::Contains->value, 'value' => 'ACME SOFTWARE']],
+        'actions' => [['type' => RuleActionType::SetCleanDescription->value, 'value' => 'Acme hosting']],
+    ]);
+    $account = Account::factory()->for($this->user)->create();
+    $unnamed = Transaction::factory()->for($this->user)->for($account)->fromRedbark()->create([
+        'description' => 'ACME SOFTWARE PTY LTD 1833',
+        'clean_description' => null,
+    ]);
+    $named = Transaction::factory()->for($this->user)->for($account)->fromRedbark()->create([
+        'description' => 'ACME SOFTWARE PTY LTD 1902',
+        'clean_description' => 'Acme domains',
+    ]);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->call('applyRule', $rule->id);
+
+    expect($unnamed->fresh()->clean_description)->toBe('Acme hosting')
+        ->and($named->fresh()->clean_description)->toBe('Acme hosting')
+        ->and($named->fresh()->description)->toBe('ACME SOFTWARE PTY LTD 1902');
+});
+
 test('applyRule ignores another user\'s rule and an inactive rule', function (bool $foreign) {
     $category = Category::factory()->create(['is_hidden' => false]);
     $owner = $foreign ? User::factory()->create() : $this->user;
@@ -439,4 +464,28 @@ test('a value-requiring action with empty value fails validation', function () {
         ->assertHasErrors(['actions.0.value']);
 
     expect(UserRule::where('user_id', $this->user->id)->count())->toBe(0);
+});
+
+test('a set_clean_description value longer than the column fails validation', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+
+    $component = Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->call('openAddRuleModal', $group->id)
+        ->set('ruleName', 'Name Acme')
+        ->set('triggers.0.field', RuleTriggerField::Description->value)
+        ->set('triggers.0.operator', RuleTriggerOperator::Contains->value)
+        ->set('triggers.0.value', 'ACME SOFTWARE')
+        ->set('actions.0.type', RuleActionType::SetCleanDescription->value)
+        ->set('actions.0.value', str_repeat('a', 256))
+        ->call('saveRule')
+        ->assertHasErrors(['actions.0.value' => 'max']);
+
+    expect(UserRule::where('user_id', $this->user->id)->count())->toBe(0);
+
+    $component->set('actions.0.value', str_repeat('a', 255))
+        ->call('saveRule')
+        ->assertHasNoErrors();
+
+    expect(UserRule::where('user_id', $this->user->id)->sole()->actions[0]['value'])->toBe(str_repeat('a', 255));
 });
