@@ -3723,6 +3723,96 @@ test('editing a redbark transaction with categorise-matching ticked creates a ru
         ->and($sibling->fresh()->category_id)->toBe($category->id);
 });
 
+test('saving a bank-feed row with a clean description and categorise-matching ticked renames matching transactions', function (string $mode) {
+    $this->travelTo(CarbonImmutable::parse('2026-03-01'));
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'amount' => 4400,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'ACME SOFTWARE PTY LTD 1833',
+        'post_date' => '2026-02-15',
+        'category_id' => null,
+    ]);
+    $sibling = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'amount' => 4400,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'ACME SOFTWARE PTY LTD 1902',
+        'post_date' => '2026-01-15',
+        'category_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('cleanDescription', 'Acme hosting')
+        ->set('mode', $mode)
+        ->set('frequency', RecurrenceFrequency::EveryMonth->value)
+        ->set('categoryId', $category->id)
+        ->set('categoriseMatching', true)
+        ->set('categoriseMatchValue', 'ACME SOFTWARE')
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertSet('showModal', false);
+
+    $rule = UserRule::query()->where('user_id', $user->id)->sole();
+
+    expect($rule->actions)->toBe([
+        ['type' => 'set_category', 'value' => (string) $category->id],
+        ['type' => 'set_clean_description', 'value' => 'Acme hosting'],
+    ])
+        ->and($sibling->fresh()->clean_description)->toBe('Acme hosting')
+        ->and($sibling->fresh()->category_id)->toBe($category->id)
+        ->and($sibling->fresh()->description)->toBe('ACME SOFTWARE PTY LTD 1902');
+})->with(['enter mode' => 'enter', 'plan mode' => 'plan']);
+
+test('a clean description sent for a manual row never reaches the generated rule', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $source = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'amount' => 4400,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'ACME SOFTWARE',
+        'post_date' => '2026-03-15',
+        'category_id' => null,
+    ]);
+    $sibling = Transaction::factory()->for($user)->for($account)->manual()->create([
+        'merchant_name' => null,
+        'clean_description' => 'Acme domains',
+        'amount' => 4400,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'ACME SOFTWARE',
+        'post_date' => '2026-02-15',
+        'category_id' => null,
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $source->id)
+        ->set('descriptionInput', '44.00 ACME SOFTWARE')
+        ->set('cleanDescription', 'Acme hosting')
+        ->set('categoryId', $category->id)
+        ->set('categoriseMatching', true)
+        ->set('categoriseMatchValue', 'ACME SOFTWARE')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(UserRule::query()->where('user_id', $user->id)->sole()->actions)
+        ->toBe([['type' => 'set_category', 'value' => (string) $category->id]])
+        ->and($sibling->fresh()->clean_description)->toBe('Acme domains');
+});
+
 test('the categorise-matching checkbox shows when editing in enter mode and not when adding', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();

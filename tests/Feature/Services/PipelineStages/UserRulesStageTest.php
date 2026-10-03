@@ -7,6 +7,7 @@
 declare(strict_types=1);
 
 use App\DTOs\PipelineContext;
+use App\Enums\CategorySource;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
 use App\Enums\TransactionDirection;
@@ -169,6 +170,68 @@ test('auto-apply skips previously applied rule+transaction combination', functio
 
     expect($auditCount)->toBe(1);
 });
+
+test('auto-apply names a new import but keeps a clean description a person gave a later version', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $imported = createStageTransaction($this->user, $this->account, [
+        'description' => 'ACME SOFTWARE PTY LTD 1833',
+        'clean_description' => null,
+    ]);
+
+    createRuleWithGroup($this->user, [
+        ['field' => 'description', 'operator' => 'contains', 'value' => 'ACME SOFTWARE'],
+    ], [
+        ['type' => 'set_category', 'value' => (string) $category->id],
+        ['type' => 'set_clean_description', 'value' => 'Acme hosting'],
+    ], [], ['is_auto_apply' => true]);
+
+    $this->stage->execute($this->context);
+
+    expect($imported->fresh()->clean_description)->toBe('Acme hosting')
+        ->and($imported->fresh()->category_id)->toBe($category->id);
+
+    $renamed = $imported->fresh()->createChild(['clean_description' => 'Acme domains']);
+
+    $this->stage->execute($this->context);
+
+    expect($renamed->fresh()->clean_description)->toBe('Acme domains')
+        ->and($renamed->fresh()->description)->toBe('ACME SOFTWARE PTY LTD 1833');
+});
+
+test('auto-apply names a split row and keeps the rule working on it once un-split', function (bool $filedByHand) {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $mine = Category::factory()->create(['is_hidden' => false]);
+    $split = createStageTransaction($this->user, $this->account, [
+        'description' => 'ACME SOFTWARE PTY LTD 1833',
+        'clean_description' => null,
+        'category_id' => $filedByHand ? $mine->id : null,
+        'category_source' => $filedByHand ? CategorySource::Manual : null,
+    ]);
+    $split->splits()->create([
+        'category_id' => $mine->id,
+        'amount' => 1699,
+        'position' => 1,
+    ]);
+
+    createRuleWithGroup($this->user, [
+        ['field' => 'description', 'operator' => 'contains', 'value' => 'ACME SOFTWARE'],
+    ], [
+        ['type' => 'set_category', 'value' => (string) $category->id],
+        ['type' => 'set_clean_description', 'value' => 'Acme hosting'],
+    ], [], ['is_auto_apply' => true]);
+
+    $this->stage->execute($this->context);
+
+    expect($split->fresh()->category_id)->toBe($filedByHand ? $mine->id : null)
+        ->and($split->fresh()->clean_description)->toBe('Acme hosting');
+
+    $split->splits()->delete();
+
+    $this->stage->execute($this->context);
+
+    expect($split->fresh()->category_id)->toBe($filedByHand ? $mine->id : $category->id)
+        ->and($split->fresh()->clean_description)->toBe('Acme hosting');
+})->with(['an uncategorised split' => false, 'a split categorised by hand' => true]);
 
 // ─── Suggestion Creation ───────────────────────────────────────────────
 

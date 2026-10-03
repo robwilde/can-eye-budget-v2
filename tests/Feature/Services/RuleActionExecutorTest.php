@@ -71,6 +71,36 @@ test('set_description updates description', function () {
     expect($transaction->fresh()->description)->toBe('New Description');
 });
 
+// ─── Set Clean Description ─────────────────────────────────────────────
+
+test('set_clean_description replaces the clean description and leaves the raw description', function () {
+    $transaction = createActionTransaction($this->user, $this->account, ['clean_description' => 'Old name']);
+
+    $this->executor->execute($transaction, [
+        ['type' => 'set_clean_description', 'value' => 'Acme hosting'],
+    ]);
+
+    $fresh = $transaction->fresh();
+
+    expect($fresh->clean_description)->toBe('Acme hosting')
+        ->and($fresh->description)->toBe('ORIGINAL DESCRIPTION');
+});
+
+test('without overwrite, set_clean_description only names a row whose clean description is blank', function (?string $existing, string $expected) {
+    $transaction = createActionTransaction($this->user, $this->account, ['clean_description' => $existing]);
+
+    $handled = $this->executor->execute($transaction, [
+        ['type' => 'set_clean_description', 'value' => 'Acme hosting'],
+    ], overwriteCleanDescription: false);
+
+    expect($handled)->toBeTrue()
+        ->and($transaction->fresh()->clean_description)->toBe($expected);
+})->with([
+    'no clean description' => [null, 'Acme hosting'],
+    'a whitespace clean description' => ['   ', 'Acme hosting'],
+    'a person\'s clean description' => ['Acme domains', 'Acme domains'],
+]);
+
 // ─── Append Notes ──────────────────────────────────────────────────────
 
 test('append_notes on null notes sets notes to value', function () {

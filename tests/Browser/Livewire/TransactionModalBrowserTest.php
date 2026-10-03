@@ -5,8 +5,10 @@
 
 declare(strict_types=1);
 
+use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\Transaction;
 use App\Models\User;
 
 $openModal = <<<'JS'
@@ -88,4 +90,36 @@ test('modal submit button takes the selected type colour', function () use ($ope
     $page->script($openModal);
 
     $page->assertPresent('button[data-testid="transaction-submit"].bg-red-600\\!');
+});
+
+test('the categorise-matching description follows the clean description after blur', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $row = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
+        'merchant_name' => null,
+        'clean_description' => null,
+        'amount' => 4400,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'ACME SOFTWARE PTY LTD 1833',
+        'post_date' => '2026-03-15',
+        'category_id' => null,
+    ]);
+
+    $this->actingAs($user);
+
+    $page = visit('/calendar');
+    $page->script("Livewire.dispatch('edit-transaction', { id: {$row->id} })");
+
+    $cleanDescription = 'input[placeholder="Your description for this transaction"]';
+    $description = '[data-testid="categorise-matching-description"]';
+    $elsewhere = '[data-testid="transaction-categorise-match-value"]';
+
+    $page->assertPresent($description)
+        ->assertDontSeeIn($description, 'Acme hosting')
+        ->type($cleanDescription, 'Acme hosting')
+        ->click($elsewhere)
+        ->assertSeeIn($description, 'Acme hosting')
+        ->clear($cleanDescription)
+        ->click($elsewhere)
+        ->assertDontSeeIn($description, 'Acme hosting');
 });
