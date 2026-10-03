@@ -16,13 +16,19 @@ final readonly class RuleActionExecutor
 
     /**
      * @param  array<int, array<string, string>>  $actions
+     * @param  bool  $overwriteCleanDescription  False leaves a non-blank clean
+     *                                           description alone. The import
+     *                                           pipeline re-runs rules on every
+     *                                           new version of a row, so an
+     *                                           overwrite there would revert a
+     *                                           person's later rename.
      * @return bool Whether the rule fully applied. Returns false when a fold
      *              action was requested but did not fold (e.g. an orphan fee
      *              whose parent is not yet imported), so the caller leaves it
      *              unaudited for the next pipeline run to retry — even if other
      *              actions in the same rule took effect.
      */
-    public function execute(Transaction $transaction, array $actions): bool
+    public function execute(Transaction $transaction, array $actions, bool $overwriteCleanDescription = true): bool
     {
         $applied = false;
         $foldPending = false;
@@ -39,6 +45,7 @@ final readonly class RuleActionExecutor
             $effect = match ($type) {
                 RuleActionType::SetCategory => $this->setCategory($transaction, $value),
                 RuleActionType::SetDescription => $this->setDescription($transaction, $value),
+                RuleActionType::SetCleanDescription => $this->setCleanDescription($transaction, $value, $overwriteCleanDescription),
                 RuleActionType::AppendNotes => $this->appendNotes($transaction, $value),
                 RuleActionType::SetNotes => $this->setNotes($transaction, $value),
                 RuleActionType::LinkToPlannedTransaction => $this->linkToPlannedTransaction($transaction, $value),
@@ -155,6 +162,24 @@ final readonly class RuleActionExecutor
         $transaction->description = $value;
 
         return true;
+    }
+
+    /**
+     * Reports handled even when it keeps an existing name, so the pipeline
+     * audits the row and stops retrying it.
+     *
+     * On a split the pipeline still fills the name but reports not-applied,
+     * as setCategory() does, so the split alone never audits the row and the
+     * rule still categorises it once it is un-split. Filling a blank name
+     * again on the next sync changes nothing.
+     */
+    private function setCleanDescription(Transaction $transaction, string $value, bool $overwrite): bool
+    {
+        if ($overwrite || mb_trim($transaction->clean_description ?? '') === '') {
+            $transaction->clean_description = $value;
+        }
+
+        return $overwrite || ! $transaction->isSplit();
     }
 
     private function appendNotes(Transaction $transaction, string $value): bool
