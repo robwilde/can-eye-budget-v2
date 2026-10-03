@@ -535,12 +535,15 @@ final class UserRuleManager extends Component
         // Build the value rule per action index: value-requiring types must have
         // a non-empty value (required is implicit so it catches empty strings),
         // while valueless actions (e.g. fold into parent) accept an empty value.
+        // A clean description is written to a 255-character column.
         foreach (array_keys($this->actions) as $index) {
             $type = RuleActionType::tryFrom($this->actions[$index]['type'] ?? '');
 
-            $rules["actions.{$index}.value"] = $type !== null && ! $type->requiresValue()
-                ? ['nullable', 'string']
-                : ['required', 'string'];
+            $rules["actions.{$index}.value"] = match (true) {
+                $type !== null && ! $type->requiresValue() => ['nullable', 'string'],
+                $type === RuleActionType::SetCleanDescription => ['required', 'string', 'max:255'],
+                default => ['required', 'string'],
+            };
         }
 
         return $rules;
