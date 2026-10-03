@@ -13,6 +13,8 @@ use App\Models\Transaction;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
 use App\Support\Recurring\MerchantSignature;
+use Illuminate\Support\Collection;
+use Throwable;
 
 /**
  * Builds a "categorise this merchant" rule from a source transaction and a
@@ -172,6 +174,61 @@ final readonly class CategoryRuleGenerator
             existingCategories: $existingCategories,
             contradictingCategories: $contradictingCategories,
         );
+    }
+
+    /**
+     * Rows a human filed under another category that the rule would match.
+     *
+     * @return Collection<int, Transaction>
+     */
+    public function manualContradictions(Transaction $source, int $categoryId, ?string $matchValue): Collection
+    {
+        return $this->contradictions
+            ->check($source->user_id, $categoryId, [$this->buildTrigger($source, $matchValue)])['contradicts'];
+    }
+
+    /**
+     * Re-file the contradicting rows the user agreed to move.
+     *
+     * The contradictions are recomputed rather than taken from the form, and
+     * a row moves only when it still contradicts the rule and is among
+     * $consentedIds — the rows the user was shown. A row that started
+     * contradicting after the list was rendered stays where the user put it.
+     *
+     * Stamped Manual because moving it is a direct human choice, and written
+     * row by row without the planned-group fan-out, as applyCategoryToSelection()
+     * does: the fan-out would rewrite siblings the user never saw. One
+     * transaction, so the user's agreement lands for every row or for none.
+     *
+     * The consented rows are locked, in id order, before the recompute reads
+     * them, so a concurrent edit cannot slip in between the check and the save.
+     *
+     * @param  list<int>  $consentedIds
+     *
+     * @throws Throwable
+     */
+    public function moveManualContradictions(Transaction $source, int $categoryId, ?string $matchValue, array $consentedIds): void
+    {
+        $source->getConnection()->transaction(function () use ($source, $categoryId, $matchValue, $consentedIds): void {
+            $locked = Transaction::query()
+                ->where('user_id', $source->user_id)
+                ->whereKey($consentedIds)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->pluck('id')
+                ->flip();
+
+            foreach ($this->manualContradictions($source, $categoryId, $matchValue) as $transaction) {
+                if (! $locked->has($transaction->id)) {
+                    continue;
+                }
+
+                $transaction->category_id = $categoryId;
+                $transaction->category_source = CategorySource::Manual;
+                $transaction->propagateCategoryChange = false;
+                $transaction->save();
+            }
+        });
     }
 
     /**
