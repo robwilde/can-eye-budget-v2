@@ -72,6 +72,7 @@ final class TransactionModal extends Component
 
     public ?string $occurrenceDate = null;
 
+    /** Off by default; openForEdit() ticks it for an uncategorised row that is neither a transfer nor split. */
     public bool $categoriseMatching = false;
 
     public string $categoriseMatchValue = '';
@@ -170,6 +171,9 @@ final class TransactionModal extends Component
         $this->date = $transaction->post_date->format('Y-m-d');
         $this->notes = $transaction->notes ?? '';
         $this->categoriseMatchValue = app(CategoryRuleGenerator::class)->suggestMatchValue($transaction);
+        $this->categoriseMatching = $transaction->category_id === null
+            && $transaction->transfer_pair_id === null
+            && ! $transaction->isSplit();
 
         $this->showModal = true;
     }
