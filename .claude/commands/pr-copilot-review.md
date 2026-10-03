@@ -37,7 +37,7 @@ Abort if:
 
 Draft title and body from the branch's commits + diff. Conventions observed on this repo:
 
-- **Title:** `feat(#<issue>): <short description>` or `fix(#<issue>): …` / `test(#<issue>): …`
+- **Title:** `feat: [<issue>] <short description>` or `fix: [<issue>] …` / `test: [<issue>] …` (same format as commits; `gh pr merge --merge` reuses it as the merge subject)
 - **Body sections:** `## Summary`, `## Closes`, `## Test plan` (as markdown checklist), optional `## Notes`
 - Backtick-escape any backticks in the heredoc body (use `\``) — common PR-body pitfall
 - End the body with the `🤖 Generated with [Claude Code](https://claude.com/claude-code)` footer
