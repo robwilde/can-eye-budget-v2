@@ -280,6 +280,32 @@
                                 {{ $path }} ({{ $count }}){{ ! $loop->last ? ', ' : '' }}
                             @endforeach
                         </p>
+
+                        {{-- Native disclosure: flux:accordion is a Pro component. wire:ignore.self keeps it open across re-renders. --}}
+                        <details class="text-sm" wire:ignore.self data-testid="categorise-contradicts-list">
+                            <summary class="cursor-pointer text-zinc-600 dark:text-zinc-400">
+                                {{ trans_choice('Show the transaction|Show the :count transactions', $contradictingCount, ['count' => $contradictingCount]) }}
+                            </summary>
+                            <ul class="mt-2 max-h-48 space-y-2 overflow-y-auto">
+                                @foreach($categoriseContradictionRows as $row)
+                                    <li wire:key="categorise-contradiction-{{ $row['id'] }}">
+                                        <span class="font-medium break-words">{{ $row['description'] }}</span>
+                                        <span class="block text-xs text-zinc-500 dark:text-zinc-400">{{ $row['date'] }} · {{ $row['category'] }}</span>
+                                    </li>
+                                @endforeach
+                            </ul>
+                        </details>
+
+                        {{-- The tick submits the current list's key, so a tick given for an earlier list renders unticked and moves nothing. Keyed by that list because Flux reads a checkbox's value only once, on init. --}}
+                        <flux:checkbox.group wire:model="categoriseMoveConsent" wire:key="categorise-move-{{ $categoriseContradictionKey }}">
+                            <flux:checkbox
+                                value="{{ $categoriseContradictionKey }}"
+                                :label="trans_choice('Also update this transaction to the new category|Also update these :count transactions to the new category', $contradictingCount, ['count' => $contradictingCount])"
+                                :description="__('Otherwise the rule leaves them as they are.')"
+                                data-testid="categorise-move-contradictions"
+                            />
+                        </flux:checkbox.group>
+                        <flux:error name="categoriseMoveConsent"/>
                     @endif
                 @endif
             @endif
