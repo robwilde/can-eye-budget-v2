@@ -44,38 +44,44 @@ Run `cat op.conf` or read the file if you need to check available aliases.
 Process (issue first): for issue-backed work — which is the default for any
 feature or bug — create the GitHub issue, then branch from it. The issue number
 then exists up front and gets reused throughout that change — branch name,
-commit scope, PR, and the `Closes #NNN` footer — keeping one number threaded
+commit subject, PR, and the `Closes #NNN` footer — keeping one number threaded
 through it. Small self-contained work that warrants no issue skips this and
-takes a module or `repo` scope instead, per the fallback below.
+omits the bracketed id.
 
-Format: `type(scope): subject` — the scope is REQUIRED on every authored
-(non-merge) commit. A bare `type: subject` is invalid.
+Format: `type: [id] summary`. Take the ticket number from the branch name
+(`$GIT_BRANCH_NAME`, e.g. `feat/69-foo` gives `69`) and put it in square
+brackets right after the type, before the summary. Example: `feat: [69] add receipt linker`.
 
-- type: feat | fix | test | refactor | docs | chore | perf | ci | build
-- scope, in order of preference:
-  1. the issue number (e.g. `#249`) when the commit is genuinely part of that
-     issue's work. On a `type/<issue>-slug` branch the branch name may help you
-     identify that issue, but it is not proof — confirm the commit really
-     belongs to that issue's work before using its number;
-  2. a module name (e.g. `pay-cycle`, `transactions`) for work with no issue;
-  3. `repo` for a cross-cutting chore with neither.
-
+- type, exactly one of:
+  - `feat`: new features
+  - `fix`: bug fixes
+  - `chore`: maintenance tasks
+  - `docs`: documentation updates
+  - `style`: code formatting
+  - `refactor`: code refactoring
+  - `test`: adding tests
+- id: the issue number from the branch name, only when the commit is genuinely
+  part of that issue's work. The branch name helps you find the issue but is
+  not proof. A commit with no issue omits the brackets: `chore: bump pint`.
   Do NOT tag an unrelated change with an issue number just because it rides on
-  the same branch — give it its own module scope instead.
-- subject: imperative mood, lowercase, no trailing period, <= 72 chars.
+  the same branch.
+- summary: one short imperative sentence, lowercase, no trailing period.
+  The summary alone is at most 50 characters; `type: [id] ` does not count.
 
-Body (optional, wrap at 72): explain WHY, not what. Note what was verified (test/command run). Separate from subject with a blank line.
+Body (optional): a blank line, then bullets saying what improvement the change
+offers. Two or three sentences at most. Avoid verbose descriptions and
+unnecessary detail. Say what was verified only if it was actually run.
 
-Footer (optional): `Refs #249`, `Closes #249`.
+Footer (optional): `Refs #249`, `Closes #249`, so GitHub links the issue.
 
 Generated merge commits are exceptions, because their subjects are produced by
 a tool rather than authored. There are exactly two:
 
 - **PR merges via `gh pr merge --merge`.** `gh` derives the merge subject from
   the PR title and appends the PR number, e.g.
-  `feat(#449): persist a normalised merchant_key (#455)`. The trailing number
-  is the **PR**; the scope stays the **issue**. Because of this, PR titles must
-  themselves follow `type(scope): subject` — a scopeless or capitalised PR
+  `feat: [449] persist a normalised merchant_key (#455)`. The trailing number
+  is the **PR**; the bracketed number stays the **issue**. Because of this, PR
+  titles must themselves follow `type: [id] summary`: a bare or capitalised PR
   title becomes a non-conforming merge commit on `develop`.
 - **Local merges via `git merge`.** Git's default `Merge branch 'x' into y`
   subject stands as written.
