@@ -193,7 +193,7 @@ const MATRIX_SURFACES_COUNTING_UNTRACKED_TRANSFERS = ['calendar month totals', '
 
 function matrixExpected(array $flow, array $actual, string $surface, string $kind): array
 {
-    if (str_starts_with($kind, 'transfer ') && ! in_array($surface, MATRIX_SURFACES_COUNTING_UNTRACKED_TRANSFERS, true)) {
+    if (preg_match('/^transfer (tracked|untracked)/', $kind) === 1 && ! in_array($surface, MATRIX_SURFACES_COUNTING_UNTRACKED_TRANSFERS, true)) {
         $flow = ['spend' => 0, 'income' => 0];
     }
 
