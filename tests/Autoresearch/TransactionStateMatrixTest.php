@@ -196,6 +196,18 @@ function matrixPlannedSurface(User $user, string $surface): array
 
 const MATRIX_SURFACES_COUNTING_UNTRACKED_TRANSFERS = ['calendar month totals', 'calendar projected totals'];
 
+const MATRIX_SURFACE_KEYS = [
+    'calendar month totals' => ['spend', 'income'],
+    'pay cycle calendar totals' => ['spend', 'income'],
+    'report actuals' => ['spend', 'income'],
+    'dashboard spend last 7 days' => ['spend'],
+    'calendar projected totals' => ['spend', 'income'],
+    'pay cycle calendar planned' => ['counted'],
+    'report plan' => ['spend', 'income'],
+    'balance projection' => ['net'],
+    'needed until payday' => ['spend'],
+];
+
 function matrixExpected(array $flow, array $actual, string $surface, string $kind): array
 {
     if (preg_match('/^transfer (tracked|untracked)/', $kind) === 1 && ! in_array($surface, MATRIX_SURFACES_COUNTING_UNTRACKED_TRANSFERS, true)) {
@@ -209,7 +221,7 @@ function matrixExpected(array $flow, array $actual, string $surface, string $kin
         'counted' => $flow['income'] + $flow['spend'],
     ];
 
-    return array_intersect_key($derived, $actual);
+    return array_intersect_key($derived, array_flip(MATRIX_SURFACE_KEYS[$surface]));
 }
 
 test('entered transaction is classified consistently', function (string $surface, string $kind): void {
