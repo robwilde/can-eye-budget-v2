@@ -36,6 +36,7 @@ const MATRIX_ENTERED_KINDS = [
     'transfer untracked to tracked' => ['spend' => 0, 'income' => MATRIX_AMOUNT],
     'transfer untracked to untracked' => ['spend' => 0, 'income' => 0],
     'transfer category unpaired' => ['spend' => 0, 'income' => 0],
+    'transfer child category unpaired' => ['spend' => 0, 'income' => 0],
     'transfer category marked not a transfer' => ['spend' => MATRIX_AMOUNT, 'income' => 0],
 ];
 
@@ -48,6 +49,7 @@ const MATRIX_PLANNED_KINDS = [
     'transfer untracked to tracked' => ['spend' => 0, 'income' => MATRIX_AMOUNT],
     'transfer untracked to untracked' => ['spend' => 0, 'income' => 0],
     'transfer category without destination' => ['spend' => 0, 'income' => 0],
+    'transfer child category without destination' => ['spend' => 0, 'income' => 0],
 ];
 
 beforeEach(function (): void {
@@ -67,6 +69,7 @@ beforeEach(function (): void {
 
     $this->groceries = Category::factory()->create(['name' => 'Groceries']);
     $this->transferCategory = Category::factory()->create(['name' => 'Transfer']);
+    $this->transferChild = Category::factory()->create(['name' => 'Savings Move', 'parent_id' => $this->transferCategory->id]);
 
     $this->actingAs($this->user);
 });
@@ -103,6 +106,7 @@ function matrixSeedEntered(object $t, string $kind): void
         'transfer untracked to tracked' => matrixPair($t->user, $t->untracked, $t->tracked),
         'transfer untracked to untracked' => matrixPair($t->user, $t->untracked, $t->untrackedOther),
         'transfer category unpaired' => matrixPosted($t->user, $t->tracked, TransactionDirection::Debit, ['category_id' => $t->transferCategory->id]),
+        'transfer child category unpaired' => matrixPosted($t->user, $t->tracked, TransactionDirection::Debit, ['category_id' => $t->transferChild->id]),
         'transfer category marked not a transfer' => matrixPosted($t->user, $t->tracked, TransactionDirection::Debit, [
             'category_id' => $t->transferCategory->id,
             'transfer_link_source' => TransferLinkSource::Unlinked,
@@ -135,6 +139,7 @@ function matrixSeedPlanned(object $t, string $kind): void
         'transfer untracked to tracked' => matrixPlan($t->user, $t->untracked, TransactionDirection::Debit, ['transfer_to_account_id' => $t->tracked->id]),
         'transfer untracked to untracked' => matrixPlan($t->user, $t->untracked, TransactionDirection::Debit, ['transfer_to_account_id' => $t->untrackedOther->id]),
         'transfer category without destination' => matrixPlan($t->user, $t->tracked, TransactionDirection::Debit, ['category_id' => $t->transferCategory->id]),
+        'transfer child category without destination' => matrixPlan($t->user, $t->tracked, TransactionDirection::Debit, ['category_id' => $t->transferChild->id]),
     };
 }
 
