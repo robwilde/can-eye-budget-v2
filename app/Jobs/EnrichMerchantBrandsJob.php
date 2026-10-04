@@ -8,6 +8,7 @@ use App\Enums\TransactionDirection;
 use App\Models\MerchantBrand;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\MerchantBrands\BrandNameWriter;
 use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\MerchantBrands\RepresentativeTransaction;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -24,6 +25,10 @@ use Illuminate\Foundation\Queue\Queueable;
  * Most-frequent keys go first and the batch is sized to what is left of today's
  * credit budget, so a large first import cannot flood the queue with lookups
  * that would only be refused by the cap.
+ *
+ * Before any lookup it applies the stored resolved brands to rows that still
+ * lack a better name, so later imports are named without credits, even when
+ * enrichment is switched off.
  */
 final class EnrichMerchantBrandsJob implements ShouldBeUnique, ShouldQueue
 {
@@ -48,8 +53,10 @@ final class EnrichMerchantBrandsJob implements ShouldBeUnique, ShouldQueue
         return $this->user->id;
     }
 
-    public function handle(ContextDevCreditBudget $budget, RepresentativeTransaction $representatives): void
+    public function handle(ContextDevCreditBudget $budget, RepresentativeTransaction $representatives, BrandNameWriter $names): void
     {
+        $names->fillFromResolvedBrands($this->user);
+
         if (! config('services.context_dev.enrichment_enabled')) {
             return;
         }

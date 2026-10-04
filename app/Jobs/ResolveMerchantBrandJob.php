@@ -8,8 +8,8 @@ use App\Contracts\ContextDevServiceContract;
 use App\DTOs\MerchantBrandData;
 use App\Enums\MerchantBrandStatus;
 use App\Models\MerchantBrand;
-use App\Models\Transaction;
 use App\Models\User;
+use App\Services\MerchantBrands\BrandNameWriter;
 use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\MerchantBrands\DescriptorGate;
 use App\Services\MerchantBrands\RepresentativeTransaction;
@@ -23,10 +23,11 @@ use Illuminate\Support\Facades\Log;
 /**
  * One paid Context.dev lookup for one of a user's merchant keys.
  *
- * Writes only the merchant_brands sidecar, never the transaction: merchant_name
- * feeds merchant_key, and re-keying rows would orphan rules and split recurring
- * clusters. Every guard runs before the credit is reserved, so a skipped lookup
- * costs nothing.
+ * Writes the merchant_brands sidecar and, once a brand resolves, the
+ * import-derived clean name on the rows it matches. It never touches
+ * merchant_name, which feeds merchant_key: re-keying rows would orphan rules and
+ * split recurring clusters. Every guard runs before the credit is reserved, so a
+ * skipped lookup costs nothing.
  */
 final class ResolveMerchantBrandJob implements ShouldBeUnique, ShouldQueue
 {
@@ -59,7 +60,7 @@ final class ResolveMerchantBrandJob implements ShouldBeUnique, ShouldQueue
         return $this->user->id.':'.$this->merchantKey;
     }
 
-    public function handle(RepresentativeTransaction $representatives, DescriptorGate $gate, ContextDevCreditBudget $budget): void
+    public function handle(RepresentativeTransaction $representatives, DescriptorGate $gate, ContextDevCreditBudget $budget, BrandNameWriter $names): void
     {
         if (! config('services.context_dev.enrichment_enabled')) {
             return;
@@ -111,6 +112,8 @@ final class ResolveMerchantBrandJob implements ShouldBeUnique, ShouldQueue
         }
 
         $this->store($brand, $descriptor);
+
+        $names->fillIfResolved($this->user, $this->merchantKey);
     }
 
     private function store(?MerchantBrandData $brand, string $descriptor): void
