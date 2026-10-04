@@ -262,7 +262,7 @@
                     <flux:checkbox wire:model.live="categoriseMatching"/>
                     <flux:label>{{ __('Also categorise matching transactions') }}</flux:label>
                     <flux:description data-testid="categorise-matching-description">
-                        @if($isBankFeedTransaction && mb_trim($cleanDescription) !== '')
+                        @if($isBankFeedTransaction && mb_trim($cleanDescription) !== '' && ($cleanDescription !== $openedCleanDescription || $openedNameIsDeliberate))
                             {{ __('Creates a rule that applies this category to past and future transactions from the same merchant, and renames them to “:name”.', ['name' => mb_trim($cleanDescription)]) }}
                         @else
                             {{ __('Creates a rule that applies this category to past and future transactions from the same merchant.') }}
