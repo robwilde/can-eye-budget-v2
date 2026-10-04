@@ -7,6 +7,7 @@ namespace App\Livewire;
 use App\Enums\BankImportStatus;
 use App\Enums\ImportSource;
 use App\Jobs\ImportCsvTransactionsJob;
+use App\Livewire\Attributes\NotAudited;
 use App\Models\Account;
 use App\Models\BankImport;
 use App\Models\Transaction;
@@ -179,6 +180,7 @@ final class ImportBank extends Component
         $this->step = 3;
     }
 
+    #[NotAudited]
     public function pollStatus(): void
     {
         if ($this->bankImportId === null) {

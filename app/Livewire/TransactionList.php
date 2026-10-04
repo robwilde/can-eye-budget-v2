@@ -15,6 +15,7 @@ use App\Enums\TransactionDirection;
 use App\Enums\TransactionPeriod;
 use App\Exceptions\GmailSearchException;
 use App\Jobs\ResolveMerchantBrandJob;
+use App\Livewire\Attributes\NotAudited;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\MerchantBrand;
@@ -873,6 +874,7 @@ final class TransactionList extends Component
      * expired unresolved row is re-queued while it already exists, so only a
      * write since queueing shows the lookup has finished.
      */
+    #[NotAudited]
     public function pollMerchantBrands(): void
     {
         if ($this->pendingSince === null || now()->getTimestamp() - $this->pendingSince >= self::PENDING_TIMEOUT_SECONDS) {
