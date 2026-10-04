@@ -55,6 +55,7 @@ final class FirstImportSummary
             ->where('user_id', $user->id)
             ->where('created_at', '<=', $run->completed_at)
             ->whereNull('category_id')
+            ->whereDoesntHave('splits')
             ->current()
             ->excludingTransfers()
             ->count();
