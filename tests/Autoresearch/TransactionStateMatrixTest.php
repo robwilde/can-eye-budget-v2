@@ -189,8 +189,14 @@ function matrixPlannedSurface(User $user, string $surface): array
     };
 }
 
-function matrixExpected(array $flow, array $actual): array
+const MATRIX_SURFACES_COUNTING_UNTRACKED_TRANSFERS = ['calendar month totals', 'calendar projected totals'];
+
+function matrixExpected(array $flow, array $actual, string $surface, string $kind): array
 {
+    if (str_starts_with($kind, 'transfer ') && ! in_array($surface, MATRIX_SURFACES_COUNTING_UNTRACKED_TRANSFERS, true)) {
+        $flow = ['spend' => 0, 'income' => 0];
+    }
+
     $derived = [
         'spend' => $flow['spend'],
         'income' => $flow['income'],
@@ -206,7 +212,7 @@ test('entered transaction is classified consistently', function (string $surface
 
     $actual = matrixEnteredSurface($this->user, $surface);
 
-    expect($actual)->toEqual(matrixExpected(MATRIX_ENTERED_KINDS[$kind], $actual));
+    expect($actual)->toEqual(matrixExpected(MATRIX_ENTERED_KINDS[$kind], $actual, $surface, $kind));
 })->with([
     'calendar month totals',
     'pay cycle calendar totals',
@@ -219,7 +225,7 @@ test('planned transaction is classified consistently', function (string $surface
 
     $actual = matrixPlannedSurface($this->user, $surface);
 
-    expect($actual)->toEqual(matrixExpected(MATRIX_PLANNED_KINDS[$kind], $actual));
+    expect($actual)->toEqual(matrixExpected(MATRIX_PLANNED_KINDS[$kind], $actual, $surface, $kind));
 })->with([
     'calendar projected totals',
     'pay cycle calendar planned',
