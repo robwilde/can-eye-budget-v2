@@ -320,3 +320,46 @@ it('does not create a seed rule that contradicts a manual categorisation', funct
         ->and($contradiction['source'])->toBe('seed')
         ->and($contradiction['contradicting_categories'])->toBe([$other->fullPath() => 1]);
 });
+
+it('keeps a seed guard when narrowing a contradicted seed', function () {
+    $user = User::factory()->create();
+    $payroll = Account::factory()->for($user)->create();
+    $other = Account::factory()->for($user)->create();
+    $salary = Category::factory()->create(['name' => 'Salary']);
+    $bonus = Category::factory()->create(['name' => 'Shopping']);
+
+    minerTransaction($user, $payroll, 'ACME PAYROLL  BRISBANE', $salary->id)
+        ->update(['direction' => TransactionDirection::Credit]);
+    minerTransaction($user, $other, 'ACME PAYROLL REFUND  BRISBANE', $bonus->id)
+        ->update(['direction' => TransactionDirection::Credit]);
+
+    $seed = [
+        'value' => 'ACME PAYROLL',
+        'category_id' => $salary->id,
+        'source' => 'income',
+        'extra_triggers' => [['field' => 'direction', 'operator' => 'is', 'value' => 'credit']],
+    ];
+
+    $miner = app(CategoryRuleMiner::class);
+    $candidate = collect($miner->mine($user, [], [$seed])['candidates'])->firstWhere('value', 'ACME PAYROLL');
+
+    expect($candidate['extra_triggers'])->toBe([
+        ['field' => 'direction', 'operator' => 'is', 'value' => 'credit'],
+        ['field' => 'account_id', 'operator' => 'is', 'value' => (string) $payroll->id],
+    ]);
+
+    $rule = new UserRule(['triggers' => $miner->triggersFor($candidate), 'strict_mode' => true]);
+    $debit = Transaction::factory()->for($user)->for($payroll)->create([
+        'description' => 'ACME PAYROLL  SYDNEY',
+        'direction' => TransactionDirection::Debit,
+        'category_id' => null,
+    ]);
+    $credit = Transaction::factory()->for($user)->for($payroll)->create([
+        'description' => 'ACME PAYROLL  SYDNEY',
+        'direction' => TransactionDirection::Credit,
+        'category_id' => null,
+    ]);
+
+    expect(app(RuleEvaluator::class)->matches($debit, $rule))->toBeFalse()
+        ->and(app(RuleEvaluator::class)->matches($credit, $rule))->toBeTrue();
+});
