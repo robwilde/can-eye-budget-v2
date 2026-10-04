@@ -251,6 +251,12 @@ new #[Title('Bank providers')] class extends Component {
                 </div>
             @endif
 
+            <flux:separator />
+
+            <livewire:gmail-connection />
+
+            <flux:separator />
+
             <livewire:analysis-suggestions />
         </div>
 
