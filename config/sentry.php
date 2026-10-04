@@ -67,6 +67,9 @@ return [
     // @see: https://docs.sentry.io/platforms/php/guides/laravel/configuration/options/#sample_rate
     'sample_rate' => env('SENTRY_SAMPLE_RATE') === null ? 1.0 : (float) env('SENTRY_SAMPLE_RATE'),
 
+    // @see: https://docs.sentry.io/platforms/php/guides/laravel/configuration/options/#max_request_body_size
+    'max_request_body_size' => 'none',
+
     // @see: https://docs.sentry.io/platforms/php/guides/laravel/configuration/options/#traces_sample_rate
     'traces_sample_rate' => env('SENTRY_TRACES_SAMPLE_RATE') === null ? null : (float) env('SENTRY_TRACES_SAMPLE_RATE'),
 
@@ -108,8 +111,7 @@ return [
         // Capture Laravel cache events (hits, writes etc.) as breadcrumbs
         'cache' => env('SENTRY_BREADCRUMBS_CACHE_ENABLED', true),
 
-        // Capture Livewire components like routes as breadcrumbs
-        'livewire' => env('SENTRY_BREADCRUMBS_LIVEWIRE_ENABLED', true),
+        'livewire' => false,
 
         // Capture SQL queries as breadcrumbs
         'sql_queries' => env('SENTRY_BREADCRUMBS_SQL_QUERIES_ENABLED', true),
