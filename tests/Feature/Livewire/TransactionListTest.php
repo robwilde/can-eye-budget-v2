@@ -14,6 +14,7 @@ use App\Exceptions\GmailSearchException;
 use App\Livewire\TransactionList;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\GmailCredential;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\TransactionEmail;
@@ -1595,7 +1596,21 @@ test('scanEmail records a friendly error when the search fails', function () {
         ->call('scanEmail', $transaction->id)
         ->assertSet('emailPanelTxnId', $transaction->id)
         ->assertCount('emailResults', 0)
-        ->assertSet('emailScanError', 'Could not search Gmail — check the GMAIL_* credentials and connection.');
+        ->assertSet('emailScanError', 'Could not search Gmail — check your Gmail connection in Settings > Providers.');
+});
+
+test('scanEmail shows the error state when the stored Gmail password cannot be decrypted', function () {
+    $user = User::factory()->create();
+    $transaction = afterpayTransaction($user);
+    $credential = GmailCredential::factory()->for($user)->create();
+    GmailCredential::query()->whereKey($credential->id)->update(['app_password' => 'not-encrypted']);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('scanEmail', $transaction->id)
+        ->assertSet('emailPanelTxnId', $transaction->id)
+        ->assertCount('emailResults', 0)
+        ->assertSet('emailScanError', 'Could not search Gmail — check your Gmail connection in Settings > Providers.');
 });
 
 test('linkEmail persists the email and is idempotent', function () {
@@ -1645,9 +1660,7 @@ test('unlinkEmail removes an owned email but not another users', function () {
     $this->assertDatabaseHas('transaction_emails', ['id' => $foreignEmail->id]);
 });
 
-test('scan-email action is hidden when Gmail is not configured', function () {
-    config(['imap.accounts.gmail.username' => null, 'imap.accounts.gmail.password' => null]);
-
+test('scan-email action is hidden until the user connects Gmail', function () {
     $user = User::factory()->create();
     $transaction = afterpayTransaction($user);
 
@@ -1655,6 +1668,20 @@ test('scan-email action is hidden when Gmail is not configured', function () {
         ->test(TransactionList::class)
         ->assertSee('AFTERPAY PURCHASE')
         ->assertDontSee('scan-email-'.$transaction->id);
+});
+
+test('scan-email action shows for a user with their own Gmail connection only', function () {
+    $user = User::factory()->create();
+    $transaction = afterpayTransaction($user);
+    GmailCredential::factory()->create();
+
+    Livewire::actingAs($user)->test(TransactionList::class)
+        ->assertDontSee('scan-email-'.$transaction->id);
+
+    GmailCredential::factory()->for($user)->create();
+
+    Livewire::actingAs($user)->test(TransactionList::class)
+        ->assertSee('scan-email-'.$transaction->id);
 });
 
 test('linkEmail derives the Gmail URL server-side and ignores the result URL', function () {

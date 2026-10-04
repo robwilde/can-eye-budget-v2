@@ -8,6 +8,7 @@ use App\Contracts\ScheduleSource;
 use App\DTOs\RawEmail;
 use App\Models\Account;
 use App\Models\BnplOrder;
+use App\Models\GmailCredential;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\TransactionEmail;
@@ -21,19 +22,30 @@ use Illuminate\Console\Scheduling\Schedule;
  *
  * @param  list<RawEmail>  $emails
  */
-function fakeScheduleSource(array $emails = [], ?Throwable $failure = null): object
+function fakeScheduleSource(array $emails = [], ?Throwable $failure = null, ?int $failureFor = null): object
 {
-    $source = new class($emails, $failure) implements ScheduleSource
+    $source = new class($emails, $failure, $failureFor) implements ScheduleSource
     {
         /** @var list<string> */
         public array $queries = [];
 
-        /** @param list<RawEmail> $emails */
-        public function __construct(private readonly array $emails, private readonly ?Throwable $failure) {}
+        /** @var list<int> */
+        public array $users = [];
 
-        public function fetch(string $query, int $limit): array
+        /** @param list<RawEmail> $emails */
+        public function __construct(private readonly array $emails, private readonly ?Throwable $failure, private readonly ?int $failureFor) {}
+
+        public function fetch(User $user, string $query, int $limit): array
         {
             $this->queries[] = $query;
+
+            if (! in_array($user->id, $this->users, true)) {
+                $this->users[] = $user->id;
+            }
+
+            if ($this->failureFor !== null && $user->id === $this->failureFor) {
+                throw new RuntimeException('IMAP login refused');
+            }
 
             if ($this->failure !== null) {
                 throw $this->failure;
@@ -50,14 +62,11 @@ function fakeScheduleSource(array $emails = [], ?Throwable $failure = null): obj
 
 beforeEach(function () {
     $this->travelTo(CarbonImmutable::parse('2026-07-25 04:00'));
-    config([
-        'budget.bnpl_email_import' => true,
-        'imap.accounts.gmail.username' => 'budget@example.test',
-        'imap.accounts.gmail.password' => 'app-password',
-    ]);
+    config(['budget.bnpl_email_import' => true]);
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
     $this->user->update(['primary_account_id' => $this->account->id]);
+    GmailCredential::factory()->for($this->user)->create();
 });
 
 test('the scan does nothing while the import flag is off', function () {
@@ -72,32 +81,61 @@ test('the scan does nothing while the import flag is off', function () {
         ->and(BnplOrder::query()->count())->toBe(0);
 });
 
-test('the scan does nothing while Gmail is not configured', function () {
-    config(['imap.accounts.gmail.password' => '']);
+test('users without a connected mailbox are skipped and their mailbox is never read', function () {
+    $this->user->gmailCredential()->delete();
     $source = fakeScheduleSource([payPalReceiptEmail()]);
 
     $this->artisan('app:scan-bnpl-emails')
-        ->expectsOutput('Gmail is not configured (GMAIL_USERNAME / GMAIL_APP_PASSWORD).')
+        ->expectsOutput('No user with a connected Gmail mailbox; nothing to scan.')
         ->assertSuccessful();
 
     expect($source->queries)->toBe([])
         ->and(BnplOrder::query()->count())->toBe(0);
 });
 
-test('with more than one user the owner must be named', function () {
+test('each connected user is scanned through their own mailbox and owns what it imports', function () {
     $other = User::factory()->create();
-    Account::factory()->for($other)->create();
-    fakeScheduleSource([payPalReceiptEmail()]);
+    $otherAccount = Account::factory()->for($other)->create();
+    $other->update(['primary_account_id' => $otherAccount->id]);
+    GmailCredential::factory()->for($other)->create();
+    $skipped = User::factory()->create();
+    $source = fakeScheduleSource([payPalReceiptEmail()]);
 
-    $this->artisan('app:scan-bnpl-emails')
-        ->expectsOutput('More than one user exists; pass --user=<id>.')
-        ->assertFailed();
+    $this->artisan('app:scan-bnpl-emails')->assertSuccessful();
 
-    expect(BnplOrder::query()->count())->toBe(0);
+    expect($source->users)->toBe([$this->user->id, $other->id])
+        ->and(BnplOrder::query()->pluck('user_id')->sort()->values()->all())->toBe([$this->user->id, $other->id]);
+});
+
+test('--user scans only that user and skips them cleanly when they have no mailbox', function () {
+    $other = User::factory()->create();
+    $source = fakeScheduleSource([payPalReceiptEmail()]);
+
+    $this->artisan('app:scan-bnpl-emails', ['--user' => (string) $other->id])
+        ->expectsOutput('No user with a connected Gmail mailbox; nothing to scan.')
+        ->assertSuccessful();
+
+    expect($source->users)->toBe([]);
 
     $this->artisan('app:scan-bnpl-emails', ['--user' => (string) $this->user->id])->assertSuccessful();
 
-    expect(BnplOrder::query()->sole()->user_id)->toBe($this->user->id);
+    expect($source->users)->toBe([$this->user->id])
+        ->and(BnplOrder::query()->sole()->user_id)->toBe($this->user->id);
+});
+
+test('one user failing to fetch does not stop the next user and the run still fails', function () {
+    $other = User::factory()->create();
+    $otherAccount = Account::factory()->for($other)->create();
+    $other->update(['primary_account_id' => $otherAccount->id]);
+    GmailCredential::factory()->for($other)->create();
+    $source = fakeScheduleSource([payPalReceiptEmail()], failureFor: $this->user->id);
+
+    $this->artisan('app:scan-bnpl-emails')
+        ->expectsOutput(sprintf('Gmail fetch failed for user %d: IMAP login refused', $this->user->id))
+        ->assertFailed();
+
+    expect($source->users)->toBe([$this->user->id, $other->id])
+        ->and(BnplOrder::query()->sole()->user_id)->toBe($other->id);
 });
 
 test('an unknown --user fails without writing', function () {
@@ -205,7 +243,7 @@ test('a mailbox failure fails the run', function () {
     fakeScheduleSource(failure: new RuntimeException('IMAP login refused'));
 
     $this->artisan('app:scan-bnpl-emails')
-        ->expectsOutput('Gmail fetch failed: IMAP login refused')
+        ->expectsOutput(sprintf('Gmail fetch failed for user %d: IMAP login refused', $this->user->id))
         ->assertFailed();
 });
 
