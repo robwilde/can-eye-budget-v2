@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Support\Email;
 
 use App\DTOs\RawEmail;
+use App\Models\User;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use RuntimeException;
+use SensitiveParameter;
 use Throwable;
 use Webklex\IMAP\Facades\Client;
 use Webklex\PHPIMAP\Address;
@@ -16,11 +18,7 @@ use Webklex\PHPIMAP\Folder;
 use Webklex\PHPIMAP\Message;
 use Webklex\PHPIMAP\Support\MessageCollection;
 
-/**
- * The app's single Gmail mailbox (config/imap.php `gmail` account): one IMAP
- * connection per search, Gmail's own query language via X-GM-RAW.
- */
-final class GmailMailbox
+final readonly class GmailMailbox
 {
     /**
      * Gmail folders searched, in priority order. All Mail covers archived
@@ -29,6 +27,12 @@ final class GmailMailbox
      * @var list<string>
      */
     private const array FOLDER_PATHS = ['[Gmail]/All Mail', 'INBOX'];
+
+    public function __construct(
+        private string $username,
+        #[SensitiveParameter]
+        private string $password,
+    ) {}
 
     /**
      * The mailbox-independent parts of a message. Null when the message has no
@@ -56,10 +60,25 @@ final class GmailMailbox
         );
     }
 
-    public function isConfigured(): bool
+    public static function forUser(User $user): ?self
     {
-        return (string) config('imap.accounts.gmail.username') !== ''
-            && (string) config('imap.accounts.gmail.password') !== '';
+        $credential = $user->gmailCredential;
+
+        return $credential === null ? null : new self($credential->username, $credential->app_password);
+    }
+
+    /**
+     * @throws Throwable login or connection failure
+     */
+    public function verify(): void
+    {
+        $client = $this->client();
+
+        try {
+            $client->connect();
+        } finally {
+            $this->close($client);
+        }
     }
 
     /**
@@ -70,10 +89,9 @@ final class GmailMailbox
      */
     public function search(string $xGmRaw, int $limit): MessageCollection
     {
-        $client = null;
+        $client = $this->client();
 
         try {
-            $client = Client::account('gmail');
             $client->connect();
 
             return $this->resolveFolder($client)
@@ -82,10 +100,24 @@ final class GmailMailbox
                 ->limit($limit)
                 ->get();
         } finally {
-            try {
-                $client?->disconnect();
-            } catch (Throwable) {
-            }
+            $this->close($client);
+        }
+    }
+
+    private function client(): ImapClient
+    {
+        return Client::make([
+            ...(array) config('imap.accounts.gmail'),
+            'username' => $this->username,
+            'password' => $this->password,
+        ]);
+    }
+
+    private function close(ImapClient $client): void
+    {
+        try {
+            $client->disconnect();
+        } catch (Throwable) {
         }
     }
 
