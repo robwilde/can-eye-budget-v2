@@ -314,3 +314,30 @@ test('starting balance uses available credit when primary account has a credit l
     expect($projection->startingBalanceCents)->toBe(159358)
         ->and($projection->points[0]->balanceCents)->toBe(159358);
 });
+
+test('planned transfers move the projection only across the tracked boundary and by its direction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 100000]);
+    $hidden = Account::factory()->for($user)->untracked()->create();
+    $trackedOther = Account::factory()->for($user)->create();
+    $user->update(['primary_account_id' => $account->id]);
+
+    $plan = fn (Account $from, Account $to, int $amount, int $days) => PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $from->id,
+        'transfer_to_account_id' => $to->id,
+        'direction' => TransactionDirection::Debit,
+        'amount' => $amount,
+        'start_date' => CarbonImmutable::today()->addDays($days),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'is_active' => true,
+    ]);
+
+    $plan($account, $hidden, 30000, 1);
+    $plan($hidden, $account, 10000, 2);
+    $plan($account, $trackedOther, 99999, 3);
+
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
+
+    expect(array_map(fn ($point) => $point->eventAmountCents, $projection->points))->toBe([0, -30000, 10000])
+        ->and($projection->points[2]->balanceCents)->toBe(80000);
+});
