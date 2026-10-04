@@ -233,9 +233,10 @@ final class User extends Authenticatable
 
         return (int) $this->plannedTransactions()
             ->where('is_active', true)
-            ->where('direction', TransactionDirection::Debit)
-            ->excludingTransfers()
+            ->countable()
+            ->with(['account:id,is_tracked', 'transferToAccount:id,is_tracked'])
             ->get()
+            ->filter(static fn (PlannedTransaction $plan): bool => $plan->countedDirection() === TransactionDirection::Debit)
             ->sum(static fn (PlannedTransaction $plan) => $plan->occurrencesBetween($today, $bounds['end'])->count() * abs($plan->amount));
     }
 

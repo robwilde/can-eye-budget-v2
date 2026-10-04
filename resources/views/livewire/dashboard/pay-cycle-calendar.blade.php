@@ -115,6 +115,7 @@
                             $rowTone = match ($pip->kind) {
                                 'inc' => 'inc',
                                 'plan' => 'plan',
+                                'xfer' => 'xfer',
                                 default => 'out',
                             };
                         @endphp

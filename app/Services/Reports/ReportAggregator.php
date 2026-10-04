@@ -133,16 +133,25 @@ final class ReportAggregator
         $transferCategoryIds = $this->transferCategoryIds();
 
         $rows = CategoryAttribution::query($user->id, excludeUntracked: true)
-            ->whereNull('transfer_pair_id')
+            ->where(fn ($counted) => $counted
+                ->where(fn ($ordinary) => $ordinary
+                    ->whereNull('transfer_pair_id')
+                    ->when(
+                        $transferCategoryIds !== [],
+                        fn ($q) => $q->where(fn ($inner) => $inner
+                            ->whereNull('category_id')
+                            ->orWhereNotIn('category_id', $transferCategoryIds)
+                            ->orWhere('transfer_link_source', 'unlinked')),
+                    ))
+                ->orWhereExists(fn ($pair) => $pair
+                    ->selectRaw('1')
+                    ->from('transactions as pair')
+                    ->join('accounts as pair_account', 'pair_account.id', '=', 'pair.account_id')
+                    ->whereColumn('pair.id', 'atoms.transfer_pair_id')
+                    ->whereNull('pair.deleted_at')
+                    ->where('pair_account.is_tracked', false)))
             ->when($start, fn ($q, $s) => $q->where('post_date', '>=', $s))
             ->when($end, fn ($q, $e) => $q->where('post_date', '<=', $e))
-            ->when(
-                $transferCategoryIds !== [],
-                fn ($q) => $q->where(fn ($inner) => $inner
-                    ->whereNull('category_id')
-                    ->orWhereNotIn('category_id', $transferCategoryIds)
-                    ->orWhere('transfer_link_source', 'unlinked')),
-            )
             ->selectRaw("{$monthExpr} as ym, direction, category_id, SUM(ABS(amount)) as total, COUNT(*) as tx_count")
             ->groupByRaw($monthExpr)
             ->groupBy('direction', 'category_id')
@@ -195,7 +204,8 @@ final class ReportAggregator
         $plans = PlannedTransaction::query()
             ->where('user_id', $user->id)
             ->where('is_active', true)
-            ->excludingTransfers()
+            ->countable()
+            ->with(['account:id,is_tracked', 'transferToAccount:id,is_tracked'])
             ->get();
 
         /** @var array<string, array{ym: string, direction: string, category_id: int|null, total: int, count: int}> $atoms */
@@ -208,7 +218,12 @@ final class ReportAggregator
                 continue;
             }
 
-            $direction = $plan->direction->value;
+            $direction = $plan->countedDirection()?->value;
+
+            if ($direction === null) {
+                continue;
+            }
+
             $categoryId = $plan->category_id;
 
             foreach ($this->planOccurrences($plan, $start, $end) as $date) {

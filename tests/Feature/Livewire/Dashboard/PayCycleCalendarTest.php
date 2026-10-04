@@ -527,7 +527,7 @@ test('detail panel exposes all pips for a day even when more than the grid cap',
     expect($selected['pips'] ?? [])->toHaveCount(5);
 });
 
-test('excludes transfer-pair transactions from pips', function () {
+test('a tracked-to-tracked transfer shows once and is not counted in the totals', function () {
     $nextPay = nextMondayAtLeastDaysAhead(7);
 
     $user = User::factory()->withPayCycle()->create([
@@ -555,19 +555,20 @@ test('excludes transfer-pair transactions from pips', function () {
         'post_date' => $start->addDay(),
     ]);
 
+    $component = Livewire::actingAs($user)->test(PayCycleCalendar::class)->instance();
+
     /** @var list<PayCycleDayData> $days */
-    $days = Livewire::actingAs($user)
-        ->test(PayCycleCalendar::class)
-        ->instance()
-        ->days();
+    $days = $component->days();
 
     $allPips = collect($days)->flatMap(fn (PayCycleDayData $day) => $day->pips);
 
-    expect($allPips)->toHaveCount(1)
-        ->and($allPips->first()->amount)->toBe(4000);
+    expect($allPips->where('kind', 'xfer'))->toHaveCount(1)
+        ->and($allPips->where('kind', 'xfer')->first()->amount)->toBe(30000)
+        ->and($allPips->where('kind', 'out'))->toHaveCount(1)
+        ->and($component->totals())->toMatchArray(['posted' => 4000, 'income' => 0]);
 });
 
-test('excludes transfer-categorised planned transactions', function () {
+test('a transfer-categorised plan without a destination is shown but not counted', function () {
     $nextPay = nextMondayAtLeastDaysAhead(7);
 
     $user = User::factory()->withPayCycle()->create([
@@ -587,15 +588,16 @@ test('excludes transfer-categorised planned transactions', function () {
         'frequency' => RecurrenceFrequency::DontRepeat,
     ]);
 
+    $component = Livewire::actingAs($user)->test(PayCycleCalendar::class)->instance();
+
     /** @var list<PayCycleDayData> $days */
-    $days = Livewire::actingAs($user)
-        ->test(PayCycleCalendar::class)
-        ->instance()
-        ->days();
+    $days = $component->days();
 
     $planPips = collect($days)->flatMap(fn (PayCycleDayData $day) => $day->pips)->where('kind', 'plan');
 
-    expect($planPips)->toHaveCount(0);
+    expect($planPips)->toHaveCount(1)
+        ->and($planPips->first()->tone)->toBe('xfer')
+        ->and($component->totals()['planned'])->toBe(0);
 });
 
 test('netCents per day equals credits minus debits', function () {

@@ -458,6 +458,46 @@ test('spend last 7 days excludes internal transfers', function () {
     expect($spend['sum'])->toBe(5000);
 });
 
+test('spend last 7 days counts a transfer to an untracked account but not one from it', function () {
+    $user = User::factory()->withPayCycle()->create();
+    $tracked = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+
+    $out = Transaction::factory()->debit()->for($user)->for($tracked)->create(['amount' => 7000, 'post_date' => now()->subDay()]);
+    $outMirror = Transaction::factory()->credit()->for($user)->for($hidden)->create(['amount' => 7000, 'post_date' => now()->subDay(), 'transfer_pair_id' => $out->id]);
+    $out->update(['transfer_pair_id' => $outMirror->id]);
+
+    $in = Transaction::factory()->credit()->for($user)->for($tracked)->create(['amount' => 3000, 'post_date' => now()->subDay()]);
+    $inMirror = Transaction::factory()->debit()->for($user)->for($hidden)->create(['amount' => 3000, 'post_date' => now()->subDay(), 'transfer_pair_id' => $in->id]);
+    $in->update(['transfer_pair_id' => $inMirror->id]);
+
+    $spend = Livewire::actingAs($user)->test(Dashboard::class)->instance()->spendLast7Days();
+
+    expect($spend['sum'])->toBe(7000);
+});
+
+test('needed until payday counts a planned transfer to an untracked account but not one into a tracked account', function () {
+    $this->travelTo(now()->startOfDay());
+    $user = User::factory()->withPayCycle()->create(['next_pay_date' => now()->addDays(10)->toDateString()]);
+    $tracked = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+
+    $plan = fn (Account $from, Account $to, int $amount) => PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $from->id,
+        'transfer_to_account_id' => $to->id,
+        'direction' => TransactionDirection::Debit,
+        'amount' => $amount,
+        'start_date' => now()->addDays(2)->toDateString(),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'is_active' => true,
+    ]);
+
+    $plan($tracked, $hidden, 9000);
+    $plan($hidden, $tracked, 4000);
+
+    expect($user->fresh()->totalNeededUntilPayday())->toBe(9000);
+});
+
 test('spend last 7 days excludes transactions categorised at the parent Transfer level', function () {
     $user = User::factory()->withPayCycle()->create();
     $account = Account::factory()->for($user)->create();
