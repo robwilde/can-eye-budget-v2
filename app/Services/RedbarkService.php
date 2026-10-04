@@ -27,8 +27,8 @@ use Throwable;
  * Client for the Redbark CDR API (https://api.redbark.com/v1), a plain Bearer-token
  * REST service. One instance per user key — build it through RedbarkClientFactory.
  *
- * Retries: connection failures, HTTP 429 and 5xx are all retried here, since this is
- * the only layer that can recover a transient failure before it reaches the caller.
+ * Retries: connection failures, HTTP 429 and 5xx are retried per the client's attempt
+ * budget (3 for queued syncs, 1 for key validation).
  *
  * Errors: responses are never chained through ->throw(). Status mapping is explicit so
  * every failure carries a machine-readable errorType the job can branch on.
@@ -49,6 +49,8 @@ final readonly class RedbarkService implements RedbarkServiceContract
         #[SensitiveParameter]
         private string $apiKey,
         private string $baseUrl = 'https://api.redbark.com/v1',
+        private int $timeoutSeconds = 120,
+        private int $maxAttempts = 3,
     ) {}
 
     /**
@@ -142,8 +144,8 @@ final readonly class RedbarkService implements RedbarkServiceContract
         return Http::baseUrl($this->baseUrl)
             ->withToken($this->apiKey)
             ->acceptJson()
-            ->timeout(120)
-            ->retry(3, 2000, static fn (Throwable $e): bool => $e instanceof ConnectionException
+            ->timeout($this->timeoutSeconds)
+            ->retry($this->maxAttempts, 2000, static fn (Throwable $e): bool => $e instanceof ConnectionException
                 || ($e instanceof RequestException && ($e->response->status() === 429 || $e->response->status() >= 500)), throw: false);
     }
 
