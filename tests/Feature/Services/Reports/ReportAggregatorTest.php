@@ -242,3 +242,101 @@ test('open real bounds extend the axis to cover future-dated actuals', function 
 
     expect($bounds['end']->format('Y-m'))->toBe('2026-09');
 });
+
+test('actual atoms count the tracked leg of a transfer with an untracked account by its own direction', function () {
+    $user = User::factory()->create();
+    $tracked = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+    $trackedOther = Account::factory()->for($user)->create();
+
+    $pair = function (Account $from, Account $to, int $amount) use ($user): void {
+        $debit = Transaction::factory()->for($user)->debit()->create(['account_id' => $from->id, 'amount' => $amount, 'post_date' => '2026-07-05']);
+        $credit = Transaction::factory()->for($user)->credit()->create(['account_id' => $to->id, 'amount' => $amount, 'post_date' => '2026-07-05', 'transfer_pair_id' => $debit->id]);
+        $debit->update(['transfer_pair_id' => $credit->id]);
+    };
+
+    $pair($tracked, $hidden, 7000);
+    $pair($hidden, $tracked, 3000);
+    $pair($tracked, $trackedOther, 9999);
+
+    $atoms = app(ReportAggregator::class)->atoms(
+        $user,
+        'actual',
+        CarbonImmutable::parse('2026-07-01'),
+        CarbonImmutable::parse('2026-07-31')->endOfDay(),
+    );
+
+    $byDirection = collect($atoms)->groupBy('direction')->map(fn ($rows) => [$rows->sum('total'), $rows->sum('count')]);
+
+    expect($byDirection->get('debit'))->toBe([7000, 1])
+        ->and($byDirection->get('credit'))->toBe([3000, 1]);
+});
+
+test('plan atoms classify transfers by the tracked side, whichever account the plan sits on', function () {
+    $user = User::factory()->create();
+    $tracked = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+    $trackedOther = Account::factory()->for($user)->create();
+
+    $plan = fn (Account $from, Account $to, int $amount) => PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $from->id,
+        'transfer_to_account_id' => $to->id,
+        'direction' => TransactionDirection::Debit,
+        'amount' => $amount,
+        'start_date' => '2026-07-10',
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+
+    $plan($tracked, $hidden, 6000);
+    $plan($hidden, $tracked, 2000);
+    $plan($tracked, $trackedOther, 9999);
+
+    $atoms = app(ReportAggregator::class)->atoms(
+        $user,
+        'plan',
+        CarbonImmutable::parse('2026-07-01'),
+        CarbonImmutable::parse('2026-07-31')->endOfDay(),
+    );
+
+    expect(collect($atoms)->where('direction', 'debit')->sum('total'))->toBe(6000)
+        ->and(collect($atoms)->where('direction', 'credit')->sum('total'))->toBe(2000);
+});
+
+test('open-range month bounds include boundary transfers before and after ordinary activity', function () {
+    $user = User::factory()->create();
+    $tracked = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+    $trackedOther = Account::factory()->for($user)->create();
+
+    Transaction::factory()->for($user)->debit()->create(['account_id' => $tracked->id, 'amount' => 1000, 'post_date' => '2026-07-05']);
+
+    $pair = function (Account $from, Account $to, string $date) use ($user): void {
+        $debit = Transaction::factory()->for($user)->debit()->create(['account_id' => $from->id, 'amount' => 5000, 'post_date' => $date]);
+        $credit = Transaction::factory()->for($user)->credit()->create(['account_id' => $to->id, 'amount' => 5000, 'post_date' => $date, 'transfer_pair_id' => $debit->id]);
+        $debit->update(['transfer_pair_id' => $credit->id]);
+    };
+
+    $pair($tracked, $hidden, '2026-05-10');
+    $pair($hidden, $tracked, '2026-09-20');
+    $pair($tracked, $trackedOther, '2026-03-01');
+    $pair($tracked, $trackedOther, '2026-12-01');
+
+    $bounds = app(ReportAggregator::class)->monthBounds($user, 'real', null, null);
+
+    expect($bounds['start']->format('Y-m'))->toBe('2026-05')
+        ->and($bounds['end']->format('Y-m'))->toBe('2026-09');
+});
+
+test('open-range month bounds start at a transfer-only history', function () {
+    $user = User::factory()->create();
+    $tracked = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+
+    $debit = Transaction::factory()->for($user)->debit()->create(['account_id' => $tracked->id, 'amount' => 5000, 'post_date' => '2026-04-10']);
+    $mirror = Transaction::factory()->for($user)->credit()->create(['account_id' => $hidden->id, 'amount' => 5000, 'post_date' => '2026-04-10', 'transfer_pair_id' => $debit->id]);
+    $debit->update(['transfer_pair_id' => $mirror->id]);
+
+    $bounds = app(ReportAggregator::class)->monthBounds($user, 'real', null, null);
+
+    expect($bounds['start']->format('Y-m'))->toBe('2026-04');
+});
