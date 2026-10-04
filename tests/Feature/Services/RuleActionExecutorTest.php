@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\CleanDescriptionSource;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Models\Account;
@@ -86,8 +87,8 @@ test('set_clean_description replaces the clean description and leaves the raw de
         ->and($fresh->description)->toBe('ORIGINAL DESCRIPTION');
 });
 
-test('without overwrite, set_clean_description only names a row whose clean description is blank', function (?string $existing, string $expected) {
-    $transaction = createActionTransaction($this->user, $this->account, ['clean_description' => $existing]);
+test('without overwrite, set_clean_description names a blank or import-named row but keeps a name a person or rule set', function (?string $existing, ?CleanDescriptionSource $source, string $expected) {
+    $transaction = createActionTransaction($this->user, $this->account, ['clean_description' => $existing, 'clean_description_source' => $source]);
 
     $handled = $this->executor->execute($transaction, [
         ['type' => 'set_clean_description', 'value' => 'Acme hosting'],
@@ -96,10 +97,59 @@ test('without overwrite, set_clean_description only names a row whose clean desc
     expect($handled)->toBeTrue()
         ->and($transaction->fresh()->clean_description)->toBe($expected);
 })->with([
-    'no clean description' => [null, 'Acme hosting'],
-    'a whitespace clean description' => ['   ', 'Acme hosting'],
-    'a person\'s clean description' => ['Acme domains', 'Acme domains'],
+    'no clean description' => [null, null, 'Acme hosting'],
+    'a whitespace clean description' => ['   ', null, 'Acme hosting'],
+    'a feed name' => ['Acme', CleanDescriptionSource::Feed, 'Acme hosting'],
+    'a brand name' => ['Acme', CleanDescriptionSource::Brand, 'Acme hosting'],
+    'a derived name' => ['Acme', CleanDescriptionSource::Derived, 'Acme hosting'],
+    'a person\'s clean description' => ['Acme domains', CleanDescriptionSource::Manual, 'Acme domains'],
+    'a rule\'s clean description' => ['Acme domains', CleanDescriptionSource::Rule, 'Acme domains'],
 ]);
+
+test('a whitespace-only set_clean_description value leaves no name and no source on either path', function (bool $overwrite) {
+    $transaction = createActionTransaction($this->user, $this->account, ['clean_description' => null]);
+
+    $this->executor->execute($transaction, [
+        ['type' => 'set_clean_description', 'value' => " \t "],
+    ], overwriteCleanDescription: $overwrite);
+    $transaction->save();
+
+    expect($transaction->fresh()->clean_description)->toBeNull()
+        ->and($transaction->fresh()->clean_description_source)->toBeNull();
+})->with([true, false]);
+
+test('both set_clean_description paths store the same tidied value', function () {
+    $overwritten = createActionTransaction($this->user, $this->account, ['clean_description' => null]);
+    $offered = createActionTransaction($this->user, $this->account, ['clean_description' => null]);
+    $action = [['type' => 'set_clean_description', 'value' => '  Acme   hosting ']];
+
+    $this->executor->execute($overwritten, $action, overwriteCleanDescription: true);
+    $this->executor->execute($offered, $action, overwriteCleanDescription: false);
+    $overwritten->save();
+    $offered->save();
+
+    expect($overwritten->fresh()->clean_description)->toBe('Acme hosting')
+        ->and($offered->fresh()->clean_description)->toBe('Acme hosting');
+});
+
+test('without overwrite, set_clean_description keeps a name a person saved after the row was loaded', function () {
+    $transaction = createActionTransaction($this->user, $this->account, ['clean_description' => null]);
+    $stale = Transaction::query()->findOrFail($transaction->id);
+
+    Transaction::query()->whereKey($transaction->id)->update([
+        'clean_description' => 'Acme domains',
+        'clean_description_source' => CleanDescriptionSource::Manual,
+    ]);
+
+    $this->executor->execute($stale, [
+        ['type' => 'set_clean_description', 'value' => 'Acme hosting'],
+    ], overwriteCleanDescription: false);
+
+    $fresh = $transaction->fresh();
+
+    expect($fresh->clean_description)->toBe('Acme domains')
+        ->and($fresh->clean_description_source)->toBe(CleanDescriptionSource::Manual);
+});
 
 // ─── Append Notes ──────────────────────────────────────────────────────
 
