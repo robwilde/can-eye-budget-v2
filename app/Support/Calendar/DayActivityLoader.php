@@ -288,7 +288,10 @@ final readonly class DayActivityLoader
             $postedCents += $transferSpendByDate[$key] ?? 0;
 
             foreach ($plannedPipsByDate[$key] ?? [] as $plannedPip) {
-                $plannedCents += $plannedPip->amount;
+                if ($plannedPip->flow() !== null) {
+                    $plannedCents += $plannedPip->amount;
+                }
+
                 $pips[] = $plannedPip;
             }
 

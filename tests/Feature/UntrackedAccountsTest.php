@@ -99,7 +99,7 @@ test('linked transfers to an untracked account never change its balance', functi
         ->and($user->totalAvailable())->toBe(500000);
 });
 
-test('a tracked leg linked to a hidden account drops out of calendar and report totals', function () {
+test('a tracked leg linked to a hidden account keeps counting as spend in the transfer-aware totals', function () {
     $this->travelTo(CarbonImmutable::parse('2026-07-15'));
     $user = User::factory()->create();
     $checking = Account::factory()->for($user)->create();
@@ -115,10 +115,12 @@ test('a tracked leg linked to a hidden account drops out of calendar and report 
     app(TransferLinker::class)->linkToUntrackedAccount($tx, $hidden, TransferLinkSource::Manual);
 
     $after = (new DayActivityLoader)->load($range[0], $range[1], $user->id);
+    $withTransfers = (new DayActivityLoader)->load($range[0], $range[1], $user->id, includeTransfers: true);
     $atoms = app(ReportAggregator::class)->atoms($user, 'real', $range[0], $range[1]);
 
     expect(isset($after['2026-07-05']) ? $after['2026-07-05']->postedCents : 0)->toBe(0)
-        ->and(collect($atoms)->sum('total'))->toBe(0);
+        ->and($withTransfers['2026-07-05']->postedCents)->toBe(20000)
+        ->and(collect($atoms)->sum('total'))->toBe(20000);
 });
 
 test('accounts page lists untracked accounts under long term savings with a badge', function () {

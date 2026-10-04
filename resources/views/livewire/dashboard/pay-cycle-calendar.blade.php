@@ -75,7 +75,7 @@
                         </div>
                         <div class="cyc-day-body">
                             @foreach (array_slice($day->pips, 0, PayCycleCalendar::MAX_PIPS_PER_DAY) as $pip)
-                                <div @class(['cyc-pip', $pip->kind]) @if($pip->tooltip !== null) title="{{ $pip->tooltip }}" @endif>
+                                <div @class(['cyc-pip', $pip->kind, 'xfer' => $pip->kind === 'plan' && $pip->tone === 'xfer']) @if($pip->tooltip !== null) title="{{ $pip->tooltip }}" @endif>
                                     <span class="cyc-pip-dot"></span>
                                     <span class="cyc-pip-name">{{ $pip->name }}</span>
                                 </div>
@@ -114,7 +114,8 @@
                         @php
                             $rowTone = match ($pip->kind) {
                                 'inc' => 'inc',
-                                'plan' => 'plan',
+                                'plan' => $pip->tone === 'xfer' ? 'xfer' : 'plan',
+                                'xfer' => 'xfer',
                                 default => 'out',
                             };
                         @endphp

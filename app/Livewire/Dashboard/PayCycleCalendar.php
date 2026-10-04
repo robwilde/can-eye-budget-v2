@@ -152,7 +152,7 @@ final class PayCycleCalendar extends Component
 
         $userId = (int) auth()->id();
 
-        $activity = (new DayActivityLoader)->load($cycleStart, $lastRenderedDay, $userId);
+        $activity = (new DayActivityLoader)->load($cycleStart, $lastRenderedDay, $userId, includeTransfers: true);
 
         $days = [];
         $cursor = $cycleStart;
