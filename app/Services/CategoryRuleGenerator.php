@@ -252,8 +252,10 @@ final readonly class CategoryRuleGenerator
             return $source->merchant_name;
         }
 
-        if ($source->clean_description !== null && $source->clean_description !== '') {
-            return $this->merchantToken($source->clean_description);
+        $identity = $source->identityCleanDescription();
+
+        if ($identity !== null && $identity !== '') {
+            return $this->merchantToken($identity);
         }
 
         return $this->merchantToken($source->description);
@@ -313,11 +315,13 @@ final readonly class CategoryRuleGenerator
             ];
         }
 
-        if ($source->clean_description !== null && $source->clean_description !== '') {
+        $identity = $source->identityCleanDescription();
+
+        if ($identity !== null && $identity !== '') {
             return [
                 'field' => RuleTriggerField::CleanDescription->value,
                 'operator' => RuleTriggerOperator::Contains->value,
-                'value' => $this->merchantToken($source->clean_description),
+                'value' => $this->merchantToken($identity),
             ];
         }
 
