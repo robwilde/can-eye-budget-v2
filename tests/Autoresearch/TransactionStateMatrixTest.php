@@ -194,8 +194,6 @@ function matrixPlannedSurface(User $user, string $surface): array
     };
 }
 
-const MATRIX_SURFACES_COUNTING_UNTRACKED_TRANSFERS = ['calendar month totals', 'calendar projected totals'];
-
 const MATRIX_SURFACE_KEYS = [
     'calendar month totals' => ['spend', 'income'],
     'pay cycle calendar totals' => ['spend', 'income'],
@@ -210,9 +208,6 @@ const MATRIX_SURFACE_KEYS = [
 
 function matrixExpected(array $flow, array $actual, string $surface, string $kind): array
 {
-    if (preg_match('/^transfer (tracked|untracked)/', $kind) === 1 && ! in_array($surface, MATRIX_SURFACES_COUNTING_UNTRACKED_TRANSFERS, true)) {
-        $flow = ['spend' => 0, 'income' => 0];
-    }
 
     $derived = [
         'spend' => $flow['spend'],
