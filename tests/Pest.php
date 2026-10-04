@@ -243,3 +243,22 @@ function payPalInstalmentReceiptEmail(int $number, ?string $messageId = null): R
         $schedule => $remaining,
     ], $date);
 }
+
+function auditSentryEvent(): Sentry\Event
+{
+    $event = Sentry\Event::createEvent();
+
+    Sentry\SentrySdk::getCurrentHub()->configureScope(function (Sentry\State\Scope $scope) use (&$event): void {
+        $event = $scope->applyToEvent($event) ?? $event;
+    });
+
+    return $event;
+}
+
+/** @return list<Monolog\LogRecord> */
+function auditLogRecords(): array
+{
+    $handler = Illuminate\Support\Facades\Log::channel('audit')->getLogger()->getHandlers()[0];
+
+    return $handler->getRecords();
+}

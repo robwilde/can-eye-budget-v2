@@ -270,14 +270,15 @@ test('uniqueId is the bankImport id', function () {
         ->and($job)->toBeInstanceOf(Illuminate\Contracts\Queue\ShouldBeUnique::class);
 });
 
-test('has WithoutOverlapping middleware keyed on bank import', function () {
+test('attributes the job before taking the WithoutOverlapping lock keyed on bank import', function () {
     $bankImport = makeBankImportFromFixture();
     $job = new ImportCsvTransactionsJob($bankImport);
 
     $middleware = $job->middleware();
 
-    expect($middleware)->toHaveCount(1)
-        ->and($middleware[0])->toBeInstanceOf(Illuminate\Queue\Middleware\WithoutOverlapping::class);
+    expect($middleware)->toHaveCount(2)
+        ->and($middleware[0])->toBeInstanceOf(App\Support\Audit\AttributeJobToUser::class)
+        ->and($middleware[1])->toBeInstanceOf(Illuminate\Queue\Middleware\WithoutOverlapping::class);
 });
 
 test('a csv row matching an active plan is reconciled at import and renders a single calendar pip', function () {

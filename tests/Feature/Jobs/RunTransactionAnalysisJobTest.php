@@ -23,14 +23,15 @@ test('job implements ShouldBeUnique with user-scoped uniqueId', function () {
         ->and($job->uniqueFor)->toBe(300);
 });
 
-test('job has WithoutOverlapping middleware keyed on user', function () {
+test('job attributes the user before taking the WithoutOverlapping lock keyed on user', function () {
     $user = User::factory()->create();
     $job = new RunTransactionAnalysisJob($user);
 
     $middleware = $job->middleware();
 
-    expect($middleware)->toHaveCount(1)
-        ->and($middleware[0])->toBeInstanceOf(WithoutOverlapping::class);
+    expect($middleware)->toHaveCount(2)
+        ->and($middleware[0])->toBeInstanceOf(App\Support\Audit\AttributeJobToUser::class)
+        ->and($middleware[1])->toBeInstanceOf(WithoutOverlapping::class);
 });
 
 test('job has correct tries and timeout configuration', function () {

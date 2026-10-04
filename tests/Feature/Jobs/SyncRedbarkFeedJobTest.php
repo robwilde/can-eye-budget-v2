@@ -858,9 +858,10 @@ test('middleware expires the overlap lock after UNIQUE_FOR seconds, which exceed
 
     $middleware = $job->middleware();
 
-    expect($middleware)->toHaveCount(1)
-        ->and($middleware[0])->toBeInstanceOf(Illuminate\Queue\Middleware\WithoutOverlapping::class)
-        ->and($middleware[0]->expiresAfter)->toBe(SyncRedbarkFeedJob::UNIQUE_FOR)
+    expect($middleware)->toHaveCount(2)
+        ->and($middleware[0])->toBeInstanceOf(App\Support\Audit\AttributeJobToUser::class)
+        ->and($middleware[1])->toBeInstanceOf(Illuminate\Queue\Middleware\WithoutOverlapping::class)
+        ->and($middleware[1]->expiresAfter)->toBe(SyncRedbarkFeedJob::UNIQUE_FOR)
         ->and(SyncRedbarkFeedJob::UNIQUE_FOR)->toBeGreaterThan($job->timeout);
 });
 
