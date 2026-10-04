@@ -250,3 +250,46 @@ test('planned transaction is classified consistently', function (string $surface
     'balance projection',
     'needed until payday',
 ])->with(array_keys(MATRIX_PLANNED_KINDS));
+
+test('linked and unlinked postings against a plan count once and keep the plan visible only when unpaid', function (string $scenario, array $expected): void {
+    $plan = matrixPlan($this->user, $this->tracked, TransactionDirection::Debit, ['start_date' => '2026-06-18']);
+
+    match ($scenario) {
+        'linked on the day' => matrixPosted($this->user, $this->tracked, TransactionDirection::Debit, ['post_date' => '2026-06-18', 'planned_transaction_id' => $plan->id]),
+        'linked within tolerance' => matrixPosted($this->user, $this->tracked, TransactionDirection::Debit, ['post_date' => '2026-06-20', 'planned_transaction_id' => $plan->id]),
+        'linked beyond tolerance' => matrixPosted($this->user, $this->tracked, TransactionDirection::Debit, ['post_date' => '2026-06-23', 'planned_transaction_id' => $plan->id]),
+        'unlinked same day' => matrixPosted($this->user, $this->tracked, TransactionDirection::Debit, ['post_date' => '2026-06-18']),
+        'no posting' => null,
+    };
+
+    $calendar = Livewire::test(CalendarView::class)->instance();
+    $cycle = Livewire::test(PayCycleCalendar::class)->instance();
+
+    expect([
+        'calendar spend' => $calendar->monthTotals['spend'],
+        'calendar projected spend' => $calendar->projectedTotals['spend'],
+        'cycle posted' => $cycle->totals['posted'],
+        'cycle planned' => $cycle->totals['planned'],
+    ])->toEqual($expected);
+})->with([
+    'linked on the day' => ['linked on the day', ['calendar spend' => MATRIX_AMOUNT, 'calendar projected spend' => 0, 'cycle posted' => MATRIX_AMOUNT, 'cycle planned' => 0]],
+    'linked within tolerance' => ['linked within tolerance', ['calendar spend' => MATRIX_AMOUNT, 'calendar projected spend' => 0, 'cycle posted' => MATRIX_AMOUNT, 'cycle planned' => 0]],
+    'linked beyond tolerance' => ['linked beyond tolerance', ['calendar spend' => MATRIX_AMOUNT, 'calendar projected spend' => MATRIX_AMOUNT, 'cycle posted' => MATRIX_AMOUNT, 'cycle planned' => MATRIX_AMOUNT]],
+    'unlinked same day' => ['unlinked same day', ['calendar spend' => MATRIX_AMOUNT, 'calendar projected spend' => MATRIX_AMOUNT, 'cycle posted' => MATRIX_AMOUNT, 'cycle planned' => MATRIX_AMOUNT]],
+    'no posting' => ['no posting', ['calendar spend' => 0, 'calendar projected spend' => MATRIX_AMOUNT, 'cycle posted' => 0, 'cycle planned' => MATRIX_AMOUNT]],
+]);
+
+test('a split expense counts its full amount once', function (): void {
+    $tx = matrixPosted($this->user, $this->tracked, TransactionDirection::Debit);
+    $tx->splits()->createMany([
+        ['category_id' => $this->groceries->id, 'amount' => 10_000, 'position' => 0],
+        ['category_id' => Category::factory()->create()->id, 'amount' => MATRIX_AMOUNT - 10_000, 'position' => 1],
+    ]);
+
+    $atoms = app(ReportAggregator::class)->atoms($this->user, 'actual', CarbonImmutable::create(2026, 6, 1), CarbonImmutable::create(2026, 6, 30)->endOfDay());
+
+    expect([
+        'calendar' => Livewire::test(CalendarView::class)->instance()->monthTotals['spend'],
+        'report' => matrixAtomTotals($atoms)['spend'],
+    ])->toEqual(['calendar' => MATRIX_AMOUNT, 'report' => MATRIX_AMOUNT]);
+});
