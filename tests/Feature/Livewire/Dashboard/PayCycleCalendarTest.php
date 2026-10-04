@@ -1035,3 +1035,90 @@ test('blade does not render import-edge class when no csv-imported transactions 
         ->test(PayCycleCalendar::class)
         ->assertDontSee('import-edge');
 });
+
+test('transfers across the tracked boundary count as spend and income, once, and tracked-to-tracked ones do not', function () {
+    $nextPay = nextMondayAtLeastDaysAhead(7);
+
+    $user = User::factory()->withPayCycle()->create([
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => $nextPay,
+    ]);
+    $tracked = Account::factory()->for($user)->create();
+    $trackedOther = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+    $day = $nextPay->subWeeks(2)->addDay();
+
+    $pair = function (Account $from, Account $to, int $amount) use ($user, $day): void {
+        $debit = Transaction::factory()->debit()->for($user)->for($from)->create(['amount' => $amount, 'post_date' => $day]);
+        $credit = Transaction::factory()->credit()->for($user)->for($to)->create(['amount' => $amount, 'post_date' => $day, 'transfer_pair_id' => $debit->id]);
+        $debit->update(['transfer_pair_id' => $credit->id]);
+    };
+
+    $pair($tracked, $hidden, 7000);
+    $pair($hidden, $tracked, 3000);
+    $pair($tracked, $trackedOther, 9999);
+
+    $totals = Livewire::actingAs($user)->test(PayCycleCalendar::class)->instance()->totals();
+
+    expect($totals)->toMatchArray(['posted' => 7000, 'income' => 3000]);
+});
+
+test('planned transfers across the tracked boundary count in the planned total, neutral ones do not', function () {
+    $nextPay = nextMondayAtLeastDaysAhead(7);
+
+    $user = User::factory()->withPayCycle()->create([
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => $nextPay,
+    ]);
+    $tracked = Account::factory()->for($user)->create();
+    $trackedOther = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+    $day = $nextPay->subWeeks(2)->addDay();
+
+    $plan = fn (Account $from, Account $to, int $amount) => PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $from->id,
+        'transfer_to_account_id' => $to->id,
+        'direction' => TransactionDirection::Debit,
+        'amount' => $amount,
+        'start_date' => $day,
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+
+    $plan($tracked, $hidden, 6000);
+    $plan($hidden, $tracked, 2000);
+    $plan($tracked, $trackedOther, 9999);
+
+    expect(Livewire::actingAs($user)->test(PayCycleCalendar::class)->instance()->totals()['planned'])->toBe(8000);
+});
+
+test('a posted transfer linked to its plan replaces the plan occurrence instead of duplicating it', function () {
+    $nextPay = nextMondayAtLeastDaysAhead(7);
+
+    $user = User::factory()->withPayCycle()->create([
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => $nextPay,
+    ]);
+    $tracked = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+    $day = $nextPay->subWeeks(2)->addDay();
+
+    $plan = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $tracked->id,
+        'transfer_to_account_id' => $hidden->id,
+        'direction' => TransactionDirection::Debit,
+        'amount' => 6000,
+        'start_date' => $day,
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+
+    $debit = Transaction::factory()->debit()->for($user)->for($tracked)->create(['amount' => 6000, 'post_date' => $day, 'planned_transaction_id' => $plan->id]);
+    $mirror = Transaction::factory()->credit()->for($user)->for($hidden)->create(['amount' => 6000, 'post_date' => $day, 'transfer_pair_id' => $debit->id]);
+    $debit->update(['transfer_pair_id' => $mirror->id]);
+
+    $component = Livewire::actingAs($user)->test(PayCycleCalendar::class)->instance();
+    $pips = collect($component->days())->flatMap(fn (PayCycleDayData $d) => $d->pips);
+
+    expect($pips->where('kind', 'xfer'))->toHaveCount(1)
+        ->and($pips->where('kind', 'plan'))->toHaveCount(0)
+        ->and($component->totals())->toMatchArray(['posted' => 6000, 'planned' => 0]);
+});
