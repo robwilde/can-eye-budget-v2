@@ -13,6 +13,7 @@ use App\Services\MerchantBrands\BrandNameWriter;
 use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\MerchantBrands\DescriptorGate;
 use App\Services\MerchantBrands\RepresentativeTransaction;
+use App\Support\Audit\AttributeJobToUser;
 use ContextDev\Core\Exceptions\ContextDevException;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -58,6 +59,14 @@ final class ResolveMerchantBrandJob implements ShouldBeUnique, ShouldQueue
     public function uniqueId(): string
     {
         return $this->user->id.':'.$this->merchantKey;
+    }
+
+    /** @return array<int, object> */
+    public function middleware(): array
+    {
+        return [
+            new AttributeJobToUser($this->user->id, audit: false),
+        ];
     }
 
     public function handle(RepresentativeTransaction $representatives, DescriptorGate $gate, ContextDevCreditBudget $budget, BrandNameWriter $names): void

@@ -6,6 +6,7 @@ namespace App\Support\Audit;
 
 use App\Enums\AuditOutcome;
 use Closure;
+use Illuminate\Contracts\Queue\Job as QueueJob;
 use Throwable;
 
 final readonly class AttributeJobToUser
@@ -24,16 +25,25 @@ final readonly class AttributeJobToUser
             $next($job);
         } catch (Throwable $exception) {
             if ($this->audit) {
-                $recorder->record($action, outcome: AuditOutcome::Failure, actorId: $this->userId);
+                $recorder->recordSafely($action, outcome: AuditOutcome::Failure, actorId: $this->userId);
             }
 
             throw $exception;
+        }
+
+        try {
+            if ($this->audit && ! $this->released($job)) {
+                $recorder->recordSafely($action, actorId: $this->userId);
+            }
         } finally {
             $sentryActor->bind(null);
         }
+    }
 
-        if ($this->audit) {
-            $recorder->record($action, actorId: $this->userId);
-        }
+    private function released(object $job): bool
+    {
+        $queueJob = $job->job ?? null;
+
+        return $queueJob instanceof QueueJob && $queueJob->isReleased();
     }
 }

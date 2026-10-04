@@ -11,6 +11,7 @@ use App\Models\BankImport;
 use App\Models\Transaction;
 use App\Services\CsvImport\CsvParserService;
 use App\Services\TransactionIngestor;
+use App\Support\Audit\AttributeJobToUser;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\QueryException;
@@ -44,6 +45,7 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
     public function middleware(): array
     {
         return [
+            new AttributeJobToUser($this->bankImport->user_id),
             new WithoutOverlapping("import-csv-{$this->bankImport->id}"),
         ];
     }
