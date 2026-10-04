@@ -1,4 +1,5 @@
 @use('App\Casts\MoneyCast')
+@use('App\Enums\TransactionPeriod')
 
 <div class="space-y-6">
     @if ($this->needsBankConnection)
@@ -11,6 +12,22 @@
                 Connect your bank
             </a>
         </section>
+    @endif
+
+    @if ($this->firstImportSummary !== null)
+        <x-cib.card data-test="dashboard-first-import-card">
+            <flux:heading size="lg">{{ __('Your first import is sorted') }}</flux:heading>
+            <flux:text size="sm" class="mt-1" data-test="dashboard-first-import-text">
+                {{ trans_choice(':count transaction categorised by :rules|:count transactions categorised by :rules', $this->firstImportSummary['categorised'], [
+                    'rules' => trans_choice(':count new rule|:count new rules', $this->firstImportSummary['rules']),
+                ]) }}, {{ trans_choice(':count needs your attention.|:count need your attention.', $this->firstImportSummary['needs_attention']) }}
+            </flux:text>
+            @if ($this->firstImportSummary['needs_attention'] > 0)
+                <a href="{{ route('transactions', ['categorised' => 'uncategorised', 'period' => TransactionPeriod::All->value]) }}" wire:navigate
+                   class="mt-3 inline-block text-sm font-bold underline decoration-dotted"
+                   data-test="dashboard-first-import-link">{{ __('Categorise the rest') }}</a>
+            @endif
+        </x-cib.card>
     @endif
 
     @if ($this->statementsDue->isNotEmpty())
