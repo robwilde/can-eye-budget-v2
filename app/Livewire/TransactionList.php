@@ -943,7 +943,7 @@ final class TransactionList extends Component
                 'error' => $e->getMessage(),
             ]);
 
-            $this->emailScanError = 'Could not search Gmail — check the GMAIL_* credentials and connection.';
+            $this->emailScanError = 'Could not search Gmail — check your Gmail connection in Settings > Providers.';
         }
     }
 
@@ -1349,7 +1349,7 @@ final class TransactionList extends Component
             'hasPayCycle' => auth()->user()->hasPayCycleConfigured(),
             'suggestedTransferCount' => app(TransferReviewQueue::class)->suggestedPairs(auth()->user())->count(),
             'showCustomRange' => $periodEnum === TransactionPeriod::Custom,
-            'gmailEnabled' => app(GmailServiceContract::class)->isConfigured(),
+            'gmailEnabled' => app(GmailServiceContract::class)->isConfigured(auth()->user()),
             'splitCategories' => Category::visibleSortedByFullPath(),
             'selectionCount' => $this->selectionCount(),
             'pageEligibleIds' => $pageEligibleIds,
