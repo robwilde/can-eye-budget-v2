@@ -7,11 +7,12 @@ namespace App\Contracts;
 use App\DTOs\EmailSearchResult;
 use App\Exceptions\GmailSearchException;
 use App\Models\Transaction;
+use App\Models\User;
 use Illuminate\Support\Collection;
 
 interface GmailServiceContract
 {
-    public function isConfigured(): bool;
+    public function isConfigured(User $user): bool;
 
     /**
      * Search Gmail for emails plausibly matching the transaction.
