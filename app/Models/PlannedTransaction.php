@@ -10,6 +10,7 @@ use App\Enums\TransactionDirection;
 use App\Events\PlannedTransactionCategoryUpdated;
 use App\Events\PlannedTransactionCreated;
 use Carbon\CarbonImmutable;
+use Closure;
 use Database\Factories\PlannedTransactionFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -105,6 +106,52 @@ final class PlannedTransaction extends Model
                         fn (Builder $p): Builder => $p->where('name', 'Transfer'),
                     );
             });
+    }
+
+    /**
+     * Plans that move money in or out of the tracked accounts: ordinary plans plus transfers
+     * with exactly one tracked side. Tracked <-> tracked and untracked <-> untracked transfers
+     * net to zero for the user and stay out.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeCountable(Builder $query): Builder
+    {
+        $tracked = fn (bool $is): Closure => fn (Builder $a): Builder => $a->where('is_tracked', $is);
+
+        return $query->where(fn (Builder $q): Builder => $q
+            ->excludingTransfers()
+            ->orWhere(fn (Builder $t): Builder => $t
+                ->whereNotNull('transfer_to_account_id')
+                ->where(fn (Builder $sides): Builder => $sides
+                    ->where(fn (Builder $s): Builder => $s
+                        ->whereHas('account', $tracked(true))
+                        ->whereHas('transferToAccount', $tracked(false)))
+                    ->orWhere(fn (Builder $s): Builder => $s
+                        ->whereHas('account', $tracked(false))
+                        ->whereHas('transferToAccount', $tracked(true))))));
+    }
+
+    /**
+     * Direction the plan has for the tracked accounts, or null when it nets to zero. A transfer
+     * out of a tracked account is a debit; a transfer into one is a credit, whatever side the
+     * plan's own account sits on. Needs account and transferToAccount loaded for transfers.
+     */
+    public function countedDirection(): ?TransactionDirection
+    {
+        if ($this->transfer_to_account_id === null) {
+            return $this->direction;
+        }
+
+        $sourceTracked = $this->account->is_tracked;
+        $destinationTracked = $this->transferToAccount->is_tracked; // @phpstan-ignore property.nonObject
+
+        return match (true) {
+            $sourceTracked && ! $destinationTracked => TransactionDirection::Debit,
+            ! $sourceTracked && $destinationTracked => TransactionDirection::Credit,
+            default => null,
+        };
     }
 
     /**

@@ -25,7 +25,8 @@ final readonly class MonthlyProjectionService
         $plannedTransactions = PlannedTransaction::query()
             ->where('user_id', $user->id)
             ->where('is_active', true)
-            ->excludingTransfers()
+            ->countable()
+            ->with(['account:id,is_tracked', 'transferToAccount:id,is_tracked'])
             ->where('start_date', '<=', $endDate)
             ->where(static function ($query) use ($today): void {
                 $query->whereNull('until_date')->orWhere('until_date', '>=', $today);
@@ -35,7 +36,13 @@ final readonly class MonthlyProjectionService
         $dailyBuckets = [];
 
         foreach ($plannedTransactions as $planned) {
-            $signedAmount = $planned->direction === TransactionDirection::Credit
+            $direction = $planned->countedDirection();
+
+            if ($direction === null) {
+                continue;
+            }
+
+            $signedAmount = $direction === TransactionDirection::Credit
                 ? abs((int) $planned->amount)
                 : -abs((int) $planned->amount);
 

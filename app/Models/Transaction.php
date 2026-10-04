@@ -342,6 +342,34 @@ final class Transaction extends Model
     }
 
     /**
+     * Rows that move money in or out of the tracked accounts: ordinary rows plus the tracked
+     * leg of a transfer whose other leg sits on an untracked account (tracked -> untracked is
+     * spend, untracked -> tracked is income). Tracked <-> tracked pairs net to zero and stay out.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeCountable(Builder $query): Builder
+    {
+        return $query->where(fn (Builder $q): Builder => $q
+            ->excludingTransfers()
+            ->orWhere(fn (Builder $t): Builder => $t->pairedWithUntrackedAccount()));
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopePairedWithUntrackedAccount(Builder $query): Builder
+    {
+        return $query
+            ->whereNotNull('transfer_pair_id')
+            ->onTrackedAccounts()
+            ->whereHas('transferPair', fn (Builder $p): Builder => $p
+                ->whereHas('account', fn (Builder $a): Builder => $a->where('is_tracked', false)));
+    }
+
+    /**
      * @param  Builder<self>  $query
      * @return Builder<self>
      */

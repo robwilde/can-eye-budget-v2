@@ -1057,6 +1057,7 @@ select:focus[data-flux-control] {
     .cyc-pip.out .cyc-pip-dot { background: var(--color-money-owed); }
     .cyc-pip.inc .cyc-pip-dot { background: var(--color-cib-green-500); }
     .cyc-pip.plan .cyc-pip-dot { background: var(--color-money-planned); }
+    .cyc-pip.xfer .cyc-pip-dot { background: var(--color-money-transfer-strong); }
     .cyc-pip-amt { font-weight: 900; flex-shrink: 0; border-radius: 4px; }
     .cyc-pip-cat {
         font-style: italic;
