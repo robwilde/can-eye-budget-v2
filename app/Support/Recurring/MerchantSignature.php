@@ -37,19 +37,24 @@ final class MerchantSignature
      * Card networks that lead card-purchase descriptions. MC is deliberately
      * absent: it opens merchant names ("MC DONALDS"), not only Mastercard ones.
      */
-    private const array CARD_NETWORK_TOKENS = ['VISA', 'MASTERCARD', 'EFTPOS'];
+    public const array CARD_NETWORK_TOKENS = ['VISA', 'MASTERCARD', 'EFTPOS'];
 
-    private const string FOREIGN_MARKER_TOKEN = 'FRGN';
+    public const string FOREIGN_MARKER_TOKEN = 'FRGN';
 
     /**
      * The payee key: the redacted descriptor without card-usage edge tokens.
      */
     public static function for(string $raw): string
     {
+        return self::payeeOrNull($raw) ?? self::normalize($raw);
+    }
+
+    public static function payeeOrNull(string $raw): ?string
+    {
         $kept = self::payeeTokens($raw);
 
         if ($kept === []) {
-            return self::normalize($raw);
+            return null;
         }
 
         while (count($kept) > 1 && in_array($kept[0], self::CARD_NETWORK_TOKENS, true)) {
