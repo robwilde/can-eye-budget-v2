@@ -9,6 +9,7 @@ use App\DTOs\EmailSearchResult;
 use App\DTOs\RawEmail;
 use App\Exceptions\GmailSearchException;
 use App\Models\Transaction;
+use App\Models\User;
 use App\Support\Email\GmailMailbox;
 use App\Support\Email\ReceiptParser;
 use Carbon\CarbonImmutable;
@@ -45,7 +46,6 @@ final class GmailService implements GmailServiceContract
 
     public function __construct(
         private readonly CategoryRuleGenerator $ruleGenerator,
-        private readonly GmailMailbox $mailbox,
     ) {}
 
     /**
@@ -80,9 +80,9 @@ final class GmailService implements GmailServiceContract
         return 'https://mail.google.com/mail/u/0/#search/rfc822msgid:'.rawurlencode($messageId);
     }
 
-    public function isConfigured(): bool
+    public function isConfigured(User $user): bool
     {
-        return $this->mailbox->isConfigured();
+        return $user->gmailCredential()->exists();
     }
 
     /**
@@ -110,18 +110,19 @@ final class GmailService implements GmailServiceContract
      */
     public function searchForTransaction(Transaction $transaction): Collection
     {
-        if (! $this->isConfigured()) {
-            throw GmailSearchException::notConfigured();
-        }
-
         try {
-            $messages = $this->mailbox->search($this->buildQuery($transaction), self::MAX_RESULTS);
+            $mailbox = GmailMailbox::forUser($transaction->user)
+                ?? throw GmailSearchException::notConnected();
+
+            $messages = $mailbox->search($this->buildQuery($transaction), self::MAX_RESULTS);
 
             if ($messages->isEmpty()) {
-                $messages = $this->mailbox->search($this->buildQuery($transaction, withAmount: false), self::MAX_RESULTS);
+                $messages = $mailbox->search($this->buildQuery($transaction, withAmount: false), self::MAX_RESULTS);
             }
 
             return $this->rank($messages, $transaction->post_date);
+        } catch (GmailSearchException $e) {
+            throw $e;
         } catch (Throwable $e) {
             throw GmailSearchException::wrap($e);
         }
