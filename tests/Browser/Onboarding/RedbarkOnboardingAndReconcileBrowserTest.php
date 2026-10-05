@@ -67,10 +67,10 @@ test('a new user signs up, connects Redbark and reconciles last month', function
         ->fill('password_confirmation', 'password-12345')
         ->click('[data-test="register-user-button"]')
         ->assertPathIs('/connect-bank')
-        ->assertSee('Step 1 of 2')
+        ->assertSee('Step 1 of 3')
         ->fill('[data-test="connect-bank-api-key"]', 'rbk_test_0123456789abcdef')
         ->click('[data-test="connect-bank-submit"]')
-        ->assertSee('Step 2 of 2')
+        ->assertSee('Step 2 of 3')
         ->assertSee('Everyday Card');
 
     $user = User::query()->where('email', 'onboarding@example.com')->sole();
@@ -78,6 +78,8 @@ test('a new user signs up, connects Redbark and reconciles last month', function
 
     $page->select("[data-test=\"redbark-choice-{$redbarkAccountId}\"]", 'new:'.AccountClass::CreditCard->value)
         ->click('[data-test="save-redbark-accounts-button"]')
+        ->assertSee('Step 3 of 3')
+        ->click('[data-test="connect-bank-skip"]')
         ->assertPathIs('/dashboard')
         ->assertMissing('[data-test="dashboard-connect-bank-card"]');
 
