@@ -582,3 +582,33 @@ test('the first import report counts rules applied by a later sync and not rows 
         ->test(Dashboard::class)
         ->assertSeeText('11 transactions categorised by 3 new rules, 2 need your attention.');
 });
+
+test('an empty first sync does not stop mining once history arrives', function () {
+    app(TransactionAnalysisPipeline::class)->run($this->user, PipelineTrigger::Sync);
+
+    expect(PipelineAuditEntry::query()->where('stage', 'rule-mining')->where('action', 'rules_created')->exists())->toBeFalse();
+
+    seedFirstImportFixture($this->user, $this->account);
+    app(TransactionAnalysisPipeline::class)->run($this->user, PipelineTrigger::Sync);
+
+    expect(UserRule::query()->where('user_id', $this->user->id)->exists())->toBeTrue();
+});
+
+test('the first import card follows versioned rows to their current state', function () {
+    seedFirstImportFixture($this->user, $this->account);
+    app(TransactionAnalysisPipeline::class)->run($this->user, PipelineTrigger::Sync);
+
+    $summary = app(App\Services\FirstImportSummary::class);
+    $before = $summary->for($this->user);
+
+    $ruled = Transaction::query()->where('user_id', $this->user->id)->where('category_source', CategorySource::Rule->value)->current()->first();
+    $ruled->createChild(['category_id' => null, 'category_source' => null]);
+
+    $uncategorised = Transaction::query()->where('user_id', $this->user->id)->whereNull('category_id')->current()->first();
+    $uncategorised->createChild(['notes' => 'edited']);
+
+    $after = $summary->for($this->user);
+
+    expect($after['categorised'])->toBe($before['categorised'] - 1)
+        ->and($after['needs_attention'])->toBe($before['needs_attention'] + 1);
+});

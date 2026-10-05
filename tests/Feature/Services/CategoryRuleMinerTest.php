@@ -363,3 +363,43 @@ it('keeps a seed guard when narrowing a contradicted seed', function () {
     expect(app(RuleEvaluator::class)->matches($debit, $rule))->toBeFalse()
         ->and(app(RuleEvaluator::class)->matches($credit, $rule))->toBeTrue();
 });
+
+it('does not let a later unguarded entry shadow an earlier guarded one with the same value', function () {
+    $user = User::factory()->create();
+    $salary = Category::factory()->create(['name' => 'Salary']);
+    $hardware = Category::factory()->create(['name' => 'Hardware']);
+
+    $guarded = [
+        'value' => 'BUNNINGS',
+        'category_id' => $salary->id,
+        'source' => 'income',
+        'extra_triggers' => [['field' => 'direction', 'operator' => 'is', 'value' => 'credit']],
+    ];
+    $unguarded = ['value' => 'Bunnings', 'category_id' => $hardware->id, 'source' => 'seed'];
+
+    $candidates = app(CategoryRuleMiner::class)->mine($user, [], [$guarded, $unguarded])['candidates'];
+    $bunnings = collect($candidates)->filter(fn (array $c): bool => mb_strtolower($c['value']) === 'bunnings');
+
+    expect($bunnings)
+        ->toHaveCount(1)
+        ->and($bunnings->first()['category_id'])->toBe($salary->id);
+});
+
+it('filters irrelevant entries before subsumption so they cannot erase a kept entry', function () {
+    $user = User::factory()->create();
+    $streaming = Category::factory()->create(['name' => 'Streaming']);
+
+    $entries = [
+        ['value' => 'NETFLIX', 'category_id' => $streaming->id, 'source' => 'seed'],
+        ['value' => 'NETFLIX.COM', 'category_id' => $streaming->id, 'source' => 'mined'],
+    ];
+
+    $candidates = app(CategoryRuleMiner::class)->mine(
+        $user,
+        [],
+        $entries,
+        fn (array $entry): bool => $entry['source'] === 'mined',
+    )['candidates'];
+
+    expect(collect($candidates)->pluck('value')->all())->toBe(['NETFLIX.COM']);
+});
