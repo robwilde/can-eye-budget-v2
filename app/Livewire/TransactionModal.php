@@ -6,6 +6,7 @@ namespace App\Livewire;
 
 use App\Casts\MoneyCast;
 use App\Enums\AccountStatus;
+use App\Enums\CleanDescriptionSource;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
@@ -57,6 +58,15 @@ final class TransactionModal extends Component
     public string $notes = '';
 
     public string $cleanDescription = '';
+
+    #[Locked]
+    public string $openedCleanDescription = '';
+
+    #[Locked]
+    public string $openedDescription = '';
+
+    #[Locked]
+    public bool $openedNameIsDeliberate = false;
 
     public ?int $transferToAccountId = null;
 
@@ -188,9 +198,12 @@ final class TransactionModal extends Component
         $dollars = number_format(abs($transaction->amount) / 100, 2, '.', '');
         $description = $transaction->description ?? '';
         $this->descriptionInput = $description !== '' ? "{$dollars} {$description}" : $dollars;
+        $this->openedDescription = AmountParser::parse($this->descriptionInput)->description;
 
         if ($this->isBankFeedTransaction) {
             $this->cleanDescription = $transaction->clean_description ?? '';
+            $this->openedCleanDescription = $this->cleanDescription;
+            $this->openedNameIsDeliberate = filled($transaction->identityCleanDescription());
         }
 
         $this->categoryId = $transaction->category_id;
@@ -665,7 +678,7 @@ final class TransactionModal extends Component
     {
         return $row->category_id !== $this->categoryId
             || ($row->notes ?? '') !== $this->notes
-            || ($row->clean_description ?? '') !== $this->cleanDescription;
+            || $this->cleanDescription !== $this->openedCleanDescription;
     }
 
     /**
@@ -892,31 +905,63 @@ final class TransactionModal extends Component
         [$transaction, $parsed] = $resolved;
 
         if ($transaction->source->isBankFeed()) {
-            $child = $transaction->createChild([
-                'category_id' => $this->categoryId,
-                'notes' => $this->notes !== '' ? $this->notes : null,
-                ...$this->editedDescriptors($transaction),
-            ]);
+            $child = DB::transaction(function () use ($transaction): Transaction {
+                $this->reloadCleanNamesUnderLock($transaction);
+
+                return $transaction->createChild([
+                    'category_id' => $this->categoryId,
+                    'notes' => $this->notes !== '' ? $this->notes : null,
+                    ...$this->editedDescriptors($transaction),
+                ]);
+            });
 
             // The partner follows the new version, but only for links that still hold under lock.
             app(TransferLinker::class)->followVersion($transaction, $child);
         } else {
-            $child = $transaction->createChild([
-                'account_id' => $this->accountId,
-                'category_id' => $this->categoryId,
-                'amount' => $parsed->amount,
-                'direction' => $this->transactionType === 'expense'
-                    ? TransactionDirection::Debit
-                    : TransactionDirection::Credit,
-                ...$this->editedDescriptors($transaction),
-                'post_date' => $this->date,
-                'notes' => $this->notes !== '' ? $this->notes : null,
-            ]);
+            $child = DB::transaction(function () use ($transaction, $parsed): Transaction {
+                $this->reloadCleanNamesUnderLock($transaction);
+
+                return $transaction->createChild([
+                    'account_id' => $this->accountId,
+                    'category_id' => $this->categoryId,
+                    'amount' => $parsed->amount,
+                    'direction' => $this->transactionType === 'expense'
+                        ? TransactionDirection::Debit
+                        : TransactionDirection::Credit,
+                    ...$this->editedDescriptors($transaction),
+                    'post_date' => $this->date,
+                    'notes' => $this->notes !== '' ? $this->notes : null,
+                ]);
+            });
         }
 
         $this->applyCategoriseMatching($child);
 
         return true;
+    }
+
+    private function reloadCleanNamesUnderLock(Transaction ...$transactions): void
+    {
+        $locked = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->whereIn('id', array_map(static fn (Transaction $transaction): int => $transaction->id, $transactions))
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get(['id', 'clean_description', 'clean_description_source'])
+            ->keyBy('id');
+
+        foreach ($transactions as $transaction) {
+            $current = $locked->get($transaction->id);
+
+            if ($current === null) {
+                continue;
+            }
+
+            $transaction->forceFill([
+                'clean_description' => $current->clean_description,
+                'clean_description_source' => $current->clean_description_source,
+            ])->syncOriginalAttributes(['clean_description', 'clean_description_source']);
+        }
     }
 
     /**
@@ -928,9 +973,46 @@ final class TransactionModal extends Component
      */
     private function editedDescriptors(Transaction $transaction): array
     {
-        return $transaction->source->isBankFeed()
-            ? ['clean_description' => $this->cleanDescription !== '' ? $this->cleanDescription : null]
-            : ['description' => AmountParser::parse($this->descriptionInput)->description];
+        if (! $transaction->source->isBankFeed()) {
+            return $this->renamedDescriptors($transaction, AmountParser::parse($this->descriptionInput)->description);
+        }
+
+        $cleanDescription = $this->cleanDescription !== '' ? $this->cleanDescription : null;
+
+        if ($this->cleanDescription === $this->openedCleanDescription) {
+            return [];
+        }
+
+        return $cleanDescription === null
+            ? ['clean_description' => null]
+            : ['clean_description' => $cleanDescription, 'clean_description_source' => CleanDescriptionSource::Manual->value];
+    }
+
+    /**
+     * @return array<string, string|null>
+     */
+    private function renamedDescriptors(Transaction $transaction, string $description): array
+    {
+        if ($transaction->source->isBankFeed()
+            || $description === $this->openedDescription
+            || $description === ''
+            || ! $this->cleanNameFollowsDescription($transaction)) {
+            return ['description' => $description];
+        }
+
+        return [
+            'description' => $description,
+            'clean_description' => $description,
+            'clean_description_source' => CleanDescriptionSource::Manual->value,
+        ];
+    }
+
+    private function cleanNameFollowsDescription(Transaction $transaction): bool
+    {
+        $source = $transaction->clean_description_source;
+
+        return $source?->isImportDerived() === true
+            || ($source === CleanDescriptionSource::Manual && $transaction->clean_description === $transaction->description);
     }
 
     /**
@@ -947,6 +1029,8 @@ final class TransactionModal extends Component
         [$debitSide, $creditSide, $parsed] = $resolved;
 
         DB::transaction(function () use ($debitSide, $creditSide, $parsed): void {
+            $this->reloadCleanNamesUnderLock($debitSide, $creditSide);
+
             $shared = [
                 'category_id' => $this->categoryId,
                 'amount' => $parsed->amount,
@@ -955,8 +1039,8 @@ final class TransactionModal extends Component
                 'notes' => $this->notes !== '' ? $this->notes : null,
             ];
 
-            $debitChild = $debitSide->createChild($shared + ['account_id' => $this->accountId]);
-            $creditChild = $creditSide->createChild($shared + ['account_id' => $this->transferToAccountId]);
+            $debitChild = $debitSide->createChild($this->renamedDescriptors($debitSide, $parsed->description) + $shared + ['account_id' => $this->accountId]);
+            $creditChild = $creditSide->createChild($this->renamedDescriptors($creditSide, $parsed->description) + $shared + ['account_id' => $this->transferToAccountId]);
 
             $manual = ['transfer_link_source' => TransferLinkSource::Manual];
 
@@ -981,6 +1065,8 @@ final class TransactionModal extends Component
         [$transaction, $parsed] = $resolved;
 
         DB::transaction(function () use ($transaction, $parsed): void {
+            $this->reloadCleanNamesUnderLock($transaction);
+
             $shared = [
                 'amount' => $parsed->amount,
                 'description' => $parsed->description,
@@ -992,7 +1078,7 @@ final class TransactionModal extends Component
             $debitChild = $transaction->createChild($shared + [
                 'account_id' => $this->accountId,
                 'direction' => TransactionDirection::Debit,
-            ]);
+            ] + $this->renamedDescriptors($transaction, $parsed->description));
 
             $credit = Transaction::query()->create($shared + [
                 'user_id' => auth()->id(),
@@ -1029,6 +1115,8 @@ final class TransactionModal extends Component
             : TransactionDirection::Credit;
 
         DB::transaction(function () use ($debitSide, $creditSide, $parsed, $direction): void {
+            $this->reloadCleanNamesUnderLock($debitSide, $creditSide);
+
             // An imported row is never deleted: unlink it (stamping both legs) and keep it.
             $keepCreditSide = $creditSide->source->isBankFeed();
 
@@ -1040,12 +1128,12 @@ final class TransactionModal extends Component
                 'account_id' => $this->accountId,
                 'direction' => $direction,
                 'amount' => $parsed->amount,
-                'description' => $parsed->description,
                 'post_date' => $this->date,
                 'category_id' => $this->categoryId,
                 'notes' => $this->notes !== '' ? $this->notes : null,
                 'transfer_pair_id' => null,
                 'transfer_link_source' => $keepCreditSide ? TransferLinkSource::Unlinked : null,
+                ...$this->renamedDescriptors($debitSide, $parsed->description),
             ]);
 
             if (! $keepCreditSide) {
@@ -1100,11 +1188,15 @@ final class TransactionModal extends Component
         }
 
         $generator = app(CategoryRuleGenerator::class);
+        $ruleCleanDescription = $this->cleanDescription === $this->openedCleanDescription
+            ? $source->identityCleanDescription()
+            : $this->cleanDescription;
+
         $generator->generateAndApply(
             $source,
             $this->categoryId,
             $this->categoriseMatchValue,
-            $source->source->isBankFeed() ? $this->cleanDescription : null,
+            $source->source->isBankFeed() ? $ruleCleanDescription : null,
         );
 
         if ($this->categoriseContradictionKey !== ''
@@ -1496,6 +1588,9 @@ final class TransactionModal extends Component
         $this->date = '';
         $this->notes = '';
         $this->cleanDescription = '';
+        $this->openedCleanDescription = '';
+        $this->openedDescription = '';
+        $this->openedNameIsDeliberate = false;
         $this->transferToAccountId = null;
         $this->originalWasTransfer = false;
         $this->selectedCandidateId = null;

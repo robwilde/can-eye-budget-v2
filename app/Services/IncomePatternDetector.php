@@ -233,8 +233,10 @@ final class IncomePatternDetector
             return mb_strtoupper(mb_trim($transaction->merchant_name));
         }
 
-        if ($transaction->clean_description !== null && $transaction->clean_description !== '') {
-            return mb_strtoupper(mb_trim($transaction->clean_description));
+        $identityName = $transaction->identityCleanDescription();
+
+        if ($identityName !== null && $identityName !== '') {
+            return mb_strtoupper(mb_trim($identityName));
         }
 
         $normalized = mb_strtoupper(mb_trim($transaction->description));

@@ -129,7 +129,7 @@ final readonly class RecurringTransactionDetector
     {
         $source = match (true) {
             $transaction->merchant_name !== null && $transaction->merchant_name !== '' => $transaction->merchant_name,
-            $transaction->clean_description !== null && $transaction->clean_description !== '' => $transaction->clean_description,
+            $transaction->identityCleanDescription() !== null && $transaction->identityCleanDescription() !== '' => $transaction->identityCleanDescription(),
             default => $transaction->description,
         };
 

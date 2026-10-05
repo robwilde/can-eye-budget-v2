@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\CategorySource;
+use App\Enums\CleanDescriptionSource;
 use App\Enums\RuleActionType;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
+use App\Support\CleanDescriptionDeriver;
+use Illuminate\Support\Facades\DB;
 
 final readonly class RuleActionExecutor
 {
@@ -16,12 +19,16 @@ final readonly class RuleActionExecutor
 
     /**
      * @param  array<int, array<string, string>>  $actions
-     * @param  bool  $overwriteCleanDescription  False leaves a non-blank clean
-     *                                           description alone. The import
-     *                                           pipeline re-runs rules on every
-     *                                           new version of a row, so an
-     *                                           overwrite there would revert a
-     *                                           person's later rename.
+     * @param  bool  $overwriteCleanDescription  False never replaces a name a
+     *                                           person or a rule set, nor a
+     *                                           legacy name with no source, but
+     *                                           does replace an import-derived
+     *                                           name (feed, brand or derived).
+     *                                           The import pipeline re-runs
+     *                                           rules on every new version of a
+     *                                           row, so an overwrite there
+     *                                           would revert a person's later
+     *                                           rename.
      * @return bool Whether the rule fully applied. Returns false when a fold
      *              action was requested but did not fold (e.g. an orphan fee
      *              whose parent is not yet imported), so the caller leaves it
@@ -30,40 +37,15 @@ final readonly class RuleActionExecutor
      */
     public function execute(Transaction $transaction, array $actions, bool $overwriteCleanDescription = true): bool
     {
-        $applied = false;
-        $foldPending = false;
-
-        foreach ($actions as $action) {
-            $type = RuleActionType::tryFrom($action['type'] ?? '');
-
-            if ($type === null) {
-                continue;
-            }
-
-            $value = $action['value'] ?? '';
-
-            $effect = match ($type) {
-                RuleActionType::SetCategory => $this->setCategory($transaction, $value),
-                RuleActionType::SetDescription => $this->setDescription($transaction, $value),
-                RuleActionType::SetCleanDescription => $this->setCleanDescription($transaction, $value, $overwriteCleanDescription),
-                RuleActionType::AppendNotes => $this->appendNotes($transaction, $value),
-                RuleActionType::SetNotes => $this->setNotes($transaction, $value),
-                RuleActionType::LinkToPlannedTransaction => $this->linkToPlannedTransaction($transaction, $value),
-                RuleActionType::FoldIntoParent => $this->feeFolder->fold($transaction) instanceof Transaction,
-            };
-
-            if ($type === RuleActionType::FoldIntoParent && ! $effect) {
-                $foldPending = true;
-            }
-
-            $applied = $effect || $applied;
+        if ($overwriteCleanDescription || ! $transaction->exists || ! $this->setsCleanDescription($actions)) {
+            return $this->run($transaction, $actions, $overwriteCleanDescription);
         }
 
-        if ($transaction->isDirty()) {
-            $transaction->save();
-        }
+        return DB::transaction(function () use ($transaction, $actions): bool {
+            $this->syncPersistedCleanDescription($transaction);
 
-        return $applied && ! $foldPending;
+            return $this->run($transaction, $actions, false);
+        });
     }
 
     /**
@@ -108,6 +90,80 @@ final readonly class RuleActionExecutor
         }
 
         return null;
+    }
+
+    /**
+     * @param  array<int, array<string, string>>  $actions
+     */
+    private function setsCleanDescription(array $actions): bool
+    {
+        foreach ($actions as $action) {
+            if (RuleActionType::tryFrom($action['type'] ?? '') === RuleActionType::SetCleanDescription) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function syncPersistedCleanDescription(Transaction $transaction): void
+    {
+        $fresh = Transaction::query()
+            ->whereKey($transaction->getKey())
+            ->lockForUpdate()
+            ->first(['id', 'clean_description', 'clean_description_source']);
+
+        if ($fresh === null || $transaction->isDirty(['clean_description', 'clean_description_source'])) {
+            return;
+        }
+
+        $transaction
+            ->forceFill([
+                'clean_description' => $fresh->clean_description,
+                'clean_description_source' => $fresh->clean_description_source,
+            ])
+            ->syncOriginalAttributes(['clean_description', 'clean_description_source']);
+    }
+
+    /**
+     * @param  array<int, array<string, string>>  $actions
+     */
+    private function run(Transaction $transaction, array $actions, bool $overwriteCleanDescription): bool
+    {
+        $applied = false;
+        $foldPending = false;
+
+        foreach ($actions as $action) {
+            $type = RuleActionType::tryFrom($action['type'] ?? '');
+
+            if ($type === null) {
+                continue;
+            }
+
+            $value = $action['value'] ?? '';
+
+            $effect = match ($type) {
+                RuleActionType::SetCategory => $this->setCategory($transaction, $value),
+                RuleActionType::SetDescription => $this->setDescription($transaction, $value),
+                RuleActionType::SetCleanDescription => $this->setCleanDescription($transaction, $value, $overwriteCleanDescription),
+                RuleActionType::AppendNotes => $this->appendNotes($transaction, $value),
+                RuleActionType::SetNotes => $this->setNotes($transaction, $value),
+                RuleActionType::LinkToPlannedTransaction => $this->linkToPlannedTransaction($transaction, $value),
+                RuleActionType::FoldIntoParent => $this->feeFolder->fold($transaction) instanceof Transaction,
+            };
+
+            if ($type === RuleActionType::FoldIntoParent && ! $effect) {
+                $foldPending = true;
+            }
+
+            $applied = $effect || $applied;
+        }
+
+        if ($transaction->isDirty()) {
+            $transaction->save();
+        }
+
+        return $applied && ! $foldPending;
     }
 
     /**
@@ -175,8 +231,11 @@ final readonly class RuleActionExecutor
      */
     private function setCleanDescription(Transaction $transaction, string $value, bool $overwrite): bool
     {
-        if ($overwrite || mb_trim($transaction->clean_description ?? '') === '') {
-            $transaction->clean_description = $value;
+        if ($overwrite) {
+            $transaction->clean_description = CleanDescriptionDeriver::tidy($value);
+            $transaction->clean_description_source = CleanDescriptionSource::Rule;
+        } else {
+            $transaction->offerCleanDescription($value, CleanDescriptionSource::Rule);
         }
 
         return $overwrite || ! $transaction->isSplit();

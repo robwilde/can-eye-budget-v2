@@ -23,6 +23,7 @@ use App\Models\TransactionEmail;
 use App\Models\TransactionSplit;
 use App\Services\CategoryRuleGenerator;
 use App\Services\GmailService;
+use App\Services\MerchantBrands\BrandNameWriter;
 use App\Services\MerchantBrands\ContextDevCreditBalance;
 use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\MerchantBrands\DescriptorGate;
@@ -897,20 +898,22 @@ final class TransactionList extends Component
         }
     }
 
-    /**
-     * "Wrong merchant": hide the brand for this merchant key and never look it up
-     * again for this user. Transactions themselves are untouched.
-     */
     public function vetoMerchantBrand(int $transactionId): void
     {
         $transaction = Transaction::query()
             ->where('user_id', auth()->id())
             ->findOrFail($transactionId);
 
-        MerchantBrand::query()->updateOrCreate(
-            ['user_id' => auth()->id(), 'merchant_key' => $this->merchantKeyFor($transaction)],
-            ['status' => MerchantBrandStatus::Vetoed, 'retry_after' => null],
-        );
+        $key = $this->merchantKeyFor($transaction);
+
+        DB::transaction(function () use ($key): void {
+            MerchantBrand::query()->updateOrCreate(
+                ['user_id' => auth()->id(), 'merchant_key' => $key],
+                ['status' => MerchantBrandStatus::Vetoed, 'retry_after' => null],
+            );
+
+            app(BrandNameWriter::class)->revoke(auth()->user(), $key);
+        });
 
         Flux::toast(text: 'Merchant hidden. It will not be suggested again.', variant: 'success');
     }

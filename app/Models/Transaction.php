@@ -6,11 +6,13 @@ namespace App\Models;
 
 use App\Casts\MoneyCast;
 use App\Enums\CategorySource;
+use App\Enums\CleanDescriptionSource;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Enums\TransferLinkSource;
 use App\Events\TransactionCategoryUpdated;
+use App\Support\CleanDescriptionDeriver;
 use App\Support\Recurring\MerchantSignature;
 use Carbon\CarbonImmutable;
 use Database\Factories\TransactionFactory;
@@ -32,6 +34,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property TransactionDirection $direction
  * @property string $description
  * @property string|null $clean_description
+ * @property CleanDescriptionSource|null $clean_description_source
  * @property CarbonImmutable $post_date
  * @property CarbonImmutable|null $transaction_date
  * @property TransactionStatus $status
@@ -99,6 +102,7 @@ final class Transaction extends Model
         'direction',
         'description',
         'clean_description',
+        'clean_description_source',
         'post_date',
         'transaction_date',
         'status',
@@ -414,8 +418,10 @@ final class Transaction extends Model
 
     /**
      * The persisted payee signature used to cluster transactions on the
-     * transactions list. Derived from the most specific description the feed
-     * gave us, falling back through clean_description to the raw description.
+     * transactions list. It is derived from the most specific description the
+     * feed gave us, falling back through a clean_description a person or rule set
+     * (never an import-derived one, which must not move a row's key) to the
+     * raw description.
      *
      * Feeds emit empty strings as readily as nulls, so the fallback tests for
      * blankness rather than null — otherwise a merchant_name of '' would pin
@@ -428,7 +434,7 @@ final class Transaction extends Model
      */
     public function resolveMerchantKey(): string
     {
-        foreach ([$this->merchant_name, $this->clean_description, $this->description] as $candidate) {
+        foreach ([$this->merchant_name, $this->identityCleanDescription(), $this->description] as $candidate) {
             if (mb_trim((string) $candidate) === '') {
                 continue;
             }
@@ -443,13 +449,49 @@ final class Transaction extends Model
         return self::UNKNOWN_MERCHANT_KEY;
     }
 
+    public function identityCleanDescription(): ?string
+    {
+        return $this->clean_description_source?->isImportDerived() === true ? null : $this->clean_description;
+    }
+
+    public function offerCleanDescription(?string $name, CleanDescriptionSource $source): bool
+    {
+        $name = CleanDescriptionDeriver::tidy($name);
+
+        if ($name === null) {
+            return false;
+        }
+
+        $current = $this->clean_description_source;
+
+        if (mb_trim((string) $this->clean_description) !== '' && ($current === null || ! $current->yieldsTo($source))) {
+            return false;
+        }
+
+        $this->clean_description = $name;
+        $this->clean_description_source = $source;
+
+        return true;
+    }
+
     protected static function booted(): void
     {
+        self::saving(static function (Transaction $transaction): void {
+            if (mb_trim((string) $transaction->clean_description) === '') {
+                $transaction->clean_description = null;
+                $transaction->clean_description_source = null;
+
+                return;
+            }
+
+            $transaction->clean_description_source ??= CleanDescriptionSource::Manual;
+        });
+
         // Derive the merchant key on every write rather than only at ingest, so
         // edited descriptions and createChild() revisions cannot leave a stale
         // key pointing at the previous payee's cluster.
         self::saving(static function (Transaction $transaction): void {
-            $sourcesChanged = $transaction->isDirty(['merchant_name', 'clean_description', 'description']);
+            $sourcesChanged = $transaction->isDirty(['merchant_name', 'clean_description', 'clean_description_source', 'description']);
 
             if ($transaction->merchant_key !== null && ! $sourcesChanged) {
                 return;
@@ -499,6 +541,7 @@ final class Transaction extends Model
         return [
             'source' => TransactionSource::class,
             'category_source' => CategorySource::class,
+            'clean_description_source' => CleanDescriptionSource::class,
             'transfer_link_source' => TransferLinkSource::class,
             'direction' => TransactionDirection::class,
             'status' => TransactionStatus::class,

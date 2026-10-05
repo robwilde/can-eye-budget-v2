@@ -8,6 +8,7 @@ use App\Contracts\RedbarkServiceContract;
 use App\DTOs\RedbarkBalanceData;
 use App\DTOs\RedbarkConnectionData;
 use App\DTOs\RedbarkTransactionData;
+use App\Enums\CleanDescriptionSource;
 use App\Enums\ImportSource;
 use App\Enums\RedbarkFeedStatus;
 use App\Enums\RefreshStatus;
@@ -24,6 +25,7 @@ use App\Models\Transaction;
 use App\Services\RedbarkClientFactory;
 use App\Services\RedbarkTransactionMatcher;
 use App\Services\TransactionIngestor;
+use App\Support\CleanDescriptionDeriver;
 use App\Support\Redbark\InitialSyncWindow;
 use App\Support\RedbarkCurrency;
 use App\Support\RedbarkNarration;
@@ -33,6 +35,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -813,6 +816,11 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             ],
         ];
 
+        $names = [
+            'feed' => CleanDescriptionDeriver::tidy($row['merchantName'] ?? null),
+            'derived' => CleanDescriptionDeriver::fromDescription($row['description'] ?? null),
+        ];
+
         // Trashed rows count: a folded fee must be recognised, never resurrected.
         $existing = Transaction::withTrashed()->where('redbark_id', $id)->first();
 
@@ -825,12 +833,14 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
 
                 $this->applyValues($existing, $values);
                 $existing->restore();
+                $this->persistNames($existing, $names);
 
                 return 'updated';
             }
 
             $this->applyValues($existing, $values);
             $existing->save();
+            $this->persistNames($existing, $names);
 
             return 'updated';
         }
@@ -848,6 +858,8 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
                 'post_date' => $originalPostDate,
                 'redbark_id' => $id,
             ])->save();
+
+            $this->persistNames($claimed, $names);
 
             return 'updated';
         }
@@ -874,17 +886,21 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
 
             $this->applyValues($adopted, $values);
             $adopted->save();
+            $this->persistNames($adopted, $names);
 
             return 'matched';
         }
 
         // New rows must go through the ingestor: it is the single funnel that reconciles
         // against planned transactions and emits TransactionEntered/TransactionReconciled.
-        $ingestor->ingest(new Transaction([
+        $created = new Transaction([
             'redbark_id' => $id,
             'source' => TransactionSource::Redbark,
             ...$values,
-        ]));
+        ]);
+        $this->offerNames($created, $names);
+
+        $ingestor->ingest($created);
 
         return 'created';
     }
@@ -909,6 +925,69 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             'enrich_data' => $values['enrich_data'],
             'merchant_name' => $transaction->merchant_name ?? $values['merchant_name'],
         ]);
+    }
+
+    /**
+     * @param  array{feed: ?string, derived: ?string}  $names
+     */
+    private function offerNames(Transaction $transaction, array $names): void
+    {
+        if ($names['feed'] !== null) {
+            $transaction->offerCleanDescription($names['feed'], CleanDescriptionSource::Feed);
+
+            return;
+        }
+
+        $transaction->offerCleanDescription($names['derived'], CleanDescriptionSource::Derived);
+    }
+
+    /**
+     * @param  array{feed: ?string, derived: ?string}  $names
+     */
+    private function persistNames(Transaction $transaction, array $names): void
+    {
+        DB::transaction(function () use ($transaction, $names): void {
+            $parent = Transaction::query()->lockForUpdate()->find($transaction->id);
+
+            if ($parent === null) {
+                return;
+            }
+
+            $this->nameRow($parent, $names);
+
+            $current = $parent;
+
+            while (true) {
+                $child = Transaction::query()
+                    ->where('user_id', $parent->user_id)
+                    ->where('parent_transaction_id', $current->id)
+                    ->latest('id')
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($child === null) {
+                    break;
+                }
+
+                $current = $child;
+            }
+
+            if ($current->id !== $parent->id) {
+                $this->nameRow($current, $names);
+            }
+        });
+    }
+
+    /**
+     * @param  array{feed: ?string, derived: ?string}  $names
+     */
+    private function nameRow(Transaction $row, array $names): void
+    {
+        $this->offerNames($row, $names);
+
+        if ($row->isDirty()) {
+            $row->save();
+        }
     }
 
     /**

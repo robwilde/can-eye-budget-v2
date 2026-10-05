@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Enums\CategorySource;
+use App\Enums\CleanDescriptionSource;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\Category;
@@ -288,4 +289,51 @@ test('it suggests the distinctive payee token for an external transfer descripti
     ]);
 
     expect(app(CategoryRuleGenerator::class)->suggestMatchValue($source))->toBe('LANDLORD');
+});
+
+test('a brand or derived name never becomes the rule trigger for the row it names', function (CleanDescriptionSource $source) {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $generator = app(CategoryRuleGenerator::class);
+
+    $named = Transaction::factory()->for($user)->for($account)->create([
+        'merchant_name' => null,
+        'category_id' => null,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'VISA WOOLWORTHS 1234 SYDNEY',
+        'clean_description' => 'Acme Holdings',
+        'clean_description_source' => $source,
+    ]);
+    $sibling = Transaction::factory()->for($user)->for($account)->create([
+        'merchant_name' => null,
+        'category_id' => null,
+        'direction' => TransactionDirection::Debit,
+        'description' => 'VISA WOOLWORTHS 5678 SYDNEY',
+        'clean_description' => null,
+    ]);
+
+    $preview = $generator->preview($named, $category->id, null);
+
+    expect($generator->suggestMatchValue($named))->toBe('WOOLWORTHS')
+        ->and($preview->wouldChange)->toBe(2)
+        ->and($sibling->fresh()->clean_description)->toBeNull();
+})->with([
+    'a brand' => [CleanDescriptionSource::Brand],
+    'the feed' => [CleanDescriptionSource::Feed],
+    'the narration' => [CleanDescriptionSource::Derived],
+]);
+
+test('a name the person chose still seeds the rule trigger', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $named = Transaction::factory()->for($user)->for($account)->create([
+        'merchant_name' => null,
+        'description' => 'VISA WOOLWORTHS 1234 SYDNEY',
+        'clean_description' => 'Groceries',
+        'clean_description_source' => CleanDescriptionSource::Manual,
+    ]);
+
+    expect(app(CategoryRuleGenerator::class)->suggestMatchValue($named))->toBe('GROCERIES');
 });
