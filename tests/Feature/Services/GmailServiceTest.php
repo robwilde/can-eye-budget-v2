@@ -7,10 +7,16 @@ declare(strict_types=1);
 use App\Enums\TransactionDirection;
 use App\Exceptions\GmailSearchException;
 use App\Models\Account;
+use App\Models\GmailCredential;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\CategoryRuleGenerator;
 use App\Services\GmailService;
+use Webklex\IMAP\Facades\Client;
+use Webklex\PHPIMAP\Client as ImapClient;
+use Webklex\PHPIMAP\Folder;
+use Webklex\PHPIMAP\Query\WhereQuery;
+use Webklex\PHPIMAP\Support\MessageCollection;
 
 function gmailTransaction(array $overrides = []): Transaction
 {
@@ -99,16 +105,47 @@ test('buildQuery strips double quotes from the merchant term', function () {
         ->and($query)->toStartWith('Big W ');
 });
 
-test('searchForTransaction throws when Gmail is not configured', function () {
-    config(['imap.accounts.gmail.username' => null, 'imap.accounts.gmail.password' => null]);
-
+test('searchForTransaction throws when the transaction owner has not connected Gmail', function () {
     $service = app(GmailService::class);
     $transaction = gmailTransaction();
+    GmailCredential::factory()->create();
 
-    expect($service->isConfigured())->toBeFalse();
+    expect($service->isConfigured($transaction->user))->toBeFalse();
 
     $service->searchForTransaction($transaction);
-})->throws(GmailSearchException::class);
+})->throws(GmailSearchException::class, 'Gmail is not connected');
+
+test('searchForTransaction wraps an undecryptable stored password in a GmailSearchException', function () {
+    $transaction = gmailTransaction();
+    $credential = GmailCredential::factory()->for($transaction->user)->create();
+    GmailCredential::query()->whereKey($credential->id)->update(['app_password' => 'not-encrypted']);
+
+    app(GmailService::class)->searchForTransaction($transaction->fresh());
+})->throws(GmailSearchException::class, 'Gmail search failed');
+
+test('searchForTransaction reads the transaction owner mailbox and no other', function () {
+    GmailCredential::factory()->create(['username' => 'someone-else@gmail.com']);
+    $transaction = gmailTransaction();
+    GmailCredential::factory()->for($transaction->user)->create(['username' => 'owner@gmail.com', 'app_password' => 'ownerpassword1234']);
+
+    $query = Mockery::mock(WhereQuery::class);
+    $query->shouldReceive('where')->andReturnSelf();
+    $query->shouldReceive('limit')->andReturnSelf();
+    $query->shouldReceive('get')->andReturn(new MessageCollection);
+    $folder = Mockery::mock(Folder::class);
+    $folder->shouldReceive('query')->andReturn($query);
+    $client = Mockery::mock(ImapClient::class);
+    $client->shouldReceive('connect')->andReturnSelf();
+    $client->shouldReceive('disconnect')->andReturnSelf();
+    $client->shouldReceive('getFolderByPath')->andReturn($folder);
+    Client::shouldReceive('make')
+        ->withArgs(fn (array $config): bool => $config['username'] === 'owner@gmail.com' && $config['password'] === 'ownerpassword1234')
+        ->atLeast()->once()
+        ->andReturn($client);
+
+    expect(app(GmailService::class)->isConfigured($transaction->user))->toBeTrue()
+        ->and(app(GmailService::class)->searchForTransaction($transaction))->toBeEmpty();
+});
 
 test('snippetFromBodies prefers the plain-text body', function () {
     expect(GmailService::snippetFromBodies('  Plain   text  body ', '<p>ignored</p>'))

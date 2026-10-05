@@ -6,16 +6,19 @@ namespace App\Services\Bnpl;
 
 use App\Contracts\ScheduleSource;
 use App\DTOs\RawEmail;
+use App\Models\User;
 use App\Support\Email\GmailMailbox;
+use RuntimeException;
 use Webklex\PHPIMAP\Message;
 
 final readonly class GmailScheduleSource implements ScheduleSource
 {
-    public function __construct(private GmailMailbox $mailbox) {}
-
-    public function fetch(string $query, int $limit): array
+    public function fetch(User $user, string $query, int $limit): array
     {
-        return $this->mailbox->search($query, $limit)
+        $mailbox = GmailMailbox::forUser($user)
+            ?? throw new RuntimeException("User {$user->id} has not connected Gmail.");
+
+        return $mailbox->search($query, $limit)
             ->map(static fn (Message $message): ?RawEmail => GmailMailbox::rawEmail($message))
             ->filter()
             ->values()

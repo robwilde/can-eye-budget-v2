@@ -9,11 +9,12 @@ use App\DTOs\RawEmail;
 use App\Models\User;
 use App\Services\Bnpl\BnplOrderImporter;
 use App\Services\Bnpl\BnplReceiptLinker;
-use App\Support\Email\GmailMailbox;
 use App\Support\Email\ScheduleParser;
 use Carbon\CarbonImmutable;
 use Carbon\Exceptions\InvalidFormatException;
 use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use Throwable;
@@ -24,17 +25,16 @@ final class ScanBnplEmailsCommand extends Command
 
     protected $signature = 'app:scan-bnpl-emails
         {--since=10d : How far back to read: <n>d, <n>w, <n>m or a Y-m-d date}
-        {--user= : Owner of the imported orders; required when more than one user exists}
+        {--user= : Scan only this user id; defaults to every user with a connected Gmail mailbox}
         {--dry-run : Parse the emails but write nothing}';
 
-    protected $description = 'Scan the Gmail mailbox for BNPL schedule emails and create planned transactions';
+    protected $description = 'Scan each connected Gmail mailbox for BNPL schedule emails and create planned transactions';
 
     public function handle(
         ScheduleParser $parser,
         ScheduleSource $source,
         BnplOrderImporter $importer,
         BnplReceiptLinker $linker,
-        GmailMailbox $mailbox,
     ): int {
         if (config('budget.bnpl_email_import') !== true) {
             $this->info('BNPL email import is disabled (BUDGET_BNPL_EMAIL_IMPORT).');
@@ -42,14 +42,8 @@ final class ScanBnplEmailsCommand extends Command
             return self::SUCCESS;
         }
 
-        if (! $mailbox->isConfigured()) {
-            $this->warn('Gmail is not configured (GMAIL_USERNAME / GMAIL_APP_PASSWORD).');
-
-            return self::SUCCESS;
-        }
-
         try {
-            $user = $this->owner();
+            $users = $this->users();
             $since = $this->since((string) $this->option('since'));
         } catch (InvalidArgumentException $e) {
             $this->error($e->getMessage());
@@ -57,59 +51,71 @@ final class ScanBnplEmailsCommand extends Command
             return self::FAILURE;
         }
 
+        if (! $users->exists()) {
+            $this->info('No user with a connected Gmail mailbox; nothing to scan.');
+
+            return self::SUCCESS;
+        }
+
         $dryRun = (bool) $this->option('dry-run');
         $counts = ['scanned' => 0, 'parsed' => 0, 'orders' => 0, 'plans' => 0, 'linked' => 0, 'ambiguous' => 0, 'skipped' => 0, 'failed' => 0];
+        $fetchFailed = false;
 
-        foreach ($parser->strategies() as $strategy) {
-            try {
-                $emails = $source->fetch($strategy->query($since), self::FETCH_LIMIT);
-            } catch (Throwable $e) {
-                $this->error('Gmail fetch failed: '.$e->getMessage());
-                Log::warning('BNPL scan failed', ['provider' => $strategy->provider()->value, 'exception' => $e->getMessage()]);
+        $users->with('gmailCredential')->chunkById(100, function (Collection $chunk) use ($parser, $source, $importer, $linker, $since, $dryRun, &$counts, &$fetchFailed): void {
+            foreach ($chunk as $user) {
+                foreach ($parser->strategies() as $strategy) {
+                    try {
+                        $emails = $source->fetch($user, $strategy->query($since), self::FETCH_LIMIT);
+                    } catch (Throwable $e) {
+                        $this->error(sprintf('Gmail fetch failed for user %d: %s', $user->id, $e->getMessage()));
+                        Log::warning('BNPL scan failed', ['user_id' => $user->id, 'provider' => $strategy->provider()->value, 'exception' => $e->getMessage()]);
+                        $fetchFailed = true;
 
-                return self::FAILURE;
-            }
-
-            if (count($emails) >= self::FETCH_LIMIT) {
-                $this->warn(sprintf('Fetch window truncated at %d messages; narrow --since.', self::FETCH_LIMIT));
-            }
-
-            foreach ($this->oldestFirst($emails) as $email) {
-                $counts['scanned']++;
-                $schedule = $strategy->parse($email);
-
-                if ($schedule === null) {
-                    $counts['skipped']++;
-
-                    continue;
-                }
-
-                $counts['parsed']++;
-
-                if ($dryRun) {
-                    continue;
-                }
-
-                try {
-                    $order = $importer->import($user, $email, $schedule);
-
-                    if ($order->wasRecentlyCreated) {
-                        $counts['orders']++;
-                        $counts['plans'] += $order->planned_transaction_id === null ? 0 : 1;
+                        break;
                     }
 
-                    $link = $linker->link($order, $email, $schedule);
-                } catch (Throwable $e) {
-                    report($e);
-                    $counts['failed']++;
+                    if (count($emails) >= self::FETCH_LIMIT) {
+                        $this->warn(sprintf('Fetch window truncated at %d messages for user %d; narrow --since.', self::FETCH_LIMIT, $user->id));
+                    }
 
-                    continue;
+                    foreach ($this->oldestFirst($emails) as $email) {
+                        $counts['scanned']++;
+                        $schedule = $strategy->parse($email);
+
+                        if ($schedule === null) {
+                            $counts['skipped']++;
+
+                            continue;
+                        }
+
+                        $counts['parsed']++;
+
+                        if ($dryRun) {
+                            continue;
+                        }
+
+                        try {
+                            $order = $importer->import($user, $email, $schedule);
+
+                            if ($order->wasRecentlyCreated) {
+                                $counts['orders']++;
+                                $counts['plans'] += $order->planned_transaction_id === null ? 0 : 1;
+                            }
+
+                            $link = $linker->link($order, $email, $schedule);
+                        } catch (Throwable $e) {
+                            report($e);
+                            $counts['failed']++;
+
+                            continue;
+                        }
+
+                        $counts['linked'] += $link->transaction === null ? 0 : 1;
+                        $counts['ambiguous'] += $link->ambiguous ? 1 : 0;
+                    }
                 }
-
-                $counts['linked'] += $link->transaction === null ? 0 : 1;
-                $counts['ambiguous'] += $link->ambiguous ? 1 : 0;
             }
-        }
+        });
 
         $this->info($dryRun
             ? sprintf('Dry run: scanned %d email(s): %d schedule(s) parsed, %d skipped; nothing written.', $counts['scanned'], $counts['parsed'], $counts['skipped'])
@@ -124,36 +130,31 @@ final class ScanBnplEmailsCommand extends Command
                 $counts['failed'],
             ));
 
-        return self::SUCCESS;
+        return $fetchFailed ? self::FAILURE : self::SUCCESS;
     }
 
     /**
-     * Financial records never get a guessed owner: with more than one user
-     * the owner must be named, and a malformed id ("1oops") is rejected rather
-     * than coerced to a real user.
+     * @return Builder<User>
      *
      * @throws InvalidArgumentException
      */
-    private function owner(): User
+    private function users(): Builder
     {
         $id = $this->option('user');
 
-        if ($id !== null) {
-            if (preg_match('/^[1-9]\d*$/', $id) !== 1) {
-                throw new InvalidArgumentException('--user must be a user id (a positive whole number).');
-            }
-
-            return User::query()->find((int) $id)
-                ?? throw new InvalidArgumentException("User {$id} does not exist.");
+        if ($id === null) {
+            return User::query()->whereHas('gmailCredential');
         }
 
-        $users = User::query()->limit(2)->get();
+        if (preg_match('/^[1-9]\d*$/', $id) !== 1) {
+            throw new InvalidArgumentException('--user must be a user id (a positive whole number).');
+        }
 
-        return match ($users->count()) {
-            1 => $users->first(),
-            0 => throw new InvalidArgumentException('No user exists to own the imported orders.'),
-            default => throw new InvalidArgumentException('More than one user exists; pass --user=<id>.'),
-        };
+        if (! User::query()->whereKey((int) $id)->exists()) {
+            throw new InvalidArgumentException("User {$id} does not exist.");
+        }
+
+        return User::query()->whereKey((int) $id)->whereHas('gmailCredential');
     }
 
     /**

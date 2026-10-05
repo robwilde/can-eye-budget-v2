@@ -93,6 +93,12 @@ final class User extends Authenticatable
         return $this->hasMany(PlannedTransaction::class);
     }
 
+    /** @return HasOne<GmailCredential, $this> */
+    public function gmailCredential(): HasOne
+    {
+        return $this->hasOne(GmailCredential::class);
+    }
+
     /** @return HasOne<RedbarkFeed, $this> */
     public function redbarkFeed(): HasOne
     {

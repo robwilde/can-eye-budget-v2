@@ -26,7 +26,6 @@ use App\Services\PipelineStages\UserRulesStage;
 use App\Services\RedbarkClientFactory;
 use App\Services\TransactionAnalysisPipeline;
 use App\Services\TypeSafeService;
-use App\Support\Email\GmailMailbox;
 use App\Support\Email\ScheduleParser;
 use App\Support\Email\Schedules\PayPalReceiptStrategy;
 use App\View\Composers\LayoutShellComposer;
@@ -82,7 +81,7 @@ final class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(
             GmailServiceContract::class,
-            fn (): GmailService => new GmailService(app(CategoryRuleGenerator::class), app(GmailMailbox::class)),
+            fn (): GmailService => new GmailService(app(CategoryRuleGenerator::class)),
         );
 
         $this->app->alias(GmailServiceContract::class, GmailService::class);

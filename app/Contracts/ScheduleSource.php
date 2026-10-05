@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Contracts;
 
 use App\DTOs\RawEmail;
+use App\Models\User;
 use Throwable;
 
 /**
@@ -19,5 +20,5 @@ interface ScheduleSource
      *
      * @throws Throwable when the mailbox cannot be read
      */
-    public function fetch(string $query, int $limit): array;
+    public function fetch(User $user, string $query, int $limit): array;
 }

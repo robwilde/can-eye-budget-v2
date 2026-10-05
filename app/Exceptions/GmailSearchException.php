@@ -14,8 +14,8 @@ final class GmailSearchException extends RuntimeException
         return new self('Gmail search failed: '.$e->getMessage(), 0, $e);
     }
 
-    public static function notConfigured(): self
+    public static function notConnected(): self
     {
-        return new self('Gmail is not configured. Set GMAIL_USERNAME and GMAIL_APP_PASSWORD.');
+        return new self('Gmail is not connected. Connect it under Settings > Providers.');
     }
 }
