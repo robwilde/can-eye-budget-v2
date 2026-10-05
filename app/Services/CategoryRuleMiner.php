@@ -87,16 +87,18 @@ final class CategoryRuleMiner
         $seeds = $seedResult['resolved'];
         $skippedSeeds = $seedResult['skipped'];
 
-        $deduped = $this->dedupeAndSubsume([...$seeds, ...$extraSeeds, ...$candidates], $this->existingTriggerValues($activeRules));
+        $entries = [...$seeds, ...$extraSeeds, ...$candidates];
+
+        if ($isRelevant !== null) {
+            $entries = array_values(array_filter($entries, $isRelevant));
+        }
+
+        $deduped = $this->dedupeAndSubsume($entries, $this->existingTriggerValues($activeRules));
 
         $final = [];
         $contradictions = [];
 
         foreach ($deduped as $entry) {
-            if ($isRelevant !== null && ! $isRelevant($entry)) {
-                continue;
-            }
-
             $motivating = $entry['source'] === 'mined' ? ($motivatingRows[mb_strtolower($entry['value'])] ?? []) : [];
             $resolved = $this->resolveContradictions($user->id, $entry, $motivating);
 
@@ -324,8 +326,8 @@ final class CategoryRuleMiner
             return ['field' => $field->value, 'operator' => RuleTriggerOperator::Is->value, 'value' => $value];
         }
 
-        $keptAmounts = array_map(fn (Transaction $t): int => (int) $t->amount, $keep);
-        $contraAmounts = array_map(fn (Transaction $t): int => (int) $t->amount, $contradicting);
+        $keptAmounts = array_map(static fn (Transaction $t): int => (int) $t->amount, $keep);
+        $contraAmounts = array_map(static fn (Transaction $t): int => (int) $t->amount, $contradicting);
 
         // Kept rows all below the contradicting ones: cut at the gap's midpoint.
         if (max($keptAmounts) < min($contraAmounts)) {
@@ -390,7 +392,7 @@ final class CategoryRuleMiner
             }
 
             foreach ($byValue[$key] ?? [] as $kept) {
-                if ($kept['category_id'] === $entry['category_id'] || (($kept['extra_triggers'] ?? []) === [] && ($entry['extra_triggers'] ?? []) === [])) {
+                if ($kept['category_id'] === $entry['category_id'] || ($entry['extra_triggers'] ?? []) === []) {
                     continue 2;
                 }
             }
@@ -434,11 +436,7 @@ final class CategoryRuleMiner
             ->where('name', self::GROUP_NAME)
             ->first();
 
-        if ($existing !== null) {
-            return $existing;
-        }
-
-        return UserRuleGroup::query()->create([
+        return $existing ?? UserRuleGroup::query()->create([
             'user_id' => $userId,
             'name' => self::GROUP_NAME,
             'order' => (int) UserRuleGroup::query()->where('user_id', $userId)->max('order') + 1,

@@ -11,6 +11,7 @@ use App\Models\PipelineRun;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserRule;
+use Carbon\CarbonInterface;
 
 final class FirstImportSummary
 {
@@ -51,14 +52,7 @@ final class FirstImportSummary
 
         $categorised = $this->categorisedCount($user, $run, $ruleIds);
 
-        $needsAttention = Transaction::query()
-            ->where('user_id', $user->id)
-            ->where('created_at', '<=', $run->completed_at)
-            ->whereNull('category_id')
-            ->whereDoesntHave('splits')
-            ->current()
-            ->excludingTransfers()
-            ->count();
+        $needsAttention = $this->needsAttentionCount($user, $run);
 
         return [
             'rules' => count($ruleIds),
@@ -82,12 +76,23 @@ final class FirstImportSummary
             ->pluck('metadata')
             ->filter(fn (array $metadata): bool => in_array($metadata['rule_id'] ?? null, $ruleIds, true));
 
-        $categoryByTransaction = Transaction::query()
+        $importedIds = Transaction::query()
             ->whereIn('id', $applied->pluck('transaction_id')->unique()->all())
             ->where('created_at', '<=', $run->completed_at)
+            ->pluck('id')
+            ->all();
+
+        $currentIdByOriginal = $this->currentVersionIds($importedIds);
+
+        $categoryByCurrent = Transaction::query()
+            ->whereIn('id', array_values($currentIdByOriginal))
             ->where('category_source', CategorySource::Rule->value)
             ->excludingTransfers()
             ->pluck('category_id', 'id');
+
+        $categoryByTransaction = collect($currentIdByOriginal)
+            ->filter(fn (int $currentId): bool => isset($categoryByCurrent[$currentId]))
+            ->map(fn (int $currentId): int => $categoryByCurrent[$currentId]);
 
         return $applied
             ->filter(fn (array $metadata): bool => isset($categoryByTransaction[$metadata['transaction_id']])
@@ -96,6 +101,103 @@ final class FirstImportSummary
             ->pluck('transaction_id')
             ->unique()
             ->count();
+    }
+
+    private function needsAttentionCount(User $user, PipelineRun $run): int
+    {
+        $candidates = Transaction::query()
+            ->where('user_id', $user->id)
+            ->whereNull('category_id')
+            ->whereDoesntHave('splits')
+            ->current()
+            ->excludingTransfers()
+            ->where(fn ($query) => $query
+                ->whereNotNull('parent_transaction_id')
+                ->orWhere('created_at', '<=', $run->completed_at))
+            ->get(['id', 'parent_transaction_id', 'created_at']);
+
+        $versioned = $candidates->whereNotNull('parent_transaction_id');
+        $rootCreatedAt = $this->rootCreatedAt($versioned->pluck('parent_transaction_id')->all());
+
+        return $candidates->filter(function (Transaction $transaction) use ($run, $rootCreatedAt): bool {
+            $createdAt = $transaction->parent_transaction_id === null
+                ? $transaction->created_at
+                : $rootCreatedAt[$transaction->parent_transaction_id] ?? null;
+
+            return $createdAt !== null && $createdAt <= $run->completed_at;
+        })->count();
+    }
+
+    /**
+     * @param  list<int>  $parentIds
+     * @return array<int, CarbonInterface> created_at of each starting id's lineage root
+     */
+    private function rootCreatedAt(array $parentIds): array
+    {
+        $result = [];
+        $pending = array_fill_keys($parentIds, null);
+        $lookup = $parentIds;
+
+        while ($lookup !== []) {
+            $rows = Transaction::withTrashed()
+                ->whereIn('id', array_unique($lookup))
+                ->get(['id', 'parent_transaction_id', 'created_at'])
+                ->keyBy('id');
+
+            $lookup = [];
+
+            foreach ($pending as $start => $cursor) {
+                $row = $rows[$cursor ?? $start] ?? null;
+
+                if ($row === null) {
+                    unset($pending[$start]);
+
+                    continue;
+                }
+
+                if ($row->parent_transaction_id === null) {
+                    $result[$start] = $row->created_at;
+                    unset($pending[$start]);
+
+                    continue;
+                }
+
+                $pending[$start] = $row->parent_transaction_id;
+                $lookup[] = $row->parent_transaction_id;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param  list<int>  $ids
+     * @return array<int, int> original id => id of its current version
+     */
+    private function currentVersionIds(array $ids): array
+    {
+        $current = array_combine($ids, $ids);
+        $frontier = $current;
+
+        while ($frontier !== []) {
+            $children = Transaction::query()
+                ->whereIn('parent_transaction_id', array_values($frontier))
+                ->orderBy('id')
+                ->pluck('id', 'parent_transaction_id');
+
+            $next = [];
+
+            foreach ($frontier as $original => $cursor) {
+                if (isset($children[$cursor])) {
+                    $current[$original] = (int) $children[$cursor];
+                    $next[$original] = (int) $children[$cursor];
+                }
+            }
+
+            $frontier = $next;
+        }
+
+        return $current;
     }
 
     private function setCategoryId(UserRule $rule): ?int

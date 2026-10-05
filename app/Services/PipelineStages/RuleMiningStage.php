@@ -22,6 +22,7 @@ use App\Services\RuleEvaluator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 final readonly class RuleMiningStage implements PipelineStageContract
 {
@@ -61,6 +62,9 @@ final readonly class RuleMiningStage implements PipelineStageContract
             && ($context->isFirstSync || $this->hasFailedAttempt($context));
     }
 
+    /**
+     * @throws Throwable
+     */
     public function execute(PipelineContext $context): StageResult
     {
         $imported = Transaction::query()
@@ -68,6 +72,17 @@ final readonly class RuleMiningStage implements PipelineStageContract
             ->whereIn('source', TransactionSource::forAnalysis())
             ->current()
             ->get();
+
+        if ($imported->isEmpty()) {
+            PipelineAuditEntry::create([
+                'pipeline_run_id' => $context->pipelineRun->id,
+                'stage' => self::STAGE_KEY,
+                'action' => 'nothing_imported',
+                'metadata' => [],
+            ]);
+
+            return new StageResult(success: true, stage: self::STAGE_KEY);
+        }
 
         $result = $this->miner->mine(
             $context->user,
@@ -85,7 +100,7 @@ final readonly class RuleMiningStage implements PipelineStageContract
                 'action' => 'rules_created',
                 'metadata' => [
                     'rules_created' => count($rules),
-                    'rule_ids' => array_map(fn (UserRule $rule): int => $rule->id, $rules),
+                    'rule_ids' => array_map(static fn (UserRule $rule): int => $rule->id, $rules),
                     'ambiguous' => count($result['ambiguous']),
                     'conflicts' => count($result['conflicts']),
                     'contradictions' => count($result['contradictions']),
@@ -103,7 +118,8 @@ final readonly class RuleMiningStage implements PipelineStageContract
 
     private function hasFailedAttempt(PipelineContext $context): bool
     {
-        return $this->userAudit($context, 'failed')->exists();
+        return $this->userAudit($context, 'failed')->exists()
+            || $this->userAudit($context, 'nothing_imported')->exists();
     }
 
     /** @return Builder<PipelineAuditEntry> */
@@ -147,7 +163,7 @@ final readonly class RuleMiningStage implements PipelineStageContract
 
             $seeds[mb_strtolower($value)] = [
                 'value' => $value,
-                'category_id' => (int) $salaryCategoryId,
+                'category_id' => $salaryCategoryId,
                 'source' => 'income',
                 'extra_triggers' => [[
                     'field' => RuleTriggerField::Direction->value,
@@ -183,7 +199,7 @@ final readonly class RuleMiningStage implements PipelineStageContract
                 for ($end = $start; $end < $count; $end++) {
                     $tokens = array_slice($run, $start, $end - $start + 1);
 
-                    if ($this->isGeneric($tokens[0]) || $this->isGeneric($tokens[count($tokens) - 1])) {
+                    if ($this->isGeneric($tokens[0]) || $this->isGeneric((string) $tokens[count($tokens) - 1])) {
                         continue;
                     }
 
