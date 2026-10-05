@@ -6,11 +6,13 @@ declare(strict_types=1);
 
 use App\Enums\AccountClass;
 use App\Enums\ImportSource;
+use App\Enums\RefreshStatus;
 use App\Jobs\SyncRedbarkFeedJob;
 use App\Livewire\RedbarkAccountSetup;
 use App\Models\Account;
 use App\Models\RedbarkAccount;
 use App\Models\RedbarkFeed;
+use App\Models\RedbarkSyncLog;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -341,4 +343,66 @@ test('a forged choice cannot link an untracked account to the feed', function ()
 
     expect($redbarkAccount->fresh()->account_id)->toBeNull()
         ->and($untracked->fresh()->import_source)->toBe(ImportSource::Manual);
+});
+
+test('step 2 shows the failed sync errors instead of an empty list once the run fails', function () {
+    $user = User::factory()->create();
+    $feed = RedbarkFeed::factory()->for($user)->create(['last_synced_at' => null]);
+
+    $component = Livewire::actingAs($user)
+        ->test(RedbarkAccountSetup::class)
+        ->assertSee('Fetching your accounts from Redbark')
+        ->assertDontSeeHtml('data-testid="redbark-sync-errors"');
+
+    RedbarkSyncLog::query()->where('redbark_feed_id', $feed->id)->sole()->update([
+        'status' => RefreshStatus::Failed,
+        'errors' => [['context' => 'accounts', 'message' => 'Invalid API key']],
+    ]);
+
+    $component->call('$refresh')
+        ->assertSeeHtml('data-testid="redbark-sync-errors"')
+        ->assertSee('Invalid API key')
+        ->assertDontSee('Nothing left to set up');
+});
+
+test('step 2 explains a failed sync even when the job stored no error details', function () {
+    $user = User::factory()->create();
+    $feed = RedbarkFeed::factory()->for($user)->synced()->pendingSetup()->create();
+    RedbarkSyncLog::factory()->for($feed, 'feed')->create(['status' => RefreshStatus::Failed, 'errors' => null]);
+
+    Livewire::actingAs($user)
+        ->test(RedbarkAccountSetup::class)
+        ->assertSeeHtml('data-testid="redbark-sync-errors"')
+        ->assertSee('The sync failed before Redbark returned any details')
+        ->assertDontSee('Nothing left to set up');
+});
+
+test('step 2 keeps the empty message when the latest sync did not fail', function () {
+    $user = User::factory()->create();
+    $feed = RedbarkFeed::factory()->for($user)->synced()->create();
+    RedbarkSyncLog::factory()->for($feed, 'feed')->failed()->create(['created_at' => now()->subHour()]);
+    RedbarkSyncLog::factory()->for($feed, 'feed')->completed()->create();
+
+    Livewire::actingAs($user)
+        ->test(RedbarkAccountSetup::class)
+        ->assertDontSeeHtml('data-testid="redbark-sync-errors"')
+        ->assertSee('Nothing left to set up');
+});
+
+test('step 2 keeps the empty message when a later sync fails after the accounts were already set up', function () {
+    $user = User::factory()->create();
+    $feed = RedbarkFeed::factory()->for($user)->synced()->create();
+    RedbarkAccount::factory()->create([
+        'redbark_feed_id' => $feed->id,
+        'account_id' => Account::factory()->for($user)->create()->id,
+    ]);
+    RedbarkSyncLog::factory()->for($feed, 'feed')->create([
+        'status' => RefreshStatus::Failed,
+        'errors' => [['context' => 'balances', 'message' => 'Rate limit exceeded']],
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(RedbarkAccountSetup::class)
+        ->assertDontSeeHtml('data-testid="redbark-sync-errors"')
+        ->assertSee('Nothing left to set up');
 });

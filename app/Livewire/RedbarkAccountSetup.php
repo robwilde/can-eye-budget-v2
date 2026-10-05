@@ -114,6 +114,28 @@ final class RedbarkAccountSetup extends Component
             && $log->created_at->greaterThan(now()->subSeconds(SyncRedbarkFeedJob::UNIQUE_FOR));
     }
 
+    /** @return list<array{context: string, message: string}> */
+    #[Computed]
+    public function lastSyncErrors(): array
+    {
+        $feed = $this->feed();
+
+        if ($feed === null || $feed->accounts()->exists()) {
+            return [];
+        }
+
+        $log = RedbarkSyncLog::query()
+            ->where('redbark_feed_id', $feed->id)
+            ->latest('id')
+            ->first();
+
+        if ($log?->status !== RefreshStatus::Failed) {
+            return [];
+        }
+
+        return $log->errors ?? [['context' => 'sync', 'message' => __('The sync failed before Redbark returned any details. Check your Redbark key and try again.')]];
+    }
+
     public function save(): void
     {
         $feed = $this->feed();

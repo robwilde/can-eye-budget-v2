@@ -24,6 +24,22 @@
             <flux:callout.heading>{{ __('Fetching your accounts from Redbark…') }}</flux:callout.heading>
             <flux:callout.text>{{ __('This can take a moment. This page will update automatically.') }}</flux:callout.text>
         </flux:callout>
+    @elseif ($this->redbarkAccounts->isEmpty() && $this->lastSyncErrors !== [])
+        <flux:callout variant="danger" icon="exclamation-triangle" data-testid="redbark-sync-errors">
+            <flux:callout.heading>{{ __('We could not fetch your accounts from Redbark') }}</flux:callout.heading>
+            <flux:callout.text>
+                <ul class="list-disc space-y-1 ps-4">
+                    @foreach ($this->lastSyncErrors as $error)
+                        <li>{{ $error['message'] }}</li>
+                    @endforeach
+                </ul>
+            </flux:callout.text>
+            <x-slot name="actions">
+                <flux:button :href="route('providers.edit')" wire:navigate size="sm">
+                    {{ __('Check your Redbark key') }}
+                </flux:button>
+            </x-slot>
+        </flux:callout>
     @elseif ($this->redbarkAccounts->isEmpty())
         <flux:callout icon="check-circle">
             <flux:callout.heading>{{ __('Nothing left to set up') }}</flux:callout.heading>
