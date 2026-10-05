@@ -3,6 +3,9 @@ grumphp:
     stop_on_failure: false
     hide_circumvention_tip: true
 
+    git_hook_variables:
+        EXEC_GRUMPHP_COMMAND: 'ddev exec php'
+
     tasks:
         shell:
             scripts:

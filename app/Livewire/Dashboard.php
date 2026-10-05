@@ -9,6 +9,7 @@ use App\Models\Account;
 use App\Models\Budget;
 use App\Models\PlannedTransaction;
 use App\Models\RedbarkFeed;
+use App\Services\FirstImportSummary;
 use App\Services\Transfers\TransferReviewQueue;
 use App\Support\Transactions\CategoryAttribution;
 use Carbon\CarbonImmutable;
@@ -77,6 +78,13 @@ final class Dashboard extends Component
     public function pendingTransfers(): int
     {
         return app(TransferReviewQueue::class)->pendingCount(auth()->user());
+    }
+
+    /** @return array{rules: int, categorised: int, needs_attention: int}|null */
+    #[Computed]
+    public function firstImportSummary(): ?array
+    {
+        return app(FirstImportSummary::class)->for(auth()->user());
     }
 
     #[Computed]

@@ -14,6 +14,7 @@ use App\Models\UserRule;
 use App\Models\UserRuleGroup;
 use App\Support\Transactions\MerchantMatchValue;
 use BackedEnum;
+use Closure;
 use Illuminate\Support\Collection;
 
 final class CategoryRuleMiner
@@ -35,9 +36,10 @@ final class CategoryRuleMiner
      * reported under `contradictions` instead of being created.
      *
      * @param  list<int>  $accountIds
+     * @param  list<array{value: string, category_id: int, source: string, extra_triggers?: list<array{field: string, operator: string, value: string}>}>  $extraSeeds
      * @return array{candidates: list<array{value: string, category_id: int, source: string, extra_triggers?: list<array{field: string, operator: string, value: string}>}>, ambiguous: list<array{value: string, categories: list<int>}>, conflicts: list<array{value: string, candidate: int, rule_id: int, rule_category: int}>, contradictions: list<array{value: string, category_id: int, source: string, contradicting: int, contradicting_categories: array<string, int>}>, skippedSeeds: list<string>, unknownCategoryIds: list<int>}
      */
-    public function mine(User $user, array $accountIds = []): array
+    public function mine(User $user, array $accountIds = [], array $extraSeeds = [], ?Closure $isRelevant = null): array
     {
         $activeRules = $this->activeRules($user);
         $categoryNames = Category::query()->pluck('name', 'id');
@@ -85,7 +87,13 @@ final class CategoryRuleMiner
         $seeds = $seedResult['resolved'];
         $skippedSeeds = $seedResult['skipped'];
 
-        $deduped = $this->dedupeAndSubsume([...$seeds, ...$candidates], $this->existingTriggerValues($activeRules));
+        $entries = [...$seeds, ...$extraSeeds, ...$candidates];
+
+        if ($isRelevant !== null) {
+            $entries = array_values(array_filter($entries, $isRelevant));
+        }
+
+        $deduped = $this->dedupeAndSubsume($entries, $this->existingTriggerValues($activeRules));
 
         $final = [];
         $contradictions = [];
@@ -138,15 +146,25 @@ final class CategoryRuleMiner
      */
     public function createRules(User $user, array $entries): int
     {
+        return count($this->createRuleModels($user, $entries));
+    }
+
+    /**
+     * @param  list<array{value: string, category_id: int, source: string, extra_triggers?: list<array{field: string, operator: string, value: string}>}>  $entries
+     * @return list<UserRule>
+     */
+    public function createRuleModels(User $user, array $entries): array
+    {
         if ($entries === []) {
-            return 0;
+            return [];
         }
 
         $group = $this->resolveGroup($user->id);
         $order = (int) UserRule::query()->where('user_rule_group_id', $group->id)->max('order');
+        $rules = [];
 
         foreach ($entries as $entry) {
-            UserRule::query()->create([
+            $rules[] = UserRule::query()->create([
                 'user_id' => $user->id,
                 'user_rule_group_id' => $group->id,
                 'name' => mb_substr('Categorise '.$entry['value'], 0, 255),
@@ -162,7 +180,7 @@ final class CategoryRuleMiner
             ]);
         }
 
-        return count($entries);
+        return $rules;
     }
 
     /**
@@ -254,7 +272,7 @@ final class CategoryRuleMiner
      * group that motivated the candidate; a seed with no agreeing manual rows
      * has nothing to anchor a narrowing to and is reported rather than guessed.
      *
-     * @param  array{value: string, category_id: int, source: string}  $entry
+     * @param  array{value: string, category_id: int, source: string, extra_triggers?: list<array{field: string, operator: string, value: string}>}  $entry
      * @param  list<Transaction>  $motivating
      * @return array{value: string, category_id: int, source: string, extra_triggers?: list<array{field: string, operator: string, value: string}>}|array{value: string, category_id: int, source: string, contradicting: int, contradicting_categories: array<string, int>}
      */
@@ -270,7 +288,7 @@ final class CategoryRuleMiner
         $narrowing = $keep === [] ? null : $this->narrowingTrigger($keep, $check['contradicts']->all());
 
         if ($narrowing !== null) {
-            return [...$entry, 'extra_triggers' => [$narrowing]];
+            return [...$entry, 'extra_triggers' => [...($entry['extra_triggers'] ?? []), $narrowing]];
         }
 
         return [
@@ -308,8 +326,8 @@ final class CategoryRuleMiner
             return ['field' => $field->value, 'operator' => RuleTriggerOperator::Is->value, 'value' => $value];
         }
 
-        $keptAmounts = array_map(fn (Transaction $t): int => (int) $t->amount, $keep);
-        $contraAmounts = array_map(fn (Transaction $t): int => (int) $t->amount, $contradicting);
+        $keptAmounts = array_map(static fn (Transaction $t): int => (int) $t->amount, $keep);
+        $contraAmounts = array_map(static fn (Transaction $t): int => (int) $t->amount, $contradicting);
 
         // Kept rows all below the contradicting ones: cut at the gap's midpoint.
         if (max($keptAmounts) < min($contraAmounts)) {
@@ -357,25 +375,31 @@ final class CategoryRuleMiner
     }
 
     /**
-     * @param  list<array{value: string, category_id: int, source: string}>  $entries
+     * @param  list<array{value: string, category_id: int, source: string, extra_triggers?: list<array{field: string, operator: string, value: string}>}>  $entries
      * @param  array<string, true>  $existingValues
-     * @return list<array{value: string, category_id: int, source: string}>
+     * @return list<array{value: string, category_id: int, source: string, extra_triggers?: list<array{field: string, operator: string, value: string}>}>
      */
     private function dedupeAndSubsume(array $entries, array $existingValues): array
     {
-        $byKey = [];
+        $byValue = [];
+        $merged = [];
 
         foreach ($entries as $entry) {
             $key = mb_strtolower($entry['value']);
 
-            if (isset($existingValues[$key]) || isset($byKey[$key])) {
+            if (isset($existingValues[$key])) {
                 continue;
             }
 
-            $byKey[$key] = $entry;
-        }
+            foreach ($byValue[$key] ?? [] as $kept) {
+                if ($kept['category_id'] === $entry['category_id'] || ($entry['extra_triggers'] ?? []) === []) {
+                    continue 2;
+                }
+            }
 
-        $merged = array_values($byKey);
+            $byValue[$key][] = $entry;
+            $merged[] = $entry;
+        }
 
         $final = [];
 
@@ -412,11 +436,7 @@ final class CategoryRuleMiner
             ->where('name', self::GROUP_NAME)
             ->first();
 
-        if ($existing !== null) {
-            return $existing;
-        }
-
-        return UserRuleGroup::query()->create([
+        return $existing ?? UserRuleGroup::query()->create([
             'user_id' => $userId,
             'name' => self::GROUP_NAME,
             'order' => (int) UserRuleGroup::query()->where('user_id', $userId)->max('order') + 1,

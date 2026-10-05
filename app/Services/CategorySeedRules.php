@@ -104,6 +104,8 @@ final class CategorySeedRules
         'GSUITE' => 'Office / Online Service',
         'Google YouTube' => 'Entertainment / Streaming',
         'GOOGLE*YOUTUBE' => 'Entertainment / Streaming',
+        'WOOLWORTHS' => 'Food / Groceries',
+        'NETFLIX' => 'Entertainment / Streaming',
     ];
 
     public static function count(): int
