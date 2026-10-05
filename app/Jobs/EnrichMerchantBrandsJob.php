@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\MerchantBrands\BrandNameWriter;
 use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\MerchantBrands\RepresentativeTransaction;
+use App\Support\Audit\AttributeJobToUser;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -51,6 +52,14 @@ final class EnrichMerchantBrandsJob implements ShouldBeUnique, ShouldQueue
     public function uniqueId(): int
     {
         return $this->user->id;
+    }
+
+    /** @return array<int, object> */
+    public function middleware(): array
+    {
+        return [
+            new AttributeJobToUser($this->user->id, audit: false),
+        ];
     }
 
     public function handle(ContextDevCreditBudget $budget, RepresentativeTransaction $representatives, BrandNameWriter $names): void

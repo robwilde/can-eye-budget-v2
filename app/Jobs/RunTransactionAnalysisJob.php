@@ -7,6 +7,7 @@ namespace App\Jobs;
 use App\Enums\PipelineTrigger;
 use App\Models\User;
 use App\Services\TransactionAnalysisPipeline;
+use App\Support\Audit\AttributeJobToUser;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -38,6 +39,7 @@ final class RunTransactionAnalysisJob implements ShouldBeUnique, ShouldQueue
     public function middleware(): array
     {
         return [
+            new AttributeJobToUser($this->user->id),
             new WithoutOverlapping("analysis-user-{$this->user->id}"),
         ];
     }

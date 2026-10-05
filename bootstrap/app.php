@@ -3,10 +3,12 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\HealthCheckController;
+use App\Http\Middleware\AttributeRequestToUser;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 use Sentry\Laravel\Integration;
 
@@ -23,6 +25,13 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->trustProxies(at: '*');
 
         $middleware->preventRequestsDuringMaintenance(except: ['up']);
+
+        $middleware->web(append: [AttributeRequestToUser::class]);
+
+        $middleware->appendToPriorityList(
+            after: StartSession::class,
+            append: AttributeRequestToUser::class,
+        );
     })
     ->withSchedule(function (Schedule $schedule): void {
         $schedule->command('horizon:snapshot')->everyFiveMinutes();

@@ -25,6 +25,7 @@ use App\Models\Transaction;
 use App\Services\RedbarkClientFactory;
 use App\Services\RedbarkTransactionMatcher;
 use App\Services\TransactionIngestor;
+use App\Support\Audit\AttributeJobToUser;
 use App\Support\CleanDescriptionDeriver;
 use App\Support\Redbark\InitialSyncWindow;
 use App\Support\RedbarkCurrency;
@@ -137,6 +138,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
     public function middleware(): array
     {
         return [
+            new AttributeJobToUser($this->feed->user_id),
             // expireAfter is load-bearing: without it a worker killed mid-run (queue
             // timeout, OOM) leaves the lock held forever and every later sync for this
             // feed is dropped silently.
