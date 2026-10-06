@@ -21,6 +21,7 @@ use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -196,6 +197,33 @@ test('a livewire action that fails is audited as a failure', function () {
 
     expect(AuditEvent::query()->where('action', 'livewire.connect-bank.connect')->sole()->outcome)
         ->toBe(AuditOutcome::Failure);
+});
+
+test('a livewire action that reports a rejected key through the error bag is audited as a failure', function () {
+    Http::swap(new HttpFactory);
+    Http::fake(['*/connections' => Http::response([], 401)]);
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(ConnectBank::class)
+        ->set('api_key', 'rbk_live_0123456789abcdef')
+        ->call('connect')
+        ->assertHasErrors('api_key');
+
+    expect(AuditEvent::query()->where('action', 'livewire.connect-bank.connect')->sole()->outcome)
+        ->toBe(AuditOutcome::Failure);
+});
+
+test('a call that succeeds after an earlier rejected one is audited as a success', function () {
+    Queue::fake();
+    $user = User::factory()->create();
+    $component = Livewire::actingAs($user)->test(ConnectBank::class);
+
+    $component->set('api_key', '')->call('connect')->assertHasErrors('api_key');
+    $component->set('api_key', 'rbk_live_0123456789abcdef')->call('connect')->assertHasNoErrors();
+
+    expect(AuditEvent::query()->where('action', 'livewire.connect-bank.connect')->orderBy('id')->pluck('outcome')->all())
+        ->toBe([AuditOutcome::Failure, AuditOutcome::Success]);
 });
 
 test('livewire property updates and framework methods are not audited as actions', function () {
