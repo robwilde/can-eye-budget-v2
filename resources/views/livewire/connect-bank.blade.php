@@ -1,7 +1,7 @@
 <div class="mx-auto max-w-2xl space-y-6">
     <div class="flex items-center justify-between gap-4">
         <flux:text size="sm" class="font-bold uppercase tracking-wide text-zinc-500" data-test="connect-bank-step">
-            {{ __('Step :step of 2', ['step' => $step]) }}
+            {{ __('Step :step of :total', ['step' => $step, 'total' => \App\Livewire\ConnectBank::TOTAL_STEPS]) }}
         </flux:text>
         <flux:link :href="route('dashboard')" wire:navigate data-test="connect-bank-skip">
             {{ __('Skip for now') }}
@@ -33,7 +33,9 @@
                 {{ __('Connect') }}
             </flux:button>
         </form>
+    @elseif ($step === \App\Livewire\ConnectBank::STEP_ACCOUNTS)
+        <livewire:redbark-account-setup :in-onboarding="true" />
     @else
-        <livewire:redbark-account-setup :redirect-to-dashboard="true" />
+        <livewire:confirm-pay-cycle-step />
     @endif
 </div>

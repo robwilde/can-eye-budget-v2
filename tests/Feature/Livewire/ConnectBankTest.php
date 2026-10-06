@@ -4,9 +4,11 @@
 
 declare(strict_types=1);
 
+use App\Enums\PayFrequency;
 use App\Jobs\SyncRedbarkFeedJob;
 use App\Livewire\ConnectBank;
 use App\Livewire\RedbarkAccountSetup;
+use App\Models\Account;
 use App\Models\RedbarkFeed;
 use App\Models\User;
 use App\Services\RedbarkClientFactory;
@@ -29,7 +31,7 @@ test('the connect-bank page needs authentication and renders step 1 for a new us
         ->get(route('connect-bank'))
         ->assertOk()
         ->assertSeeLivewire(ConnectBank::class)
-        ->assertSee('Step 1 of 2')
+        ->assertSee('Step 1 of 3')
         ->assertSee('from the 1st of last month')
         ->assertSee(route('dashboard'), false);
 });
@@ -173,7 +175,14 @@ test('an empty or too-short key is rejected and creates nothing', function (stri
 })->with(['empty' => '', 'too short' => 'short-key']);
 
 test('a user whose feed is fully set up is sent to the dashboard', function () {
-    $user = User::factory()->create();
+    $account = Account::factory()->create();
+    $user = $account->user;
+    $user->update([
+        'primary_account_id' => $account->id,
+        'pay_amount' => 250000,
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => now()->addDays(5)->toDateString(),
+    ]);
     RedbarkFeed::factory()->for($user)->synced()->create(['pending_account_setup' => false]);
 
     Livewire::actingAs($user)

@@ -42,8 +42,8 @@ final class RedbarkAccountSetup extends Component
     /** @var list<string> */
     public array $rowErrors = [];
 
-    /** Set by the onboarding page so a finished setup lands on the dashboard, not accounts. */
-    public bool $redirectToDashboard = false;
+    /** Set by the onboarding page so a finished setup advances to the next onboarding step, not accounts. */
+    public bool $inOnboarding = false;
 
     public function mount(): void
     {
@@ -196,9 +196,15 @@ final class RedbarkAccountSetup extends Component
             return;
         }
 
+        if ($this->inOnboarding) {
+            $this->dispatch('accounts-set-up');
+
+            return;
+        }
+
         session()->flash('status', __('Redbark accounts set up.'));
 
-        $this->redirect(route($this->redirectToDashboard ? 'dashboard' : 'accounts'), navigate: true);
+        $this->redirect(route('accounts'), navigate: true);
     }
 
     public function render(): View

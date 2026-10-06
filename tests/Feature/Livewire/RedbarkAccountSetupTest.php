@@ -319,14 +319,15 @@ test('choosing a new account type outside the offered list is rejected', functio
     Queue::assertNothingPushed();
 });
 
-test('when embedded in onboarding a finished setup redirects to the dashboard', function () {
+test('when embedded in onboarding a finished setup advances to the next onboarding step', function () {
     [$user, $feed, $redbarkAccount] = wizardFixture();
 
     Livewire::actingAs($user)
-        ->test(RedbarkAccountSetup::class, ['redirectToDashboard' => true])
+        ->test(RedbarkAccountSetup::class, ['inOnboarding' => true])
         ->set("choices.{$redbarkAccount->id}", 'new:transaction')
         ->call('save')
-        ->assertRedirect(route('dashboard'));
+        ->assertDispatched('accounts-set-up')
+        ->assertNoRedirect();
 
     expect($feed->fresh()->pending_account_setup)->toBeFalse();
 });
