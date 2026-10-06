@@ -1,11 +1,21 @@
 <div class="mx-auto max-w-2xl space-y-6">
     <div class="flex items-center justify-between gap-4">
         <flux:text size="sm" class="font-bold uppercase tracking-wide text-zinc-500" data-test="connect-bank-step">
-            {{ __('Step :step of :total', ['step' => $step, 'total' => \App\Livewire\ConnectBank::TOTAL_STEPS]) }}
+            @if ($step === \App\Livewire\ConnectBank::STEP_GMAIL)
+                {{ __('Optional last step') }}
+            @else
+                {{ __('Step :step of :total', ['step' => $step, 'total' => \App\Livewire\ConnectBank::TOTAL_STEPS]) }}
+            @endif
         </flux:text>
-        <flux:link :href="route('dashboard')" wire:navigate data-test="connect-bank-skip">
-            {{ __('Skip for now') }}
-        </flux:link>
+        @if ($step === \App\Livewire\ConnectBank::STEP_GMAIL)
+            <flux:link :href="route('dashboard')" wire:click.prevent="finish" data-test="connect-bank-skip">
+                {{ __('Skip for now') }}
+            </flux:link>
+        @else
+            <flux:link :href="route('dashboard')" wire:navigate data-test="connect-bank-skip">
+                {{ __('Skip for now') }}
+            </flux:link>
+        @endif
     </div>
 
     @if ($step === \App\Livewire\ConnectBank::STEP_CONNECT)
@@ -35,7 +45,25 @@
         </form>
     @elseif ($step === \App\Livewire\ConnectBank::STEP_ACCOUNTS)
         <livewire:redbark-account-setup :in-onboarding="true" />
-    @else
+    @elseif ($step === \App\Livewire\ConnectBank::STEP_PAY_CYCLE)
         <livewire:confirm-pay-cycle-step />
+    @else
+        <div class="space-y-4" data-test="onboarding-gmail-step">
+            <div class="space-y-2">
+                <flux:heading size="xl">{{ __('Connect Gmail (optional)') }}</flux:heading>
+                <flux:text>
+                    {{ __('Link your own Gmail so Can Eye can find buy-now-pay-later schedules and receipts for your transactions. Can Eye signs in over IMAP with a Google app password and only searches your mail for matches; it never sends mail. The password is stored encrypted and only you can use it.') }}
+                </flux:text>
+                <flux:text>
+                    {{ __('You can skip this and connect later under Settings > Providers.') }}
+                </flux:text>
+            </div>
+
+            <livewire:gmail-connection />
+
+            <flux:button wire:click="finish" variant="ghost" data-test="onboarding-gmail-skip">
+                {{ __('Skip, I will do this later') }}
+            </flux:button>
+        </div>
     @endif
 </div>
