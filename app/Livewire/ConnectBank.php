@@ -11,6 +11,7 @@ use App\Exceptions\Redbark\RedbarkAuthenticationException;
 use App\Exceptions\Redbark\RedbarkException;
 use App\Jobs\SyncRedbarkFeedJob;
 use App\Models\AnalysisSuggestion;
+use App\Models\GmailCredential;
 use App\Models\RedbarkFeed;
 use App\Models\User;
 use App\Services\RedbarkClientFactory;
@@ -21,8 +22,9 @@ use Livewire\Component;
 
 /**
  * Post-registration onboarding: connect a Redbark key (step 1), set up the accounts it
- * finds (step 2), then confirm the primary account and pay cycle (step 3). Skippable at
- * every step; the dashboard keeps nudging until a feed exists and a pay cycle is set.
+ * finds (step 2), then confirm the primary account and pay cycle (step 3). An optional
+ * Gmail step follows for users without a mailbox connected. Skippable at every step; the
+ * dashboard keeps nudging until a feed exists and a pay cycle is set.
  */
 final class ConnectBank extends Component
 {
@@ -31,6 +33,8 @@ final class ConnectBank extends Component
     public const int STEP_ACCOUNTS = 2;
 
     public const int STEP_PAY_CYCLE = 3;
+
+    public const int STEP_GMAIL = 4;
 
     public const int TOTAL_STEPS = 3;
 
@@ -103,6 +107,26 @@ final class ConnectBank extends Component
     public function advanceToPayCycle(): void
     {
         $this->step = self::STEP_PAY_CYCLE;
+    }
+
+    #[On('pay-cycle-confirmed')]
+    public function advanceToGmail(): void
+    {
+        if (GmailCredential::query()->where('user_id', Auth::id())->exists()) {
+            $this->finish();
+
+            return;
+        }
+
+        $this->step = self::STEP_GMAIL;
+    }
+
+    #[On('gmail-saved')]
+    public function finish(): void
+    {
+        session()->flash('status', __('Primary account and pay cycle saved.'));
+
+        $this->redirect(route('dashboard'), navigate: true);
     }
 
     public function render(): View

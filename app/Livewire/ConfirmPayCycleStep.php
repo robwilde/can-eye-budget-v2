@@ -135,9 +135,7 @@ final class ConfirmPayCycleStep extends Component
             return;
         }
 
-        session()->flash('status', __('Primary account and pay cycle saved.'));
-
-        $this->redirect(route('dashboard'), navigate: true);
+        $this->dispatch('pay-cycle-confirmed');
     }
 
     public function render(): View
