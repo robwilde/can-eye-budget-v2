@@ -109,7 +109,7 @@ test('confirming the detected values saves them and accepts both suggestions', f
         ->test(ConfirmPayCycleStep::class)
         ->call('confirm')
         ->assertHasNoErrors()
-        ->assertRedirect(route('dashboard'));
+        ->assertDispatched('pay-cycle-confirmed');
 
     $user = $user->fresh();
 
@@ -171,7 +171,7 @@ test('with nothing detected the user can enter the account and pay cycle by hand
         ->set('nextPayDate', $nextPay)
         ->call('confirm')
         ->assertHasNoErrors()
-        ->assertRedirect(route('dashboard'));
+        ->assertDispatched('pay-cycle-confirmed');
 
     $user = $user->fresh();
 
@@ -192,7 +192,7 @@ test('an incomplete or invalid form saves nothing', function (string $field, str
         ->set($field, $value)
         ->call('confirm');
 
-    $component->assertHasErrors($field)->assertNoRedirect();
+    $component->assertHasErrors($field)->assertNotDispatched('pay-cycle-confirmed');
 
     expect($user->fresh()->hasPayCycleConfigured())->toBeFalse()
         ->and($user->fresh()->primary_account_id)->toBeNull();
@@ -333,7 +333,7 @@ test('confirming is refused server-side while the analysis is still running', fu
         ->set('nextPayDate', $nextPay)
         ->call('confirm')
         ->assertHasErrors('primaryAccountId')
-        ->assertNoRedirect();
+        ->assertNotDispatched('pay-cycle-confirmed');
 
     expect($user->fresh()->primary_account_id)->toBeNull()
         ->and($user->fresh()->hasPayCycleConfigured())->toBeFalse();
