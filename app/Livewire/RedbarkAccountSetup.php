@@ -62,9 +62,7 @@ final class RedbarkAccountSetup extends Component
             SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Manual);
         }
 
-        foreach ($this->redbarkAccounts() as $redbarkAccount) {
-            $this->choices[$redbarkAccount->id] ??= 'skip';
-        }
+        $this->seedChoices();
     }
 
     /** @return Collection<int, RedbarkAccount> */
@@ -181,9 +179,9 @@ final class RedbarkAccountSetup extends Component
             }
         }
 
-        $feed->update([
-            'pending_account_setup' => $feed->accounts()->needsSetup()->exists(),
-        ]);
+        $stillPending = $feed->accounts()->needsSetup()->exists();
+
+        $feed->update(['pending_account_setup' => $stillPending]);
 
         // @phpstan-ignore property.notFound
         unset($this->redbarkAccounts, $this->availableAccounts);
@@ -192,7 +190,7 @@ final class RedbarkAccountSetup extends Component
             SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Manual);
         }
 
-        if ($this->rowErrors !== []) {
+        if ($this->rowErrors !== [] || $stillPending) {
             return;
         }
 
@@ -209,6 +207,8 @@ final class RedbarkAccountSetup extends Component
 
     public function render(): View
     {
+        $this->seedChoices();
+
         return view('livewire.redbark-account-setup', [
             'accountClasses' => $this->offeredAccountClasses(),
         ]);
@@ -217,6 +217,13 @@ final class RedbarkAccountSetup extends Component
     private function feed(): ?RedbarkFeed
     {
         return RedbarkFeed::query()->where('user_id', Auth::id())->first();
+    }
+
+    private function seedChoices(): void
+    {
+        foreach ($this->redbarkAccounts() as $redbarkAccount) {
+            $this->choices[$redbarkAccount->id] ??= 'skip';
+        }
     }
 
     /** @return int 1 when the row ended up linked to an app account */
