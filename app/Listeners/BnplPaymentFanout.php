@@ -168,6 +168,7 @@ final class BnplPaymentFanout
 
         $debit->getConnection()->transaction(function () use ($debit, $provider, $chosen, $total, $sign, $last): void {
             $allocated = 0;
+            $firstChild = null;
 
             foreach ($chosen as $index => $occurrence) {
                 $plan = $occurrence->plan;
@@ -184,7 +185,7 @@ final class BnplPaymentFanout
                     count($chosen),
                 );
 
-                $debit->createChild([
+                $child = $debit->createChild([
                     'amount' => $amount,
                     'csv_hash' => null,
                     'planned_transaction_id' => $plan->id,
@@ -194,8 +195,12 @@ final class BnplPaymentFanout
                         ? $note
                         : $debit->notes."\n".$note,
                 ]);
+
+                $firstChild ??= $child;
             }
 
+            $debit->folded_into_transaction_id = $firstChild->id;
+            $debit->save();
             $debit->delete();
         });
     }
