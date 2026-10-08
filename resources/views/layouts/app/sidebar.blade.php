@@ -38,6 +38,7 @@
             </flux:sidebar.item>
             <flux:sidebar.item icon="funnel" :href="route('rules')" :current="request()->routeIs('rules')" wire:navigate :class="$navItem">
                 {{ __('Rules') }}
+                <livewire:bnpl-pending-badge />
             </flux:sidebar.item>
         </flux:sidebar.group>
     </flux:sidebar.nav>
