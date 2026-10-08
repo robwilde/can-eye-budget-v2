@@ -16,7 +16,7 @@
     <flux:text size="sm" class="text-zinc-500">Auto-apply rules run after every import and when you click Run rules. Other rules turn their matches into suggestions for you to accept.</flux:text>
 
     @forelse($groups as $group)
-        <flux:card wire:key="group-{{ $group->id }}">
+        <x-cib.card wire:key="group-{{ $group->id }}">
             <div class="flex items-center justify-between gap-4">
                 <div class="flex items-center gap-3">
                     <div class="flex flex-col gap-1">
@@ -30,18 +30,15 @@
                         </div>
                     </div>
                     <div>
-                        <flux:heading size="sm">{{ $group->name }}</flux:heading>
+                        <x-cib.sec-head :title="$group->name">
+                            <x-cib.stat-pill tone="neutral" :value="$group->rules->count().' '.Str::plural('rule', $group->rules->count())" />
+                            @unless($group->is_active)<x-cib.stat-pill tone="planned">Inactive</x-cib.stat-pill>@endunless
+                            @if($group->stop_processing)<x-cib.stat-pill tone="posted">Stop Processing</x-cib.stat-pill>@endif
+                        </x-cib.sec-head>
                         @if($group->description)
                             <flux:text size="sm" class="text-zinc-500">{{ $group->description }}</flux:text>
                         @endif
                     </div>
-                    <flux:badge size="sm" color="zinc">{{ $group->rules->count() }} {{ Str::plural('rule', $group->rules->count()) }}</flux:badge>
-                    @unless($group->is_active)
-                        <flux:badge size="sm" color="yellow">Inactive</flux:badge>
-                    @endunless
-                    @if($group->stop_processing)
-                        <flux:badge size="sm" color="red">Stop Processing</flux:badge>
-                    @endif
                 </div>
 
                 <div class="flex shrink-0 items-center gap-2">
@@ -102,16 +99,11 @@
                     @endforeach
                 </div>
             @endif
-        </flux:card>
+        </x-cib.card>
     @empty
-        <flux:card>
-            <div class="flex flex-col items-center justify-center py-12 text-center">
-                <flux:icon.funnel class="mb-4 size-12 text-zinc-400" />
-                <flux:heading size="sm">No rule groups yet</flux:heading>
-                <flux:text size="sm" class="mt-1 text-zinc-500">Create a group to start organising your transaction rules.</flux:text>
-                <flux:button variant="primary" size="sm" class="mt-4" wire:click="openAddGroupModal">Add Group</flux:button>
-            </div>
-        </flux:card>
+        <x-cib.card>
+            <x-cib.empty-state icon="funnel" title="No rule groups yet" description="Create a group to start organising your transaction rules."><x-slot:action><flux:button variant="primary" size="sm" wire:click="openAddGroupModal">Add Group</flux:button></x-slot:action></x-cib.empty-state>
+        </x-cib.card>
     @endforelse
 
     {{-- Group Form Modal --}}
