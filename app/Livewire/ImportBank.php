@@ -8,6 +8,7 @@ use App\Enums\BankImportStatus;
 use App\Enums\ImportSource;
 use App\Jobs\ImportCsvTransactionsJob;
 use App\Livewire\Attributes\NotAudited;
+use App\Livewire\Concerns\ReportsFailure;
 use App\Models\Account;
 use App\Models\BankImport;
 use App\Models\Transaction;
@@ -27,6 +28,7 @@ use Throwable;
 
 final class ImportBank extends Component
 {
+    use ReportsFailure;
     use WithFileUploads;
 
     public int $step = 1;
@@ -60,15 +62,13 @@ final class ImportBank extends Component
 
     public ?int $bankImportId = null;
 
-    public ?string $errorMessage = null;
-
     /**
      * @throws SyntaxError
      * @throws Exception
      */
     public function uploadAndDetectHeaders(CsvParserService $parser, CsvColumnMapper $mapper): void
     {
-        $this->errorMessage = null;
+        $this->clearFailure();
 
         $this->validate([
             'file' => ['required', 'file', 'mimes:csv,txt', 'max:10240'],
@@ -111,10 +111,10 @@ final class ImportBank extends Component
 
     public function confirmImport(): void
     {
-        $this->errorMessage = null;
+        $this->clearFailure();
 
         if ($this->bankImportId === null || $this->accountId === null) {
-            $this->errorMessage = 'No import in progress.';
+            $this->fail('No import in progress.');
 
             return;
         }
@@ -216,6 +216,7 @@ final class ImportBank extends Component
             'bankImportId',
             'errorMessage',
         ]);
+        $this->resetErrorBag('errorMessage');
 
         $this->step = 1;
     }
@@ -299,7 +300,7 @@ final class ImportBank extends Component
 
         if ($this->accountChoice === 'existing') {
             if ($this->accountId === null) {
-                $this->errorMessage = 'Pick an existing account, or choose to create a new one.';
+                $this->fail('Pick an existing account, or choose to create a new one.');
 
                 return null;
             }
@@ -307,13 +308,13 @@ final class ImportBank extends Component
             $account = Account::query()->whereKey($this->accountId)->where('user_id', $user->id)->tracked()->first();
 
             if ($account === null) {
-                $this->errorMessage = 'That account is not yours.';
+                $this->fail('That account is not yours.');
 
                 return null;
             }
 
             if (! $account->acceptsCsvImports()) {
-                $this->errorMessage = 'This account is connected via your bank — CSV imports are not allowed.';
+                $this->fail('This account is connected via your bank — CSV imports are not allowed.');
 
                 return null;
             }
