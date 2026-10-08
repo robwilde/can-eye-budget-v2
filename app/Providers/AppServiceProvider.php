@@ -27,6 +27,7 @@ use App\Services\RedbarkClientFactory;
 use App\Services\TransactionAnalysisPipeline;
 use App\Services\TypeSafeService;
 use App\Support\Email\ScheduleParser;
+use App\Support\Email\Schedules\AfterpayOrderStrategy;
 use App\Support\Email\Schedules\PayPalReceiptStrategy;
 use App\View\Composers\LayoutShellComposer;
 use Carbon\CarbonImmutable;
@@ -88,6 +89,7 @@ final class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(ScheduleParser::class, fn (): ScheduleParser => new ScheduleParser([
             new PayPalReceiptStrategy,
+            new AfterpayOrderStrategy,
         ]));
 
         $this->app->bind(ScheduleSource::class, GmailScheduleSource::class);
