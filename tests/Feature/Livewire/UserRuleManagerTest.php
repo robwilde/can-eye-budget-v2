@@ -489,3 +489,40 @@ test('a set_clean_description value longer than the column fails validation', fu
 
     expect(UserRule::where('user_id', $this->user->id)->sole()->actions[0]['value'])->toBe(str_repeat('a', 255));
 });
+
+// ─── Cib Component Rendering ───────────────────────────
+
+test('groups render as cib cards with stat pills', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create(['is_active' => true]);
+    UserRule::factory()->for($this->user)->for($group, 'group')->create();
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->assertSeeHtml('class="cib-card"')
+        ->assertSeeHtml('class="stat-pill stat-pill-neutral"')
+        ->assertSee('1 rule');
+});
+
+test('inactive and stop-processing groups show tone pills', function () {
+    UserRuleGroup::factory()
+        ->for($this->user)
+        ->create(['is_active' => false]);
+
+    UserRuleGroup::factory()
+        ->for($this->user)
+        ->create(['stop_processing' => true]);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->assertSeeHtml('class="stat-pill stat-pill-planned"')
+        ->assertSee('Inactive')
+        ->assertSeeHtml('class="stat-pill stat-pill-posted"')
+        ->assertSee('Stop Processing');
+});
+
+test('empty state uses the cib component', function () {
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->assertSeeHtml('class="empty-state"')
+        ->assertSee('No rule groups yet');
+});
