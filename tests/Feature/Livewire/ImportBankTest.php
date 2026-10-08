@@ -6,6 +6,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\AuditOutcome;
 use App\Enums\BankImportStatus;
 use App\Enums\ImportSource;
 use App\Enums\TransactionDirection;
@@ -13,6 +14,7 @@ use App\Enums\TransactionSource;
 use App\Jobs\ImportCsvTransactionsJob;
 use App\Livewire\ImportBank;
 use App\Models\Account;
+use App\Models\AuditEvent;
 use App\Models\BankImport;
 use App\Models\Transaction;
 use App\Models\User;
@@ -491,4 +493,55 @@ test('confirming with a swapped account id is refused for an import that belongs
         ->assertSet('step', 2);
 
     Queue::assertNothingPushed();
+});
+
+test('a redbark account upload refused with an error message is audited as a failure', function () {
+    $user = User::factory()->create();
+    $redbarkAccount = Account::factory()->for($user)->withRedbark()->create();
+
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'existing')
+        ->set('accountId', $redbarkAccount->id)
+        ->set('file', fixtureUpload())
+        ->call('uploadAndDetectHeaders');
+
+    expect(AuditEvent::query()->where('action', 'livewire.import-bank.uploadAndDetectHeaders')->sole()->outcome)
+        ->toBe(AuditOutcome::Failure);
+});
+
+test('confirming with no import in progress is audited as a failure', function () {
+    Livewire::actingAs(User::factory()->create())
+        ->test(ImportBank::class)
+        ->call('confirmImport');
+
+    expect(AuditEvent::query()->where('action', 'livewire.import-bank.confirmImport')->sole()->outcome)
+        ->toBe(AuditOutcome::Failure);
+});
+
+test('consecutive failing calls are each audited as a failure', function () {
+    $component = Livewire::actingAs(User::factory()->create())
+        ->test(ImportBank::class)
+        ->call('confirmImport')
+        ->call('confirmImport');
+
+    expect(AuditEvent::query()->where('action', 'livewire.import-bank.confirmImport')->orderBy('id')->pluck('outcome')->all())
+        ->toBe([AuditOutcome::Failure, AuditOutcome::Failure]);
+
+    $component->assertSet('errorMessage', fn ($value) => $value !== null);
+});
+
+test('a csv upload that succeeds is audited as a success', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create();
+
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('accountChoice', 'existing')
+        ->set('accountId', $account->id)
+        ->set('file', fixtureUpload())
+        ->call('uploadAndDetectHeaders');
+
+    expect(AuditEvent::query()->where('action', 'livewire.import-bank.uploadAndDetectHeaders')->sole()->outcome)
+        ->toBe(AuditOutcome::Success);
 });
