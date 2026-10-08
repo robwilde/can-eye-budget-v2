@@ -28,9 +28,8 @@ return [
     |
     | When enabled, a scheduled mailbox scan turns Afterpay (and later Zip,
     | Klarna, PayPal Pay-in-4 and Humm) payment-schedule emails into planned
-    | transactions. Disabled until every sub-task of epic #355 has merged:
-    | importing schedules without the combined-debit fan-out would make the
-    | calendar double-count.
+    | transactions. Off by default; the combined-debit fan-out (#601) is in
+    | place, so enabling it is a per-environment choice.
     |
     */
 
