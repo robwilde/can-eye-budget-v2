@@ -13,7 +13,8 @@ use App\Models\Transaction;
  * record a posted transaction. It persists the transaction, reconciles it against the
  * user's active planned transactions through ReconciliationPolicy, and emits the matching
  * lifecycle event. Reconciling here — synchronously, before anything renders — is what
- * stops a planned pip and an entered pip appearing on the same calendar day.
+ * stops a planned pip and an entered pip appearing on the same calendar day. A combined
+ * BNPL debit may come back already superseded by children (see BnplPaymentFanout).
  */
 final readonly class TransactionIngestor
 {

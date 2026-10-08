@@ -6,6 +6,9 @@ declare(strict_types=1);
 
 use App\Contracts\ScheduleSource;
 use App\DTOs\RawEmail;
+use App\Enums\BnplOrderStatus;
+use App\Enums\BnplProvider;
+use App\Enums\RecurrenceFrequency;
 use App\Models\Account;
 use App\Models\BnplOrder;
 use App\Models\GmailCredential;
@@ -18,7 +21,7 @@ use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
 
 /**
- * Bind a mailbox that returns $emails for every query and records the queries.
+ * Bind a mailbox that returns the $emails sent from the domain a query asks for, and records the queries.
  *
  * @param  list<RawEmail>  $emails
  */
@@ -51,7 +54,10 @@ function fakeScheduleSource(array $emails = [], ?Throwable $failure = null, ?int
                 throw $this->failure;
             }
 
-            return $this->emails;
+            return array_values(array_filter(
+                $this->emails,
+                static fn (RawEmail $email): bool => str_contains($query, 'from:'.mb_substr((string) mb_strrchr($email->fromAddress, '@'), 1)),
+            ));
         }
     };
 
@@ -175,7 +181,10 @@ test('the scan imports receipts into orders and plans and reports the counts', f
         ->expectsOutput('Scanned 2 email(s): 1 order(s) created, 1 plan(s) created, 0 instalment(s) linked, 0 ambiguous, 1 skipped, 0 failed.')
         ->assertSuccessful();
 
-    expect($source->queries)->toBe(['from:paypal.com.au subject:(Pay in 4 payment went through) after:2026/07/14'])
+    expect($source->queries)->toBe([
+        'from:paypal.com.au subject:(Pay in 4 payment went through) after:2026/07/14',
+        'from:afterpay.com subject:(Thank you for your Afterpay order) after:2026/07/14',
+    ])
         ->and(BnplOrder::query()->count())->toBe(1)
         ->and(PlannedTransaction::query()->sole()->description)->toBe('PayPal Pay in 4 - Umart Online');
 });
@@ -288,6 +297,28 @@ test('the scan links each receipt to its posted instalment and counts it once', 
         ->assertSuccessful();
 
     expect(TransactionEmail::query()->count())->toBe(2);
+});
+
+test('an Afterpay order confirmation imports an order and its plan through the real parser', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-08-01 04:00'));
+    fakeScheduleSource([afterpayOrderEmail()]);
+
+    $this->artisan('app:scan-bnpl-emails', ['--user' => (string) $this->user->id])
+        ->expectsOutput('Scanned 1 email(s): 1 order(s) created, 1 plan(s) created, 0 instalment(s) linked, 0 ambiguous, 0 skipped, 0 failed.')
+        ->assertSuccessful();
+
+    $order = BnplOrder::query()->sole();
+    $plan = PlannedTransaction::query()->sole();
+
+    expect($order->provider)->toBe(BnplProvider::Afterpay)
+        ->and($order->order_ref)->toBe('953186001')
+        ->and($order->status)->toBe(BnplOrderStatus::PendingReview)
+        ->and($order->review_note)->toBe('no_category')
+        ->and($plan->description)->toBe('Afterpay - Petbarn')
+        ->and($plan->amount)->toBe(1861)
+        ->and($plan->start_date->toDateString())->toBe('2026-08-07')
+        ->and($plan->until_date->toDateString())->toBe('2026-09-18')
+        ->and($plan->frequency)->toBe(RecurrenceFrequency::Every2Weeks);
 });
 
 test('the scan is scheduled nightly at 04:00 without overlapping', function () {

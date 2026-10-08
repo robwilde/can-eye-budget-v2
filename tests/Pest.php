@@ -244,6 +244,27 @@ function payPalInstalmentReceiptEmail(int $number, ?string $messageId = null): R
     ], $date);
 }
 
+/**
+ * The real Afterpay order confirmation for order 953186001 (Petbarn, $74.45 in four
+ * fortnightly instalments from 7 August 2026), tests/Fixtures/emails/afterpay-order-confirmation.html.
+ *
+ * @param  array<string, string>  $replace  search => replacement applied to the HTML
+ */
+function afterpayOrderEmail(array $replace = [], string $messageId = 'afterpay-order-953186001@mail.test', ?CarbonImmutable $date = null): RawEmail
+{
+    $html = (string) file_get_contents(base_path('tests/Fixtures/emails/afterpay-order-confirmation.html'));
+
+    return new RawEmail(
+        messageId: $messageId,
+        subject: 'Thank you for your Afterpay order 953186001',
+        fromName: 'Afterpay',
+        fromAddress: 'donotreply@afterpay.com',
+        date: $date ?? CarbonImmutable::parse('2026-07-24 12:16'),
+        textBody: null,
+        htmlBody: strtr($html, $replace),
+    );
+}
+
 function auditSentryEvent(): Sentry\Event
 {
     $event = Sentry\Event::createEvent();
