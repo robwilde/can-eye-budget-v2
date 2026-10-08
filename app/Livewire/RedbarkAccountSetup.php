@@ -222,7 +222,7 @@ final class RedbarkAccountSetup extends Component
     private function seedChoices(): void
     {
         foreach ($this->redbarkAccounts() as $redbarkAccount) {
-            $this->choices[$redbarkAccount->id] ??= 'skip';
+            $this->choices[$redbarkAccount->id] ??= $this->defaultChoiceFor($redbarkAccount);
         }
     }
 
@@ -285,6 +285,15 @@ final class RedbarkAccountSetup extends Component
             'sync_start_date' => $redbarkAccount->sync_start_date ?? InitialSyncWindow::start(CarbonImmutable::now()),
         ]);
         $account->update(['import_source' => ImportSource::Redbark]);
+    }
+
+    private function defaultChoiceFor(RedbarkAccount $redbarkAccount): string
+    {
+        $class = AccountClass::tryFrom(mb_strtolower(mb_trim((string) $redbarkAccount->account_type)));
+
+        return $class !== null && in_array($class, $this->offeredAccountClasses(), true)
+            ? 'new:'.$class->value
+            : 'skip';
     }
 
     /** @return list<AccountClass> the classes offered for a 'new:' choice */
