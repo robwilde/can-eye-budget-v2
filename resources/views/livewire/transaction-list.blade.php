@@ -66,6 +66,9 @@
                 wire-model="account"
             />
         @endif
+        <div class="min-w-56" data-testid="category-filter">
+            <x-category-combobox wire:model="category" :categories="$splitCategories" placeholder="Any category" aria-label="Category" size="sm" />
+        </div>
 
         <x-cib.filter-toggle
             :options="[
