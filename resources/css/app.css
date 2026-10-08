@@ -1171,3 +1171,8 @@ select:focus[data-flux-control] {
         animation: none;
     }
 }
+
+/* Touch targets (#602): the modal's segmented toggles meet the 44 px minimum. */
+[data-flux-modal] .type-toggle button {
+    min-height: 44px;
+}
