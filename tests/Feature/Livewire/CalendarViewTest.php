@@ -409,6 +409,34 @@ test('next month navigation works', function () {
         ->and($header['isCurrentMonth'])->toBeFalse();
 });
 
+test('previous month navigation from the 31st lands on the previous month', function () {
+    $this->travelTo('2026-03-31');
+    $user = User::factory()->create();
+
+    $component = Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->call('previousMonth');
+
+    $header = $component->get('headerLabel');
+
+    expect($header['label'])->toBe('February 2026')
+        ->and($header['isCurrentMonth'])->toBeFalse();
+});
+
+test('next month navigation from the 31st lands on the next month', function () {
+    $this->travelTo('2026-01-31');
+    $user = User::factory()->create();
+
+    $component = Livewire::actingAs($user)
+        ->test(CalendarView::class)
+        ->call('nextMonth');
+
+    $header = $component->get('headerLabel');
+
+    expect($header['label'])->toBe('February 2026')
+        ->and($header['isCurrentMonth'])->toBeFalse();
+});
+
 test('today button resets to current month', function () {
     $user = User::factory()->create();
 
