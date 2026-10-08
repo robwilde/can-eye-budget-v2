@@ -166,14 +166,14 @@ test('multiple filters work together via URL', function () {
         'account_id' => $account->id,
         'category_id' => $groceries->id,
         'description' => 'WOOLWORTHS SYDNEY',
-        'post_date' => now()->subDays(3),
+        'post_date' => now()->startOfMonth(),
     ]);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $otherAccount->id,
         'category_id' => $groceries->id,
         'description' => 'WOOLWORTHS MELBOURNE',
-        'post_date' => now()->subDays(3),
+        'post_date' => now()->startOfMonth(),
     ]);
 
     $this->actingAs($user);
