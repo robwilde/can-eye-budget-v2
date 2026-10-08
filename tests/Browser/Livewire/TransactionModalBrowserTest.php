@@ -138,3 +138,22 @@ test('date field is clear of the close button', function () use ($openModal) {
         "document.querySelector('dialog[open] input[type=date]').getBoundingClientRect().right <= document.querySelector('dialog[open] button[aria-label=\"Close modal\"]').getBoundingClientRect().left"
     );
 });
+
+test('at 375px the type toggle buttons are 44px tall and the modal does not scroll sideways', function () use ($openModal) {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create();
+
+    $this->actingAs($user);
+
+    $page = visit('/calendar');
+    $page->resize(375, 812);
+
+    $page->script($openModal);
+
+    $page->click('Plan')
+        ->assertSee('Always')
+        ->assertScript("document.querySelectorAll('dialog[open] .type-toggle').length === 2")
+        ->assertScript("Array.from(document.querySelectorAll('dialog[open] .type-toggle button')).every(b => b.getBoundingClientRect().height >= 44)")
+        ->assertScript("document.querySelector('dialog[open]').scrollWidth <= document.querySelector('dialog[open]').clientWidth")
+        ->assertScript('document.documentElement.scrollWidth <= window.innerWidth');
+});
