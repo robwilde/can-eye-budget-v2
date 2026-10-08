@@ -29,17 +29,14 @@
                         $typeTone = match ($transactionType) {
                             'income' => [
                                 'select' => 'text-green-700! border-green-500! bg-green-50!',
-                                'header' => 'border-green-500',
                                 'button' => 'bg-green-600!',
                             ],
                             'transfer' => [
                                 'select' => 'text-orange-700! border-orange-500! bg-orange-50!',
-                                'header' => 'border-orange-500',
                                 'button' => 'bg-orange-600!',
                             ],
                             default => [
                                 'select' => 'text-red-700! border-red-500! bg-red-50!',
-                                'header' => 'border-red-500',
                                 'button' => 'bg-red-600!',
                             ],
                         };
@@ -63,7 +60,7 @@
                     </flux:select>
                 </div>
 
-                <div>
+                <div class="pe-9">
                     @if($date && $isBankFeedTransaction)
                         <flux:badge color="zinc">
                             {{ CarbonImmutable::parse($date)->format('D j M Y') }}
