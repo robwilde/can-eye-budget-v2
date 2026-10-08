@@ -123,3 +123,18 @@ test('the categorise-matching description follows the clean description after bl
         ->click($elsewhere)
         ->assertDontSeeIn($description, 'Acme hosting');
 });
+
+test('date field is clear of the close button', function () use ($openModal) {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create();
+
+    $this->actingAs($user);
+
+    $page = visit('/calendar');
+
+    $page->script($openModal);
+
+    $page->assertScript(
+        "document.querySelector('dialog[open] input[type=date]').getBoundingClientRect().right <= document.querySelector('dialog[open] button[aria-label=\"Close modal\"]').getBoundingClientRect().left"
+    );
+});
