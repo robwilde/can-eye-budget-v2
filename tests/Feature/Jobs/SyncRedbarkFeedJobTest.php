@@ -7,6 +7,7 @@
 declare(strict_types=1);
 
 use App\Enums\ImportSource;
+use App\Enums\RecurrenceFrequency;
 use App\Enums\RedbarkFeedStatus;
 use App\Enums\RefreshStatus;
 use App\Enums\RefreshTrigger;
@@ -18,7 +19,9 @@ use App\Exceptions\Redbark\RedbarkAuthenticationException;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Jobs\SyncRedbarkFeedJob;
 use App\Models\Account;
+use App\Models\BnplOrder;
 use App\Models\Category;
+use App\Models\PlannedTransaction;
 use App\Models\RedbarkAccount;
 use App\Models\RedbarkFeed;
 use App\Models\RedbarkSyncLog;
@@ -257,6 +260,58 @@ test('a folded fee is recognised and never resurrected', function () {
     expect(Transaction::query()->count())->toBe(1)
         ->and($fee->fresh()->trashed())->toBeTrue()
         ->and(RedbarkSyncLog::query()->latest('id')->firstOrFail()->transactions_created)->toBe(0);
+});
+
+test('a fanned-out bnpl debit stays split across resyncs', function () {
+    [$feed, , $account] = linkedRedbarkFeed();
+
+    $plans = collect(range(1, 3))->map(function () use ($feed, $account): PlannedTransaction {
+        $plan = PlannedTransaction::factory()->for($feed->user)->for($account)->create([
+            'amount' => 1861,
+            'direction' => TransactionDirection::Debit,
+            'description' => 'Afterpay - '.fake()->company(),
+            'start_date' => '2026-08-07',
+            'until_date' => '2026-09-18',
+            'frequency' => RecurrenceFrequency::Every2Weeks,
+            'is_active' => true,
+        ]);
+
+        BnplOrder::factory()->autoApproved()->create([
+            'user_id' => $feed->user_id,
+            'account_id' => $account->id,
+            'planned_transaction_id' => $plan->id,
+            'instalment_amount' => 1861,
+            'first_due_date' => '2026-08-07',
+            'last_due_date' => '2026-09-18',
+        ]);
+
+        return $plan;
+    });
+
+    $row = redbarkRow([
+        'id' => 'rb_txn_afterpay',
+        'date' => '2026-09-04',
+        'postDate' => '2026-09-04',
+        'valueDate' => '2026-09-04',
+        'description' => 'VISA -Afterpay                 afterpay.com AU  145377 #8357',
+        'amount' => '-55.83',
+        'merchantName' => 'Afterpay',
+    ]);
+
+    fakeRedbark(accounts: [redbarkUpstreamAccount()], transactions: [$row]);
+    runRedbarkSync($feed);
+
+    $parent = Transaction::withTrashed()->where('redbark_id', 'rb_txn_afterpay')->firstOrFail();
+    $childIds = Transaction::query()->where('parent_transaction_id', $parent->id)->pluck('id')->sort()->values()->all();
+
+    fakeRedbark(accounts: [redbarkUpstreamAccount()], transactions: [$row]);
+    runRedbarkSync($feed->fresh());
+
+    expect($childIds)->toHaveCount(3)
+        ->and($parent->fresh()->trashed())->toBeTrue()
+        ->and(Transaction::query()->current()->where('user_id', $feed->user_id)->pluck('id')->sort()->values()->all())->toBe($childIds)
+        ->and((int) Transaction::query()->current()->where('user_id', $feed->user_id)->sum('amount'))->toBe(-5583)
+        ->and(Transaction::query()->current()->whereIn('planned_transaction_id', $plans->pluck('id'))->count())->toBe(3);
 });
 
 test('two identical amounts on one day are matched one to one', function () {

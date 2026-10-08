@@ -79,6 +79,7 @@ test('three instalments due on one day are split out of one combined debit', fun
         ->and($children->every(fn (Transaction $child): bool => $child->category_id === $child->plannedTransaction->category_id))->toBeTrue()
         ->and($children->first()->notes)->toContain('Afterpay debit split across 3 plans')
         ->and(Transaction::withTrashed()->find($debit->id)->trashed())->toBeTrue()
+        ->and(Transaction::withTrashed()->find($debit->id)->folded_into_transaction_id)->toBe($children->first()->id)
         ->and(Transaction::query()->current()->where('user_id', $this->user->id)->pluck('id')->sort()->values()->all())
         ->toBe($children->pluck('id')->sort()->values()->all())
         ->and((int) Transaction::query()->current()->where('user_id', $this->user->id)->sum('amount'))->toBe(-5583);
