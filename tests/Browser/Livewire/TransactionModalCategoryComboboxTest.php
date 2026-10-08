@@ -144,3 +144,26 @@ test('combobox is pre-filled when editing a transaction with a category', functi
     $page->assertPresent('[role="combobox"] input')
         ->assertValue('[role="combobox"] input', 'Groceries');
 });
+
+test('combobox keeps a long category path on one line inside the viewport', function () use ($openModal) {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create();
+    $transport = Category::factory()->create(['name' => 'Transport']);
+    Category::factory()->withParent($transport)->create(['name' => 'Motorcycle Fuel Surcharge Rebate Programme']);
+
+    $this->actingAs($user);
+
+    $page = visit('/calendar');
+    $page->script($openModal);
+
+    $page->assertPresent('[role="combobox"] input');
+
+    $page->script("document.querySelector('[role=\"combobox\"]').style.width = '160px'");
+
+    $page->click('[role="combobox"] input')
+        ->type('[role="combobox"] input', 'mot')
+        ->assertSee('Transport / Motorcycle Fuel Surcharge Rebate Programme')
+        ->assertScript('document.querySelector(\'[role="listbox"] [role="option"]\').getBoundingClientRect().height < 40')
+        ->assertScript('document.querySelector(\'[role="listbox"]\').getBoundingClientRect().width > 160')
+        ->assertScript('document.querySelector(\'[role="listbox"]\').getBoundingClientRect().right <= window.innerWidth');
+});

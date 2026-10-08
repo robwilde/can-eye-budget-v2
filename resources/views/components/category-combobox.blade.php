@@ -100,7 +100,9 @@
                         el.style.top = (rect.bottom + 4) + 'px';
                     }
                     el.style.left = rect.left + 'px';
-                    el.style.width = rect.width + 'px';
+                    el.style.minWidth = rect.width + 'px';
+                    el.style.width = 'max-content';
+                    el.style.maxWidth = Math.min(480, window.innerWidth - rect.left - 8) + 'px';
                     el.showPopover();
                 }
             });
@@ -185,7 +187,7 @@
             <button
                 type="button"
                 @click="select(item)"
-                class="flex w-full cursor-pointer items-center px-3 py-1.5 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10"
+                class="flex w-full cursor-pointer items-center px-3 py-1.5 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10 whitespace-nowrap"
                 :class="{ 'bg-zinc-50 dark:bg-white/5': selectedId === item.id }"
                 role="option"
                 :aria-selected="selectedId === item.id"
