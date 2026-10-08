@@ -48,15 +48,32 @@ test('a user with no feed is sent back to the providers panel', function () {
         ->assertRedirect(route('providers.edit'));
 });
 
-test('accounts needing setup are listed and default to skip', function () {
+test('a mapped redbark account type is preselected as a new account', function () {
     [$user, , $redbarkAccount] = wizardFixture();
 
     Livewire::actingAs($user)
         ->test(RedbarkAccountSetup::class)
         ->assertSee('Test Bank - Everyday Account')
         ->assertSee('$1,234.56')
-        ->assertSet("choices.{$redbarkAccount->id}", 'skip');
+        ->assertSet("choices.{$redbarkAccount->id}", 'new:transaction');
 });
+
+test('the default choice follows the redbark account type', function (?string $type, string $expected) {
+    [$user, , $redbarkAccount] = wizardFixture(['account_type' => $type]);
+
+    Livewire::actingAs($user)
+        ->test(RedbarkAccountSetup::class)
+        ->assertSet("choices.{$redbarkAccount->id}", $expected);
+})->with([
+    ['credit-card', 'new:credit-card'],
+    ['savings', 'new:savings'],
+    ['loan', 'new:loan'],
+    ['investment', 'skip'],
+    ['term-deposit', 'skip'],
+    ['other', 'skip'],
+    [null, 'skip'],
+    ['weird', 'skip'],
+]);
 
 test('choosing a new account type creates and links it', function () {
     [$user, $feed, $redbarkAccount] = wizardFixture();
@@ -242,20 +259,19 @@ test('mount queues a sync for a never-synced feed instead of running it inline',
     expect($feed->fresh()->last_synced_at)->toBeNull();
 });
 
-test('accounts the first sync finds after the wizard loaded default to skip and are resolved on save', function () {
+test('accounts the first sync finds after the wizard loaded are defaulted from their type and resolved on save', function () {
     $user = User::factory()->create();
     $feed = RedbarkFeed::factory()->for($user)->create();
 
     $wizard = Livewire::actingAs($user)->test(RedbarkAccountSetup::class);
 
     $feed->update(['last_synced_at' => now(), 'pending_account_setup' => true]);
-    $everyday = RedbarkAccount::factory()->for($feed, 'feed')->create(['account_id' => null, 'name' => 'Everyday']);
-    $card = RedbarkAccount::factory()->for($feed, 'feed')->create(['account_id' => null, 'name' => 'Card']);
+    $everyday = RedbarkAccount::factory()->for($feed, 'feed')->create(['account_id' => null, 'name' => 'Everyday', 'account_type' => 'other']);
+    $card = RedbarkAccount::factory()->for($feed, 'feed')->create(['account_id' => null, 'name' => 'Card', 'account_type' => 'credit-card']);
 
     $wizard->call('$refresh')
         ->assertSet("choices.{$everyday->id}", 'skip')
-        ->assertSet("choices.{$card->id}", 'skip')
-        ->set("choices.{$card->id}", 'new:credit-card')
+        ->assertSet("choices.{$card->id}", 'new:credit-card')
         ->call('save');
 
     expect($everyday->fresh()->ignored)->toBeTrue()
@@ -268,7 +284,7 @@ test('an account that lands between the last render and save keeps onboarding on
 
     $wizard = Livewire::actingAs($user)->test(RedbarkAccountSetup::class, ['inOnboarding' => true]);
 
-    $late = RedbarkAccount::factory()->for($feed, 'feed')->create(['account_id' => null, 'name' => 'Late']);
+    $late = RedbarkAccount::factory()->for($feed, 'feed')->create(['account_id' => null, 'name' => 'Late', 'account_type' => 'other']);
 
     $wizard->call('save')
         ->assertNotDispatched('accounts-set-up')
