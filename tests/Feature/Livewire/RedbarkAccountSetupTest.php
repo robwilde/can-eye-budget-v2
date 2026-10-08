@@ -242,6 +242,44 @@ test('mount queues a sync for a never-synced feed instead of running it inline',
     expect($feed->fresh()->last_synced_at)->toBeNull();
 });
 
+test('accounts the first sync finds after the wizard loaded default to skip and are resolved on save', function () {
+    $user = User::factory()->create();
+    $feed = RedbarkFeed::factory()->for($user)->create();
+
+    $wizard = Livewire::actingAs($user)->test(RedbarkAccountSetup::class);
+
+    $feed->update(['last_synced_at' => now(), 'pending_account_setup' => true]);
+    $everyday = RedbarkAccount::factory()->for($feed, 'feed')->create(['account_id' => null, 'name' => 'Everyday']);
+    $card = RedbarkAccount::factory()->for($feed, 'feed')->create(['account_id' => null, 'name' => 'Card']);
+
+    $wizard->call('$refresh')
+        ->assertSet("choices.{$everyday->id}", 'skip')
+        ->assertSet("choices.{$card->id}", 'skip')
+        ->set("choices.{$card->id}", 'new:credit-card')
+        ->call('save');
+
+    expect($everyday->fresh()->ignored)->toBeTrue()
+        ->and($card->fresh()->account_id)->not->toBeNull()
+        ->and($feed->fresh()->pending_account_setup)->toBeFalse();
+});
+
+test('an account that lands between the last render and save keeps onboarding on the wizard', function () {
+    [$user, $feed] = wizardFixture();
+
+    $wizard = Livewire::actingAs($user)->test(RedbarkAccountSetup::class, ['inOnboarding' => true]);
+
+    $late = RedbarkAccount::factory()->for($feed, 'feed')->create(['account_id' => null, 'name' => 'Late']);
+
+    $wizard->call('save')
+        ->assertNotDispatched('accounts-set-up')
+        ->assertSee('Late')
+        ->assertSet("choices.{$late->id}", 'skip');
+
+    expect($late->fresh()->account_id)->toBeNull()
+        ->and($late->fresh()->ignored)->toBeFalse()
+        ->and($feed->fresh()->pending_account_setup)->toBeTrue();
+});
+
 test('resubmitting after a partial failure does not re-apply already-resolved choices', function () {
     [$user, $feed, $accountA] = wizardFixture();
 
