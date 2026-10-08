@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\DTOs\PlanOccurrence;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use Carbon\CarbonImmutable;
@@ -72,24 +73,51 @@ final readonly class ReconciliationMatcher
             return null;
         }
 
+        $best = null;
+
+        foreach ($this->unclaimedOccurrences($transaction->user_id, $plans, $transaction->post_date) as $occurrence) {
+            if ($best === null || $occurrence->dayDiff < $best->dayDiff) {
+                $best = $occurrence;
+            }
+        }
+
+        return $best?->plan;
+    }
+
+    /**
+     * Occurrences of $plans within DATE_TOLERANCE_DAYS of $postDate that no current
+     * transaction has already reconciled, in plan order then date order.
+     *
+     * @param  Collection<int, PlannedTransaction>  $plans
+     * @return Collection<int, PlanOccurrence>
+     */
+    public function unclaimedOccurrences(int $userId, Collection $plans, CarbonImmutable $postDate): Collection
+    {
+        if ($plans->isEmpty()) {
+            return collect();
+        }
+
+        $tolerance = ReconciliationPolicy::DATE_TOLERANCE_DAYS;
+        $windowStart = $postDate->subDays($tolerance);
+        $windowEnd = $postDate->addDays($tolerance);
+
         // Occurrences already reconciled by another transaction, fetched once and matched
         // in-memory so the ingress path doesn't issue a query per candidate occurrence.
         $claimedByPlan = Transaction::query()
-            ->where('user_id', $transaction->user_id)
+            ->where('user_id', $userId)
             ->current()
             ->whereIn('planned_transaction_id', $plans->pluck('id'))
             ->whereBetween('post_date', [$windowStart->subDays($tolerance), $windowEnd->addDays($tolerance)])
             ->get(['planned_transaction_id', 'post_date'])
             ->groupBy('planned_transaction_id');
 
-        $bestPlan = null;
-        $bestDiff = null;
+        $occurrences = collect();
 
         foreach ($plans as $plan) {
             $claimed = $claimedByPlan->get($plan->id) ?? collect();
 
             foreach ($plan->occurrencesBetween($windowStart, $windowEnd) as $occurrence) {
-                $diff = ReconciliationPolicy::dayDiff($transaction->post_date, $occurrence);
+                $diff = ReconciliationPolicy::dayDiff($postDate, $occurrence);
 
                 if ($diff > $tolerance) {
                     continue;
@@ -99,18 +127,13 @@ final readonly class ReconciliationMatcher
                     fn (Transaction $linked): bool => ReconciliationPolicy::dayDiff($linked->post_date, $occurrence) <= $tolerance,
                 );
 
-                if ($alreadyClaimed) {
-                    continue;
-                }
-
-                if ($bestDiff === null || $diff < $bestDiff) {
-                    $bestDiff = $diff;
-                    $bestPlan = $plan;
+                if (! $alreadyClaimed) {
+                    $occurrences->push(new PlanOccurrence($plan, $occurrence, $diff));
                 }
             }
         }
 
-        return $bestPlan;
+        return $occurrences;
     }
 
     public function link(Transaction $transaction, PlannedTransaction $planned): void

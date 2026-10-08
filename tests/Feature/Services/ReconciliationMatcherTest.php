@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\PlannedTransaction;
@@ -294,4 +295,35 @@ test('unlink on already unlinked transaction does nothing', function () {
     $this->matcher->unlink($transaction);
 
     expect($transaction->fresh()->planned_transaction_id)->toBeNull();
+});
+
+test('unclaimed occurrences list every open occurrence in plan then date order', function () {
+    $weekly = PlannedTransaction::factory()->for($this->user)->for($this->account)->create([
+        'amount' => 1000,
+        'direction' => TransactionDirection::Debit,
+        'frequency' => RecurrenceFrequency::EveryWeek,
+        'start_date' => '2026-03-15',
+        'until_date' => null,
+    ]);
+    $monthly = PlannedTransaction::factory()->for($this->user)->for($this->account)->create([
+        'amount' => 1000,
+        'direction' => TransactionDirection::Debit,
+        'frequency' => RecurrenceFrequency::EveryMonth,
+        'start_date' => '2026-03-15',
+        'until_date' => null,
+    ]);
+
+    Transaction::factory()->for($this->user)->debit()->create([
+        'account_id' => $this->account->id,
+        'amount' => 1000,
+        'post_date' => '2026-03-15',
+        'planned_transaction_id' => $weekly->id,
+    ]);
+
+    $occurrences = $this->matcher->unclaimedOccurrences($this->user->id, collect([$weekly, $monthly]), CarbonImmutable::parse('2026-03-15'));
+
+    expect($occurrences)->toHaveCount(1)
+        ->and($occurrences->first()->plan->id)->toBe($monthly->id)
+        ->and($occurrences->first()->date->toDateString())->toBe('2026-03-15')
+        ->and($occurrences->first()->dayDiff)->toBe(0);
 });
