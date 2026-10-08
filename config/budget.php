@@ -11,9 +11,11 @@ return [
     |
     | When enabled, the analysis pipeline scans imported transactions for
     | recurring patterns and surfaces them as suggestions that can be turned
-    | into planned transactions. Disabled by default while the core
-    | import/reconcile flow is stabilised; it will be rewired into the user
-    | rule system before being re-enabled.
+    | into planned transactions. Off by default (#580). Import-time detection
+    | stays paused until it is rewired into the user-rule system
+    | (docs/plans/2026-06-27-recurring-review-rules-page-design.md); users run
+    | the on-demand scan on /rules (`RecurringTransactionReview::findRecurring`).
+    | `SetupJourneyTest` enables the flag on purpose.
     |
     */
 
