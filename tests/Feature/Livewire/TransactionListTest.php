@@ -91,6 +91,48 @@ test('filters by category_id', function () {
         ->assertDontSee('UBER TRIP');
 });
 
+test('renders a category filter combobox', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create();
+    Category::factory()->create(['name' => 'Groceries']);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->assertSeeHtml('data-testid="category-filter"')
+        ->assertSeeHtml('placeholder="Any category"')
+        ->assertSeeHtml('aria-label="Category"');
+});
+
+test('clearing the category filter shows every transaction', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $transport = Category::factory()->create(['name' => 'Transport']);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $groceries->id,
+        'description' => 'WOOLWORTHS',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $transport->id,
+        'description' => 'UBER TRIP',
+        'post_date' => now()->subDays(5),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->set('category', $groceries->id)
+        ->assertSee('WOOLWORTHS')
+        ->assertDontSee('UBER TRIP')
+        ->set('category', null)
+        ->assertSee('WOOLWORTHS')
+        ->assertSee('UBER TRIP');
+});
+
 test('filters by period', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
