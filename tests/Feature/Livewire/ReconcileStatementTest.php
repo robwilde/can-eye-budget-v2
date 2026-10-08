@@ -4,12 +4,14 @@
 
 declare(strict_types=1);
 
+use App\Enums\AuditOutcome;
 use App\Enums\StatementLineKind;
 use App\Enums\StatementLineResolution;
 use App\Enums\StatementReconciliationStatus;
 use App\Enums\TransactionSource;
 use App\Livewire\ReconcileStatement;
 use App\Models\Account;
+use App\Models\AuditEvent;
 use App\Models\RedbarkAccount;
 use App\Models\RedbarkFeed;
 use App\Models\StatementReconciliation;
@@ -476,4 +478,19 @@ test('each line checkbox is named after its line', function () {
         ->assertSeeHtml('aria-label="Tick 10/08/2026 WOOLWORTHS 1234"')
         ->call('tick', $line->id)
         ->assertSeeHtml('aria-label="Untick 10/08/2026 WOOLWORTHS 1234"');
+});
+
+test('a tick refused on a closed month is audited as a failure and a later tick after reopening as a success', function () {
+    [$user, $account] = reconcileAccount();
+    $reconciliation = reconcileAugust($account);
+    $line = reconcileLine($reconciliation, 'matched');
+    $reconciliation->update(['status' => StatementReconciliationStatus::Closed, 'closed_at' => now()]);
+
+    reconcilePage($user, $account)
+        ->call('tick', $line->id)
+        ->call('reopen')
+        ->call('tick', $line->id);
+
+    expect(AuditEvent::query()->where('action', 'livewire.reconcile-statement.tick')->orderBy('id')->pluck('outcome')->all())
+        ->toBe([AuditOutcome::Failure, AuditOutcome::Success]);
 });

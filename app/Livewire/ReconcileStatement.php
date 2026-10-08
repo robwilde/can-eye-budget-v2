@@ -10,6 +10,7 @@ use App\Exceptions\Statement\StatementLineAlreadyFolded;
 use App\Exceptions\Statement\StatementLineNotResolvable;
 use App\Exceptions\Statement\StatementReconciliationClosed;
 use App\Exceptions\Statement\StatementReconciliationIncomplete;
+use App\Livewire\Concerns\ReportsFailure;
 use App\Models\Account;
 use App\Models\StatementReconciliation;
 use App\Models\StatementReconciliationLine;
@@ -43,6 +44,7 @@ use Throwable;
 #[Layout('layouts::app')]
 final class ReconcileStatement extends Component
 {
+    use ReportsFailure;
     use WithFileUploads;
 
     private const string MONTH_FORMAT = 'Y-m';
@@ -69,8 +71,6 @@ final class ReconcileStatement extends Component
 
     #[Locked]
     public ?string $originalFilename = null;
-
-    public ?string $errorMessage = null;
 
     public function mount(Account $account): void
     {
@@ -103,11 +103,12 @@ final class ReconcileStatement extends Component
     {
         $this->discardPendingFile();
         $this->reset(['file', 'uploading', 'headers', 'mapping', 'storedPath', 'originalFilename', 'errorMessage']);
+        $this->resetErrorBag('errorMessage');
     }
 
     public function uploadFile(CsvParserService $parser, CsvColumnMapper $mapper): void
     {
-        $this->errorMessage = null;
+        $this->clearFailure();
 
         $this->validate([
             'file' => ['required', 'file', 'mimes:csv,txt', 'max:10240'],
@@ -120,7 +121,7 @@ final class ReconcileStatement extends Component
         }
 
         if ($this->reconciliation !== null && ! $this->reconciliation->isOpen()) {
-            $this->errorMessage = __('This month is closed — reopen it first');
+            $this->fail(__('This month is closed — reopen it first'));
 
             return;
         }
@@ -128,7 +129,7 @@ final class ReconcileStatement extends Component
         $storedPath = $file->store('statement-reconciliations', 'local');
 
         if ($storedPath === false) {
-            $this->errorMessage = __('The file could not be stored. Please try again.');
+            $this->fail(__('The file could not be stored. Please try again.'));
 
             return;
         }
@@ -137,7 +138,7 @@ final class ReconcileStatement extends Component
             $this->headers = $parser->headers(Storage::disk('local')->path($storedPath));
         } catch (Throwable) {
             Storage::disk('local')->delete($storedPath);
-            $this->errorMessage = __('That file could not be read as a CSV.');
+            $this->fail(__('That file could not be read as a CSV.'));
 
             return;
         }
@@ -157,10 +158,10 @@ final class ReconcileStatement extends Component
 
     public function reconcile(StatementReconciler $reconciler): void
     {
-        $this->errorMessage = null;
+        $this->clearFailure();
 
         if ($this->storedPath === null || $this->originalFilename === null) {
-            $this->errorMessage = __('Upload a statement first.');
+            $this->fail(__('Upload a statement first.'));
 
             return;
         }
@@ -188,7 +189,7 @@ final class ReconcileStatement extends Component
         $existing = $this->reconciliation;
 
         if ($existing !== null && ! $existing->isOpen()) {
-            $this->errorMessage = __('This month is closed — reopen it first');
+            $this->fail(__('This month is closed — reopen it first'));
 
             return;
         }
@@ -220,7 +221,7 @@ final class ReconcileStatement extends Component
                 $reconciler->build($reconciliation);
             });
         } catch (StatementFileUnreadable|StatementReconciliationClosed $e) {
-            $this->errorMessage = $e->getMessage();
+            $this->fail($e->getMessage());
             $this->account->refresh();
             unset($this->reconciliation);
 
@@ -247,7 +248,7 @@ final class ReconcileStatement extends Component
 
     public function tickAll(string $kind): void
     {
-        $this->errorMessage = null;
+        $this->clearFailure();
         $lineKind = StatementLineKind::tryFrom($kind);
 
         if (! in_array($lineKind, [StatementLineKind::Matched, StatementLineKind::FeedOnly], true)) {
@@ -312,7 +313,7 @@ final class ReconcileStatement extends Component
 
     public function reopen(StatementReconciler $reconciler): void
     {
-        $this->errorMessage = null;
+        $this->clearFailure();
         $reconciliation = $this->reconciliation;
 
         if ($reconciliation !== null) {
@@ -422,7 +423,7 @@ final class ReconcileStatement extends Component
         }
 
         if (! $reconciliation->isOpen()) {
-            $this->errorMessage = __('This month is closed — reopen it first');
+            $this->fail(__('This month is closed — reopen it first'));
 
             return null;
         }
@@ -433,11 +434,11 @@ final class ReconcileStatement extends Component
     /** A line of the reconciliation on screen; ids from the wire are never trusted. */
     private function line(int $lineId): ?StatementReconciliationLine
     {
-        $this->errorMessage = null;
+        $this->clearFailure();
         $line = $this->reconciliation?->lines()->whereKey($lineId)->first();
 
         if ($line === null) {
-            $this->errorMessage = __('That line is not part of this reconciliation.');
+            $this->fail(__('That line is not part of this reconciliation.'));
         }
 
         return $line;
@@ -452,7 +453,7 @@ final class ReconcileStatement extends Component
         }
 
         if ($checked && $line->kind === StatementLineKind::StatementOnly && $line->resolution === null) {
-            $this->errorMessage = __('Add, link or ignore this statement line before ticking it.');
+            $this->fail(__('Add, link or ignore this statement line before ticking it.'));
 
             return;
         }
@@ -473,12 +474,12 @@ final class ReconcileStatement extends Component
     /** Runs a reconciler mutation, surfacing its domain errors inline. */
     private function attempt(callable $mutation): void
     {
-        $this->errorMessage = null;
+        $this->clearFailure();
 
         try {
             $mutation();
         } catch (StatementLineAlreadyFolded|StatementLineNotResolvable|StatementReconciliationClosed|StatementReconciliationIncomplete $e) {
-            $this->errorMessage = $e->getMessage();
+            $this->fail($e->getMessage());
         }
     }
 }
