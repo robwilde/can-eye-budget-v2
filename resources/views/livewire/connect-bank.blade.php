@@ -27,6 +27,11 @@
             <flux:text>
                 {{ __('Your first sync covers transactions from the 1st of last month.') }}
             </flux:text>
+            <flux:text>
+                {{ __('New to Redbark?') }}
+                <flux:link :href="route('setup-guide')" external rel="noopener" data-test="connect-bank-guide">{{ __('Read the setup guide') }}</flux:link>
+                {{ __('(opens in a new tab).') }}
+            </flux:text>
         </div>
 
         <form wire:submit="connect" class="space-y-4">
@@ -34,7 +39,7 @@
                 wire:model="api_key"
                 type="password"
                 :label="__('Redbark API key')"
-                :description="__('Create a key at app.redbark.com under Settings > API Keys. Requires a Developer or Professional plan.')"
+                :description="__('Create a key at app.redbark.com under Settings > API & MCP. The free trial is enough; after it you need a Developer or Professional plan.')"
                 autocomplete="off"
                 data-test="connect-bank-api-key"
             />

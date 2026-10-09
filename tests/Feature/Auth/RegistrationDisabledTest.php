@@ -34,6 +34,14 @@ test('the landing page renders without a sign-up link when registration is disab
     expect($response->getContent())->not->toContain('/register');
 });
 
+test('the setup guide renders without a sign-up link when registration is disabled', function () {
+    $response = $this->get(route('setup-guide'));
+
+    $response->assertOk()->assertSee('Before you start');
+
+    expect($response->getContent())->not->toContain('/register');
+});
+
 test('an existing user can still log in when registration is disabled', function () {
     $user = User::factory()->create();
 
