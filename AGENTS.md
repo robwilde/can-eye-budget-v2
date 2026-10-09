@@ -50,7 +50,7 @@ op ci                         # lint.check + mago.lint + analyse + test
 op migrate[.fresh|.rollback|.status]   # DB
 op seed | seed.basiq | seed.sandbox    # seeders
 op build                      # ddev exec npm run build (Vite)
-op horizon | op logs          # queues / pail tail
+op horizon.status | op logs   # queue status / pail tail (Horizon itself starts with `ddev start`)
 ```
 `op test*` are **flock-guarded single-flight** (`/tmp/op-test.lock`) — never background or stack them. First-run bootstrap: `ddev composer setup`. Host-level composer scripts also exist (`composer dev/test/lint`) but `op`/`ddev exec` is the project convention.
 

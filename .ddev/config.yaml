@@ -267,6 +267,11 @@ corepack_enable: false
 #  command: "/var/www/html/node_modules/.bin/http-server /var/www/html/sub -p 3000"
 #  directory: /var/www/html
 
+web_extra_daemons:
+- name: "horizon"
+  command: "php artisan horizon"
+  directory: /var/www/html
+
 # override_config: false
 # By default, config.*.yaml files are *merged* into the configuration
 # But this means that some things can't be overridden
