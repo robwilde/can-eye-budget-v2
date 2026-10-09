@@ -34,7 +34,8 @@ test('the connect-bank page needs authentication and renders step 1 for a new us
         ->assertSee('Step 1 of 3')
         ->assertSee('from the 1st of last month')
         ->assertSee(route('dashboard'), false)
-        ->assertSee(route('setup-guide'), false);
+        ->assertSee(route('setup-guide'), false)
+        ->assertSee('Settings > API & MCP');
 });
 
 test('connecting stores the key encrypted, dispatches a sync and advances to step 2', function () {

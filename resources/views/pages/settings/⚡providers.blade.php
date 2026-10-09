@@ -161,7 +161,7 @@ new #[Title('Bank providers')] class extends Component {
                     :label="__('API key')"
                     type="password"
                     placeholder="rbk_live_…"
-                    :description="__('Create a key at app.redbark.com under Settings > API Keys. Requires a Developer or Professional plan.')"
+                    :description="__('Create a key at app.redbark.com under Settings > API & MCP. The free trial is enough; after it you need a Developer or Professional plan.')"
                     viewable
                     required
                 />

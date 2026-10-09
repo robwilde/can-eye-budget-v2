@@ -39,7 +39,7 @@
                 wire:model="api_key"
                 type="password"
                 :label="__('Redbark API key')"
-                :description="__('Create a key at app.redbark.com under Settings > API Keys. Requires a Developer or Professional plan.')"
+                :description="__('Create a key at app.redbark.com under Settings > API & MCP. The free trial is enough; after it you need a Developer or Professional plan.')"
                 autocomplete="off"
                 data-test="connect-bank-api-key"
             />
