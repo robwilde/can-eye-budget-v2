@@ -6,6 +6,8 @@ use App\Livewire\ReconcileStatement;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome')->name('home');
+// Public: linked from onboarding step 1 and from tester invites; holds no user data.
+Route::view('setup-guide', 'setup-guide')->name('setup-guide');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');

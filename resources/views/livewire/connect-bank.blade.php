@@ -27,6 +27,11 @@
             <flux:text>
                 {{ __('Your first sync covers transactions from the 1st of last month.') }}
             </flux:text>
+            <flux:text>
+                {{ __('New to Redbark?') }}
+                <flux:link :href="route('setup-guide')" external rel="noopener" data-test="connect-bank-guide">{{ __('Read the setup guide') }}</flux:link>
+                {{ __('(opens in a new tab).') }}
+            </flux:text>
         </div>
 
         <form wire:submit="connect" class="space-y-4">

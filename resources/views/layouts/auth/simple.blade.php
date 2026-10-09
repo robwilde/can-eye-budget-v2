@@ -1,3 +1,4 @@
+@props(['title' => null, 'width' => 'max-w-sm'])
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
     <head>
@@ -5,7 +6,7 @@
     </head>
     <body class="min-h-screen bg-cib-teal-400 antialiased">
         <div class="flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
-            <div class="flex w-full max-w-sm flex-col gap-5">
+            <div class="flex w-full {{ $width }} flex-col gap-5">
                 <a href="{{ route('home') }}" class="flex flex-col items-center gap-2" wire:navigate>
                     <span class="flex size-12 items-center justify-center rounded-xl border-2 border-cib-black bg-white shadow-pop-sm">
                         <x-app-logo-icon class="size-9" />

@@ -33,7 +33,8 @@ test('the connect-bank page needs authentication and renders step 1 for a new us
         ->assertSeeLivewire(ConnectBank::class)
         ->assertSee('Step 1 of 3')
         ->assertSee('from the 1st of last month')
-        ->assertSee(route('dashboard'), false);
+        ->assertSee(route('dashboard'), false)
+        ->assertSee(route('setup-guide'), false);
 });
 
 test('connecting stores the key encrypted, dispatches a sync and advances to step 2', function () {
@@ -224,4 +225,13 @@ test('skip for now leads to the dashboard on both steps', function () {
         ->test(ConnectBank::class)
         ->assertSeeHtml('data-test="connect-bank-skip"')
         ->assertSee(route('dashboard'));
+});
+
+test('step 1 opens the setup guide in a new tab', function () {
+    $content = $this->actingAs(User::factory()->create())
+        ->get(route('connect-bank'))
+        ->assertOk()
+        ->getContent();
+
+    expect($content)->toMatch('/<a\b(?=[^>]*data-test="connect-bank-guide")(?=[^>]*target="_blank")[^>]*>/');
 });
