@@ -14,6 +14,7 @@ use App\Jobs\ImportCsvTransactionsJob;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Models\Account;
 use App\Models\BankImport;
+use App\Models\BnplOrder;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
@@ -405,4 +406,73 @@ test('a folded fee is not restored on re-import', function () {
         ->and($bankImport->restored_count)->toBe(0)
         ->and(Transaction::query()->find($targetId))->toBeNull()
         ->and(Transaction::withTrashed()->find($targetId)->trashed())->toBeTrue();
+});
+
+test('a fanned-out bnpl debit stays split when the csv is re-imported', function () {
+    Queue::fake([RunTransactionAnalysisJob::class]);
+
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create();
+
+    foreach (range(1, 3) as $ignored) {
+        $plan = PlannedTransaction::factory()->for($user)->for($account)->create([
+            'amount' => 1861,
+            'direction' => TransactionDirection::Debit,
+            'description' => 'Afterpay - '.fake()->company(),
+            'start_date' => '2026-08-07',
+            'until_date' => '2026-09-18',
+            'frequency' => RecurrenceFrequency::Every2Weeks,
+            'is_active' => true,
+        ]);
+
+        BnplOrder::factory()->autoApproved()->create([
+            'user_id' => $user->id,
+            'account_id' => $account->id,
+            'planned_transaction_id' => $plan->id,
+            'instalment_amount' => 1861,
+            'first_due_date' => '2026-08-07',
+            'last_due_date' => '2026-09-18',
+        ]);
+    }
+
+    $csv = <<<'CSV'
+        Date,Description,Amount
+        04/09/2026,VISA -Afterpay                 afterpay.com AU  145377 #8357,-55.83
+        CSV;
+
+    $storedPath = 'bank-imports/'.bin2hex(random_bytes(8)).'.csv';
+    Storage::disk('local')->put($storedPath, $csv);
+
+    $bankImport = BankImport::factory()->for($user)->for($account)->create([
+        'original_filename' => 'afterpay.csv',
+        'stored_path' => $storedPath,
+        'column_mapping' => [
+            CsvColumnMapper::FIELD_DATE => 'Date',
+            CsvColumnMapper::FIELD_DESCRIPTION => 'Description',
+            CsvColumnMapper::FIELD_AMOUNT => 'Amount',
+        ],
+    ]);
+
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class));
+
+    $parent = Transaction::withTrashed()->where('account_id', $account->id)->whereNotNull('csv_hash')->firstOrFail();
+    $childIds = Transaction::query()->where('parent_transaction_id', $parent->id)->pluck('id')->sort()->values()->all();
+
+    $bankImport->update([
+        'status' => BankImportStatus::Pending,
+        'imported_count' => 0,
+        'skipped_count' => 0,
+        'restored_count' => 0,
+        'row_count' => 0,
+        'row_errors' => null,
+        'completed_at' => null,
+    ]);
+
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService(), app(TransactionIngestor::class));
+
+    expect($childIds)->toHaveCount(3)
+        ->and($bankImport->fresh()->restored_count)->toBe(0)
+        ->and($parent->fresh()->trashed())->toBeTrue()
+        ->and(Transaction::query()->current()->where('user_id', $user->id)->pluck('id')->sort()->values()->all())->toBe($childIds)
+        ->and((int) Transaction::query()->current()->where('user_id', $user->id)->sum('amount'))->toBe(-5583);
 });
