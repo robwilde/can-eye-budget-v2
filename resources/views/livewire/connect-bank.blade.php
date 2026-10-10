@@ -52,6 +52,10 @@
         <livewire:redbark-account-setup :in-onboarding="true" />
     @elseif ($step === \App\Livewire\ConnectBank::STEP_PAY_CYCLE)
         <livewire:confirm-pay-cycle-step />
+    @elseif ($step === \App\Livewire\ConnectBank::STEP_TAGS)
+        <livewire:confirm-budget-tags />
+    @elseif ($step === \App\Livewire\ConnectBank::STEP_PAYEES)
+        <livewire:payee-review :onboarding="true" />
     @else
         <div class="space-y-4" data-test="onboarding-gmail-step">
             <div class="space-y-2">
