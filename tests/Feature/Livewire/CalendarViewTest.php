@@ -318,8 +318,8 @@ test('projectedTotals splits planned occurrences by direction and ignores out-of
     expect($totals)->toBe(['income' => 300000, 'spend' => 150000]);
 });
 
-test('projectedTotals does not count a planned occurrence already reconciled to a posted transaction', function () {
-    $this->travelTo('2026-10-01');
+test('projectedTotals counts an entered plan once, as its posted transaction', function () {
+    $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -337,9 +337,30 @@ test('projectedTotals does not count a planned occurrence already reconciled to 
 
     $component = Livewire::actingAs($user)->test(CalendarView::class);
 
-    expect($component->get('projectedTotals'))->toBe(['income' => 0, 'spend' => 0])
+    expect($component->get('projectedTotals'))->toBe(['income' => 0, 'spend' => 5000])
         ->and($component->get('monthTotals')['spend'])->toBe(5000);
 });
+
+test('projectedTotals covers the whole month whatever today is: an entered payday plus the one still to come', function (string $today) {
+    $this->travelTo($today);
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'amount' => 571860,
+        'direction' => TransactionDirection::Credit,
+        'start_date' => '2026-10-22',
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+    Transaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'amount' => 571860,
+        'direction' => TransactionDirection::Credit,
+        'post_date' => '2026-10-08',
+    ]);
+
+    expect(Livewire::actingAs($user)->test(CalendarView::class)->get('projectedTotals')['income'])->toBe(1143720);
+})->with(['2026-10-01', '2026-10-11', '2026-10-22']);
 
 test('projectedTotals excludes an occurrence reconciled to a posting just before the grid starts', function () {
     $this->travelTo('2026-06-10');
@@ -366,7 +387,7 @@ test('projectedTotals excludes an occurrence reconciled to a posting just before
 });
 
 test('quickline renders projected pills on the left and actual pills on the right', function () {
-    $this->travelTo('2026-10-01');
+    $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
@@ -597,7 +618,7 @@ test('inactive planned transactions are excluded', function () {
 });
 
 test('posted credit pip carries inc tone, parent-child category path and the description', function () {
-    $this->travelTo('2026-10-01');
+    $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $parent = Category::factory()->create(['name' => 'Income']);
@@ -623,7 +644,7 @@ test('posted credit pip carries inc tone, parent-child category path and the des
 });
 
 test('grid colours entered pips by direction and flags only planned pips as filled', function () {
-    $this->travelTo('2026-10-01');
+    $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['name' => 'Rent']);
@@ -817,7 +838,7 @@ function calendarPairedTransfer(User $user, Account $from, Account $to, string $
 }
 
 test('a transfer between two tracked accounts shows one neutral pip and is not counted', function () {
-    $this->travelTo('2026-10-01');
+    $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $from = Account::factory()->for($user)->create();
     $to = Account::factory()->for($user)->create();
@@ -836,7 +857,7 @@ test('a transfer between two tracked accounts shows one neutral pip and is not c
 });
 
 test('a transfer out to an untracked account is shown as a transfer and counted as spend', function () {
-    $this->travelTo('2026-10-01');
+    $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $everyday = Account::factory()->for($user)->create();
     $spaceship = Account::factory()->for($user)->untracked()->create();
@@ -855,7 +876,7 @@ test('a transfer out to an untracked account is shown as a transfer and counted 
 });
 
 test('a transfer in from an untracked account is counted as income', function () {
-    $this->travelTo('2026-10-01');
+    $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $everyday = Account::factory()->for($user)->create();
     $investment = Account::factory()->for($user)->untracked()->create();
@@ -872,7 +893,7 @@ test('a transfer in from an untracked account is counted as income', function ()
 });
 
 test('a Transfer-categorised row with no pair is shown but not counted', function () {
-    $this->travelTo('2026-10-01');
+    $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['name' => 'Transfer']);
@@ -894,7 +915,7 @@ test('a Transfer-categorised row with no pair is shown but not counted', functio
 });
 
 test('planned transfers count toward projected spend only when they leave the tracked accounts', function () {
-    $this->travelTo('2026-10-01');
+    $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $everyday = Account::factory()->for($user)->create();
     $savings = Account::factory()->for($user)->create();
@@ -952,7 +973,7 @@ test('an entered tracked-to-tracked transfer reconciles one planned occurrence, 
 });
 
 test('transfer pips render with the transfer tone, filled when planned', function () {
-    $this->travelTo('2026-10-01');
+    $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $everyday = Account::factory()->for($user)->create();
     $ubank = Account::factory()->for($user)->untracked()->create();
