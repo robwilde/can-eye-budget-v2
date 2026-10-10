@@ -9,8 +9,10 @@ use App\Contracts\ContextDevServiceContract;
 use App\Contracts\GmailServiceContract;
 use App\DTOs\CategoryRulePreview;
 use App\DTOs\EmailSearchResult;
+use App\Enums\BudgetTag;
 use App\Enums\CategorySource;
 use App\Enums\MerchantBrandStatus;
+use App\Enums\PayeeStatus;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionPeriod;
 use App\Exceptions\GmailSearchException;
@@ -19,18 +21,23 @@ use App\Livewire\Attributes\NotAudited;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\MerchantBrand;
+use App\Models\Payee;
 use App\Models\Transaction;
 use App\Models\TransactionEmail;
 use App\Models\TransactionSplit;
+use App\Models\User;
 use App\Services\CategoryRuleGenerator;
 use App\Services\GmailService;
 use App\Services\MerchantBrands\BrandNameWriter;
 use App\Services\MerchantBrands\ContextDevCreditBalance;
 use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\MerchantBrands\DescriptorGate;
+use App\Services\Payees\PayeeConfirmer;
+use App\Services\Payees\PayeeReviewQueue;
 use App\Services\TransactionEmailLinker;
 use App\Services\Transfers\TransferReviewQueue;
 use App\Support\AmountParser;
+use App\Support\Budget\BudgetTagResolver;
 use ContextDev\Core\Exceptions\ContextDevException;
 use Flux\Flux;
 use Illuminate\Database\Eloquent\Builder;
@@ -194,6 +201,8 @@ final class TransactionList extends Component
     public array $bulkExcluded = [];
 
     public string $bulkCategoryId = '';
+
+    public string $clusterIntent = '';
 
     #[Locked]
     public ?string $bulkError = null;
@@ -459,6 +468,19 @@ final class TransactionList extends Component
         $this->bulkError = null;
         $this->bulkNotice = null;
         $this->closeRulePanel();
+        $this->clusterIntent = '';
+        $this->bulkCategoryId = (string) ($this->suggestedClusterPayee($merchantKey)->suggested_category_id ?? '');
+    }
+
+    public function updatedClusterIntent(): void
+    {
+        $options = $this->narrowedByIntent(Category::visibleSortedByFullPath());
+
+        if ($options->contains('id', (int) $this->bulkCategoryId)) {
+            return;
+        }
+
+        $this->bulkCategoryId = (string) ($options->first()->id ?? '');
     }
 
     public function clearSelection(): void
@@ -467,6 +489,7 @@ final class TransactionList extends Component
         $this->bulkScope = null;
         $this->bulkExcluded = [];
         $this->bulkCategoryId = '';
+        $this->clusterIntent = '';
         $this->bulkError = null;
         $this->bulkNotice = null;
         $this->closeRulePanel();
@@ -494,7 +517,7 @@ final class TransactionList extends Component
      *
      * @throws Throwable
      */
-    public function applyCategoryToSelection(): void
+    public function applyCategoryToSelection(PayeeConfirmer $payeeConfirmer): void
     {
         $this->bulkError = null;
         $this->bulkNotice = null;
@@ -512,6 +535,8 @@ final class TransactionList extends Component
 
             return;
         }
+
+        $clusterPayee = $this->wholeClusterPayee($query);
 
         // Counted from the database before the write rather than tallied in
         // the loop, so the number shown is the number of rows the write
@@ -560,6 +585,10 @@ final class TransactionList extends Component
                 }
             });
         });
+
+        if ($clusterPayee !== null) {
+            $payeeConfirmer->confirm($this->authenticatedUser(), $clusterPayee, $categoryId);
+        }
 
         $this->clearSelection();
         // The write can shrink the result set past the current page — applying
@@ -1356,6 +1385,8 @@ final class TransactionList extends Component
             'showCustomRange' => $periodEnum === TransactionPeriod::Custom,
             'gmailEnabled' => app(GmailServiceContract::class)->isConfigured(auth()->user()),
             'splitCategories' => Category::visibleSortedByFullPath(),
+            'clusterSuggestion' => $this->clusterSuggestion(),
+            'bulkCategories' => $this->narrowedByIntent(Category::visibleSortedByFullPath()),
             'selectionCount' => $this->selectionCount(),
             'pageEligibleIds' => $pageEligibleIds,
             'matchingCount' => $this->matchingEligibleCount(),
@@ -2045,6 +2076,114 @@ final class TransactionList extends Component
         return $query
             ->whereNull('transfer_pair_id')
             ->whereDoesntHave('splits');
+    }
+
+    private function authenticatedUser(): User
+    {
+        /** @var User $user */
+        $user = auth()->user();
+
+        return $user;
+    }
+
+    private function pendingPayee(string $merchantKey): ?Payee
+    {
+        return Payee::query()
+            ->where('user_id', auth()->id())
+            ->where('merchant_key', $merchantKey)
+            ->where('status', PayeeStatus::Pending)
+            ->first();
+    }
+
+    private function suggestedClusterPayee(string $merchantKey): ?Payee
+    {
+        $payee = $this->pendingPayee($merchantKey);
+
+        if ($payee === null || $payee->suggested_category_id === null) {
+            return null;
+        }
+
+        $hasUncategorised = $this->eligibleForBulk(Transaction::query()->where('user_id', auth()->id())->current())
+            ->where('merchant_key', $merchantKey)
+            ->whereNull('category_id')
+            ->exists();
+
+        return $hasUncategorised ? $payee : null;
+    }
+
+    /**
+     * The Payee to confirm alongside a bulk write, but only when the write
+     * covers every eligible row of that merchant. A partial selection is a
+     * one-off choice and must not become a rule for the whole merchant.
+     *
+     * @param  Builder<Transaction>  $query
+     */
+    private function wholeClusterPayee(Builder $query): ?Payee
+    {
+        $merchantKey = $this->bulkScope['merchantKey'] ?? null;
+
+        if (! is_string($merchantKey) || $this->bulkExcluded !== []) {
+            return null;
+        }
+
+        $merchantRows = $this->eligibleForBulk(Transaction::query()->where('user_id', auth()->id())->current())
+            ->where('merchant_key', $merchantKey)
+            ->count();
+
+        if ((clone $query)->count() !== $merchantRows) {
+            return null;
+        }
+
+        return $this->pendingPayee($merchantKey);
+    }
+
+    /**
+     * @return array{payee: Payee, tag: BudgetTag|null, ambiguous: bool}|null
+     */
+    private function clusterSuggestion(): ?array
+    {
+        $merchantKey = $this->bulkScope['merchantKey'] ?? null;
+
+        if (! is_string($merchantKey)) {
+            return null;
+        }
+
+        $payee = $this->suggestedClusterPayee($merchantKey);
+
+        if ($payee === null) {
+            return null;
+        }
+
+        $user = $this->authenticatedUser();
+        $chosen = (int) $this->bulkCategoryId;
+        $category = $chosen > 0 ? Category::allWithLinkedParents()->firstWhere('id', $chosen) : null;
+
+        return [
+            'payee' => $payee,
+            'tag' => app(BudgetTagResolver::class)->forCategory($user, $category, $payee),
+            'ambiguous' => app(PayeeReviewQueue::class)->isAmbiguous($payee->merchant_name),
+        ];
+    }
+
+    /**
+     * @param  Collection<int, Category>  $categories
+     * @return Collection<int, Category>
+     */
+    private function narrowedByIntent(Collection $categories): Collection
+    {
+        $roots = match ($this->clusterIntent) {
+            'work' => PayeeReview::WORK_ROOTS,
+            'personal' => PayeeReview::PERSONAL_ROOTS,
+            default => null,
+        };
+
+        if ($roots === null) {
+            return $categories;
+        }
+
+        return $categories
+            ->filter(fn (Category $category): bool => in_array(explode(' / ', $category->fullPath())[0], $roots, true))
+            ->values();
     }
 
     /**

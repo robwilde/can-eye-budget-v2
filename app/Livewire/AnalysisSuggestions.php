@@ -98,7 +98,7 @@ final class AnalysisSuggestions extends Component
 
         $applier->applyRecurringTransaction($suggestion, $user, $categoryId);
 
-        Flux::toast(text: 'Recurring transaction created', variant: 'success');
+        Flux::toast(text: $categoryId !== null ? 'Recurring transaction created and all matching transactions categorised' : 'Recurring transaction created', variant: 'success');
     }
 
     public function copyRecurringTransaction(int $suggestionId): void

@@ -22,9 +22,10 @@ use Livewire\Component;
 
 /**
  * Post-registration onboarding: connect a Redbark key (step 1), set up the accounts it
- * finds (step 2), then confirm the primary account and pay cycle (step 3). An optional
- * Gmail step follows for users without a mailbox connected. Skippable at every step; the
- * dashboard keeps nudging until a feed exists and a pay cycle is set.
+ * finds (step 2), confirm the primary account and pay cycle (step 3), review the
+ * Needs/Wants/Savings tags (step 4) and review how payees are categorised (step 5). An
+ * optional Gmail step follows for users without a mailbox connected. Skippable at every
+ * step; the dashboard keeps nudging until a feed exists and a pay cycle is set.
  */
 final class ConnectBank extends Component
 {
@@ -34,9 +35,13 @@ final class ConnectBank extends Component
 
     public const int STEP_PAY_CYCLE = 3;
 
-    public const int STEP_GMAIL = 4;
+    public const int STEP_TAGS = 4;
 
-    public const int TOTAL_STEPS = 3;
+    public const int STEP_PAYEES = 5;
+
+    public const int STEP_GMAIL = 6;
+
+    public const int TOTAL_STEPS = 5;
 
     public int $step = self::STEP_CONNECT;
 
@@ -110,6 +115,18 @@ final class ConnectBank extends Component
     }
 
     #[On('pay-cycle-confirmed')]
+    public function advanceToTags(): void
+    {
+        $this->step = self::STEP_TAGS;
+    }
+
+    #[On('budget-tags-confirmed')]
+    public function advanceToPayees(): void
+    {
+        $this->step = self::STEP_PAYEES;
+    }
+
+    #[On('payee-review-finished')]
     public function advanceToGmail(): void
     {
         if (GmailCredential::query()->where('user_id', Auth::id())->exists()) {
