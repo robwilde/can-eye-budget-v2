@@ -8,9 +8,11 @@ use App\Enums\CategorySource;
 use App\Enums\PayFrequency;
 use App\Enums\SuggestionStatus;
 use App\Models\AnalysisSuggestion;
+use App\Models\Payee;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Payees\PayeeConfirmer;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -25,6 +27,7 @@ final readonly class SuggestionApplier
 {
     public function __construct(
         private PayCycleConfigurator $payCycleConfigurator,
+        private PayeeConfirmer $payeeConfirmer,
     ) {}
 
     public function applyPrimaryAccount(AnalysisSuggestion $suggestion, User $user): void
@@ -88,9 +91,6 @@ final readonly class SuggestionApplier
                 $updateData = ['planned_transaction_id' => $planned->id];
 
                 if ($categoryId !== null) {
-                    // This mass update bypasses Transaction::saving(), so the
-                    // provenance has to be written by hand; the user picked this
-                    // category in the suggestion UI, hence Manual.
                     $updateData['category_id'] = $categoryId;
                     $updateData['category_source'] = CategorySource::Manual->value;
                 }
@@ -98,12 +98,49 @@ final readonly class SuggestionApplier
                 Transaction::whereIn('id', $matchedIds)
                     ->where('user_id', $user->id)
                     ->update($updateData);
+
+                if ($categoryId !== null) {
+                    $this->categoriseMerchantsOf($matchedIds, $user, $categoryId);
+                }
             }
 
             $this->markAccepted($suggestion);
 
             return $planned;
         });
+    }
+
+    /**
+     * The user picked this category for the recurring merchant, so every one of
+     * that merchant's transactions follows it, not just the matched pattern.
+     * A merchant with a Payee row goes through PayeeConfirmer so a rule and
+     * tag exist too; otherwise the rows are written directly.
+     *
+     * @param  list<int>  $matchedIds
+     */
+    private function categoriseMerchantsOf(array $matchedIds, User $user, int $categoryId): void
+    {
+        $merchantKeys = Transaction::query()
+            ->where('user_id', $user->id)
+            ->whereIn('id', $matchedIds)
+            ->whereNotNull('merchant_key')
+            ->distinct()
+            ->pluck('merchant_key');
+
+        foreach ($merchantKeys as $merchantKey) {
+            $payee = Payee::query()
+                ->where('user_id', $user->id)
+                ->where('merchant_key', $merchantKey)
+                ->first();
+
+            if ($payee !== null) {
+                $this->payeeConfirmer->confirm($user, $payee, $categoryId);
+
+                continue;
+            }
+
+            $this->payeeConfirmer->updateTransactionsForMerchantKey($user, $merchantKey, $categoryId);
+        }
     }
 
     private function markAccepted(AnalysisSuggestion $suggestion): void

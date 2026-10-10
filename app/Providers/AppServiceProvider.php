@@ -19,6 +19,7 @@ use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\PipelineStages\IdentifyPrimaryAccountStage;
 use App\Services\PipelineStages\IdentifyRecurringTransactionsStage;
 use App\Services\PipelineStages\MatchPlannedTransactionsStage;
+use App\Services\PipelineStages\PayeeSuggestionStage;
 use App\Services\PipelineStages\RuleMiningStage;
 use App\Services\PipelineStages\SetPayCycleStage;
 use App\Services\PipelineStages\TransferDetectionStage;
@@ -113,6 +114,7 @@ final class AppServiceProvider extends ServiceProvider
                     'stageKey' => 'transfer-detection-after-rules',
                     'stageLabel' => 'Transfer Detection (after rules)',
                 ]),
+                $this->app->make(PayeeSuggestionStage::class),
                 $this->app->make(IdentifyRecurringTransactionsStage::class),
                 $this->app->make(MatchPlannedTransactionsStage::class),
             ],
