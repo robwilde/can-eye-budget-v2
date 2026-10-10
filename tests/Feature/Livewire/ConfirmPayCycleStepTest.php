@@ -56,16 +56,16 @@ function detectedSuggestions(User $user, Account $account, string $nextPay, int 
     ];
 }
 
-test('finishing the account step moves onboarding to step 3 of 3', function () {
+test('finishing the account step moves onboarding to step 3 of 5', function () {
     [$user] = payCycleFixture();
     RedbarkFeed::factory()->for($user)->synced()->pendingSetup()->create();
 
     Livewire::actingAs($user)
         ->test(ConnectBank::class)
-        ->assertSee('Step 2 of 3')
+        ->assertSee('Step 2 of 5')
         ->dispatch('accounts-set-up')
         ->assertSet('step', ConnectBank::STEP_PAY_CYCLE)
-        ->assertSee('Step 3 of 3')
+        ->assertSee('Step 3 of 5')
         ->assertSeeLivewire(ConfirmPayCycleStep::class)
         ->assertSeeHtml('data-test="connect-bank-skip"');
 });

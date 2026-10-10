@@ -243,3 +243,44 @@ it('keeps a rule stamp when a child is created with the same category', function
 
     expect($child->fresh()->category_source)->toBe(CategorySource::Rule);
 });
+
+it('leaves manual rows and credits alone when a recurring suggestion recategorises a merchant with no payee', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $earlier = Category::factory()->create(['is_hidden' => false]);
+    $matched = provenanceTransaction($this->user, $this->account, ['merchant_name' => 'NETFLIX']);
+    $key = $matched->fresh()->merchant_key;
+
+    $manual = provenanceTransaction($this->user, $this->account, [
+        'merchant_name' => 'NETFLIX',
+        'category_id' => $earlier->id,
+        'category_source' => CategorySource::Manual,
+    ]);
+    $credit = provenanceTransaction($this->user, $this->account, [
+        'merchant_name' => 'NETFLIX',
+        'direction' => TransactionDirection::Credit,
+    ]);
+    $other = provenanceTransaction($this->user, $this->account, ['merchant_name' => 'NETFLIX']);
+
+    $suggestion = AnalysisSuggestion::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => SuggestionType::RecurringTransaction,
+        'payload' => [
+            'account_id' => $this->account->id,
+            'amount' => 1000,
+            'direction' => TransactionDirection::Debit->value,
+            'clean_description' => 'NETFLIX.COM',
+            'start_date' => now()->toDateString(),
+            'frequency' => RecurrenceFrequency::EveryMonth->value,
+            'matched_transaction_ids' => [$matched->id],
+        ],
+    ]);
+
+    expect($key)->not->toBeNull();
+
+    app(SuggestionApplier::class)->applyRecurringTransaction($suggestion, $this->user, $category->id);
+
+    expect($matched->fresh()->category_id)->toBe($category->id)
+        ->and($other->fresh()->category_id)->toBe($category->id)
+        ->and($manual->fresh()->category_id)->toBe($earlier->id)
+        ->and($credit->fresh()->category_id)->toBeNull();
+});

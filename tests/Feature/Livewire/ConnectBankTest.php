@@ -31,7 +31,7 @@ test('the connect-bank page needs authentication and renders step 1 for a new us
         ->get(route('connect-bank'))
         ->assertOk()
         ->assertSeeLivewire(ConnectBank::class)
-        ->assertSee('Step 1 of 3')
+        ->assertSee('Step 1 of 5')
         ->assertSee('from the 1st of last month')
         ->assertSee(route('dashboard'), false)
         ->assertSee(route('setup-guide'), false)

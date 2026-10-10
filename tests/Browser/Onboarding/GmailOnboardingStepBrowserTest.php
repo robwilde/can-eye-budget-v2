@@ -26,12 +26,16 @@ function confirmPayCycleInBrowser(User $user): mixed
     $accountId = Account::query()->where('user_id', $user->id)->sole()->id;
 
     return visit('/connect-bank')
-        ->assertSee('Step 3 of 3')
+        ->assertSee('Step 3 of 5')
         ->select('[data-test="pay-cycle-account"]', (string) $accountId)
         ->fill('[data-test="pay-cycle-amount"]', '2500')
         ->select('[data-test="pay-cycle-frequency"]', 'fortnightly')
         ->fill('[data-test="pay-cycle-next-date"]', now()->addDays(5)->toDateString())
         ->click('[data-test="pay-cycle-confirm"]')
+        ->assertSee('Step 4 of 5')
+        ->click('[data-test="budget-tags-skip"]')
+        ->assertSee('Step 5 of 5')
+        ->click('[data-test="payee-review-skip"]')
         ->assertSee('Optional last step');
 }
 

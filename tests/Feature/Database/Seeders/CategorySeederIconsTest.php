@@ -29,15 +29,23 @@ it('assigns the expected icon to each top-level category', function (string $nam
     expect($category)->not->toBeNull("Seeder missing top-level category '{$name}'")
         ->and($category->icon)->toBe($icon);
 })->with([
-    ['Office', 'bolt'],
-    ['Personal', 'sparkles'],
+    ['Housing & Utilities', 'home'],
+    ['Groceries', 'shopping-cart'],
+    ['Transport', 'home'],
+    ['Health', 'activity'],
+    ['Insurance', 'shield-check'],
+    ['Software & Online Services', 'bolt'],
+    ['Work Equipment', 'wrench-screwdriver'],
+    ['Bank Fees & Finance Services', 'building-library'],
+    ['Loans & Debt Repayment', 'building-library'],
+    ['Eating Out', 'coffee'],
+    ['Learning & Reading', 'book-open-text'],
     ['Entertainment', 'sparkles'],
-    ['Food', 'shopping-cart'],
-    ['Bills', 'activity'],
+    ['Pets', 'house-heart'],
+    ['Personal & Shopping', 'sparkles'],
     ['Income', 'arrow-trending-up'],
     ['Transfer', 'building-library'],
-    ['Loan', 'building-library'],
-    ['Transport', 'home'],
+    ['Balance', 'building-library'],
 ]);
 
 it('overrides specific leaf categories with prototype-required icons', function (string $parentName, string $leafName, string $icon) {
@@ -49,14 +57,56 @@ it('overrides specific leaf categories with prototype-required icons', function 
     expect($leaf)->not->toBeNull("Leaf '{$parentName} / {$leafName}' not seeded")
         ->and($leaf->icon)->toBe($icon);
 })->with([
-    ['Bills', 'Rent', 'house-heart'],
-    ['Personal', 'Kitchen', 'coffee'],
+    ['Housing & Utilities', 'Rent', 'house-heart'],
+    ['Personal & Shopping', 'Kitchen', 'coffee'],
 ]);
+
+it('seeds the 14 budget-tagged roots with their default tag and leaves Income, Transfer and Balance untagged', function () {
+    $tags = Category::query()->whereNull('parent_id')->pluck('budget_tag', 'name')
+        ->map(fn ($tag) => $tag?->value)
+        ->all();
+
+    expect($tags)->toEqual([
+        'Housing & Utilities' => 'needs',
+        'Groceries' => 'needs',
+        'Transport' => 'needs',
+        'Health' => 'needs',
+        'Insurance' => 'needs',
+        'Software & Online Services' => 'needs',
+        'Work Equipment' => 'wants',
+        'Bank Fees & Finance Services' => 'needs',
+        'Loans & Debt Repayment' => 'savings',
+        'Eating Out' => 'wants',
+        'Learning & Reading' => 'wants',
+        'Entertainment' => 'wants',
+        'Pets' => 'wants',
+        'Personal & Shopping' => 'wants',
+        'Income' => null,
+        'Transfer' => null,
+        'Balance' => null,
+    ]);
+});
+
+it('keeps the old leaves as children of their new root and never tags a child', function () {
+    $paths = Category::allWithLinkedParents()->map(fn (Category $category): string => $category->fullPath());
+
+    expect($paths)->toContain(
+        'Software & Online Services / AI Apps',
+        'Learning & Reading / Training / Course',
+        'Work Equipment / Hardware / Rentals',
+        'Eating Out / Quick Foods',
+        'Bank Fees & Finance Services / Bank Fees',
+        'Loans & Debt Repayment / Latitude / Interest',
+        'Housing & Utilities / Rent',
+        'Income / Salary',
+        'Transfer / Optimus to CC',
+    )->and(Category::query()->whereNotNull('parent_id')->whereNotNull('budget_tag')->exists())->toBeFalse();
+});
 
 it('only uses icon names that Flux can resolve (Heroicons allow-list or installed Lucide partials)', function () {
     $heroicons = [
         'home', 'shopping-cart', 'bolt', 'sparkles', 'calendar',
-        'building-library', 'arrow-trending-up',
+        'building-library', 'arrow-trending-up', 'shield-check', 'wrench-screwdriver',
     ];
 
     $lucide = collect(glob(resource_path('views/flux/icon/*.blade.php')))
