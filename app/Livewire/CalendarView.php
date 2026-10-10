@@ -184,17 +184,17 @@ final class CalendarView extends Component
     }
 
     /**
-     * Sum of the visible month's unreconciled planned occurrences, split by direction.
-     * Reconciled plans are already suppressed by DayActivityLoader, so these never double-count
-     * against the posted totals.
+     * The whole visible month: everything already entered plus the planned occurrences still to
+     * come, split by direction. Reconciled plans are suppressed by DayActivityLoader, so an entered
+     * plan counts once, as its posted transaction, and the figure does not shrink as the month passes.
      *
      * @return array{income: int, spend: int}
      */
     #[Computed]
     public function projectedTotals(): array
     {
-        $income = 0;
-        $spend = 0;
+        $income = $this->monthTotals['income']; // @phpstan-ignore property.notFound
+        $spend = $this->monthTotals['spend']; // @phpstan-ignore property.notFound
 
         foreach ($this->days as $day) { // @phpstan-ignore property.notFound
             if (! $day->isCurrentMonth) {
