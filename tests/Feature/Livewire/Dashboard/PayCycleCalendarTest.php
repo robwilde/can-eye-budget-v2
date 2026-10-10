@@ -458,7 +458,7 @@ test('planned transactions render as plan pips on occurrence dates', function ()
         'description' => 'Rent',
         'direction' => TransactionDirection::Debit,
         'amount' => 60000,
-        'start_date' => $start->addDays(3),
+        'start_date' => $nextPay->subDay(),
         'frequency' => RecurrenceFrequency::DontRepeat,
         'is_active' => true,
     ]);
@@ -584,7 +584,7 @@ test('a transfer-categorised plan without a destination is shown but not counted
         'category_id' => $transferCategory->id,
         'direction' => TransactionDirection::Debit,
         'amount' => 50000,
-        'start_date' => $start->addDay(),
+        'start_date' => $nextPay->subDay(),
         'frequency' => RecurrenceFrequency::DontRepeat,
     ]);
 
@@ -1046,7 +1046,7 @@ test('transfers across the tracked boundary count as spend and income, once, and
     $tracked = Account::factory()->for($user)->create();
     $trackedOther = Account::factory()->for($user)->create();
     $hidden = Account::factory()->for($user)->untracked()->create();
-    $day = $nextPay->subWeeks(2)->addDay();
+    $day = $nextPay->subDay();
 
     $pair = function (Account $from, Account $to, int $amount) use ($user, $day): void {
         $debit = Transaction::factory()->debit()->for($user)->for($from)->create(['amount' => $amount, 'post_date' => $day]);
@@ -1073,7 +1073,7 @@ test('planned transfers across the tracked boundary count in the planned total, 
     $tracked = Account::factory()->for($user)->create();
     $trackedOther = Account::factory()->for($user)->create();
     $hidden = Account::factory()->for($user)->untracked()->create();
-    $day = $nextPay->subWeeks(2)->addDay();
+    $day = $nextPay->subDay();
 
     $plan = fn (Account $from, Account $to, int $amount) => PlannedTransaction::factory()->for($user)->create([
         'account_id' => $from->id,
@@ -1100,7 +1100,7 @@ test('a posted transfer linked to its plan replaces the plan occurrence instead 
     ]);
     $tracked = Account::factory()->for($user)->create();
     $hidden = Account::factory()->for($user)->untracked()->create();
-    $day = $nextPay->subWeeks(2)->addDay();
+    $day = $nextPay->subDay();
 
     $plan = PlannedTransaction::factory()->for($user)->create([
         'account_id' => $tracked->id,
@@ -1132,7 +1132,7 @@ test('a planned transfer renders with the transfer class in the grid and the tra
     ]);
     $tracked = Account::factory()->for($user)->create();
     $hidden = Account::factory()->for($user)->untracked()->create();
-    $day = $nextPay->subWeeks(2)->addDay();
+    $day = $nextPay->subDay();
 
     PlannedTransaction::factory()->for($user)->create([
         'account_id' => $tracked->id,
