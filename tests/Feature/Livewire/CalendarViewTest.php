@@ -318,7 +318,7 @@ test('projectedTotals splits planned occurrences by direction and ignores out-of
     expect($totals)->toBe(['income' => 300000, 'spend' => 150000]);
 });
 
-test('projectedTotals does not count a planned occurrence already reconciled to a posted transaction', function () {
+test('projectedTotals counts an entered plan once, as its posted transaction', function () {
     $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
@@ -337,9 +337,30 @@ test('projectedTotals does not count a planned occurrence already reconciled to 
 
     $component = Livewire::actingAs($user)->test(CalendarView::class);
 
-    expect($component->get('projectedTotals'))->toBe(['income' => 0, 'spend' => 0])
+    expect($component->get('projectedTotals'))->toBe(['income' => 0, 'spend' => 5000])
         ->and($component->get('monthTotals')['spend'])->toBe(5000);
 });
+
+test('projectedTotals covers the whole month whatever today is: an entered payday plus the one still to come', function (string $today) {
+    $this->travelTo($today);
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'amount' => 571860,
+        'direction' => TransactionDirection::Credit,
+        'start_date' => '2026-10-22',
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+    Transaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'amount' => 571860,
+        'direction' => TransactionDirection::Credit,
+        'post_date' => '2026-10-08',
+    ]);
+
+    expect(Livewire::actingAs($user)->test(CalendarView::class)->get('projectedTotals')['income'])->toBe(1143720);
+})->with(['2026-10-01', '2026-10-11', '2026-10-22']);
 
 test('projectedTotals excludes an occurrence reconciled to a posting just before the grid starts', function () {
     $this->travelTo('2026-06-10');
