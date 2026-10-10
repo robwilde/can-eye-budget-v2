@@ -9,6 +9,7 @@ enum RuleTriggerField: string
     case Description = 'description';
     case CleanDescription = 'clean_description';
     case MerchantName = 'merchant_name';
+    case MerchantKey = 'merchant_key';
     case Amount = 'amount';
     case Direction = 'direction';
     case AccountId = 'account_id';
@@ -23,6 +24,7 @@ enum RuleTriggerField: string
             self::Description => 'Description',
             self::CleanDescription => 'Clean Description',
             self::MerchantName => 'Merchant Name',
+            self::MerchantKey => 'Merchant Key',
             self::Amount => 'Amount',
             self::Direction => 'Direction',
             self::AccountId => 'Account',
