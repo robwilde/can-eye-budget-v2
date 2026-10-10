@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\BudgetTag;
 use Carbon\CarbonImmutable;
 use Database\Factories\CategoryFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -17,6 +18,7 @@ use Illuminate\Support\Collection;
  * @property int $id
  * @property string $name
  * @property int|null $parent_id
+ * @property BudgetTag|null $budget_tag
  * @property string|null $anzsic_division
  * @property string|null $anzsic_subdivision
  * @property string|null $anzsic_group
@@ -38,6 +40,7 @@ final class Category extends Model
     protected $fillable = [
         'name',
         'parent_id',
+        'budget_tag',
         'anzsic_division',
         'anzsic_subdivision',
         'anzsic_group',
@@ -147,6 +150,7 @@ final class Category extends Model
     {
         return [
             'is_hidden' => 'boolean',
+            'budget_tag' => BudgetTag::class,
         ];
     }
 }

@@ -179,9 +179,9 @@ it('reports curated seeds whose category path does not exist here as skipped', f
 
     $result = app(CategoryRuleMiner::class)->mine($user);
 
-    // Factory categories are single-segment, so none of the multi-segment curated
-    // seed paths resolve: every seed must be reported rather than silently dropped,
-    // naming both the merchant and the path that failed to resolve.
+    // No categories exist, so no curated seed path resolves: every seed must be
+    // reported rather than silently dropped, naming both the merchant and the
+    // path that failed to resolve.
     expect($result['skippedSeeds'])->not->toBeEmpty()
         ->and($result['skippedSeeds'])->toContain('PRIMEVIDEO → Entertainment / Streaming')
         ->and($result['skippedSeeds'])->toHaveCount(CategorySeedRules::count())

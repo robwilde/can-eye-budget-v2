@@ -4,6 +4,8 @@
 
 declare(strict_types=1);
 
+use App\Enums\CategorySource;
+use App\Enums\PayeeStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
@@ -11,6 +13,8 @@ use App\Enums\TransactionDirection;
 use App\Livewire\RecurringTransactionReview;
 use App\Models\Account;
 use App\Models\AnalysisSuggestion;
+use App\Models\Category;
+use App\Models\Payee;
 use App\Models\PipelineRun;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
@@ -158,6 +162,78 @@ test('accept creates an active planned transaction and links matched transaction
         ->and($suggestion->fresh()->status)->toBe(SuggestionStatus::Accepted);
 
     $transactions->each(fn (Transaction $transaction) => expect($transaction->fresh()->planned_transaction_id)->toBe($planned->id));
+});
+
+test('accept with a category re-categorises every transaction of the merchant, not just the matched ones, and nobody elses', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $user->update(['primary_account_id' => $account->id]);
+    $category = Category::factory()->create(['name' => 'Entertainment']);
+
+    createRecurringReviewMonthlyGroup($user, $account, 'Netflix', 1699, 3);
+    $unmatched = createRecurringReviewTransaction($user, Account::factory()->for($user)->create(), [
+        'merchant_name' => 'Netflix',
+        'amount' => 1699,
+        'post_date' => '2026-03-02',
+        'direction' => TransactionDirection::Debit,
+    ]);
+
+    $other = User::factory()->create();
+    $otherAccount = Account::factory()->for($other)->create();
+    $othersTransaction = createRecurringReviewTransaction($other, $otherAccount, [
+        'merchant_name' => 'Netflix',
+        'amount' => 1699,
+        'direction' => TransactionDirection::Debit,
+    ]);
+
+    Livewire::actingAs($user)->test(RecurringTransactionReview::class)->call('findRecurring');
+
+    $suggestion = AnalysisSuggestion::query()
+        ->where('user_id', $user->id)
+        ->ofType(SuggestionType::RecurringTransaction)
+        ->pending()
+        ->firstOrFail();
+
+    expect($suggestion->payload['matched_transaction_ids'])->not->toContain($unmatched->id);
+
+    Livewire::actingAs($user)
+        ->test(RecurringTransactionReview::class)
+        ->set('recurringCategories.'.$suggestion->id, $category->id)
+        ->call('accept', $suggestion->id);
+
+    expect($unmatched->fresh()->category_id)->toBe($category->id)
+        ->and($unmatched->fresh()->category_source)->toBe(CategorySource::Manual)
+        ->and($othersTransaction->fresh()->category_id)->toBeNull();
+});
+
+test('accept confirms the merchants payee so its rule and tag exist', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $user->update(['primary_account_id' => $account->id]);
+    $category = Category::factory()->create(['name' => 'Entertainment']);
+
+    $transactions = createRecurringReviewMonthlyGroup($user, $account, 'Netflix', 1699, 3);
+    $payee = Payee::factory()->create([
+        'user_id' => $user->id,
+        'merchant_key' => $transactions->first()->merchant_key,
+        'merchant_name' => 'Netflix',
+    ]);
+
+    Livewire::actingAs($user)->test(RecurringTransactionReview::class)->call('findRecurring');
+
+    $suggestion = AnalysisSuggestion::query()
+        ->where('user_id', $user->id)
+        ->ofType(SuggestionType::RecurringTransaction)
+        ->pending()
+        ->firstOrFail();
+
+    Livewire::actingAs($user)
+        ->test(RecurringTransactionReview::class)
+        ->set('recurringCategories.'.$suggestion->id, $category->id)
+        ->call('accept', $suggestion->id);
+
+    expect($payee->fresh()->status)->toBe(PayeeStatus::Confirmed)
+        ->and($payee->fresh()->user_rule_id)->not->toBeNull();
 });
 
 test('dismiss rejects a pending recurring suggestion', function () {

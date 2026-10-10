@@ -396,10 +396,29 @@
                         {{ $selectionCount }} selected
                     </span>
 
-                    <div class="min-w-56">
+                    @if($clusterSuggestion !== null)
+                        <div class="flex items-center gap-2" data-testid="cluster-suggestion">
+                            <flux:badge size="sm" color="purple">Suggested</flux:badge>
+                            @if($clusterSuggestion['tag'] !== null)
+                                <flux:badge size="sm" color="{{ match ($clusterSuggestion['tag']) {
+                                    \App\Enums\BudgetTag::Needs => 'blue',
+                                    \App\Enums\BudgetTag::Wants => 'amber',
+                                    \App\Enums\BudgetTag::Savings => 'green',
+                                } }}" data-testid="cluster-tag">{{ $clusterSuggestion['tag']->label() }}</flux:badge>
+                            @endif
+                            @if($clusterSuggestion['ambiguous'])
+                                <flux:radio.group wire:model.live="clusterIntent" variant="segmented" size="sm" data-testid="cluster-intent">
+                                    <flux:radio value="work" label="Work" />
+                                    <flux:radio value="personal" label="Personal" />
+                                </flux:radio.group>
+                            @endif
+                        </div>
+                    @endif
+
+                    <div class="min-w-56" wire:key="bulk-category-{{ $clusterIntent }}">
                         <x-category-combobox
                             wire:model="bulkCategoryId"
-                            :categories="$splitCategories"
+                            :categories="$bulkCategories"
                             placeholder="Category"
                             size="sm"
                             dropdown="up"

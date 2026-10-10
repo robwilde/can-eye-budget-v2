@@ -25,12 +25,16 @@ enum CategorySource: string
     /** Supplied by the upstream bank feed's own enrichment. */
     case Feed = 'feed';
 
+    /** Applied from a confident TypeSafe Jev suggestion for the payee. */
+    case Suggested = 'suggested';
+
     public function label(): string
     {
         return match ($this) {
             self::Manual => 'Set by you',
             self::Rule => 'Set by a rule',
             self::Feed => 'Set by your bank feed',
+            self::Suggested => 'Suggested by Jev',
         };
     }
 
@@ -44,7 +48,7 @@ enum CategorySource: string
     {
         return match ($this) {
             self::Manual => false,
-            self::Rule, self::Feed => true,
+            self::Rule, self::Feed, self::Suggested => true,
         };
     }
 }

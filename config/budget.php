@@ -21,6 +21,8 @@ return [
 
     'recurring_detection' => env('BUDGET_RECURRING_DETECTION', false),
 
+    'jev_categorisation' => env('BUDGET_JEV_CATEGORISATION', false),
+
     /*
     |--------------------------------------------------------------------------
     | BNPL Email Import

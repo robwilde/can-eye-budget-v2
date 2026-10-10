@@ -64,7 +64,7 @@ function seedFirstImportFixture(User $user, Account $account): void
 beforeEach(function () {
     $this->user = User::factory()->create(['primary_account_id' => null, 'pay_amount' => null, 'pay_frequency' => null, 'next_pay_date' => null]);
     $this->account = Account::factory()->for($this->user)->create();
-    $this->groceries = firstImportCategory('Food', 'Groceries');
+    $this->groceries = Category::query()->firstOrCreate(['name' => 'Groceries', 'parent_id' => null], ['is_hidden' => false]);
     $this->streaming = firstImportCategory('Entertainment', 'Streaming');
     $this->salary = firstImportCategory('Income', 'Salary');
 });
