@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\RedbarkFeedStatus;
+use App\Enums\RedbarkTransport;
+use App\Exceptions\Redbark\RedbarkRequestException;
 use Carbon\CarbonImmutable;
 use Database\Factories\RedbarkFeedFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -19,7 +21,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  *
  * @property int $id
  * @property int $user_id
- * @property string $api_key
+ * @property RedbarkTransport $transport
+ * @property string|null $api_key
+ * @property string|null $simplefin_access_url
  * @property RedbarkFeedStatus $status
  * @property int $auth_failure_count
  * @property bool $pending_account_setup
@@ -37,11 +41,20 @@ final class RedbarkFeed extends Model
      */
     protected $fillable = [
         'user_id',
+        'transport',
         'api_key',
+        'simplefin_access_url',
         'status',
         'auth_failure_count',
         'pending_account_setup',
         'last_synced_at',
+    ];
+
+    /**
+     * @var array<string, string>
+     */
+    protected $attributes = [
+        'transport' => 'rest',
     ];
 
     /** @return BelongsTo<User, $this> */
@@ -63,12 +76,35 @@ final class RedbarkFeed extends Model
     }
 
     /**
+     * Prepares the feed for credentials of another transport. Account ids differ between
+     * transports, so linked accounts would be orphaned and the switch is refused; with none
+     * linked, the old transport's discovered rows and sync state are discarded.
+     *
+     * @throws RedbarkRequestException
+     */
+    public function prepareTransportSwitch(RedbarkTransport $to): void
+    {
+        if ($this->transport === $to) {
+            return;
+        }
+
+        if ($this->accounts()->linked()->exists()) {
+            throw new RedbarkRequestException('Linked accounts block switching the bank connection type', 'transport_locked');
+        }
+
+        $this->accounts()->delete();
+        $this->update(['last_synced_at' => null, 'pending_account_setup' => false]);
+    }
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array
     {
         return [
             'api_key' => 'encrypted',
+            'simplefin_access_url' => 'encrypted',
+            'transport' => RedbarkTransport::class,
             'status' => RedbarkFeedStatus::class,
             'auth_failure_count' => 'integer',
             'last_synced_at' => 'immutable_datetime',
