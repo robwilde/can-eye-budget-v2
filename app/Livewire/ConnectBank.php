@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Actions\Redbark\SaveRedbarkApiKey;
+use App\Actions\Redbark\SaveSimpleFinAccessUrl;
+use App\Enums\RedbarkTransport;
 use App\Enums\RefreshTrigger;
 use App\Enums\SuggestionType;
 use App\Exceptions\Redbark\RedbarkAuthenticationException;
@@ -15,6 +17,7 @@ use App\Models\GmailCredential;
 use App\Models\RedbarkFeed;
 use App\Models\User;
 use App\Services\RedbarkClientFactory;
+use App\Services\SimpleFinClaimer;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\View\View;
 use Livewire\Attributes\On;
@@ -46,6 +49,8 @@ final class ConnectBank extends Component
     public int $step = self::STEP_CONNECT;
 
     public string $api_key = '';
+
+    public string $setup_token = '';
 
     public function mount(): void
     {
@@ -99,9 +104,57 @@ final class ConnectBank extends Component
         /** @var User $user */
         $user = Auth::user();
 
-        $feed = $saveApiKey->handle($user, $validated['api_key']);
+        try {
+            $feed = $saveApiKey->handle($user, $validated['api_key']);
+        } catch (RedbarkException) {
+            $this->addError('api_key', __('This bank is connected through SimpleFIN. Disconnect it first to use an API key instead.'));
+
+            return;
+        }
 
         $this->api_key = '';
+
+        SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Manual);
+
+        $this->step = self::STEP_ACCOUNTS;
+    }
+
+    public function connectSimpleFin(SaveSimpleFinAccessUrl $saveAccessUrl, SimpleFinClaimer $claimer): void
+    {
+        $validated = $this->validate([
+            'setup_token' => ['required', 'string', 'max:2048'],
+        ]);
+
+        $this->setup_token = '';
+
+        $existing = RedbarkFeed::query()->where('user_id', Auth::id())->first();
+
+        if ($existing !== null && $existing->transport === RedbarkTransport::Rest && $existing->accounts()->linked()->exists()) {
+            $this->addError('setup_token', __('You already have a bank connected through a Redbark API key. Manage it under Settings > Providers.'));
+
+            return;
+        }
+
+        try {
+            $accessUrl = $claimer->claim($validated['setup_token']);
+        } catch (RedbarkException $e) {
+            $this->addError('setup_token', $e->errorType === 'invalid_token'
+                ? __('Redbark did not accept this setup token. Check you copied all of it, or create a new token under Settings > SimpleFIN in Redbark. A token only works once.')
+                : __('We could not reach Redbark just now. Please try again in a moment with a new setup token.'));
+
+            return;
+        }
+
+        /** @var User $user */
+        $user = Auth::user();
+
+        try {
+            $feed = $saveAccessUrl->handle($user, $accessUrl);
+        } catch (RedbarkException) {
+            $this->addError('setup_token', __('You already have a bank connected through a Redbark API key. Manage it under Settings > Providers.'));
+
+            return;
+        }
 
         SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Manual);
 

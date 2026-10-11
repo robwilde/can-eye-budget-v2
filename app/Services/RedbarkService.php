@@ -139,6 +139,14 @@ final readonly class RedbarkService implements RedbarkServiceContract
         );
     }
 
+    /**
+     * @return list<string>
+     */
+    public function notices(): array
+    {
+        return [];
+    }
+
     private function request(): PendingRequest
     {
         return Http::baseUrl($this->baseUrl)

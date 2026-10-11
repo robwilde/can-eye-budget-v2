@@ -166,6 +166,10 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
 
         $this->syncTransactions($client, $connections, $log);
         $balancesUpdated = $this->syncBalances($client, $connections, $upstreamIds, $log);
+        $notices = array_map(
+            static fn (string $notice): array => ['context' => 'connections', 'message' => $notice],
+            $client->notices(),
+        );
         [
             'created' => $created,
             'updated' => $updated,
@@ -189,14 +193,14 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
         }
 
         $log->update([
-            'status' => $this->errors === [] ? RefreshStatus::Success : RefreshStatus::Failed,
+            'status' => $this->errors === [] && ($notices === [] || $upstreamIds !== []) ? RefreshStatus::Success : RefreshStatus::Failed,
             'accounts_synced' => $linkedCount,
             'transactions_created' => $created,
             // Rows adopted from existing CSV or manual history count as updated: the sync
             // linked them to the feed, it did not add anything the user did not already have.
             'transactions_updated' => $updated + $matched,
             'balances_updated' => $balancesUpdated,
-            'errors' => $this->errors === [] ? null : $this->errors,
+            'errors' => $this->errors === [] && $notices === [] ? null : [...$this->errors, ...$notices],
         ]);
 
         RunTransactionAnalysisJob::dispatch($this->feed->user);
@@ -397,8 +401,9 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
 
         // Guarded on a non-empty upstream list so a transient empty response can never
         // wipe the table. Linked rows are never pruned — the user's own accounts and
-        // their history hang off them.
-        if ($upstreamIds !== []) {
+        // their history hang off them. A provider notice means the list may be partial
+        // (a bank that is down), so nothing is pruned then: its skipped rows must survive.
+        if ($upstreamIds !== [] && $client->notices() === []) {
             RedbarkAccount::query()
                 ->where('redbark_feed_id', $this->feed->id)
                 ->whereNull('account_id')

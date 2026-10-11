@@ -47,4 +47,12 @@ interface RedbarkServiceContract
         CarbonImmutable $to,
         bool $includePending = false,
     ): array;
+
+    /**
+     * Human-readable warnings the provider attached to the data it returned, such as a
+     * bank connection that needs attention. Sanitised and safe to display.
+     *
+     * @return list<string>
+     */
+    public function notices(): array;
 }

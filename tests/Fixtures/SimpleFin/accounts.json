@@ -1,0 +1,78 @@
+{
+    "errors": [],
+    "accounts": [
+        {
+            "org": {
+                "domain": "beyondbank.com.au",
+                "sfin-url": "https://api.redbark.com/simplefin",
+                "name": "Beyond Bank Australia",
+                "id": "b2ce1a6f-7c83-429c-9ef6-5557be02fcc4"
+            },
+            "id": "6af4be01-a492-4f4b-93c9-da6dd1f93149",
+            "name": "Purple Transactor Account",
+            "currency": "AUD",
+            "balance": "1234.56",
+            "available-balance": "1200.00",
+            "balance-date": 1787191200,
+            "transactions": [
+                {
+                    "id": "bank_tx_409b6d0d1bd9cb1876bd1ddf13f86b6759e228e3bbdee67e2cde6f6b3e20381b",
+                    "posted": 1786672800,
+                    "amount": "-770.00",
+                    "description": "Ext Tfr  - NET#1234567890 to 123456 Landlord Property MAST ABC - 1 Sample Street",
+                    "payee": "",
+                    "memo": ""
+                },
+                {
+                    "id": "bank_tx_7d5cd2a867c8a1e77ded0c912dd822b07e82fdf8172e3617d67c49e2abc8f1b2",
+                    "posted": 1786586400,
+                    "amount": "-300.00",
+                    "description": "Osko Payment To Savings Account xxxx1111 YOU - Savings Ref#xxxxx2222",
+                    "payee": "",
+                    "memo": ""
+                },
+                {
+                    "id": "bank_tx_c1f0e2d3a4b5968778695a4b3c2d1e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091",
+                    "posted": 1786500000,
+                    "amount": "2450.00",
+                    "description": "SALARY ACME WIDGETS PTY LTD PAY 000123",
+                    "payee": "Acme Widgets",
+                    "memo": ""
+                },
+                {
+                    "id": "bank_tx_pending_5e6f7081928374655647382910abcdef0123456789abcdef0123456789abcd",
+                    "posted": 0,
+                    "transacted_at": 1787104800,
+                    "pending": true,
+                    "amount": "-18.40",
+                    "description": "WOOLWORTHS 1234 BRISBANE",
+                    "payee": "Woolworths",
+                    "memo": ""
+                }
+            ],
+            "extra": {
+                "account_number": "****5066",
+                "redbark_account_id": "acct_01J9ZPURPLE5066"
+            }
+        },
+        {
+            "org": {
+                "domain": "beyondbank.com.au",
+                "sfin-url": "https://api.redbark.com/simplefin",
+                "name": "Beyond Bank Australia",
+                "id": "b2ce1a6f-7c83-429c-9ef6-5557be02fcc4"
+            },
+            "id": "9107ff81-0566-472b-b2fd-1f86588f38cd",
+            "name": "monEsaver Internet Account",
+            "currency": "AUD",
+            "balance": "8800.10",
+            "available-balance": "8800.10",
+            "balance-date": 1787191200,
+            "transactions": [],
+            "extra": {
+                "account_number": "****4599",
+                "redbark_account_id": "acct_01J9ZSAVER4599"
+            }
+        }
+    ]
+}
