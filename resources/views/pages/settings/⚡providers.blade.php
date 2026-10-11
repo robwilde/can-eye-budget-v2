@@ -4,6 +4,7 @@ use App\Actions\Redbark\SaveRedbarkApiKey;
 use App\Enums\ImportSource;
 use App\Enums\RefreshStatus;
 use App\Enums\RefreshTrigger;
+use App\Exceptions\Redbark\RedbarkException;
 use App\Jobs\SyncRedbarkFeedJob;
 use App\Models\Account;
 use App\Models\RedbarkFeed;
@@ -53,7 +54,13 @@ new #[Title('Bank providers')] class extends Component {
             'api_key' => ['required', 'string', 'min:16', 'max:512'],
         ]);
 
-        $feed = $saveApiKey->handle(Auth::user(), $validated['api_key']);
+        try {
+            $feed = $saveApiKey->handle(Auth::user(), $validated['api_key']);
+        } catch (RedbarkException) {
+            $this->addError('api_key', __('This bank is connected through SimpleFIN. Disconnect it first to use an API key instead.'));
+
+            return;
+        }
 
         $this->api_key = '';
 

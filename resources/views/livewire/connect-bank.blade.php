@@ -48,6 +48,25 @@
                 {{ __('Connect') }}
             </flux:button>
         </form>
+
+        <form wire:submit="connectSimpleFin" class="space-y-4 border-t border-zinc-200 pt-6 dark:border-zinc-700">
+            <flux:text>
+                {{ __('Or connect with a SimpleFIN setup token. It works once, can be revoked at any time in Redbark, and never gives us your API key.') }}
+            </flux:text>
+
+            <flux:input
+                wire:model="setup_token"
+                type="password"
+                :label="__('SimpleFIN setup token')"
+                :description="__('Generate one at app.redbark.com under Settings > SimpleFIN. It needs a Developer or Professional plan.')"
+                autocomplete="off"
+                data-test="connect-bank-simplefin-token"
+            />
+
+            <flux:button type="submit" variant="primary" data-test="connect-bank-simplefin-submit">
+                {{ __('Connect with SimpleFIN') }}
+            </flux:button>
+        </form>
     @elseif ($step === \App\Livewire\ConnectBank::STEP_ACCOUNTS)
         <livewire:redbark-account-setup :in-onboarding="true" />
     @elseif ($step === \App\Livewire\ConnectBank::STEP_PAY_CYCLE)
