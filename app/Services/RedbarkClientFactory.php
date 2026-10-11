@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Contracts\RedbarkServiceContract;
+use App\Enums\RedbarkTransport;
 use App\Models\RedbarkFeed;
 use SensitiveParameter;
 
@@ -21,7 +22,10 @@ final readonly class RedbarkClientFactory
 
     public function for(RedbarkFeed $feed): RedbarkServiceContract
     {
-        return new RedbarkService($feed->api_key, $this->baseUrl);
+        return match ($feed->transport) {
+            RedbarkTransport::SimpleFin => new SimpleFinService((string) $feed->simplefin_access_url),
+            RedbarkTransport::Rest => new RedbarkService((string) $feed->api_key, $this->baseUrl),
+        };
     }
 
     public function forValidation(#[SensitiveParameter] string $apiKey): RedbarkServiceContract

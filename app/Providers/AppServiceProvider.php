@@ -25,6 +25,7 @@ use App\Services\PipelineStages\SetPayCycleStage;
 use App\Services\PipelineStages\TransferDetectionStage;
 use App\Services\PipelineStages\UserRulesStage;
 use App\Services\RedbarkClientFactory;
+use App\Services\SimpleFinClaimer;
 use App\Services\TransactionAnalysisPipeline;
 use App\Services\TypeSafeService;
 use App\Support\Email\ScheduleParser;
@@ -48,6 +49,10 @@ final class AppServiceProvider extends ServiceProvider
     {
         $this->app->singleton(RedbarkClientFactory::class, fn (): RedbarkClientFactory => new RedbarkClientFactory(
             baseUrl: (string) config('services.redbark.base_url'),
+        ));
+
+        $this->app->singleton(SimpleFinClaimer::class, fn (): SimpleFinClaimer => new SimpleFinClaimer(
+            allowedHost: (string) parse_url((string) config('services.redbark.base_url'), PHP_URL_HOST),
         ));
 
         $this->app->singleton(ContextDevServiceContract::class, function (): ContextDevService {
