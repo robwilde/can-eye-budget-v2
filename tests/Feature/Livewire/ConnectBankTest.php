@@ -236,3 +236,9 @@ test('step 1 opens the setup guide in a new tab', function () {
 
     expect($content)->toMatch('/<a\b(?=[^>]*data-test="connect-bank-guide")(?=[^>]*target="_blank")[^>]*>/');
 });
+
+test('the SimpleFIN form links to its own section of the setup guide in a new tab', function () {
+    $content = $this->actingAs(User::factory()->create())->get(route('connect-bank'))->assertOk()->getContent();
+
+    expect($content)->toMatch('/<a\b(?=[^>]*data-test="connect-bank-simplefin-guide")(?=[^>]*target="_blank")(?=[^>]*#simplefin)[^>]*>/');
+});
