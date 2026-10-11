@@ -17,6 +17,10 @@ use App\Support\Calendar\DayActivity;
 use App\Support\Calendar\DayActivityLoader;
 use Carbon\CarbonImmutable;
 
+beforeEach(fn () => CarbonImmutable::setTestNow(CarbonImmutable::create(2026, 5, 1)));
+
+afterEach(fn () => CarbonImmutable::setTestNow());
+
 test('returns empty array when no activity in range', function () {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
@@ -1178,4 +1182,37 @@ test('DayActivity::empty returns a zero-state instance', function () {
         ->and($empty->incomeCents)->toBe(0)
         ->and($empty->postedCents)->toBe(0)
         ->and($empty->plannedCents)->toBe(0);
+});
+
+test('an unreconciled occurrence before today is neither rendered nor counted', function () {
+    CarbonImmutable::setTestNow(CarbonImmutable::create(2026, 6, 11));
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'amount' => -25000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => CarbonImmutable::create(2026, 5, 1),
+    ]);
+
+    $activity = (new DayActivityLoader)->load(CarbonImmutable::create(2026, 6, 1), CarbonImmutable::create(2026, 7, 31), $user->id);
+
+    expect($activity)->not->toHaveKey('2026-06-01')
+        ->and($activity['2026-07-01']->plannedCents)->toBe(25000);
+});
+
+test('an occurrence dated today is still planned', function () {
+    CarbonImmutable::setTestNow(CarbonImmutable::create(2026, 6, 11));
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'amount' => -9000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => CarbonImmutable::create(2026, 6, 11),
+    ]);
+
+    $activity = (new DayActivityLoader)->load(CarbonImmutable::create(2026, 6, 1), CarbonImmutable::create(2026, 6, 30), $user->id);
+
+    expect($activity['2026-06-11']->plannedCents)->toBe(9000);
 });
