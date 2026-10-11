@@ -7,8 +7,8 @@
             </flux:text>
             <ul class="list-disc space-y-2 pl-5 text-sm text-zinc-600">
                 <li>
-                    <strong class="text-cib-ink">{{ __('Redbark API key (required)') }}</strong>
-                    {{ __('Redbark is an Australian open-banking service. You connect your bank to Redbark; Can I Budget reads your transactions through Redbark with a key that only you hold. We never see your bank login.') }}
+                    <strong class="text-cib-ink">{{ __('A Redbark connection (required): a SimpleFIN setup token or an API key') }}</strong>
+                    {{ __('Redbark is an Australian open-banking service. You connect your bank to Redbark; Can I Budget reads your transactions through Redbark with a credential that only you hold. We never see your bank login. Pick either route below.') }}
                 </li>
                 <li>
                     <strong class="text-cib-ink">{{ __('Google app password (optional)') }}</strong>
@@ -17,8 +17,35 @@
             </ul>
         </section>
 
-        <section class="space-y-3">
-            <flux:heading size="lg" level="2">{{ __('1. Get a Redbark API key') }}</flux:heading>
+        <section id="simplefin" class="space-y-3">
+            <flux:heading size="lg" level="2">{{ __('1a. Connect with a SimpleFIN setup token') }}</flux:heading>
+            <flux:text>
+                {{ __('A setup token is a single-use code that lets one app read your accounts. It is not your API key, it can be revoked at any time, and each app you connect gets its own. SimpleFIN needs the Developer or Professional plan (the free trial includes it) and covers bank accounts only.') }}
+            </flux:text>
+            <ol class="list-decimal space-y-2 pl-5 text-sm text-zinc-600">
+                <li>
+                    {{ __('Create a Redbark account, start the free trial and connect your bank as described in 1b, steps 1 and 2.') }}
+                </li>
+                <li>
+                    {{ __('Generate a setup token under') }}
+                    <flux:link href="https://app.redbark.com/settings/simplefin" external rel="noopener">{{ __('Settings > SimpleFIN') }}</flux:link>{{ __('. Name it Can I Budget so you can recognise it later, then copy it straight away.') }}
+                </li>
+                <li>
+                    {{ __('Come back to Can I Budget and paste the token into the SimpleFIN setup token field on step 1. It works once and expires after 7 days if unused; if it is refused, generate a new one.') }}
+                </li>
+                <li>
+                    {{ __('To disconnect later, revoke the token in the same Settings > SimpleFIN page in Redbark.') }}
+                </li>
+            </ol>
+            <flux:callout variant="info" icon="information-circle" :heading="__('Good to know')">
+                <flux:callout.text>
+                    {{ __('Accounts connected this way do not suggest an account type on step 2, so choose each one yourself. Prefer the API key if you already use one.') }}
+                </flux:callout.text>
+            </flux:callout>
+        </section>
+
+        <section id="api-key" class="space-y-3">
+            <flux:heading size="lg" level="2">{{ __('1b. Or get a Redbark API key') }}</flux:heading>
             <flux:text>
                 {{ __('Redbark has a 7-day free trial with no credit card, and the trial includes API access. After the trial, Can I Budget keeps working on the Developer plan (A$16 a month) or the Professional plan; the Saver plan has no API access.') }}
             </flux:text>
