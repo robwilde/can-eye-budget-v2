@@ -53,6 +53,10 @@
             <flux:text>
                 {{ __('Or connect with a SimpleFIN setup token. It works once, can be revoked at any time in Redbark, and never gives us your API key.') }}
             </flux:text>
+            <flux:text size="sm">
+                <flux:link :href="route('setup-guide').'#simplefin'" external rel="noopener" data-test="connect-bank-simplefin-guide">{{ __('How to get a setup token') }}</flux:link>
+                {{ __('(opens in a new tab).') }}
+            </flux:text>
 
             <flux:input
                 wire:model="setup_token"
