@@ -14,6 +14,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Services\RuleActionExecutor;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Arr;
 
 beforeEach(function () {
     $this->executor = app(RuleActionExecutor::class);
@@ -321,4 +322,154 @@ test('a failed fold marks the rule unapplied even when a sibling action takes ef
     expect($applied)->toBeFalse()
         ->and($fee->fresh()->category_id)->toBe($category->id)
         ->and(Transaction::withTrashed()->find($fee->id)->trashed())->toBeFalse();
+});
+
+// ─── wouldChange() ─────────────────────────────────────────────────────
+
+/**
+ * @return array{0: Transaction, 1: array<int, array<string, string>>}
+ */
+function wouldChangeCase(string $case, User $user, Account $account): array
+{
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $other = Category::factory()->create(['is_hidden' => false]);
+    $feeAttributes = [
+        'description' => 'Int Tran Fee - JetBrains CZ - 951280',
+        'amount' => -42,
+        'post_date' => CarbonImmutable::parse('2026-07-05'),
+    ];
+    $parentAttributes = [
+        'description' => 'VISA -JetBrains CZ FRGN AMT 051280 #8357',
+        'amount' => -1394,
+        'post_date' => CarbonImmutable::parse('2026-07-05'),
+    ];
+    $planned = static fn (?User $owner = null): PlannedTransaction => PlannedTransaction::factory()->create([
+        'user_id' => ($owner ?? $user)->id,
+        'account_id' => $account->id,
+    ]);
+    $setCategory = [['type' => 'set_category', 'value' => (string) $category->id]];
+    $fold = [['type' => 'fold_into_parent', 'value' => '']];
+
+    return match ($case) {
+        'category on an uncategorised row' => [createActionTransaction($user, $account), $setCategory],
+        'category the rule already set' => [createActionTransaction($user, $account, ['category_id' => $category->id, 'category_source' => 'rule']), $setCategory],
+        'category already held but feed sourced' => [createActionTransaction($user, $account, ['category_id' => $category->id, 'category_source' => 'feed']), $setCategory],
+        'category already held but suggested' => [createActionTransaction($user, $account, ['category_id' => $other->id, 'category_source' => 'suggested']), $setCategory],
+        'category a person chose elsewhere' => [createActionTransaction($user, $account, ['category_id' => $other->id, 'category_source' => 'manual']), $setCategory],
+        'hidden category' => [createActionTransaction($user, $account), [['type' => 'set_category', 'value' => (string) Category::factory()->create(['is_hidden' => true])->id]]],
+        'description that differs' => [createActionTransaction($user, $account), [['type' => 'set_description', 'value' => 'NEW']]],
+        'description that is the same' => [createActionTransaction($user, $account), [['type' => 'set_description', 'value' => 'ORIGINAL DESCRIPTION']]],
+        'clean description on an unnamed row' => [createActionTransaction($user, $account), [['type' => 'set_clean_description', 'value' => 'Netflix']]],
+        'clean description a person set' => [createActionTransaction($user, $account, ['clean_description' => 'Mine', 'clean_description_source' => 'manual']), [['type' => 'set_clean_description', 'value' => 'Netflix']]],
+        'clean description the rule already set' => [createActionTransaction($user, $account, ['clean_description' => 'Netflix', 'clean_description_source' => 'rule']), [['type' => 'set_clean_description', 'value' => '  Netflix ']]],
+        'clean description same text feed sourced' => [createActionTransaction($user, $account, ['clean_description' => 'Netflix', 'clean_description_source' => 'feed']), [['type' => 'set_clean_description', 'value' => 'Netflix']]],
+        'whitespace clean description on an unnamed row' => [createActionTransaction($user, $account), [['type' => 'set_clean_description', 'value' => '   ']]],
+        'append notes to empty notes' => [createActionTransaction($user, $account), [['type' => 'append_notes', 'value' => 'note']]],
+        'append notes to existing notes' => [createActionTransaction($user, $account, ['notes' => 'note']), [['type' => 'append_notes', 'value' => 'note']]],
+        'notes that differ' => [createActionTransaction($user, $account, ['notes' => 'old']), [['type' => 'set_notes', 'value' => 'new']]],
+        'notes that are the same' => [createActionTransaction($user, $account, ['notes' => 'same']), [['type' => 'set_notes', 'value' => 'same']]],
+        'own planned transaction' => [createActionTransaction($user, $account), [['type' => 'link_to_planned_transaction', 'value' => (string) $planned()->id]]],
+        'planned transaction already linked' => (function () use ($user, $account, $planned): array {
+            $link = $planned();
+
+            return [createActionTransaction($user, $account, ['planned_transaction_id' => $link->id]), [['type' => 'link_to_planned_transaction', 'value' => (string) $link->id]]];
+        })(),
+        'another user\'s planned transaction' => [createActionTransaction($user, $account), [['type' => 'link_to_planned_transaction', 'value' => (string) $planned(User::factory()->create())->id]]],
+        'fold with a parent' => (function () use ($user, $account, $fold, $feeAttributes, $parentAttributes): array {
+            createActionTransaction($user, $account, $parentAttributes);
+
+            return [createActionTransaction($user, $account, $feeAttributes), $fold];
+        })(),
+        'fold without a parent' => [createActionTransaction($user, $account, $feeAttributes), $fold],
+        'fold of a fee already linked to a planned transaction' => (function () use ($user, $account, $fold, $feeAttributes, $parentAttributes, $planned): array {
+            createActionTransaction($user, $account, $parentAttributes);
+
+            return [createActionTransaction($user, $account, [...$feeAttributes, 'planned_transaction_id' => $planned()->id]), $fold];
+        })(),
+        'link then fold with a parent' => (function () use ($user, $account, $fold, $feeAttributes, $parentAttributes, $planned): array {
+            createActionTransaction($user, $account, $parentAttributes);
+
+            return [createActionTransaction($user, $account, $feeAttributes), [['type' => 'link_to_planned_transaction', 'value' => (string) $planned()->id], ...$fold]];
+        })(),
+        'unknown action type' => [createActionTransaction($user, $account), [['type' => 'nonsense', 'value' => 'x']]],
+    };
+}
+
+/**
+ * @return list<array<string, mixed>>
+ */
+function transactionSnapshot(): array
+{
+    return Transaction::withTrashed()->orderBy('id')->get()
+        ->map(fn (Transaction $transaction): array => Arr::except($transaction->getAttributes(), ['updated_at']))
+        ->all();
+}
+
+test('wouldChange is true exactly when execute changes the row', function (string $case, bool $expected) {
+    [$transaction, $actions] = wouldChangeCase($case, $this->user, $this->account);
+    $before = transactionSnapshot();
+
+    $predicted = $this->executor->wouldChange($transaction->fresh(), $actions);
+
+    expect(transactionSnapshot())->toBe($before);
+
+    $this->executor->execute($transaction->fresh(), $actions);
+
+    expect($predicted)->toBe($expected)
+        ->and(transactionSnapshot() !== $before)->toBe($expected);
+})->with([
+    'category on an uncategorised row' => ['category on an uncategorised row', true],
+    'category the rule already set' => ['category the rule already set', false],
+    'category already held but feed sourced' => ['category already held but feed sourced', true],
+    'category already held but suggested' => ['category already held but suggested', true],
+    'category a person chose elsewhere' => ['category a person chose elsewhere', false],
+    'hidden category' => ['hidden category', false],
+    'description that differs' => ['description that differs', true],
+    'description that is the same' => ['description that is the same', false],
+    'clean description on an unnamed row' => ['clean description on an unnamed row', true],
+    'clean description a person set' => ['clean description a person set', true],
+    'clean description the rule already set' => ['clean description the rule already set', false],
+    'clean description same text feed sourced' => ['clean description same text feed sourced', true],
+    'whitespace clean description on an unnamed row' => ['whitespace clean description on an unnamed row', false],
+    'append notes to empty notes' => ['append notes to empty notes', true],
+    'append notes to existing notes' => ['append notes to existing notes', true],
+    'notes that differ' => ['notes that differ', true],
+    'notes that are the same' => ['notes that are the same', false],
+    'own planned transaction' => ['own planned transaction', true],
+    'planned transaction already linked' => ['planned transaction already linked', false],
+    'another user\'s planned transaction' => ['another user\'s planned transaction', false],
+    'fold with a parent' => ['fold with a parent', true],
+    'fold without a parent' => ['fold without a parent', false],
+    'fold of a fee already linked to a planned transaction' => ['fold of a fee already linked to a planned transaction', false],
+    'link then fold with a parent' => ['link then fold with a parent', true],
+    'unknown action type' => ['unknown action type', false],
+]);
+
+test('wouldChange leaves the row it was given untouched', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $transaction = createActionTransaction($this->user, $this->account);
+
+    $changes = $this->executor->wouldChange($transaction, [
+        ['type' => 'set_category', 'value' => (string) $category->id],
+        ['type' => 'set_clean_description', 'value' => 'Netflix'],
+    ]);
+
+    expect($changes)->toBeTrue()
+        ->and($transaction->isDirty())->toBeFalse()
+        ->and($transaction->category_id)->toBeNull()
+        ->and($transaction->clean_description)->toBeNull();
+});
+
+test('targetCategory is the last visible set_category and null when none can apply', function () {
+    $first = Category::factory()->create(['is_hidden' => false]);
+    $last = Category::factory()->create(['is_hidden' => false]);
+    $hidden = Category::factory()->create(['is_hidden' => true]);
+
+    expect($this->executor->targetCategory([
+        ['type' => 'set_category', 'value' => (string) $first->id],
+        ['type' => 'set_category', 'value' => (string) $last->id],
+        ['type' => 'set_category', 'value' => (string) $hidden->id],
+    ]))->toBe($last->id)
+        ->and($this->executor->targetCategory([['type' => 'set_category', 'value' => (string) $hidden->id]]))->toBeNull()
+        ->and($this->executor->targetCategory([['type' => 'set_notes', 'value' => 'x']]))->toBeNull();
 });
