@@ -864,3 +864,54 @@ test('test only sees the signed-in user\'s transactions', function () {
     expect($component->get('ruleTestResult')->totalMatches())->toBe(0)
         ->and($component->get('ruleTestResult')->notYetApplied)->toBe([]);
 });
+
+// ─── Trigger value validation ─────────────────────────────
+
+test('saving a value operator with a blank trigger value fails validation', function (string $blank) {
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    $component = openedDraft($this->user, $category, $blank)
+        ->set('ruleName', 'Blank trigger')
+        ->call('saveRule')
+        ->assertHasErrors(['triggers.0.value']);
+
+    expect($component->errors()->get('triggers.0.value'))->toBe(['The value field is required for the selected operator.'])
+        ->and(UserRule::count())->toBe(0);
+})->with(['empty' => [''], 'spaces' => ['   ']]);
+
+test('saving a valueless operator with a blank trigger value succeeds', function (RuleTriggerOperator $operator) {
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    openedDraft($this->user, $category, '')
+        ->set('triggers.0.operator', $operator->value)
+        ->set('ruleName', 'Valueless trigger')
+        ->call('saveRule')
+        ->assertHasNoErrors();
+
+    expect(UserRule::count())->toBe(1);
+})->with([
+    'is empty' => [RuleTriggerOperator::IsEmpty],
+    'is not empty' => [RuleTriggerOperator::IsNotEmpty],
+]);
+
+test('testing a value operator with a blank trigger value shows an error instead of running', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    testRuleSeed($this->user);
+
+    openedDraft($this->user, $category, '')
+        ->call('testRule')
+        ->assertHasErrors(['triggers.0.value'])
+        ->assertSet('ruleTestResult', null);
+});
+
+test('saving a trigger with a non-string operator fails validation instead of erroring', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    openedDraft($this->user, $category)
+        ->set('triggers.0.operator', 1)
+        ->set('ruleName', 'Tampered operator')
+        ->call('saveRule')
+        ->assertHasErrors(['triggers.0.operator']);
+
+    expect(UserRule::count())->toBe(0);
+});
