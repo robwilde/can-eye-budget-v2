@@ -474,17 +474,26 @@ final class Transaction extends Model
         return true;
     }
 
+    /**
+     * Drop a blank clean description together with its source, exactly as
+     * saving() does, so a dry run can see the row as it would be stored.
+     */
+    public function clearBlankCleanDescription(): void
+    {
+        if (mb_trim((string) $this->clean_description) === '') {
+            $this->clean_description = null;
+            $this->clean_description_source = null;
+        }
+    }
+
     protected static function booted(): void
     {
         self::saving(static function (Transaction $transaction): void {
-            if (mb_trim((string) $transaction->clean_description) === '') {
-                $transaction->clean_description = null;
-                $transaction->clean_description_source = null;
+            $transaction->clearBlankCleanDescription();
 
-                return;
+            if ($transaction->clean_description !== null) {
+                $transaction->clean_description_source ??= CleanDescriptionSource::Manual;
             }
-
-            $transaction->clean_description_source ??= CleanDescriptionSource::Manual;
         });
 
         // Derive the merchant key on every write rather than only at ingest, so
