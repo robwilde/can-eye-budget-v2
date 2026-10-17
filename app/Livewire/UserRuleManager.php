@@ -66,7 +66,7 @@ final class UserRuleManager extends Component
 
     public string $ruleDescription = '';
 
-    /** @var array<int, array<string, string>> */
+    /** @var array<int, array<string, mixed>> */
     public array $triggers = [];
 
     /** @var array<int, array<string, string>> */
@@ -536,6 +536,12 @@ final class UserRuleManager extends Component
         ]);
     }
 
+    /** @return array<string, string> */
+    protected function messages(): array
+    {
+        return ['triggers.*.value.required' => 'The value field is required for the selected operator.'];
+    }
+
     // ─── Private ─────────────────────────────────────────
 
     private function searchConstraint(): ?Closure
@@ -546,7 +552,7 @@ final class UserRuleManager extends Component
             return null;
         }
 
-        return fn (Builder $q) => $q->where(fn (Builder $q) => $q
+        return static fn (Builder $q) => $q->where(fn (Builder $q) => $q
             ->where('name', 'like', "%{$term}%")
             ->orWhere('description', 'like', "%{$term}%"));
     }
@@ -587,10 +593,18 @@ final class UserRuleManager extends Component
             'triggers' => ['required', 'array', 'min:1'],
             'triggers.*.field' => ['required', Rule::in(array_column(RuleTriggerField::cases(), 'value'))],
             'triggers.*.operator' => ['required', Rule::in(array_column(RuleTriggerOperator::cases(), 'value'))],
-            'triggers.*.value' => $this->triggerValueRules(),
             'actions' => ['required', 'array', 'min:1'],
             'actions.*.type' => ['required', Rule::in(array_column(RuleActionType::cases(), 'value'))],
         ];
+
+        foreach (array_keys($this->triggers) as $index) {
+            $operatorValue = $this->triggers[$index]['operator'] ?? '';
+            $operator = is_string($operatorValue) ? RuleTriggerOperator::tryFrom($operatorValue) : null;
+
+            $rules["triggers.{$index}.value"] = $operator?->requiresValue()
+                ? ['required', 'string']
+                : ['nullable', 'string'];
+        }
 
         // Build the value rule per action index: value-requiring types must have
         // a non-empty value (required is implicit so it catches empty strings),
@@ -607,37 +621,6 @@ final class UserRuleManager extends Component
         }
 
         return $rules;
-    }
-
-    /** @return array<int, mixed> */
-    private function triggerValueRules(): array
-    {
-        return [
-            'nullable',
-            'string',
-            function (string $attribute, mixed $value, Closure $fail): void {
-                if (! preg_match('/^triggers\.(\d+)\.value$/', $attribute, $matches)) {
-                    return;
-                }
-
-                $triggerIndex = (int) $matches[1];
-                $operatorValue = $this->triggers[$triggerIndex]['operator'] ?? null;
-
-                if (! is_string($operatorValue)) {
-                    return;
-                }
-
-                $operator = RuleTriggerOperator::tryFrom($operatorValue);
-
-                if ($operator === null || ! $operator->requiresValue()) {
-                    return;
-                }
-
-                if ($value === null || (is_string($value) && mb_trim($value) === '')) {
-                    $fail('The value field is required for the selected operator.');
-                }
-            },
-        ];
     }
 
     private function swapOrder(UserRuleGroup|UserRule $a, UserRuleGroup|UserRule $b): void
