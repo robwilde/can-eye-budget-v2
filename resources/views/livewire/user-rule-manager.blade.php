@@ -5,9 +5,10 @@
     use Illuminate\Support\Str;
 @endphp
 <div class="space-y-6">
-    <div class="flex items-center justify-between">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <flux:heading size="lg">Rules</flux:heading>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
+            <flux:input wire:model.live.debounce.300ms="search" icon="magnifying-glass" placeholder="Search rules..." size="sm" class="w-full sm:w-auto sm:min-w-48" />
             <flux:button size="sm" icon="play" wire:click="runRules" :disabled="! $hasActiveRules">Run rules now</flux:button>
             <flux:button variant="primary" size="sm" wire:click="openAddGroupModal">Add Group</flux:button>
         </div>
@@ -15,20 +16,24 @@
 
     <flux:text size="sm" class="text-zinc-500">Auto-apply rules run after every import and when you click Run rules. Other rules turn their matches into suggestions for you to accept.</flux:text>
 
+    @php($searching = mb_trim($search) !== '')
+
     @forelse($groups as $group)
         <x-cib.card wire:key="group-{{ $group->id }}">
             <div class="flex items-center justify-between gap-4">
                 <div class="flex items-center gap-3">
-                    <div class="flex flex-col gap-1">
-                        <div class="flex items-center gap-1">
-                            <flux:button variant="ghost" size="xs" wire:click="moveGroupUp({{ $group->id }})">
-                                <flux:icon.chevron-up class="size-3" />
-                            </flux:button>
-                            <flux:button variant="ghost" size="xs" wire:click="moveGroupDown({{ $group->id }})">
-                                <flux:icon.chevron-down class="size-3" />
-                            </flux:button>
+                    @unless($searching)
+                        <div class="flex flex-col gap-1">
+                            <div class="flex items-center gap-1">
+                                <flux:button variant="ghost" size="xs" wire:click="moveGroupUp({{ $group->id }})">
+                                    <flux:icon.chevron-up class="size-3" />
+                                </flux:button>
+                                <flux:button variant="ghost" size="xs" wire:click="moveGroupDown({{ $group->id }})">
+                                    <flux:icon.chevron-down class="size-3" />
+                                </flux:button>
+                            </div>
                         </div>
-                    </div>
+                    @endunless
                     <div>
                         <x-cib.sec-head :title="$group->name">
                             <x-cib.stat-pill tone="neutral" :value="$group->rules->count().' '.Str::plural('rule', $group->rules->count())" />
@@ -62,16 +67,21 @@
                     @foreach($group->rules as $rule)
                         <div wire:key="rule-{{ $rule->id }}" class="flex items-center justify-between gap-4 rounded-lg border border-neutral-200 p-3 dark:border-neutral-700">
                             <div class="flex items-center gap-3">
-                                <div class="flex flex-col gap-1">
-                                    <flux:button variant="ghost" size="xs" wire:click="moveRuleUp({{ $rule->id }})">
-                                        <flux:icon.chevron-up class="size-3" />
-                                    </flux:button>
-                                    <flux:button variant="ghost" size="xs" wire:click="moveRuleDown({{ $rule->id }})">
-                                        <flux:icon.chevron-down class="size-3" />
-                                    </flux:button>
-                                </div>
+                                @unless($searching)
+                                    <div class="flex flex-col gap-1">
+                                        <flux:button variant="ghost" size="xs" wire:click="moveRuleUp({{ $rule->id }})">
+                                            <flux:icon.chevron-up class="size-3" />
+                                        </flux:button>
+                                        <flux:button variant="ghost" size="xs" wire:click="moveRuleDown({{ $rule->id }})">
+                                            <flux:icon.chevron-down class="size-3" />
+                                        </flux:button>
+                                    </div>
+                                @endunless
                                 <div>
                                     <flux:text class="font-medium">{{ $rule->name }}</flux:text>
+                                    @if($rule->description)
+                                        <flux:text size="sm" class="text-zinc-500">{{ $rule->description }}</flux:text>
+                                    @endif
                                 </div>
                                 <flux:badge size="sm" color="blue">{{ count($rule->triggers) }} {{ Str::plural('trigger', count($rule->triggers)) }}</flux:badge>
                                 <flux:badge size="sm" color="purple">{{ count($rule->actions) }} {{ Str::plural('action', count($rule->actions)) }}</flux:badge>
@@ -101,9 +111,15 @@
             @endif
         </x-cib.card>
     @empty
-        <x-cib.card>
-            <x-cib.empty-state icon="funnel" title="No rule groups yet" description="Create a group to start organising your transaction rules."><x-slot:action><flux:button variant="primary" size="sm" wire:click="openAddGroupModal">Add Group</flux:button></x-slot:action></x-cib.empty-state>
-        </x-cib.card>
+        @if($searching)
+            <x-cib.card>
+                <x-cib.empty-state icon="magnifying-glass" title="No rules match “{{ mb_trim($search) }}”" description="Try a different name or description."><x-slot:action><flux:button size="sm" wire:click="$set('search', '')">Clear search</flux:button></x-slot:action></x-cib.empty-state>
+            </x-cib.card>
+        @else
+            <x-cib.card>
+                <x-cib.empty-state icon="funnel" title="No rule groups yet" description="Create a group to start organising your transaction rules."><x-slot:action><flux:button variant="primary" size="sm" wire:click="openAddGroupModal">Add Group</flux:button></x-slot:action></x-cib.empty-state>
+            </x-cib.card>
+        @endif
     @endforelse
 
     {{-- Group Form Modal --}}
