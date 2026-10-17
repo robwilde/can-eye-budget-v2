@@ -4,27 +4,35 @@ declare(strict_types=1);
 
 namespace App\Livewire;
 
+use App\DTOs\RuleTestResult;
 use App\Enums\PipelineTrigger;
 use App\Enums\RuleActionType;
 use App\Enums\RuleTriggerField;
 use App\Enums\RuleTriggerOperator;
 use App\Jobs\RunTransactionAnalysisJob;
+use App\Livewire\Attributes\NotAudited;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\User;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
+use App\Services\RuleTester;
 use App\Services\UserRuleApplier;
 use Closure;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
 final class UserRuleManager extends Component
 {
+    #[Locked]
+    public ?RuleTestResult $ruleTestResult = null;
+
     #[Url(except: '')]
     public string $search = '';
 
@@ -226,6 +234,7 @@ final class UserRuleManager extends Component
             return;
         }
 
+        $this->resetRuleForm();
         $this->editingRuleId = $rule->id;
         $this->ruleGroupId = $rule->user_rule_group_id;
         $this->ruleName = $rule->name;
@@ -294,23 +303,48 @@ final class UserRuleManager extends Component
     public function addTrigger(): void
     {
         $this->triggers[] = ['field' => '', 'operator' => '', 'value' => ''];
+        $this->ruleTestResult = null;
     }
 
     public function removeTrigger(int $index): void
     {
         unset($this->triggers[$index]);
         $this->triggers = array_values($this->triggers);
+        $this->ruleTestResult = null;
     }
 
     public function addAction(): void
     {
         $this->actions[] = ['type' => '', 'value' => ''];
+        $this->ruleTestResult = null;
     }
 
     public function removeAction(int $index): void
     {
         unset($this->actions[$index]);
         $this->actions = array_values($this->actions);
+        $this->ruleTestResult = null;
+    }
+
+    #[NotAudited]
+    public function testRule(RuleTester $tester): void
+    {
+        $this->ruleTestResult = null;
+
+        $this->validate($this->draftRuleRules());
+
+        $user = auth()->user();
+
+        abort_unless($user instanceof User, 403);
+
+        $this->ruleTestResult = $tester->test($user->id, $this->triggers, $this->ruleStrictMode, $this->actions);
+    }
+
+    public function updated(string $property): void
+    {
+        if (in_array(Str::before($property, '.'), ['triggers', 'actions', 'ruleStrictMode', 'showRuleModal'], true)) {
+            $this->ruleTestResult = null;
+        }
     }
 
     public function confirmDeleteRule(int $ruleId): void
@@ -537,13 +571,19 @@ final class UserRuleManager extends Component
         $this->ruleStrictMode = true;
         $this->ruleIsAutoApply = false;
         $this->ruleIsActive = true;
+        $this->ruleTestResult = null;
     }
 
     /** @return array<string, array<int, mixed>> */
     private function ruleFormRules(): array
     {
+        return ['ruleName' => ['required', 'string', 'max:255'], ...$this->draftRuleRules()];
+    }
+
+    /** @return array<string, array<int, mixed>> */
+    private function draftRuleRules(): array
+    {
         $rules = [
-            'ruleName' => ['required', 'string', 'max:255'],
             'triggers' => ['required', 'array', 'min:1'],
             'triggers.*.field' => ['required', Rule::in(array_column(RuleTriggerField::cases(), 'value'))],
             'triggers.*.operator' => ['required', Rule::in(array_column(RuleTriggerOperator::cases(), 'value'))],
