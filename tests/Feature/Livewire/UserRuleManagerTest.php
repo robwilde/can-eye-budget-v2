@@ -567,6 +567,17 @@ test('search is case insensitive', function () {
         ->assertSee('Woolworths');
 });
 
+test('no results heading shows special characters in the search once-escaped', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    UserRule::factory()->for($this->user)->for($group, 'group')->create(['name' => 'Coffee shops']);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->set('search', "Domino's & <b>")
+        ->assertSeeHtml('No rules match “Domino&#039;s &amp; &lt;b&gt;”')
+        ->assertDontSeeHtml('&amp;#039;');
+});
+
 test('search with no match shows the no results state', function () {
     $group = UserRuleGroup::factory()->for($this->user)->create(['name' => 'Everyday']);
     UserRule::factory()->for($this->user)->for($group, 'group')->create(['name' => 'Coffee shops']);
