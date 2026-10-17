@@ -113,7 +113,7 @@
     @empty
         @if($searching)
             <x-cib.card>
-                <x-cib.empty-state icon="magnifying-glass" title="No rules match “{{ mb_trim($search) }}”" description="Try a different name or description."><x-slot:action><flux:button size="sm" wire:click="$set('search', '')">Clear search</flux:button></x-slot:action></x-cib.empty-state>
+                <x-cib.empty-state icon="magnifying-glass" :title="'No rules match “'.mb_trim($search).'”'" description="Try a different name or description."><x-slot:action><flux:button size="sm" wire:click="$set('search', '')">Clear search</flux:button></x-slot:action></x-cib.empty-state>
             </x-cib.card>
         @else
             <x-cib.card>
