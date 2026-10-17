@@ -526,3 +526,151 @@ test('empty state uses the cib component', function () {
         ->assertSeeHtml('class="empty-state"')
         ->assertSee('No rule groups yet');
 });
+
+// ─── Search ──────────────────────────────────────────────
+
+test('search shows rules whose name matches', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    UserRule::factory()->for($this->user)->for($group, 'group')->create(['name' => 'Coffee shops']);
+    UserRule::factory()->for($this->user)->for($group, 'group')->create(['name' => 'Fuel stations']);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->set('search', 'Coffee')
+        ->assertSee('Coffee shops')
+        ->assertDontSee('Fuel stations');
+});
+
+test('search shows rules whose description matches', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    UserRule::factory()->for($this->user)->for($group, 'group')->create([
+        'name' => 'Groceries',
+        'description' => 'Pays the fortnightly butcher',
+    ]);
+    UserRule::factory()->for($this->user)->for($group, 'group')->create(['name' => 'Fuel stations']);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->set('search', 'butcher')
+        ->assertSee('Groceries')
+        ->assertSee('Pays the fortnightly butcher')
+        ->assertDontSee('Fuel stations');
+});
+
+test('search is case insensitive', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    UserRule::factory()->for($this->user)->for($group, 'group')->create(['name' => 'Woolworths']);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->set('search', 'WOOL')
+        ->assertSee('Woolworths');
+});
+
+test('no results heading shows special characters in the search once-escaped', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    UserRule::factory()->for($this->user)->for($group, 'group')->create(['name' => 'Coffee shops']);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->set('search', "Domino's & <b>")
+        ->assertSeeHtml('No rules match “Domino&#039;s &amp; &lt;b&gt;”')
+        ->assertDontSeeHtml('&amp;#039;');
+});
+
+test('search with no match shows the no results state', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create(['name' => 'Everyday']);
+    UserRule::factory()->for($this->user)->for($group, 'group')->create(['name' => 'Coffee shops']);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->set('search', 'zzz')
+        ->assertSee('No rules match')
+        ->assertSee('zzz')
+        ->assertSee('Clear search')
+        ->assertDontSee('No rule groups yet')
+        ->assertDontSee('Coffee shops')
+        ->assertDontSee('Everyday');
+});
+
+test('clearing the search restores all groups', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create(['name' => 'Everyday']);
+    UserRule::factory()->for($this->user)->for($group, 'group')->create(['name' => 'Coffee shops']);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->set('search', 'zzz')
+        ->set('search', '')
+        ->assertDontSee('No rules match')
+        ->assertSee('Everyday')
+        ->assertSee('Coffee shops');
+});
+
+test('search never shows another users rules', function () {
+    $other = User::factory()->create();
+    $otherGroup = UserRuleGroup::factory()->for($other)->create(['name' => 'Other group']);
+    UserRule::factory()->for($other)->for($otherGroup, 'group')->create(['name' => 'Woolworths secret']);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->set('search', 'Woolworths')
+        ->assertDontSee('Woolworths secret')
+        ->assertDontSee('Other group')
+        ->assertSee('No rules match');
+});
+
+test('blank and whitespace search show every group including empty ones', function (string $term) {
+    $filled = UserRuleGroup::factory()->for($this->user)->create(['name' => 'Filled group']);
+    UserRule::factory()->for($this->user)->for($filled, 'group')->create(['name' => 'Coffee shops']);
+    UserRuleGroup::factory()->for($this->user)->create(['name' => 'Empty group']);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->set('search', $term)
+        ->assertSee('Filled group')
+        ->assertSee('Empty group')
+        ->assertSee('Coffee shops')
+        ->assertDontSee('No rules match');
+})->with(['empty' => [''], 'spaces' => ['   ']]);
+
+test('search hides groups without a matching rule and counts matched rules', function () {
+    $matching = UserRuleGroup::factory()->for($this->user)->create(['name' => 'Matching group']);
+    UserRule::factory()->for($this->user)->for($matching, 'group')->create(['name' => 'Coffee shops']);
+    UserRule::factory()->for($this->user)->for($matching, 'group')->create(['name' => 'Coffee beans']);
+    UserRule::factory()->for($this->user)->for($matching, 'group')->create(['name' => 'Fuel stations']);
+    $other = UserRuleGroup::factory()->for($this->user)->create(['name' => 'Other group']);
+    UserRule::factory()->for($this->user)->for($other, 'group')->create(['name' => 'Fuel stations']);
+    UserRuleGroup::factory()->for($this->user)->create(['name' => 'Empty group']);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->set('search', 'coffee')
+        ->assertSee('Matching group')
+        ->assertSee('2 rules')
+        ->assertDontSee('Other group')
+        ->assertDontSee('Empty group')
+        ->assertDontSee('Fuel stations');
+});
+
+test('search hides reorder buttons', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    UserRule::factory()->for($this->user)->for($group, 'group')->create(['name' => 'Coffee shops']);
+
+    $component = Livewire::actingAs($this->user)->test(UserRuleManager::class);
+
+    $component->assertSeeHtml('moveGroupUp')->assertSeeHtml('moveRuleUp');
+
+    $component->set('search', 'coffee')
+        ->assertDontSeeHtml('moveGroupUp')
+        ->assertDontSeeHtml('moveRuleUp');
+});
+
+test('search does not affect run rules availability', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    UserRule::factory()->for($this->user)->for($group, 'group')->create(['name' => 'Coffee shops']);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->set('search', 'zzz')
+        ->assertViewHas('hasActiveRules', true);
+});

@@ -20,10 +20,14 @@ use Flux\Flux;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\Rule;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 
 final class UserRuleManager extends Component
 {
+    #[Url(except: '')]
+    public string $search = '';
+
     public bool $showGroupModal = false;
 
     public ?int $editingGroupId = null;
@@ -478,6 +482,8 @@ final class UserRuleManager extends Component
 
     public function render(): View
     {
+        $matchesSearch = $this->searchConstraint();
+
         return view('livewire.user-rule-manager', [
             'hasActiveRules' => UserRule::where('user_id', auth()->id())
                 ->active()
@@ -485,7 +491,8 @@ final class UserRuleManager extends Component
                 ->exists(),
             'groups' => UserRuleGroup::where('user_id', auth()->id())
                 ->ordered()
-                ->with(['rules' => fn ($q) => $q->ordered()])
+                ->when($matchesSearch !== null, fn (Builder $q) => $q->whereHas('rules', $matchesSearch))
+                ->with(['rules' => fn ($q) => $q->when($matchesSearch !== null, $matchesSearch)->ordered()])
                 ->get(),
             'categories' => Category::visibleSortedByFullPath(),
             'plannedTransactions' => PlannedTransaction::where('user_id', auth()->id())
@@ -496,6 +503,19 @@ final class UserRuleManager extends Component
     }
 
     // ─── Private ─────────────────────────────────────────
+
+    private function searchConstraint(): ?Closure
+    {
+        $term = mb_trim($this->search);
+
+        if ($term === '') {
+            return null;
+        }
+
+        return fn (Builder $q) => $q->where(fn (Builder $q) => $q
+            ->where('name', 'like', "%{$term}%")
+            ->orWhere('description', 'like', "%{$term}%"));
+    }
 
     private function resetGroupForm(): void
     {
