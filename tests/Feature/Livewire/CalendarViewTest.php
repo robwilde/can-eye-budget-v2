@@ -570,6 +570,7 @@ test('selectedDate defaults to today on mount', function () {
 // ── Planned transactions ─────────────────────────────────────────
 
 test('planned transaction occurrences appear as plan pips', function () {
+    $this->travelTo(CarbonImmutable::now()->startOfMonth());
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['name' => 'Rent']);
