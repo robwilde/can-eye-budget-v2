@@ -64,10 +64,17 @@ final readonly class RuleActionExecutor
      */
     public function categoryItWouldSet(Transaction $transaction, array $actions): ?int
     {
-        if (! $this->maySetCategory($transaction)) {
-            return null;
-        }
+        return $this->maySetCategory($transaction) ? $this->targetCategory($actions) : null;
+    }
 
+    /**
+     * The category these actions assign when nothing blocks them: the last
+     * visible SetCategory, or null if there is none.
+     *
+     * @param  array<int, array<string, string>>  $actions
+     */
+    public function targetCategory(array $actions): ?int
+    {
         $categoryIds = [];
 
         foreach ($actions as $action) {
@@ -90,6 +97,54 @@ final readonly class RuleActionExecutor
         }
 
         return null;
+    }
+
+    /**
+     * Whether execute() would change this row, as "Apply now" runs it
+     * (overwriting clean descriptions).
+     *
+     * Read-only: the actions are staged on a clone that is never saved, so no
+     * model event fires and the given row is left untouched. It runs the same
+     * setters as run(), in order, so the verdict cannot drift from the write.
+     * A fold counts as a change whenever a parent exists, and an append_notes
+     * action always counts because it adds the note on every run.
+     *
+     * @param  array<int, array<string, string>>  $actions
+     * @param  RuleActionLookups|null  $lookups  answers repeated existence checks
+     *                                           once per key across many rows; null
+     *                                           queries live, as execute() does
+     */
+    public function wouldChange(Transaction $transaction, array $actions, ?RuleActionLookups $lookups = null): bool
+    {
+        $draft = clone $transaction;
+
+        foreach ($actions as $action) {
+            $type = RuleActionType::tryFrom($action['type'] ?? '');
+
+            if ($type === null) {
+                continue;
+            }
+
+            $value = $action['value'] ?? '';
+
+            $effect = match ($type) {
+                RuleActionType::SetCategory => $this->setCategory($draft, $value, $lookups),
+                RuleActionType::SetDescription => $this->setDescription($draft, $value),
+                RuleActionType::SetCleanDescription => $this->setCleanDescription($draft, $value, true),
+                RuleActionType::AppendNotes => $this->appendNotes($draft, $value),
+                RuleActionType::SetNotes => $this->setNotes($draft, $value),
+                RuleActionType::LinkToPlannedTransaction => $this->linkToPlannedTransaction($draft, $value, $lookups),
+                RuleActionType::FoldIntoParent => $this->feeFolder->foldableParent($draft) instanceof Transaction,
+            };
+
+            if ($type === RuleActionType::FoldIntoParent && $effect) {
+                return true;
+            }
+        }
+
+        $draft->clearBlankCleanDescription();
+
+        return $draft->isDirty();
     }
 
     /**
@@ -195,7 +250,7 @@ final readonly class RuleActionExecutor
      * converting away from a transfer mints a new row id, so the audit cannot
      * strand it.
      */
-    private function setCategory(Transaction $transaction, string $value): bool
+    private function setCategory(Transaction $transaction, string $value, ?RuleActionLookups $lookups = null): bool
     {
         if (! $this->maySetCategory($transaction)) {
             // Precedence mirrors maySetCategory(): protection is decided before
@@ -205,7 +260,7 @@ final readonly class RuleActionExecutor
 
         $categoryId = (int) $value;
 
-        if (Category::visible()->where('id', $categoryId)->exists()) {
+        if ($lookups?->categoryIsVisible($categoryId) ?? Category::visible()->where('id', $categoryId)->exists()) {
             $transaction->category_id = $categoryId;
             $transaction->category_source = CategorySource::Rule;
         }
@@ -261,11 +316,11 @@ final readonly class RuleActionExecutor
         return true;
     }
 
-    private function linkToPlannedTransaction(Transaction $transaction, string $value): bool
+    private function linkToPlannedTransaction(Transaction $transaction, string $value, ?RuleActionLookups $lookups = null): bool
     {
         $plannedId = (int) $value;
 
-        if (PlannedTransaction::where('id', $plannedId)->where('user_id', $transaction->user_id)->exists()) {
+        if ($lookups?->planIsOwnedBy($plannedId, $transaction->user_id) ?? PlannedTransaction::where('id', $plannedId)->where('user_id', $transaction->user_id)->exists()) {
             $transaction->planned_transaction_id = $plannedId;
         }
 
