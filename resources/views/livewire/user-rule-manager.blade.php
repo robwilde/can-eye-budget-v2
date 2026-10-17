@@ -2,6 +2,8 @@
     use App\Enums\RuleActionType;
     use App\Enums\RuleTriggerField;
     use App\Enums\RuleTriggerOperator;
+    use App\Enums\TransactionDirection;
+    use Illuminate\Support\Carbon;
     use Illuminate\Support\Str;
 @endphp
 <div class="space-y-6">
@@ -295,8 +297,67 @@
                 <flux:checkbox wire:model="ruleIsActive" label="Active" />
             </flux:field>
 
+            @if($ruleTestResult)
+                @php($testSections = [
+                    ['key' => 'not-yet', 'title' => 'Not yet applied', 'hint' => 'Apply now would change these.', 'color' => 'amber', 'count' => $ruleTestResult->notYetAppliedCount, 'rows' => $ruleTestResult->notYetApplied],
+                    ['key' => 'skipped', 'title' => 'Skipped', 'hint' => 'Apply now leaves these alone.', 'color' => 'zinc', 'count' => $ruleTestResult->skippedCount, 'rows' => $ruleTestResult->skipped],
+                    ['key' => 'already', 'title' => 'Already applied', 'hint' => 'The actions would change nothing here.', 'color' => 'green', 'count' => $ruleTestResult->alreadyAppliedCount, 'rows' => $ruleTestResult->alreadyApplied],
+                ])
+                <div wire:dirty.remove wire:target="triggers,actions,ruleStrictMode" class="w-full space-y-3 rounded-lg border border-neutral-200 p-3 dark:border-neutral-700" data-testid="rule-test-result">
+                    <flux:text data-testid="rule-test-total">
+                        Matches <strong>{{ $ruleTestResult->totalMatches() }}</strong>
+                        {{ Str::plural('transaction', $ruleTestResult->totalMatches()) }}.
+                    </flux:text>
+
+                    @if($ruleTestResult->appendsNotes)
+                        <flux:text size="sm" class="text-amber-700 dark:text-amber-500" data-testid="rule-test-appends-notes">
+                            Apply now will add the note again each time it runs, so these rows never show as already applied.
+                        </flux:text>
+                    @endif
+
+                    @foreach($testSections as $section)
+                        @if($section['count'] > 0)
+                            <div class="space-y-1" data-testid="rule-test-{{ $section['key'] }}">
+                                <div class="flex items-center gap-2">
+                                    <flux:heading size="sm">{{ $section['title'] }}</flux:heading>
+                                    <flux:badge size="sm" :color="$section['color']" data-testid="rule-test-{{ $section['key'] }}-count">{{ $section['count'] }}</flux:badge>
+                                </div>
+                                <flux:text size="sm">{{ $section['hint'] }}</flux:text>
+                                @if($section['count'] > count($section['rows']))
+                                    <flux:text size="sm" data-testid="rule-test-{{ $section['key'] }}-capped">Showing {{ count($section['rows']) }} of {{ $section['count'] }}</flux:text>
+                                @endif
+                                <div class="max-h-64 overflow-y-auto">
+                                    @foreach($section['rows'] as $row)
+                                        <x-cib.tx-row
+                                            wire:key="rule-test-{{ $section['key'] }}-{{ $row->id }}"
+                                            :transaction-id="null"
+                                            :planned-transaction-id="null"
+                                            :name="$row->name"
+                                            :amount="$row->amount"
+                                            :tone="$row->direction === TransactionDirection::Debit ? 'out' : 'inc'"
+                                        >
+                                            <x-slot:meta>
+                                                {{ Carbon::parse($row->postDate)->format('j M Y') }} · {{ $row->accountName }}
+                                                @if($row->categoryKept)
+                                                    <flux:badge size="sm" color="amber" class="ml-1">Category kept — categorised by hand</flux:badge>
+                                                @endif
+                                                @if($row->skipReason)
+                                                    <flux:badge size="sm" color="zinc" class="ml-1">{{ $row->skipReason->label() }}</flux:badge>
+                                                @endif
+                                            </x-slot:meta>
+                                            <x-slot:category>{{ $row->categoryPath ?? 'Uncategorised' }}</x-slot:category>
+                                        </x-cib.tx-row>
+                                    @endforeach
+                                </div>
+                            </div>
+                        @endif
+                    @endforeach
+                </div>
+            @endif
+
             <div class="flex justify-end gap-2">
                 <flux:button variant="ghost" wire:click="$set('showRuleModal', false)">Cancel</flux:button>
+                <flux:button variant="filled" wire:click="testRule" data-testid="rule-test">Test</flux:button>
                 <flux:button variant="primary" wire:click="saveRule">
                     {{ $editingRuleId ? 'Update' : 'Create' }}
                 </flux:button>
