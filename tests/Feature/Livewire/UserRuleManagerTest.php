@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\CategorySource;
 use App\Enums\PipelineTrigger;
 use App\Enums\RuleActionType;
 use App\Enums\RuleTriggerField;
@@ -11,12 +12,14 @@ use App\Enums\RuleTriggerOperator;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Livewire\UserRuleManager;
 use App\Models\Account;
+use App\Models\AuditEvent;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
 use Illuminate\Support\Facades\Queue;
+use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -673,4 +676,191 @@ test('search does not affect run rules availability', function () {
         ->test(UserRuleManager::class)
         ->set('search', 'zzz')
         ->assertViewHas('hasActiveRules', true);
+});
+
+// ─── Test rule ───────────────────────────────────────────
+
+function testRuleSeed(User $user, array $overrides = []): Transaction
+{
+    return Transaction::factory()->create(array_merge([
+        'user_id' => $user->id,
+        'account_id' => Account::factory()->for($user)->create()->id,
+        'description' => 'NETFLIX.COM',
+        'category_id' => null,
+        'transfer_pair_id' => null,
+    ], $overrides));
+}
+
+function openedDraft(User $user, Category $category, string $match = 'NETFLIX'): Testable
+{
+    $group = UserRuleGroup::factory()->for($user)->create();
+
+    return Livewire::actingAs($user)
+        ->test(UserRuleManager::class)
+        ->call('openAddRuleModal', $group->id)
+        ->set('triggers.0.field', RuleTriggerField::Description->value)
+        ->set('triggers.0.operator', RuleTriggerOperator::Contains->value)
+        ->set('triggers.0.value', $match)
+        ->set('actions.0.type', RuleActionType::SetCategory->value)
+        ->set('actions.0.value', (string) $category->id);
+}
+
+test('test lists what an unsaved rule matches and creates nothing', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    testRuleSeed($this->user);
+    testRuleSeed($this->user, ['description' => 'SPOTIFY']);
+
+    $component = openedDraft($this->user, $category)->call('testRule');
+
+    expect($component->get('ruleTestResult')->notYetAppliedCount)->toBe(1)
+        ->and(UserRule::where('user_id', $this->user->id)->count())->toBe(0);
+
+    $component->assertSeeHtml('data-testid="rule-test-not-yet"')
+        ->assertSee('NETFLIX.COM')
+        ->assertDontSee('SPOTIFY');
+});
+
+test('test runs without a rule name', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    testRuleSeed($this->user);
+
+    openedDraft($this->user, $category)
+        ->set('ruleName', '')
+        ->call('testRule')
+        ->assertHasNoErrors();
+});
+
+test('test reflects the unsaved edits of an existing rule, not the saved triggers', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    $rule = UserRule::factory()->for($this->user)->for($group, 'group')->create([
+        'triggers' => [['field' => RuleTriggerField::Description->value, 'operator' => RuleTriggerOperator::Contains->value, 'value' => 'NETFLIX']],
+        'actions' => [['type' => RuleActionType::SetCategory->value, 'value' => (string) $category->id]],
+    ]);
+    testRuleSeed($this->user);
+    testRuleSeed($this->user, ['description' => 'SPOTIFY PREMIUM']);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->call('openEditRuleModal', $rule->id)
+        ->set('triggers.0.value', 'SPOTIFY')
+        ->call('testRule');
+
+    expect($component->get('ruleTestResult')->notYetApplied)->toHaveCount(1)
+        ->and($component->get('ruleTestResult')->notYetApplied[0]->name)->toBe('SPOTIFY PREMIUM')
+        ->and($rule->fresh()->triggers[0]['value'])->toBe('NETFLIX');
+});
+
+test('test shows the three sections, their counts and the hand-categorised marker', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $other = Category::factory()->create(['is_hidden' => false]);
+    testRuleSeed($this->user, ['description' => 'NETFLIX NEW']);
+    testRuleSeed($this->user, ['description' => 'NETFLIX DONE', 'category_id' => $category->id, 'category_source' => CategorySource::Rule]);
+    testRuleSeed($this->user, ['description' => 'NETFLIX HAND', 'category_id' => $other->id, 'category_source' => CategorySource::Manual]);
+
+    openedDraft($this->user, $category)
+        ->call('testRule')
+        ->assertSeeHtml('data-testid="rule-test-not-yet"')
+        ->assertSeeHtml('data-testid="rule-test-skipped"')
+        ->assertSeeHtml('data-testid="rule-test-already"')
+        ->assertSee('Not yet applied')
+        ->assertSee('Skipped')
+        ->assertSee('Already applied')
+        ->assertSee('Categorised by hand')
+        ->assertSeeHtml('<strong>3</strong>');
+});
+
+test('an incomplete trigger shows validation errors instead of running', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    testRuleSeed($this->user);
+
+    openedDraft($this->user, $category)
+        ->set('triggers.0.operator', '')
+        ->call('testRule')
+        ->assertHasErrors(['triggers.0.operator'])
+        ->assertSet('ruleTestResult', null);
+});
+
+test('a missing action shows validation errors instead of running', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+
+    openedDraft($this->user, $category)
+        ->set('actions.0.type', '')
+        ->call('testRule')
+        ->assertHasErrors(['actions.0.type'])
+        ->assertSet('ruleTestResult', null);
+});
+
+test('a failed test clears the previous result', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    testRuleSeed($this->user);
+
+    $component = openedDraft($this->user, $category)->call('testRule');
+
+    expect($component->get('ruleTestResult'))->not->toBeNull();
+
+    $component->set('triggers.0.field', '')->call('testRule')->assertHasErrors(['triggers.0.field'])->assertSet('ruleTestResult', null);
+});
+
+test('the result is cleared when the draft or the modal changes', function (Closure $change) {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    $saved = UserRule::factory()->for($this->user)->for($group, 'group')->create();
+    testRuleSeed($this->user);
+
+    $component = openedDraft($this->user, $category)->call('testRule');
+
+    expect($component->get('ruleTestResult'))->not->toBeNull();
+
+    $change($component, $saved);
+
+    $component->assertSet('ruleTestResult', null);
+})->with([
+    'trigger value' => [fn (Testable $c) => $c->set('triggers.0.value', 'SPOTIFY')],
+    'trigger operator' => [fn (Testable $c) => $c->set('triggers.0.operator', RuleTriggerOperator::Equals->value)],
+    'strict mode' => [fn (Testable $c) => $c->set('ruleStrictMode', false)],
+    'action value' => [fn (Testable $c) => $c->set('actions.0.value', '')],
+    'added trigger' => [fn (Testable $c) => $c->call('addTrigger')],
+    'removed trigger' => [fn (Testable $c) => $c->call('removeTrigger', 0)],
+    'added action' => [fn (Testable $c) => $c->call('addAction')],
+    'removed action' => [fn (Testable $c) => $c->call('removeAction', 0)],
+    'modal closed' => [fn (Testable $c) => $c->set('showRuleModal', false)],
+    'another rule opened' => [fn (Testable $c, UserRule $saved) => $c->call('openEditRuleModal', $saved->id)],
+]);
+
+test('the result survives edits that do not change what the rule matches', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    testRuleSeed($this->user);
+
+    $component = openedDraft($this->user, $category)
+        ->call('testRule')
+        ->set('ruleName', 'Renamed')
+        ->set('ruleIsActive', false)
+        ->set('ruleIsAutoApply', true);
+
+    expect($component->get('ruleTestResult'))->not->toBeNull();
+});
+
+test('test writes nothing and is not audited', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    $row = testRuleSeed($this->user);
+    $before = $row->fresh()->getAttributes();
+    $draft = openedDraft($this->user, $category);
+    $audit = AuditEvent::count();
+
+    $draft->call('testRule');
+
+    expect($row->fresh()->getAttributes())->toBe($before)
+        ->and(AuditEvent::count())->toBe($audit)
+        ->and(UserRule::count())->toBe(0);
+});
+
+test('test only sees the signed-in user\'s transactions', function () {
+    $category = Category::factory()->create(['is_hidden' => false]);
+    testRuleSeed(User::factory()->create());
+
+    $component = openedDraft($this->user, $category)->call('testRule');
+
+    expect($component->get('ruleTestResult')->totalMatches())->toBe(0)
+        ->and($component->get('ruleTestResult')->notYetApplied)->toBe([]);
 });

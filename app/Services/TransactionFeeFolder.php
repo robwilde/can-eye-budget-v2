@@ -20,15 +20,7 @@ final readonly class TransactionFeeFolder
      */
     public function fold(Transaction $fee): ?Transaction
     {
-        if ($fee->trashed()
-            || $fee->folded_into_transaction_id !== null
-            || $fee->planned_transaction_id !== null
-            || $fee->transfer_pair_id !== null
-        ) {
-            return null;
-        }
-
-        $parent = $this->findParent($fee);
+        $parent = $this->foldableParent($fee);
 
         if ($parent === null) {
             return null;
@@ -51,6 +43,24 @@ final readonly class TransactionFeeFolder
 
             return $merged;
         });
+    }
+
+    /**
+     * The purchase fold() would merge this fee into, or null when the fee is
+     * not eligible or no unambiguous parent exists. Read-only: fold() and the
+     * rule tester share it so a dry run cannot disagree with the write.
+     */
+    public function foldableParent(Transaction $fee): ?Transaction
+    {
+        if ($fee->trashed()
+            || $fee->folded_into_transaction_id !== null
+            || $fee->planned_transaction_id !== null
+            || $fee->transfer_pair_id !== null
+        ) {
+            return null;
+        }
+
+        return $this->findParent($fee);
     }
 
     /**

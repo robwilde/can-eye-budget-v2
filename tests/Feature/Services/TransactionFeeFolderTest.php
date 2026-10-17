@@ -202,3 +202,29 @@ test('foldedFees and foldedInto expose the fold relationship', function () {
 
     expect($freshFee->foldedInto->id)->toBe($merged->id);
 });
+
+// ─── foldableParent ──────────────────────────────────────────────────────
+
+test('foldableParent names the parent fold would merge into and writes nothing', function () {
+    $parent = makeParent($this->user, $this->account);
+    $fee = makeFee($this->user, $this->account);
+    $rows = Transaction::withTrashed()->count();
+
+    $found = $this->folder->foldableParent($fee);
+
+    expect($found?->id)->toBe($parent->id)
+        ->and(Transaction::withTrashed()->count())->toBe($rows)
+        ->and($fee->fresh()->trashed())->toBeFalse();
+});
+
+test('foldableParent is null for a fee fold would refuse', function (string $reason) {
+    makeParent($this->user, $this->account);
+    $fee = match ($reason) {
+        'planned link' => makeFee($this->user, $this->account, ['planned_transaction_id' => PlannedTransaction::factory()->create(['user_id' => $this->user->id, 'account_id' => $this->account->id])->id]),
+        'already folded' => makeFee($this->user, $this->account, ['folded_into_transaction_id' => makeParent($this->user, $this->account, ['description' => 'OTHER 99999 #1'])->id]),
+        'transfer' => makeFee($this->user, $this->account, ['transfer_pair_id' => makeParent($this->user, $this->account, ['description' => 'OTHER 99999 #1'])->id]),
+        'no parent' => makeFee($this->user, $this->account, ['description' => 'Int Tran Fee - nothing here']),
+    };
+
+    expect($this->folder->foldableParent($fee))->toBeNull();
+})->with(['planned link', 'already folded', 'transfer', 'no parent']);
