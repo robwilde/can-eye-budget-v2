@@ -1,6 +1,7 @@
 @php($visible = ($enabled && ($this->pendingOrders->isNotEmpty() || $this->recentlyAutoApproved->isNotEmpty())))
 <div @unless ($visible) hidden @endunless>
-    <x-cib.card data-testid="bnpl-order-review">
+    @if ($visible)
+        <x-cib.card data-testid="bnpl-order-review">
             <x-cib.sec-head :title="__('Buy now pay later orders')">
                 @if ($this->pendingOrders->isNotEmpty())
                     <x-cib.stat-pill tone="planned" :value="$this->pendingOrders->flatten(1)->count().' '.__('to review')"/>
@@ -68,4 +69,5 @@
                 </section>
             @endif
         </x-cib.card>
+    @endif
 </div>
