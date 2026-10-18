@@ -1,11 +1,11 @@
 <div>
 <flux:card>
     <div class="space-y-4">
-        <flux:heading size="lg">Transfer rules <flux:badge size="sm" color="zinc">{{ $rules->count() }}</flux:badge></flux:heading>
+        <flux:heading size="lg" class="flex items-center gap-2">Transfer rules <flux:badge size="sm" color="zinc">{{ $rules->count() }}</flux:badge></flux:heading>
         <flux:text size="sm" class="text-zinc-500">Matching imports link automatically. Deleting a rule never changes existing links.</flux:text>
 
         @forelse($rules as $rule)
-            <div wire:key="rule-{{ $rule->id }}" class="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 p-3">
+            <div wire:key="rule-{{ $rule->id }}" class="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 px-4 py-3">
                 <div class="min-w-0">
                     <div class="font-medium">{{ $rule->account->name }} → {{ $rule->counterpartAccount->name }}</div>
                     <flux:text size="sm" class="truncate text-zinc-500">

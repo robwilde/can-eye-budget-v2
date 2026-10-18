@@ -7,37 +7,38 @@
     use Illuminate\Support\Str;
 @endphp
 <div class="space-y-6">
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <flux:heading size="lg">Rules</flux:heading>
-        <div class="flex flex-wrap items-center gap-2">
-            <flux:input wire:model.live.debounce.300ms="search" icon="magnifying-glass" placeholder="Search rules..." size="sm" class="w-full sm:w-auto sm:min-w-48" />
-            <flux:button size="sm" icon="play" wire:click="runRules" :disabled="! $hasActiveRules">Run rules now</flux:button>
-            <flux:button variant="primary" size="sm" wire:click="openAddGroupModal">Add Group</flux:button>
+    <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div class="max-w-2xl">
+                <flux:heading size="lg">Rules</flux:heading>
+                <flux:text size="sm" class="mt-1 text-zinc-500">Auto-apply rules run after every import and when you click Run rules. Other rules turn their matches into suggestions for you to accept.</flux:text>
+            </div>
+            <div class="flex shrink-0 flex-wrap items-center gap-2">
+                <flux:button size="sm" icon="play" wire:click="runRules" :disabled="! $hasActiveRules">Run rules now</flux:button>
+                <flux:button variant="primary" size="sm" wire:click="openAddGroupModal">Add Group</flux:button>
+            </div>
         </div>
+        <flux:input wire:model.live.debounce.300ms="search" icon="magnifying-glass" placeholder="Search rules..." size="sm" class="w-full sm:max-w-sm" />
     </div>
-
-    <flux:text size="sm" class="text-zinc-500">Auto-apply rules run after every import and when you click Run rules. Other rules turn their matches into suggestions for you to accept.</flux:text>
 
     @php($searching = mb_trim($search) !== '')
 
     @forelse($groups as $group)
         <x-cib.card wire:key="group-{{ $group->id }}">
-            <div class="flex items-center justify-between gap-4">
-                <div class="flex items-center gap-3">
+            <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+                <div class="flex min-w-0 items-center gap-3">
                     @unless($searching)
-                        <div class="flex flex-col gap-1">
-                            <div class="flex items-center gap-1">
-                                <flux:button variant="ghost" size="xs" wire:click="moveGroupUp({{ $group->id }})">
-                                    <flux:icon.chevron-up class="size-3" />
-                                </flux:button>
-                                <flux:button variant="ghost" size="xs" wire:click="moveGroupDown({{ $group->id }})">
-                                    <flux:icon.chevron-down class="size-3" />
-                                </flux:button>
-                            </div>
+                        <div class="flex shrink-0 flex-col items-center">
+                            <flux:button variant="ghost" size="xs" wire:click="moveGroupUp({{ $group->id }})">
+                                <flux:icon.chevron-up class="size-3" />
+                            </flux:button>
+                            <flux:button variant="ghost" size="xs" wire:click="moveGroupDown({{ $group->id }})">
+                                <flux:icon.chevron-down class="size-3" />
+                            </flux:button>
                         </div>
                     @endunless
-                    <div>
-                        <x-cib.sec-head :title="$group->name">
+                    <div class="min-w-0 space-y-1">
+                        <x-cib.sec-head :title="$group->name" class="mb-0 flex-wrap justify-start gap-x-3 gap-y-2">
                             <x-cib.stat-pill tone="neutral" :value="$group->rules->count().' '.Str::plural('rule', $group->rules->count())" />
                             @unless($group->is_active)<x-cib.stat-pill tone="planned">Inactive</x-cib.stat-pill>@endunless
                             @if($group->stop_processing)<x-cib.stat-pill tone="posted">Stop Processing</x-cib.stat-pill>@endif
@@ -48,7 +49,7 @@
                     </div>
                 </div>
 
-                <div class="flex shrink-0 items-center gap-2">
+                <div class="flex shrink-0 flex-wrap items-center gap-1">
                     <flux:button variant="ghost" size="sm" wire:click="toggleGroupActive({{ $group->id }})">
                         {{ $group->is_active ? 'Disable' : 'Enable' }}
                     </flux:button>
@@ -65,12 +66,12 @@
             </div>
 
             @if($group->rules->isNotEmpty())
-                <div class="mt-4 space-y-2">
+                <div class="mt-5 space-y-2">
                     @foreach($group->rules as $rule)
-                        <div wire:key="rule-{{ $rule->id }}" class="flex items-center justify-between gap-4 rounded-lg border border-neutral-200 p-3 dark:border-neutral-700">
-                            <div class="flex items-center gap-3">
+                        <div wire:key="rule-{{ $rule->id }}" class="flex flex-col gap-3 rounded-lg border border-neutral-200 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+                            <div class="flex min-w-0 flex-1 items-center gap-3">
                                 @unless($searching)
-                                    <div class="flex flex-col gap-1">
+                                    <div class="flex shrink-0 flex-col items-center">
                                         <flux:button variant="ghost" size="xs" wire:click="moveRuleUp({{ $rule->id }})">
                                             <flux:icon.chevron-up class="size-3" />
                                         </flux:button>
@@ -79,24 +80,30 @@
                                         </flux:button>
                                     </div>
                                 @endunless
-                                <div>
-                                    <flux:text class="font-medium">{{ $rule->name }}</flux:text>
-                                    @if($rule->description)
-                                        <flux:text size="sm" class="text-zinc-500">{{ $rule->description }}</flux:text>
-                                    @endif
+                                <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+                                    <div class="min-w-0">
+                                        <flux:text class="font-medium">{{ $rule->name }}</flux:text>
+                                        @if($rule->description)
+                                            <flux:text size="sm" class="text-zinc-500">{{ $rule->description }}</flux:text>
+                                        @endif
+                                    </div>
+                                    <div class="flex flex-wrap items-center gap-1.5">
+                                        <flux:badge size="sm" color="blue">{{ count($rule->triggers) }} {{ Str::plural('trigger', count($rule->triggers)) }}</flux:badge>
+                                        <flux:badge size="sm" color="purple">{{ count($rule->actions) }} {{ Str::plural('action', count($rule->actions)) }}</flux:badge>
+                                        @unless($rule->is_active)
+                                            <flux:badge size="sm" color="yellow">Inactive</flux:badge>
+                                        @endunless
+                                    </div>
                                 </div>
-                                <flux:badge size="sm" color="blue">{{ count($rule->triggers) }} {{ Str::plural('trigger', count($rule->triggers)) }}</flux:badge>
-                                <flux:badge size="sm" color="purple">{{ count($rule->actions) }} {{ Str::plural('action', count($rule->actions)) }}</flux:badge>
-                                @unless($rule->is_active)
-                                    <flux:badge size="sm" color="yellow">Inactive</flux:badge>
-                                @endunless
                             </div>
 
-                            <div class="flex shrink-0 items-center gap-2">
+                            <div class="flex shrink-0 flex-wrap items-center gap-1 lg:justify-end">
                                 <flux:button variant="ghost" size="sm" wire:click="toggleRuleActive({{ $rule->id }})">
                                     {{ $rule->is_active ? 'Disable' : 'Enable' }}
                                 </flux:button>
-                                <flux:switch label="Auto-apply" :checked="$rule->is_auto_apply" wire:click="toggleRuleAutoApply({{ $rule->id }})" />
+                                <div class="px-2">
+                                    <flux:switch label="Auto-apply" :checked="$rule->is_auto_apply" wire:click="toggleRuleAutoApply({{ $rule->id }})" />
+                                </div>
                                 <flux:button variant="ghost" size="sm" wire:click="applyRule({{ $rule->id }})" :disabled="! $rule->is_active">
                                     Apply now
                                 </flux:button>
