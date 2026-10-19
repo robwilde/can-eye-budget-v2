@@ -1503,40 +1503,64 @@ test('updating planned transfer saves both account ids', function () {
 
 // ── Header Colors (#119) ──────────────────────────────────────
 
-test('expense type renders the red type dropdown', function () {
+test('expense type renders the amount hero in the owed tone with a minus sign', function () {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('transactionType', 'expense')
-        ->assertSeeHtml('text-red-700!')
-        ->assertDontSeeHtml('text-green-700!')
-        ->assertDontSeeHtml('text-orange-700!');
+        ->set('descriptionInput', '12.50 coffee')
+        ->assertSeeHtml('panel-amount out')
+        ->assertDontSeeHtml('panel-amount inc')
+        ->assertDontSeeHtml('panel-amount xfr')
+        ->assertSee('−$12.50');
 });
 
-test('income type renders the green type dropdown', function () {
+test('income type renders the amount hero in the available tone with a plus sign', function () {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('transactionType', 'income')
-        ->assertSeeHtml('text-green-700!')
-        ->assertDontSeeHtml('text-red-700!');
+        ->set('descriptionInput', '420 salary')
+        ->assertSeeHtml('panel-amount inc')
+        ->assertDontSeeHtml('panel-amount out')
+        ->assertSee('+$420.00');
 });
 
-test('transfer type renders the orange type dropdown', function () {
+test('transfer type renders the amount hero in the transfer tone without a sign', function () {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-03-15')
         ->set('transactionType', 'transfer')
-        ->assertSeeHtml('text-orange-700!')
-        ->assertDontSeeHtml('text-red-700!')
-        ->assertDontSeeHtml('text-blue-600')
-        ->assertDontSeeHtml('bg-amber-50');
+        ->set('descriptionInput', '100 savings transfer')
+        ->assertSeeHtml('panel-amount xfr')
+        ->assertDontSeeHtml('panel-amount out')
+        ->assertSee('$100.00')
+        ->assertDontSee('−$100.00')
+        ->assertDontSee('+$100.00');
+});
+
+test('the amount hero shows no sign before an amount is parsed', function () {
+    Livewire::actingAs(User::factory()->create())
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->assertSee('$0.00')
+        ->assertDontSee('−$0.00');
+});
+
+test('the amount hero keeps a negative parsed amount negative instead of applying the type sign', function () {
+    Livewire::actingAs(User::factory()->create())
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('transactionType', 'income')
+        ->set('descriptionInput', '5-10 refund')
+        ->assertSee('-$5.00')
+        ->assertDontSee('+$5.00');
 });
 
 test('submit button and header take the colour of the selected type', function () {

@@ -409,7 +409,7 @@ final class TransactionModal extends Component
             return;
         }
 
-        if ($transaction->source->isBankFeed() && $transaction->parent_transaction_id === null) {
+        if ($transaction->parent_transaction_id === null && $transaction->source->isBankFeed()) {
             return;
         }
 
@@ -552,6 +552,8 @@ final class TransactionModal extends Component
 
         $categories = Category::visibleSortedByFullPath();
 
+        $parsed = $this->descriptionInput !== '' ? AmountParser::parse($this->descriptionInput) : null;
+
         return view('livewire.transaction-modal', [
             'accounts' => $accounts,
             // Normal entry only offers tracked accounts; a linked bank-feed row keeps showing
@@ -562,9 +564,8 @@ final class TransactionModal extends Component
             ),
             'categories' => $categories,
             'formatMoney' => MoneyCast::format(...),
-            'parsedAmount' => $this->descriptionInput !== ''
-                ? AmountParser::parse($this->descriptionInput)->amount
-                : 0,
+            'parsedAmount' => $parsed->amount ?? 0,
+            'parsedDescription' => $parsed->description ?? '',
         ]);
     }
 
@@ -894,6 +895,9 @@ final class TransactionModal extends Component
         return true;
     }
 
+    /**
+     * @throws Throwable
+     */
     private function updateTransaction(): bool
     {
         $resolved = $this->resolveTransactionWithParsedAmount(allowZero: true);
@@ -1502,6 +1506,8 @@ final class TransactionModal extends Component
     /**
      * Plan a new recurring transaction from a bank-feed row. The bank-feed row
      * is never modified: no child version and no plan link is recorded on it.
+     *
+     * @throws Throwable
      */
     private function planFromBankFeedRow(): bool
     {

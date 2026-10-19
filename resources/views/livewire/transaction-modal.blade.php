@@ -4,11 +4,29 @@
     use Illuminate\Support\Str;
 @endphp
 <div>
-    <flux:modal wire:model="showModal" class="md:w-lg rounded-t-xl border-t-2 border-cib-black">
-        <form wire:submit="save" class="space-y-5">
-            {{-- Header: title + date --}}
-            <div class="flex items-start justify-between gap-3">
-                <div class="border-l-4 pl-3 {{ match ($transactionType) { 'income' => 'border-green-500', 'transfer' => 'border-orange-500', default => 'border-red-500' } }}">
+    @php
+        $typeTone = match ($transactionType) {
+            'income' => ['bar' => 'border-green-500', 'amount' => 'inc', 'sign' => '+', 'button' => 'bg-green-600!'],
+            'transfer' => ['bar' => 'border-orange-500', 'amount' => 'xfr', 'sign' => '', 'button' => 'bg-orange-600!'],
+            default => ['bar' => 'border-red-500', 'amount' => 'out', 'sign' => '−', 'button' => 'bg-red-600!'],
+        };
+        // A bank-feed row's direction is the bank's, so it can only be that
+        // direction's type or a transfer.
+        $feedDirection = $isBankFeedTransaction ? $bankFeedTransactionDirection : null;
+        $heroTitle = $isBankFeedTransaction && mb_trim($cleanDescription) !== '' ? mb_trim($cleanDescription) : $parsedDescription;
+        $descriptionLabel = $mode === 'plan' ? __('Planned amount with description') : __('Actual amount with description');
+    @endphp
+    <flux:modal
+        wire:model="showModal"
+        variant="flyout"
+        position="right"
+        :closable="false"
+        class="w-full max-w-full p-0! border-s-0! md:w-[34rem] md:max-w-[92vw] md:border-s-2! md:border-cib-black!"
+    >
+        <form wire:submit="save" class="panel-form">
+            {{-- Sticky bar: title, date, close --}}
+            <div class="panel-bar">
+                <div class="min-w-0 flex-1 border-l-4 pl-3 {{ $typeTone['bar'] }}">
                     <flux:heading size="lg" class="font-black">
                         @if($editingPlannedTransactionId)
                             {{ __('Edit planned') }}
@@ -25,29 +43,51 @@
                             {{ __('Synced from bank') }}
                         </flux:badge>
                     @endif
-                    @php
-                        $typeTone = match ($transactionType) {
-                            'income' => [
-                                'select' => 'text-green-700! border-green-500! bg-green-50!',
-                                'button' => 'bg-green-600!',
-                            ],
-                            'transfer' => [
-                                'select' => 'text-orange-700! border-orange-500! bg-orange-50!',
-                                'button' => 'bg-orange-600!',
-                            ],
-                            default => [
-                                'select' => 'text-red-700! border-red-500! bg-red-50!',
-                                'button' => 'bg-red-600!',
-                            ],
-                        };
-                        // A bank-feed row's direction is the bank's, so it can only be that
-                        // direction's type or a transfer.
-                        $feedDirection = $isBankFeedTransaction ? $bankFeedTransactionDirection : null;
-                    @endphp
+                </div>
+
+                @if($date && $isBankFeedTransaction)
+                    <flux:badge color="zinc" class="shrink-0">
+                        {{ CarbonImmutable::parse($date)->format('D j M Y') }}
+                    </flux:badge>
+                @elseif($date && $mode !== 'plan')
+                    <div class="w-36 shrink-0">
+                        <flux:input
+                            type="date"
+                            wire:model.live="date"
+                            class="py-1! text-sm!"
+                        />
+                    </div>
+                @endif
+
+                <flux:modal.close>
+                    <flux:button
+                        type="button"
+                        variant="ghost"
+                        icon="x-mark"
+                        size="sm"
+                        aria-label="Close modal"
+                        class="shrink-0 text-zinc-400! hover:text-zinc-800!"
+                    />
+                </flux:modal.close>
+            </div>
+
+            {{-- Amount hero: the parsed amount and name, always in view of what is being edited --}}
+            <div class="panel-amount {{ $typeTone['amount'] }}" data-testid="parsed-amount">
+                <span class="cib-label">{{ __('Parsed amount') }}</span>
+                <div class="amt">{{ $parsedAmount > 0 ? $typeTone['sign'] : '' }}{{ $formatMoney($parsedAmount) }}</div>
+                @if($heroTitle !== '')
+                    <div class="desc">{{ $heroTitle }}</div>
+                @endif
+            </div>
+
+            {{-- Type + Enter vs Plan --}}
+            <div class="grid gap-3 sm:grid-cols-2">
+                <div>
+                    <span class="cib-label">{{ __('Type') }}</span>
                     <flux:select
                         wire:model.live="transactionType"
                         :aria-label="__('Transaction type')"
-                        class="mt-2 font-bold {{ $typeTone['select'] }}"
+                        class="font-bold"
                         data-testid="transaction-type"
                     >
                         @if($feedDirection !== 'credit')
@@ -59,60 +99,26 @@
                         <flux:select.option value="transfer">{{ __('Transfer between accounts') }}</flux:select.option>
                     </flux:select>
                 </div>
-
-                <div class="pe-9">
-                    @if($date && $isBankFeedTransaction)
-                        <flux:badge color="zinc">
-                            {{ CarbonImmutable::parse($date)->format('D j M Y') }}
-                        </flux:badge>
-                    @elseif($date)
-                        <flux:input
-                            type="date"
-                            wire:model.live="date"
-                            class="py-1! text-sm!"
-                        />
-                    @endif
+                <div>
+                    <span class="cib-label">{{ __('Mode') }}</span>
+                    <div class="type-toggle" role="group" aria-label="{{ __('Enter vs Plan') }}">
+                        <button type="button"
+                                aria-pressed="{{ $mode === 'enter' ? 'true' : 'false' }}"
+                                class="{{ $mode === 'enter' ? 'active' : '' }}"
+                                wire:click="$set('mode', 'enter')">
+                            {{ __('Enter') }}
+                        </button>
+                        <button type="button"
+                                aria-pressed="{{ $mode === 'plan' ? 'true' : 'false' }}"
+                                class="{{ $mode === 'plan' ? 'active' : '' }}"
+                                wire:click="$set('mode', 'plan')">
+                            {{ __('Plan') }}
+                        </button>
+                    </div>
                 </div>
             </div>
 
-            {{-- Enter vs Plan toggle --}}
-            <div class="type-toggle" role="group" aria-label="{{ __('Enter vs Plan') }}">
-                <button type="button"
-                        aria-pressed="{{ $mode === 'enter' ? 'true' : 'false' }}"
-                        class="{{ $mode === 'enter' ? 'active' : '' }}"
-                        wire:click="$set('mode', 'enter')">
-                    {{ __('Enter') }}
-                </button>
-                <button type="button"
-                        aria-pressed="{{ $mode === 'plan' ? 'true' : 'false' }}"
-                        class="{{ $mode === 'plan' ? 'active' : '' }}"
-                        wire:click="$set('mode', 'plan')">
-                    {{ __('Plan') }}
-                </button>
-            </div>
-
-            {{-- Description / amount-with-description input --}}
-            @if($transactionType === 'transfer')
-                <flux:input
-                    wire:key="description-transfer"
-                    wire:model.blur="descriptionInput"
-                    :label="$mode === 'plan' ? __('Planned amount with description') : __('Actual amount with description')"
-                    placeholder="100 savings transfer"
-                    required
-                    :disabled="$isBankFeedTransaction"
-                />
-            @else
-                <flux:textarea
-                    wire:key="description-non-transfer"
-                    wire:model.blur="descriptionInput"
-                    :label="$mode === 'plan' ? __('Planned amount with description') : __('Actual amount with description')"
-                    placeholder="4*15 zoo tickets&#10;(100 in parentheses is ignored)"
-                    rows="2"
-                    required
-                    :disabled="$isBankFeedTransaction"
-                />
-            @endif
-
+            {{-- Clean description first: it is the field a bank-feed row lets you edit --}}
             @if($isBankFeedTransaction)
                 <flux:input
                     wire:model.live.blur="cleanDescription"
@@ -121,15 +127,29 @@
                 />
             @endif
 
-            {{-- Parsed amount card --}}
-            <div class="rounded-md border-2 border-cib-black bg-cib-cream-50 px-4 py-3 shadow-pop-sm">
-                <flux:text size="sm" class="font-bold uppercase tracking-wider text-cib-n-600">
-                    {{ __('Parsed amount') }}
-                </flux:text>
-                <div class="mt-1 text-2xl font-black tabular-nums text-cib-black">
-                    {{ $formatMoney($parsedAmount) }}
-                </div>
-            </div>
+            {{-- Description / amount-with-description input --}}
+            @if($transactionType === 'transfer')
+                <flux:input
+                    wire:key="description-transfer"
+                    wire:model.blur="descriptionInput"
+                    :label="$descriptionLabel"
+                    placeholder="100 savings transfer"
+                    required
+                    :disabled="$isBankFeedTransaction"
+                />
+            @else
+                <flux:textarea
+                    wire:key="description-non-transfer"
+                    wire:model.blur="descriptionInput"
+                    :label="$descriptionLabel"
+                    placeholder="4*15 zoo tickets&#10;(100 in parentheses is ignored)"
+                    rows="2"
+                    required
+                    :disabled="$isBankFeedTransaction"
+                />
+            @endif
+
+            <hr class="panel-rule">
 
             {{-- Account selection. A bank-feed row's own account is locked; on an unlinked
                  credit (deposit) it is the receiving side, so the picker below chooses "From". --}}
@@ -247,6 +267,8 @@
                 @endif
             @endif
 
+            <hr class="panel-rule">
+
             <x-category-combobox
                 wire:model="categoryId"
                 :categories="$categories"
@@ -315,20 +337,24 @@
 
             {{-- Plan-mode fields --}}
             @if($mode === 'plan')
-                <flux:input
-                    wire:model="date"
-                    :label="__('Date')"
-                    type="date"
-                    required
-                />
+                <hr class="panel-rule">
 
-                <flux:select wire:model.live="frequency" :label="__('Frequency')" required>
-                    @foreach(RecurrenceFrequency::cases() as $freq)
-                        <flux:select.option value="{{ $freq->value }}">
-                            {{ $freq->label() }}
-                        </flux:select.option>
-                    @endforeach
-                </flux:select>
+                <div class="grid grid-cols-2 gap-3">
+                    <flux:input
+                        wire:model="date"
+                        :label="__('Date')"
+                        type="date"
+                        required
+                    />
+
+                    <flux:select wire:model.live="frequency" :label="__('Frequency')" required>
+                        @foreach(RecurrenceFrequency::cases() as $freq)
+                            <flux:select.option value="{{ $freq->value }}">
+                                {{ $freq->label() }}
+                            </flux:select.option>
+                        @endforeach
+                    </flux:select>
+                </div>
 
                 <div class="space-y-3">
                     <div class="type-toggle" role="group" aria-label="{{ __('Repeat until') }}">
@@ -359,6 +385,8 @@
 
             {{-- Transfer / bank-feed notes, plus any existing notes (e.g. folded intl-fee note) --}}
             @if($transactionType === 'transfer' || $isBankFeedTransaction || $notes !== '')
+                <hr class="panel-rule">
+
                 <flux:textarea
                     wire:model="notes"
                     :label="$transactionType === 'transfer' ? __('Transfer description') : __('Notes')"
@@ -403,14 +431,16 @@
                         {{ __('Delete') }}
                     </flux:button>
                 @endif
-                <flux:spacer/>
-                <flux:modal.close>
-                    <flux:button variant="ghost" type="button">{{ __('Cancel') }}</flux:button>
-                </flux:modal.close>
+                <flux:spacer class="hidden sm:block"/>
+                <div class="hidden sm:block">
+                    <flux:modal.close>
+                        <flux:button variant="ghost" type="button">{{ __('Cancel') }}</flux:button>
+                    </flux:modal.close>
+                </div>
                 <flux:button
                     type="submit"
                     variant="primary"
-                    class="{{ $typeTone['button'] }} border-2! border-cib-black! text-white! shadow-pop!"
+                    class="{{ $typeTone['button'] }} grow border-2! border-cib-black! text-white! shadow-pop! sm:grow-0"
                     data-testid="transaction-submit"
                 >
                     @if($editingTransactionId && $mode === 'plan' && !$isBankFeedTransaction)
