@@ -9,6 +9,8 @@
             <flux:heading size="xl">
                 @if($categoryName)
                     {{ $categoryName }} Transactions
+                @elseif($groupName)
+                    {{ $groupName }} Transactions
                 @else
                     All Transactions
                 @endif
@@ -69,6 +71,14 @@
         <div class="min-w-56" data-testid="category-filter">
             <x-category-combobox wire:model="category" :categories="$splitCategories" placeholder="Any category" aria-label="Category" size="sm" />
         </div>
+        @if($group !== null)
+            <flux:badge size="sm" data-testid="group-filter-chip">
+                {{ $groupName ?? 'Unknown group' }}
+                <button type="button" wire:click="$set('group', null)" aria-label="Clear group filter" class="ml-1">
+                    <flux:icon.x-mark class="size-3"/>
+                </button>
+            </flux:badge>
+        @endif
 
         <x-cib.filter-toggle
             :options="[
