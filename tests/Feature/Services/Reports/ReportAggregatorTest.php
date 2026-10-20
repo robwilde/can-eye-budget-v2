@@ -302,6 +302,73 @@ test('plan atoms classify transfers by the tracked side, whichever account the p
         ->and(collect($atoms)->where('direction', 'credit')->sum('total'))->toBe(2000);
 });
 
+test('actual atoms drop the untracked-paired leg of a transfer when transfers are excluded', function () {
+    $user = User::factory()->create();
+    $tracked = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+    $groceries = Category::factory()->create(['name' => 'Groceries']);
+
+    Transaction::factory()->for($user)->debit()->create(['account_id' => $tracked->id, 'category_id' => $groceries->id, 'amount' => 1500, 'post_date' => '2026-07-04']);
+
+    $pair = function (Account $from, Account $to, int $amount) use ($user): void {
+        $debit = Transaction::factory()->for($user)->debit()->create(['account_id' => $from->id, 'amount' => $amount, 'post_date' => '2026-07-05']);
+        $credit = Transaction::factory()->for($user)->credit()->create(['account_id' => $to->id, 'amount' => $amount, 'post_date' => '2026-07-05', 'transfer_pair_id' => $debit->id]);
+        $debit->update(['transfer_pair_id' => $credit->id]);
+    };
+
+    $pair($tracked, $hidden, 7000);
+    $pair($hidden, $tracked, 3000);
+
+    $totals = fn (bool $includeTransfers): array => collect(app(ReportAggregator::class)->atoms(
+        $user,
+        'actual',
+        CarbonImmutable::parse('2026-07-01'),
+        CarbonImmutable::parse('2026-07-31')->endOfDay(),
+        $includeTransfers,
+    ))->groupBy('direction')->map(fn ($rows) => $rows->sum('total'))->all();
+
+    expect($totals(true))->toEqual(['credit' => 3000, 'debit' => 8500])
+        ->and($totals(false))->toBe(['debit' => 1500])
+        ->and(collect(app(ReportAggregator::class)->atoms(
+            $user,
+            'actual',
+            CarbonImmutable::parse('2026-07-01'),
+            CarbonImmutable::parse('2026-07-31')->endOfDay(),
+        ))->groupBy('direction')->map(fn ($rows) => $rows->sum('total'))->all())->toBe($totals(true));
+});
+
+test('plan atoms drop tracked and untracked transfer plans when transfers are excluded', function () {
+    $user = User::factory()->create();
+    $tracked = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+    $trackedOther = Account::factory()->for($user)->create();
+
+    $plan = fn (Account $from, ?Account $to, int $amount) => PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $from->id,
+        'transfer_to_account_id' => $to?->id,
+        'direction' => TransactionDirection::Debit,
+        'amount' => $amount,
+        'start_date' => '2026-07-10',
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+
+    $plan($tracked, $hidden, 6000);
+    $plan($hidden, $tracked, 2000);
+    $plan($tracked, $trackedOther, 9999);
+    $plan($tracked, null, 1200);
+
+    $totals = fn (bool $includeTransfers): array => collect(app(ReportAggregator::class)->atoms(
+        $user,
+        'plan',
+        CarbonImmutable::parse('2026-07-01'),
+        CarbonImmutable::parse('2026-07-31')->endOfDay(),
+        $includeTransfers,
+    ))->groupBy('direction')->map(fn ($rows) => $rows->sum('total'))->all();
+
+    expect($totals(true))->toEqual(['debit' => 7200, 'credit' => 2000])
+        ->and($totals(false))->toBe(['debit' => 1200]);
+});
+
 test('open-range month bounds include boundary transfers before and after ordinary activity', function () {
     $user = User::factory()->create();
     $tracked = Account::factory()->for($user)->create();
