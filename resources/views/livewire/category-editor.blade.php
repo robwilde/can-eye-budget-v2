@@ -54,7 +54,15 @@
                             <flux:icon.chevron-right @class(['size-4 shrink-0 transition-transform', 'rotate-90' => $selectedCategoryId === $category['id']])/>
                             <span class="cat-name">{{ $isSearching ? $category['full_path'] : $category['name'] }}</span>
                         </span>
-                        <span class="cat-count">{{ $category['transactions_count'] }}</span>
+                        <span class="flex items-center gap-2">
+                            @if($category['group'])
+                                <span @class(['inline-flex items-center gap-1 text-xs', 'font-medium' => $category['group_id'] !== null, 'italic' => $category['group_id'] === null])>
+                                    <flux:icon :name="$category['group']->icon" variant="mini" class="size-3" style="color: {{ $category['group']->color }}"/>
+                                    {{ $category['group']->name }}
+                                </span>
+                            @endif
+                            <span class="cat-count">{{ $category['transactions_count'] }}</span>
+                        </span>
                     </button>
 
                     @if($selectedCategoryId === $category['id'])
@@ -82,6 +90,22 @@
                                     {{ $category['is_hidden'] ? __('Unhide') : __('Hide') }}
                                 </flux:button>
                                 <flux:button wire:click="confirmDelete({{ $category['id'] }})" variant="ghost" size="sm" icon="trash" class="text-red-500 hover:text-red-600"/>
+                            </div>
+
+                            <div class="flex flex-wrap items-end gap-2">
+                                <div class="flex-1">
+                                    <label class="cib-label" for="category-group-select">{{ __('Group') }}</label>
+                                    <flux:select id="category-group-select" wire:model="editingGroupId" size="sm">
+                                        <flux:select.option value="">{{ $category['parent_id'] === null ? __('No group') : __('Inherit from parent') }}</flux:select.option>
+                                        @foreach($groups as $group)
+                                            <flux:select.option value="{{ $group->id }}">{{ $group->name }}</flux:select.option>
+                                        @endforeach
+                                    </flux:select>
+                                    @error('editingGroupId')
+                                        <flux:text size="sm" class="mt-1 text-red-600">{{ $message }}</flux:text>
+                                    @enderror
+                                </div>
+                                <flux:button wire:click="saveCategoryGroup" variant="primary" size="sm">{{ __('Save group') }}</flux:button>
                             </div>
 
                             @if($showDeleteConfirm)
@@ -124,6 +148,60 @@
                         <flux:text size="sm">{{ __('No categories found.') }}</flux:text>
                     </div>
                 @endforelse
+            </div>
+
+            <div class="space-y-3 rounded-lg border-2 border-[var(--color-border-strong)] p-3">
+                <div class="flex items-center justify-between gap-3">
+                    <flux:heading size="sm">{{ __('Category groups') }}</flux:heading>
+                    @unless($showGroupForm)
+                        <button type="button" wire:click="openGroupForm" class="cib-yellow-pill">
+                            <flux:icon.plus class="size-4"/>
+                            {{ __('Add group') }}
+                        </button>
+                    @endunless
+                </div>
+
+                @if($showGroupForm)
+                    <div class="space-y-2">
+                        <flux:input wire:model="groupName" placeholder="{{ __('Group name') }}" size="sm"/>
+                        @error('groupName')
+                            <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text>
+                        @enderror
+                        <div class="flex flex-wrap items-end gap-2">
+                            <div>
+                                <label class="cib-label" for="group-color-input">{{ __('Colour') }}</label>
+                                <input id="group-color-input" type="color" wire:model="groupColor" class="h-8 w-14 rounded border"/>
+                            </div>
+                            <div class="flex-1">
+                                <label class="cib-label" for="group-icon-select">{{ __('Icon') }}</label>
+                                <flux:select id="group-icon-select" wire:model="groupIcon" size="sm">
+                                    @foreach(App\Models\CategoryGroup::ICONS as $icon)
+                                        <flux:select.option value="{{ $icon }}">{{ $icon }}</flux:select.option>
+                                    @endforeach
+                                </flux:select>
+                            </div>
+                        </div>
+                        @error('groupColor')
+                            <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text>
+                        @enderror
+                        @error('groupIcon')
+                            <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text>
+                        @enderror
+                        <div class="flex gap-2">
+                            <flux:button wire:click="saveGroup" variant="primary" size="sm">{{ __('Save group') }}</flux:button>
+                            <flux:button wire:click="closeGroupForm" variant="ghost" size="sm">{{ __('Cancel') }}</flux:button>
+                        </div>
+                    </div>
+                @endif
+
+                <div class="flex flex-wrap gap-2">
+                    @foreach($groups as $group)
+                        <button type="button" wire:key="group-{{ $group->id }}" wire:click="openGroupForm({{ $group->id }})" class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm" style="border-color: {{ $group->color }}">
+                            <flux:icon :name="$group->icon" variant="mini" class="size-4" style="color: {{ $group->color }}"/>
+                            {{ $group->name }}
+                        </button>
+                    @endforeach
+                </div>
             </div>
         </div>
     </x-cib.card>

@@ -6,10 +6,13 @@ namespace App\Livewire;
 
 use App\Casts\MoneyCast;
 use App\Models\Category;
+use App\Models\CategoryGroup;
 use App\Models\Transaction;
+use App\Services\Reports\CategoryGroupMap;
 use App\Support\Transactions\CategoryAttribution;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Livewire\Component;
 
@@ -24,6 +27,18 @@ final class CategoryEditor extends Component
     public string $editingName = '';
 
     public ?int $editingParentId = null;
+
+    public ?int $editingGroupId = null;
+
+    public bool $showGroupForm = false;
+
+    public ?int $editingGroupRecordId = null;
+
+    public string $groupName = '';
+
+    public string $groupColor = '#6471eb';
+
+    public string $groupIcon = 'sparkles';
 
     public bool $showCreateForm = false;
 
@@ -45,6 +60,7 @@ final class CategoryEditor extends Component
             $this->selectedCategoryId = null;
             $this->editingName = '';
             $this->editingParentId = null;
+            $this->editingGroupId = null;
             $this->showDeleteConfirm = false;
 
             return;
@@ -59,6 +75,7 @@ final class CategoryEditor extends Component
         $this->selectedCategoryId = $category->id;
         $this->editingName = $category->name;
         $this->editingParentId = $category->parent_id;
+        $this->editingGroupId = $category->group_id;
         $this->showDeleteConfirm = false;
     }
 
@@ -83,6 +100,57 @@ final class CategoryEditor extends Component
             'name' => $this->editingName,
             'parent_id' => $this->editingParentId,
         ]);
+    }
+
+    public function saveCategoryGroup(): void
+    {
+        if (! $this->selectedCategoryId) {
+            return;
+        }
+
+        $this->validate([
+            'editingGroupId' => ['nullable', 'integer', 'exists:category_groups,id'],
+        ]);
+
+        Category::find($this->selectedCategoryId)?->update(['group_id' => $this->editingGroupId]);
+    }
+
+    public function openGroupForm(?int $groupId = null): void
+    {
+        $group = $groupId === null ? null : CategoryGroup::find($groupId);
+
+        $this->showGroupForm = true;
+        $this->editingGroupRecordId = $group?->id;
+        $this->groupName = $group->name ?? '';
+        $this->groupColor = $group->color ?? '#6471eb';
+        $this->groupIcon = $group->icon ?? 'sparkles';
+        $this->resetErrorBag();
+    }
+
+    public function closeGroupForm(): void
+    {
+        $this->showGroupForm = false;
+        $this->editingGroupRecordId = null;
+        $this->resetErrorBag();
+    }
+
+    public function saveGroup(): void
+    {
+        $this->validate([
+            'groupName' => ['required', 'string', 'max:255', Rule::unique('category_groups', 'name')->ignore($this->editingGroupRecordId)],
+            'groupColor' => ['required', 'regex:'.CategoryGroup::COLOR_PATTERN],
+            'groupIcon' => ['required', Rule::in(CategoryGroup::ICONS)],
+        ]);
+
+        $attributes = ['name' => $this->groupName, 'color' => $this->groupColor, 'icon' => $this->groupIcon];
+
+        if ($this->editingGroupRecordId === null) {
+            CategoryGroup::create($attributes + ['sort_order' => (int) CategoryGroup::query()->max('sort_order') + 1]);
+        } else {
+            CategoryGroup::findOrFail($this->editingGroupRecordId)->update($attributes);
+        }
+
+        $this->closeGroupForm();
     }
 
     public function toggleHidden(int $id): void
@@ -169,6 +237,9 @@ final class CategoryEditor extends Component
             ->select('category_id', DB::raw('COUNT(DISTINCT transaction_id) as aggregate'))
             ->pluck('aggregate', 'category_id');
 
+        $groupMap = CategoryGroupMap::load();
+        $groups = CategoryGroup::query()->orderBy('sort_order')->orderBy('name')->get()->keyBy('id');
+
         $categories = Category::allWithLinkedParents()
             ->when(! $this->showHidden, fn ($c) => $c->reject(fn (Category $category): bool => $category->is_hidden))
             ->when($isSearching, fn ($c) => $c->filter(
@@ -184,6 +255,8 @@ final class CategoryEditor extends Component
                 'transactions_count' => (int) ($counts[$category->id] ?? 0),
                 'is_hidden' => $category->is_hidden,
                 'parent_id' => $category->parent_id,
+                'group_id' => $category->group_id,
+                'group' => ($groupId = $groupMap->groupId($category->id)) === null ? null : $groups->get($groupId),
             ]);
 
         $transactions = $this->selectedCategoryId
@@ -204,6 +277,7 @@ final class CategoryEditor extends Component
             'categories' => $categories,
             'transactions' => $transactions,
             'parentOptions' => $parentOptions,
+            'groups' => $groups,
             'isSearching' => $isSearching,
             'formatMoney' => MoneyCast::format(...),
         ]);

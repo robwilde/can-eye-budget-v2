@@ -6,6 +6,7 @@ namespace Database\Seeders;
 
 use App\Enums\BudgetTag;
 use App\Models\Category;
+use App\Services\CategoryGroupProvisioner;
 use Illuminate\Database\Seeder;
 
 final class CategorySeeder extends Seeder
@@ -21,6 +22,8 @@ final class CategorySeeder extends Seeder
 
             $this->seedChildren($parent, $spec['children']);
         }
+
+        app(CategoryGroupProvisioner::class)->provision();
     }
 
     /**
