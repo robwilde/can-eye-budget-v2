@@ -11,6 +11,7 @@ use App\Livewire\CalendarView;
 use App\Livewire\Data\CalendarDayData;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\CategoryGroup;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
@@ -258,38 +259,7 @@ test('selectDate updates selectedDay computed', function () {
         ->and($selected['pips'])->toHaveCount(1);
 });
 
-test('monthTotals only sums current-month days', function () {
-    $user = User::factory()->create();
-    $account = Account::factory()->for($user)->create();
-    $monthStart = CarbonImmutable::now()->startOfMonth();
-
-    Transaction::factory()->for($user)->credit()->create([
-        'account_id' => $account->id,
-        'amount' => 100000,
-        'post_date' => $monthStart->addDays(3),
-    ]);
-    Transaction::factory()->for($user)->debit()->create([
-        'account_id' => $account->id,
-        'amount' => -25000,
-        'post_date' => $monthStart->addDays(8),
-    ]);
-
-    Transaction::factory()->for($user)->debit()->create([
-        'account_id' => $account->id,
-        'amount' => -99999,
-        'post_date' => $monthStart->subDay(),
-    ]);
-
-    $totals = Livewire::actingAs($user)
-        ->test(CalendarView::class)
-        ->get('monthTotals');
-
-    expect($totals['income'])->toBe(100000)
-        ->and($totals['spend'])->toBe(25000)
-        ->and($totals['net'])->toBe(75000);
-});
-
-test('projectedTotals splits planned occurrences by direction and ignores out-of-month grid days', function () {
+test('plannedToCome splits planned occurrences by direction and ignores out-of-month grid days', function () {
     $this->travelTo('2026-10-01');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
@@ -313,12 +283,12 @@ test('projectedTotals splits planned occurrences by direction and ignores out-of
 
     $totals = Livewire::actingAs($user)
         ->test(CalendarView::class)
-        ->get('projectedTotals');
+        ->get('plannedToCome');
 
     expect($totals)->toBe(['income' => 300000, 'spend' => 150000]);
 });
 
-test('projectedTotals counts an entered plan once, as its posted transaction', function () {
+test('plannedToCome counts an entered plan once, as its posting', function () {
     $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
@@ -336,12 +306,15 @@ test('projectedTotals counts an entered plan once, as its posted transaction', f
     ]);
 
     $component = Livewire::actingAs($user)->test(CalendarView::class);
+    $flow = $component->get('monthFlow');
 
-    expect($component->get('projectedTotals'))->toBe(['income' => 0, 'spend' => 5000])
-        ->and($component->get('monthTotals')['spend'])->toBe(5000);
+    expect($component->get('plannedToCome'))->toBe(['income' => 0, 'spend' => 0])
+        ->and($flow->actualExpense)->toBe(5000)
+        ->and($flow->planExpense)->toBe(5000)
+        ->and($flow->projectedNet())->toBe(-5000);
 });
 
-test('projectedTotals covers the whole month whatever today is: an entered payday plus the one still to come', function (string $today) {
+test('the month is covered whatever today is: an entered payday plus the one still to come', function (string $today) {
     $this->travelTo($today);
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
@@ -359,10 +332,14 @@ test('projectedTotals covers the whole month whatever today is: an entered payda
         'post_date' => '2026-10-08',
     ]);
 
-    expect(Livewire::actingAs($user)->test(CalendarView::class)->get('projectedTotals')['income'])->toBe(1143720);
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    expect($component->get('plannedToCome')['income'])->toBe(571860)
+        ->and($component->get('monthFlow')->actualIncome)->toBe(571860)
+        ->and($component->get('monthFlow')->projectedNet())->toBe(1143720);
 })->with(['2026-10-01', '2026-10-11', '2026-10-22']);
 
-test('projectedTotals excludes an occurrence reconciled to a posting just before the grid starts', function () {
+test('plannedToCome excludes an occurrence reconciled to a posting just before the grid starts', function () {
     $this->travelTo('2026-06-10');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
@@ -382,24 +359,8 @@ test('projectedTotals excludes an occurrence reconciled to a posting just before
 
     $component = Livewire::actingAs($user)->test(CalendarView::class);
 
-    expect($component->get('projectedTotals'))->toBe(['income' => 0, 'spend' => 0])
-        ->and($component->get('monthTotals')['spend'])->toBe(0);
-});
-
-test('quickline renders projected pills on the left and actual pills on the right', function () {
-    $this->travelTo('2026-10-15');
-    $user = User::factory()->create();
-    $account = Account::factory()->for($user)->create();
-
-    PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
-        'amount' => 123400,
-        'direction' => TransactionDirection::Credit,
-        'start_date' => '2026-10-20',
-    ]);
-
-    Livewire::actingAs($user)
-        ->test(CalendarView::class)
-        ->assertSeeHtmlInOrder(['data-testid="calendar-projected"', '1,234.00', 'data-testid="calendar-actuals"']);
+    expect($component->get('plannedToCome'))->toBe(['income' => 0, 'spend' => 0])
+        ->and($component->get('monthFlow')->actualExpense)->toBe(0);
 });
 
 test('previous month navigation works', function () {
@@ -854,7 +815,8 @@ test('a transfer between two tracked accounts shows one neutral pip and is not c
         ->and($cell->pips[0]->tone)->toBe('xfer')
         ->and($cell->pips[0]->transactionId)->toBe($debit->id)
         ->and($cell->pips[0]->flow())->toBeNull()
-        ->and($component->get('monthTotals'))->toBe(['income' => 0, 'spend' => 0, 'net' => 0]);
+        ->and($component->get('cashFlow')->isEmpty())->toBeTrue()
+        ->and($component->get('monthFlow')->isEmpty())->toBeTrue();
 });
 
 test('a transfer out to an untracked account is shown as a transfer and counted as spend', function () {
@@ -873,7 +835,8 @@ test('a transfer out to an untracked account is shown as a transfer and counted 
         ->and($cell->pips[0]->tone)->toBe('xfer')
         ->and($cell->pips[0]->flow())->toBe('out')
         ->and($cell->postedCents)->toBe(25000)
-        ->and($component->get('monthTotals'))->toBe(['income' => 0, 'spend' => 25000, 'net' => -25000]);
+        ->and($component->get('cashFlow')->spending)->toBe(25000)
+        ->and($component->get('monthFlow')->actualExpense)->toBe(0);
 });
 
 test('a transfer in from an untracked account is counted as income', function () {
@@ -890,7 +853,8 @@ test('a transfer in from an untracked account is counted as income', function ()
 
     expect($cell->pips)->toHaveCount(1)
         ->and($cell->pips[0]->flow())->toBe('inc')
-        ->and($component->get('monthTotals'))->toBe(['income' => 40000, 'spend' => 0, 'net' => 40000]);
+        ->and($component->get('cashFlow')->income)->toBe(40000)
+        ->and($component->get('monthFlow')->actualIncome)->toBe(0);
 });
 
 test('a Transfer-categorised row with no pair is shown but not counted', function () {
@@ -912,10 +876,11 @@ test('a Transfer-categorised row with no pair is shown but not counted', functio
 
     expect($cell->pips)->toHaveCount(1)
         ->and($cell->pips[0]->tone)->toBe('xfer')
-        ->and($component->get('monthTotals')['spend'])->toBe(0);
+        ->and($component->get('cashFlow')->spending)->toBe(0)
+        ->and($component->get('monthFlow')->actualExpense)->toBe(0);
 });
 
-test('planned transfers count toward projected spend only when they leave the tracked accounts', function () {
+test('planned transfers are drawn on the calendar but never counted as planned income or spend to come', function () {
     $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $everyday = Account::factory()->for($user)->create();
@@ -943,8 +908,9 @@ test('planned transfers count toward projected spend only when they leave the tr
     $pips = collect($days)->flatMap(fn (CalendarDayData $d) => $d->pips)->where('tone', 'xfer');
 
     expect($pips->pluck('amount')->sort()->values()->all())->toBe([11100, 25000, 33300])
-        ->and($component->get('projectedTotals'))->toBe(['income' => 33300, 'spend' => 25000])
-        ->and($component->get('monthTotals'))->toBe(['income' => 0, 'spend' => 0, 'net' => 0]);
+        ->and($component->get('plannedToCome'))->toBe(['income' => 0, 'spend' => 0])
+        ->and($component->get('monthFlow')->planExpense)->toBe(0)
+        ->and($component->get('monthFlow')->planIncome)->toBe(0);
 });
 
 test('an entered tracked-to-tracked transfer reconciles one planned occurrence, not two', function () {
@@ -1129,4 +1095,198 @@ test('blade does not render import-edge class when no csv-imported transactions 
     Livewire::actingAs($user)
         ->test(CalendarView::class)
         ->assertDontSee('import-edge');
+});
+
+// ── Money flow ────────────────────────────────────────────────────
+
+/**
+ * Oct 2026: a salary and a groceries posting, one uncategorised spend, and a monthly pay and bill still to come.
+ *
+ * @return array{account: Account, groceries: Category}
+ */
+function calendarMoneyFlowFixture(User $user): array
+{
+    $account = Account::factory()->for($user)->create();
+    $salary = Category::factory()->create(['name' => 'Salary']);
+    $groceries = Category::factory()->create(['name' => 'Groceries']);
+
+    Transaction::factory()->for($user)->credit()->create(['account_id' => $account->id, 'category_id' => $salary->id, 'amount' => 250000, 'post_date' => '2026-10-03']);
+    Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $groceries->id, 'amount' => -40000, 'post_date' => '2026-10-04']);
+    Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => null, 'amount' => -1500, 'post_date' => '2026-10-05']);
+
+    PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'amount' => 300000,
+        'direction' => TransactionDirection::Credit,
+        'start_date' => '2026-10-20',
+    ]);
+    PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
+        'amount' => 120000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => '2026-10-25',
+    ]);
+
+    return ['account' => $account, 'groceries' => $groceries];
+}
+
+test('the money flow section renders its Plan and Actual cards for a month with data', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    calendarMoneyFlowFixture($user);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $component->assertSeeHtml('data-testid="money-flow"')
+        ->assertSeeHtml('data-testid="money-flow-plan"')
+        ->assertSeeHtml('data-testid="money-flow-actual"');
+
+    $flow = $component->get('monthFlow');
+
+    expect($flow->planIncome)->toBe(300000)
+        ->and($flow->planExpense)->toBe(120000)
+        ->and($flow->actualIncome)->toBe(250000)
+        ->and($flow->actualExpense)->toBe(41500)
+        ->and($flow->projectedNet())->toBe(250000 - 41500 + 300000 - 120000);
+});
+
+test('the money flow section still renders for an empty month', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $component->assertSeeHtml('data-testid="money-flow"')
+        ->assertSeeHtml('data-testid="money-flow-plan"')
+        ->assertSeeHtml('data-testid="money-flow-actual"');
+
+    expect($component->get('monthFlow')->isEmpty())->toBeTrue()
+        ->and($component->get('cashFlow')->isEmpty())->toBeTrue();
+});
+
+test('the money flow section renders for a month with spend but no income', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $groceries->id, 'amount' => -5000, 'post_date' => '2026-10-04']);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    $component->assertSeeHtml('data-testid="money-flow"')
+        ->assertSeeHtml('data-testid="money-flow-plan"')
+        ->assertSeeHtml('data-testid="money-flow-actual"');
+
+    expect($component->get('monthFlow')->actualSavedPercent())->toBeNull()
+        ->and($component->get('monthFlow')->planSavedPercent())->toBeNull()
+        ->and($component->get('cashFlow')->spending)->toBe(5000)
+        ->and($component->get('cashFlow')->income)->toBe(0);
+});
+
+test('the bars keep their day ticks when actual spend dwarfs the plan', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $groceries->id, 'amount' => -500000, 'post_date' => '2026-10-04']);
+
+    Livewire::actingAs($user)->test(CalendarView::class)
+        ->assertSeeHtml('class="mf-ticks"');
+});
+
+test('monthFlow and cashFlow only hold the signed-in user data', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $stranger = User::factory()->create();
+    calendarMoneyFlowFixture($user);
+
+    $strangerAccount = Account::factory()->for($stranger)->create();
+    $strangerCategory = Category::factory()->create(['name' => 'Stranger spend']);
+    Transaction::factory()->for($stranger)->debit()->create(['account_id' => $strangerAccount->id, 'category_id' => $strangerCategory->id, 'amount' => -99999, 'post_date' => '2026-10-06']);
+    Transaction::factory()->for($stranger)->credit()->create(['account_id' => $strangerAccount->id, 'category_id' => $strangerCategory->id, 'amount' => 88888, 'post_date' => '2026-10-07']);
+    PlannedTransaction::factory()->for($stranger)->for($strangerAccount)->monthly()->create([
+        'amount' => 77777,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => '2026-10-28',
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+    $flow = $component->get('monthFlow');
+    $cash = $component->get('cashFlow');
+
+    expect($flow->actualExpense)->toBe(41500)
+        ->and($flow->actualIncome)->toBe(250000)
+        ->and($flow->planExpense)->toBe(120000)
+        ->and($component->get('plannedToCome'))->toBe(['income' => 300000, 'spend' => 120000])
+        ->and($cash->spending)->toBe(41500)
+        ->and($cash->income)->toBe(250000)
+        ->and(collect($cash->outflows)->pluck('name')->all())->not->toContain('Stranger spend');
+});
+
+test('month navigation refreshes monthFlow and cashFlow', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $groceries->id, 'amount' => -5000, 'post_date' => '2026-10-04']);
+    Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $groceries->id, 'amount' => -7000, 'post_date' => '2026-09-04']);
+    Transaction::factory()->for($user)->credit()->create(['account_id' => $account->id, 'amount' => 90000, 'post_date' => '2026-11-04']);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    expect($component->get('cashFlow')->spending)->toBe(5000)
+        ->and($component->get('monthFlow')->actualExpense)->toBe(5000)
+        ->and($component->get('monthFlow')->todayLabel)->toBe('15 Oct');
+
+    $component->call('previousMonth');
+
+    expect($component->get('cashFlow')->spending)->toBe(7000)
+        ->and($component->get('monthFlow')->actualExpense)->toBe(7000)
+        ->and($component->get('monthFlow')->elapsedDays)->toBe(30)
+        ->and($component->get('monthFlow')->todayLabel)->toBeNull();
+
+    $component->call('nextMonth')->call('nextMonth');
+
+    expect($component->get('cashFlow')->income)->toBe(90000)
+        ->and($component->get('cashFlow')->spending)->toBe(0)
+        ->and($component->get('monthFlow')->actualIncome)->toBe(90000)
+        ->and($component->get('monthFlow')->elapsedDays)->toBe(0);
+});
+
+test('the outflows list total equals the cash flow spending shown', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    calendarMoneyFlowFixture($user);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+    $cash = $component->get('cashFlow');
+    $shown = '$'.number_format($cash->spending / 100, 2);
+
+    expect(array_sum(array_column($cash->outflows, 'amount')))->toBe($cash->spending)
+        ->and($cash->spending)->toBe(41500);
+
+    $component->assertSeeHtmlInOrder(['data-testid="money-flow-outflows-total"', $shown]);
+});
+
+test('an outflow row for ungrouped categories is not a link, so it cannot open an unfiltered list', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    calendarMoneyFlowFixture($user);
+
+    $html = Livewire::actingAs($user)->test(CalendarView::class)->html();
+
+    expect(mb_substr_count($html, 'data-testid="money-flow-outflow-row"'))->toBe(2)
+        ->and(preg_match_all('/<a\b[^>]*data-testid="money-flow-outflow-row"/', $html))->toBe(1);
+});
+
+test('an outflow row for a category group links to the transactions list filtered by that group', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $group = CategoryGroup::factory()->create(['name' => 'Food Group']);
+    $groceries = Category::factory()->create(['name' => 'Groceries', 'group_id' => $group->id]);
+    Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $groceries->id, 'amount' => -40000, 'post_date' => '2026-10-04']);
+
+    $html = Livewire::actingAs($user)->test(CalendarView::class)->html();
+
+    expect($html)->toContain('group='.$group->id)
+        ->and(preg_match_all('/<a\b[^>]*data-testid="money-flow-outflow-row"/', $html))->toBe(1);
 });
