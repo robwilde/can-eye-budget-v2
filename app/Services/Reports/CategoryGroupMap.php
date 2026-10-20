@@ -66,6 +66,24 @@ final readonly class CategoryGroupMap
     }
 
     /**
+     * Every category that resolves to the group through its anchor, so a
+     * child inherits its root's group unless it carries a group of its own.
+     *
+     * @return list<int>
+     */
+    public function categoryIdsInGroup(int $groupId): array
+    {
+        $ids = array_values(array_filter(
+            array_keys($this->nodes),
+            fn (int $id): bool => $this->groupId($id) === $groupId,
+        ));
+
+        sort($ids);
+
+        return $ids;
+    }
+
+    /**
      * The direct child of the anchor on the path to the category, so deeper
      * levels roll up into it. Null when the category is the anchor itself.
      */

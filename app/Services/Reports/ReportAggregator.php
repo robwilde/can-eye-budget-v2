@@ -21,9 +21,12 @@ final class ReportAggregator
      * report renders (summary, monthly series, category roll-up, treemaps) is
      * derived from these atoms.
      *
+     * Transfers with exactly one tracked side count by default; pass
+     * $includeTransfers = false for ordinary income and spend only.
+     *
      * @return list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>
      */
-    public function atoms(User $user, string $mode, ?CarbonInterface $start, ?CarbonInterface $end): array
+    public function atoms(User $user, string $mode, ?CarbonInterface $start, ?CarbonInterface $end, bool $includeTransfers = true): array
     {
         if ($mode === 'plan') {
             $now = CarbonImmutable::now();
@@ -40,10 +43,10 @@ final class ReportAggregator
                 $windowEnd = $windowStart->endOfDay();
             }
 
-            return $this->plannedAtoms($user, $windowStart, $windowEnd);
+            return $this->plannedAtoms($user, $windowStart, $windowEnd, $includeTransfers);
         }
 
-        return $this->actualAtoms($user, $start, $end);
+        return $this->actualAtoms($user, $start, $end, $includeTransfers);
     }
 
     /**
@@ -127,7 +130,7 @@ final class ReportAggregator
     /**
      * @return list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>
      */
-    private function actualAtoms(User $user, ?CarbonInterface $start, ?CarbonInterface $end): array
+    private function actualAtoms(User $user, ?CarbonInterface $start, ?CarbonInterface $end, bool $includeTransfers): array
     {
         $monthExpr = $this->monthExpression();
         $transferCategoryIds = $this->transferCategoryIds();
@@ -143,9 +146,9 @@ final class ReportAggregator
                             ->orWhereNotIn('category_id', $transferCategoryIds)
                             ->orWhere('transfer_link_source', 'unlinked')),
                     ))
-                ->orWhereIn('transaction_id', Transaction::query()
+                ->when($includeTransfers, fn ($q) => $q->orWhereIn('transaction_id', Transaction::query()
                     ->pairedWithUntrackedAccount()
-                    ->select('transactions.id')))
+                    ->select('transactions.id'))))
             ->when($start, fn ($q, $s) => $q->where('post_date', '>=', $s))
             ->when($end, fn ($q, $e) => $q->where('post_date', '<=', $e))
             ->selectRaw("{$monthExpr} as ym, direction, category_id, SUM(ABS(amount)) as total, COUNT(*) as tx_count")
@@ -195,12 +198,12 @@ final class ReportAggregator
     /**
      * @return list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>
      */
-    private function plannedAtoms(User $user, CarbonImmutable $start, CarbonImmutable $end): array
+    private function plannedAtoms(User $user, CarbonImmutable $start, CarbonImmutable $end, bool $includeTransfers): array
     {
         $plans = PlannedTransaction::query()
             ->where('user_id', $user->id)
             ->where('is_active', true)
-            ->countable()
+            ->when($includeTransfers, fn ($q) => $q->countable(), fn ($q) => $q->excludingTransfers())
             ->with(['account:id,is_tracked', 'transferToAccount:id,is_tracked'])
             ->get();
 
