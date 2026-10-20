@@ -1,5 +1,6 @@
 import ApexCharts from 'apexcharts';
 import FeedbackPlus from 'feedbackplus';
+import './money-flow';
 
 window.ApexCharts = ApexCharts;
 window.FeedbackPlus = FeedbackPlus;
