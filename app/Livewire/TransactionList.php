@@ -20,6 +20,7 @@ use App\Jobs\ResolveMerchantBrandJob;
 use App\Livewire\Attributes\NotAudited;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\CategoryGroup;
 use App\Models\MerchantBrand;
 use App\Models\Payee;
 use App\Models\Transaction;
@@ -34,6 +35,7 @@ use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\MerchantBrands\DescriptorGate;
 use App\Services\Payees\PayeeConfirmer;
 use App\Services\Payees\PayeeReviewQueue;
+use App\Services\Reports\CategoryGroupMap;
 use App\Services\TransactionEmailLinker;
 use App\Services\Transfers\TransferReviewQueue;
 use App\Support\AmountParser;
@@ -112,6 +114,9 @@ final class TransactionList extends Component
 
     #[Url]
     public ?int $category = null;
+
+    #[Url]
+    public ?int $group = null;
 
     #[Url]
     public string $period = 'this-month';
@@ -1291,6 +1296,11 @@ final class TransactionList extends Component
         $this->resetPage();
     }
 
+    public function updatedGroup(): void
+    {
+        $this->resetPage();
+    }
+
     public function updatedPeriod(): void
     {
         $this->resetPage();
@@ -1377,6 +1387,9 @@ final class TransactionList extends Component
             'accounts' => $accounts,
             'categoryName' => $this->category
                 ? Category::query()->whereKey($this->category)->value('name')
+                : null,
+            'groupName' => $this->group
+                ? CategoryGroup::query()->whereKey($this->group)->value('name')
                 : null,
             'formatMoney' => MoneyCast::format(...),
             'periodLabel' => $periodEnum->label(),
@@ -1974,6 +1987,7 @@ final class TransactionList extends Component
             'direction' => $this->direction,
             'account' => $this->account,
             'category' => $this->category,
+            'group' => $this->group,
             'planned' => $this->planned,
             'categorised' => $this->categorised,
             'source' => $this->source,
@@ -2027,6 +2041,15 @@ final class TransactionList extends Component
             ->when(is_scalar($filters['category'] ?? null) ? $filters['category'] : null, fn ($q, $id) => $q->where(fn ($q) => $q
                 ->where('category_id', $id)
                 ->orWhereHas('splits', fn ($s) => $s->where('category_id', $id))))
+            ->when(is_int($filters['group'] ?? null) ? $filters['group'] : null, function ($q, int $groupId) {
+                $ids = CategoryGroupMap::load()->categoryIdsInGroup($groupId);
+
+                return $ids === []
+                    ? $q->whereRaw('1 = 0')
+                    : $q->where(fn ($q) => $q
+                        ->whereIn('category_id', $ids)
+                        ->orWhereHas('splits', fn ($s) => $s->whereIn('category_id', $ids)));
+            })
             ->when(($filters['planned'] ?? null) === 'planned', fn ($q) => $q->whereNotNull('planned_transaction_id'))
             ->when(($filters['planned'] ?? null) === 'unplanned', fn ($q) => $q->whereNull('planned_transaction_id'))
             // A linked transfer is one item: the modal opens the partner leg for a credit,
