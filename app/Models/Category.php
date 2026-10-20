@@ -18,6 +18,7 @@ use Illuminate\Support\Collection;
  * @property int $id
  * @property string $name
  * @property int|null $parent_id
+ * @property int|null $group_id
  * @property BudgetTag|null $budget_tag
  * @property string|null $anzsic_division
  * @property string|null $anzsic_subdivision
@@ -41,6 +42,7 @@ final class Category extends Model
         'name',
         'parent_id',
         'budget_tag',
+        'group_id',
         'anzsic_division',
         'anzsic_subdivision',
         'anzsic_group',
@@ -82,6 +84,33 @@ final class Category extends Model
     public function children(): HasMany
     {
         return $this->hasMany(self::class, 'parent_id');
+    }
+
+    /** @return BelongsTo<CategoryGroup, $this> */
+    public function ownGroup(): BelongsTo
+    {
+        return $this->belongsTo(CategoryGroup::class, 'group_id');
+    }
+
+    /**
+     * The group this category reports under: the nearest category up the tree,
+     * starting with this one, that has a group of its own.
+     */
+    public function effectiveGroup(): ?CategoryGroup
+    {
+        $visited = [];
+        $cursor = $this;
+
+        while ($cursor !== null && ! isset($visited[$cursor->id])) {
+            if ($cursor->group_id !== null) {
+                return $cursor->ownGroup;
+            }
+
+            $visited[$cursor->id] = true;
+            $cursor = $cursor->parent;
+        }
+
+        return null;
     }
 
     /** @return HasMany<Transaction, $this> */
