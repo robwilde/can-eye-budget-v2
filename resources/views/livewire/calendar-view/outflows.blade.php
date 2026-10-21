@@ -2,14 +2,16 @@
     $monthFrom = $this->currentMonth.'-01';
     $monthTo = \Carbon\CarbonImmutable::createFromFormat('Y-m-d', $monthFrom)->endOfMonth()->toDateString();
     $outflowsKey = $this->currentMonth.'-'.md5((string) json_encode($cashFlow->outflows));
-    $outflowLink = static fn (array $row): string => route('transactions', array_filter([
-        'group' => $row['uncategorised'] ? null : $row['groupId'],
-        'categorised' => $row['uncategorised'] ? 'uncategorised' : null,
-        'direction' => 'outgoing',
-        'period' => 'custom',
-        'from' => $monthFrom,
-        'to' => $monthTo,
-    ]));
+    $outflowLink = static fn (array $row): ?string => $row['groupId'] === null && ! $row['uncategorised']
+        ? null
+        : route('transactions', array_filter([
+            'group' => $row['uncategorised'] ? null : $row['groupId'],
+            'categorised' => $row['uncategorised'] ? 'uncategorised' : null,
+            'direction' => 'outgoing',
+            'period' => 'custom',
+            'from' => $monthFrom,
+            'to' => $monthTo,
+        ]));
 @endphp
 <header class="mf-head">
     <h2 class="mf-verdict">
@@ -35,13 +37,23 @@
             </div>
             <ul>
                 @foreach ($cashFlow->outflows as $row)
+                    @php($href = $outflowLink($row))
                     <li wire:key="outflow-{{ $row['id'] }}">
-                        <a href="{{ $outflowLink($row) }}" wire:navigate class="mf-out-row" data-testid="money-flow-outflow-row">
-                            <i @style(['background: '.$row['color']]) aria-hidden="true"></i>
-                            <span class="name">{{ $row['name'] }}</span>
-                            <span class="val">{{ $formatMoney($row['amount']) }}</span>
-                            <span class="pct">{{ number_format($row['percentage'], 1) }}%</span>
-                        </a>
+                        @if ($href !== null)
+                            <a href="{{ $href }}" wire:navigate class="mf-out-row" data-testid="money-flow-outflow-row">
+                                <i @style(['background: '.$row['color']]) aria-hidden="true"></i>
+                                <span class="name">{{ $row['name'] }}</span>
+                                <span class="val">{{ $formatMoney($row['amount']) }}</span>
+                                <span class="pct">{{ number_format($row['percentage'], 1) }}%</span>
+                            </a>
+                        @else
+                            <div class="mf-out-row" data-testid="money-flow-outflow-row">
+                                <i @style(['background: '.$row['color']]) aria-hidden="true"></i>
+                                <span class="name">{{ $row['name'] }}</span>
+                                <span class="val">{{ $formatMoney($row['amount']) }}</span>
+                                <span class="pct">{{ number_format($row['percentage'], 1) }}%</span>
+                            </div>
+                        @endif
                     </li>
                 @endforeach
             </ul>
