@@ -11,6 +11,7 @@ use App\Livewire\CalendarView;
 use App\Livewire\Data\CalendarDayData;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\CategoryGroup;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
@@ -1263,4 +1264,29 @@ test('the outflows list total equals the cash flow spending shown', function () 
         ->and($cash->spending)->toBe(41500);
 
     $component->assertSeeHtmlInOrder(['data-testid="money-flow-outflows-total"', $shown]);
+});
+
+test('an outflow row for ungrouped categories is not a link, so it cannot open an unfiltered list', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    calendarMoneyFlowFixture($user);
+
+    $html = Livewire::actingAs($user)->test(CalendarView::class)->html();
+
+    expect(mb_substr_count($html, 'data-testid="money-flow-outflow-row"'))->toBe(2)
+        ->and(preg_match_all('/<a\b[^>]*data-testid="money-flow-outflow-row"/', $html))->toBe(1);
+});
+
+test('an outflow row for a category group links to the transactions list filtered by that group', function () {
+    $this->travelTo('2026-10-15');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $group = CategoryGroup::factory()->create(['name' => 'Food Group']);
+    $groceries = Category::factory()->create(['name' => 'Groceries', 'group_id' => $group->id]);
+    Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $groceries->id, 'amount' => -40000, 'post_date' => '2026-10-04']);
+
+    $html = Livewire::actingAs($user)->test(CalendarView::class)->html();
+
+    expect($html)->toContain('group='.$group->id)
+        ->and(preg_match_all('/<a\b[^>]*data-testid="money-flow-outflow-row"/', $html))->toBe(1);
 });

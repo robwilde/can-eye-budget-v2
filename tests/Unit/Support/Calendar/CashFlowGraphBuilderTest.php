@@ -278,3 +278,13 @@ test('outflows total the spending, are ranked largest first and take their perce
         expect($outflow['percentage'])->toBe(round($outflow['amount'] / $flow->spending * 100, 1));
     }
 });
+
+test('outflows rank by spending even when a parent carries more income than spending', function () {
+    $flow = cashFlowBuild([
+        cashFlowParent('transfer', 0, ['in' => -300000, 'out' => 10000], groupId: 1),
+        cashFlowParent('food', 0, ['groceries' => 50000], groupId: 2),
+    ]);
+
+    expect(array_column($flow->outflows, 'id'))->toBe(['food', 'transfer'])
+        ->and(array_column($flow->outflows, 'amount'))->toBe([50000, 10000]);
+});
