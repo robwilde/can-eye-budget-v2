@@ -59,7 +59,7 @@ test('plan-mode pill reveals frequency and until-date controls', function () use
     $page->script($openModal);
 
     $page->assertPresent('.type-toggle')
-        ->click('Plan')
+        ->click('.type-toggle button[wire\\:click="$set(\'mode\', \'plan\')"]')
         ->assertSee('Frequency')
         ->assertSee('Always');
 });
@@ -74,7 +74,7 @@ test('rule-suggest card appears in plan mode for non-transfer types', function (
 
     $page->script($openModal);
 
-    $page->click('Plan')
+    $page->click('.type-toggle button[wire\\:click="$set(\'mode\', \'plan\')"]')
         ->assertPresent('.rule-suggest')
         ->assertSee('Make this a rule?');
 });
@@ -150,7 +150,7 @@ test('at 375px the type toggle buttons are 44px tall and the modal does not scro
 
     $page->script($openModal);
 
-    $page->click('Plan')
+    $page->click('.type-toggle button[wire\\:click="$set(\'mode\', \'plan\')"]')
         ->assertSee('Always')
         ->assertScript("document.querySelectorAll('dialog[open] .type-toggle').length === 2")
         ->assertScript("Array.from(document.querySelectorAll('dialog[open] .type-toggle button')).every(b => b.getBoundingClientRect().height >= 44)")

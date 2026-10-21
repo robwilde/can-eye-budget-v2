@@ -10,8 +10,12 @@ use App\Livewire\Dashboard\Data\PayCyclePip;
 use App\Livewire\Data\CalendarDayData;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Support\Calendar\CashFlow;
+use App\Support\Calendar\CashFlowLoader;
 use App\Support\Calendar\DayActivity;
 use App\Support\Calendar\DayActivityLoader;
+use App\Support\Calendar\MonthFlow;
+use App\Support\Calendar\MonthFlowLoader;
 use Carbon\CarbonImmutable;
 use Carbon\Constants\UnitValue;
 use Illuminate\View\View;
@@ -159,42 +163,17 @@ final class CalendarView extends Component
     }
 
     /**
-     * @return array{income: int, spend: int, net: int}
-     */
-    #[Computed]
-    public function monthTotals(): array
-    {
-        $income = 0;
-        $spend = 0;
-
-        foreach ($this->days as $day) { // @phpstan-ignore property.notFound
-            if (! $day->isCurrentMonth) {
-                continue;
-            }
-
-            $income += $day->incomeCents;
-            $spend += $day->postedCents;
-        }
-
-        return [
-            'income' => $income,
-            'spend' => $spend,
-            'net' => $income - $spend,
-        ];
-    }
-
-    /**
-     * The whole visible month: everything already entered plus the planned occurrences still to
-     * come, split by direction. Reconciled plans are suppressed by DayActivityLoader, so an entered
-     * plan counts once, as its posted transaction, and the figure does not shrink as the month passes.
+     * Ordinary planned income and spend still to come this month. Reconciled occurrences are
+     * suppressed by DayActivityLoader and past unreconciled ones are never loaded, so each
+     * plan counts once, as its posting once entered. Transfers are left out.
      *
      * @return array{income: int, spend: int}
      */
     #[Computed]
-    public function projectedTotals(): array
+    public function plannedToCome(): array
     {
-        $income = $this->monthTotals['income']; // @phpstan-ignore property.notFound
-        $spend = $this->monthTotals['spend']; // @phpstan-ignore property.notFound
+        $income = 0;
+        $spend = 0;
 
         foreach ($this->days as $day) { // @phpstan-ignore property.notFound
             if (! $day->isCurrentMonth) {
@@ -206,17 +185,33 @@ final class CalendarView extends Component
                     continue;
                 }
 
-                $flow = $pip->flow();
-
-                if ($flow === 'inc') {
+                if ($pip->tone === 'inc') {
                     $income += $pip->amount;
-                } elseif ($flow === 'out') {
+                } elseif ($pip->tone === 'out') {
                     $spend += $pip->amount;
                 }
             }
         }
 
         return ['income' => $income, 'spend' => $spend];
+    }
+
+    #[Computed]
+    public function monthFlow(): MonthFlow
+    {
+        $user = $this->authenticatedUser();
+
+        $toCome = $this->plannedToCome; // @phpstan-ignore property.notFound
+
+        return app(MonthFlowLoader::class)->load($user, $this->monthStart(), CarbonImmutable::today(), $toCome['income'], $toCome['spend']);
+    }
+
+    #[Computed]
+    public function cashFlow(): CashFlow
+    {
+        $user = $this->authenticatedUser();
+
+        return app(CashFlowLoader::class)->load($user, $this->monthStart());
     }
 
     /**
@@ -346,6 +341,14 @@ final class CalendarView extends Component
         return $paydays;
     }
 
+    private function authenticatedUser(): User
+    {
+        /** @var User $user */
+        $user = auth()->user();
+
+        return $user;
+    }
+
     private function monthStart(): CarbonImmutable
     {
         $date = CarbonImmutable::createFromFormat('Y-m-d', $this->currentMonth.'-01');
@@ -360,6 +363,6 @@ final class CalendarView extends Component
 
     private function bustCache(): void
     {
-        unset($this->days, $this->monthTotals, $this->projectedTotals, $this->selectedDay, $this->headerLabel, $this->importEdgeIso); // @phpstan-ignore property.notFound
+        unset($this->days, $this->plannedToCome, $this->monthFlow, $this->cashFlow, $this->selectedDay, $this->headerLabel, $this->importEdgeIso); // @phpstan-ignore property.notFound
     }
 }
