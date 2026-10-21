@@ -21,6 +21,8 @@ const compact = (cents) => {
 
 const truncate = (text, max) => (text.length > max ? text.slice(0, max - 1) + '…' : text);
 
+const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+
 const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const svgEl = (name, attrs = {}, text = null) => {
@@ -331,7 +333,12 @@ document.addEventListener('alpine:init', () => {
                     legend: { show: false },
                     dataLabels: { enabled: false },
                     stroke: { width: 2, colors: ['#fff'] },
-                    tooltip: { y: { formatter: (value) => money(Math.round(value * 100)) } },
+                    tooltip: {
+                        y: {
+                            formatter: (value) => money(Math.round(value * 100)),
+                            title: { formatter: (name) => (name ? `${escapeHtml(name)}: ` : '') },
+                        },
+                    },
                     plotOptions: {
                         pie: {
                             donut: {
