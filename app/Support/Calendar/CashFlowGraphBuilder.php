@@ -97,6 +97,8 @@ final class CashFlowGraphBuilder
             }
         }
 
+        usort($outflows, static fn (array $a, array $b): int => [$b['amount'], $a['id']] <=> [$a['amount'], $b['id']]);
+
         $net = $income - $spending;
 
         if ($net !== 0) {
