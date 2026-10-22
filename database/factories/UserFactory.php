@@ -69,4 +69,28 @@ final class UserFactory extends Factory
             'next_pay_date' => now()->addDays(7),
         ]);
     }
+
+    /**
+     * @param  array<string, mixed>  $preferences
+     */
+    public function withPreferences(array $preferences): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'preferences' => $preferences,
+        ]);
+    }
+
+    public function withTimezone(string $timezone): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'timezone' => $timezone,
+        ]);
+    }
+
+    public function withMonthStartDay(int $day): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'month_start_day' => $day,
+        ]);
+    }
 }

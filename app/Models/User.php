@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Casts\MoneyCast;
+use App\Casts\UserPreferencesCast;
+use App\DTOs\UserPreferences;
 use App\Enums\AccountClass;
 use App\Enums\PayFrequency;
 use App\Enums\TransactionDirection;
 use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -17,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 
 /**
@@ -24,6 +28,10 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * @property PayFrequency|null $pay_frequency
  * @property CarbonImmutable|null $next_pay_date
  * @property int|null $primary_account_id
+ * @property string $base_currency
+ * @property string|null $timezone
+ * @property int|null $month_start_day
+ * @property UserPreferences $preferences
  */
 final class User extends Authenticatable
 {
@@ -43,6 +51,10 @@ final class User extends Authenticatable
         'pay_frequency',
         'next_pay_date',
         'primary_account_id',
+        'base_currency',
+        'timezone',
+        'month_start_day',
+        'preferences',
     ];
 
     /**
@@ -259,6 +271,46 @@ final class User extends Authenticatable
     }
 
     /**
+     * Merge the given keys into the stored preferences, re-reading the row under a lock so concurrent
+     * updates to other keys are kept, and write only the preferences column.
+     *
+     * @param  array<string, mixed>  $changes
+     */
+    public function updatePreferences(array $changes): void
+    {
+        $this->getConnection()->transaction(function () use ($changes): void {
+            $locked = self::query()->whereKey($this->getKey())->lockForUpdate()->firstOrFail();
+
+            $locked->preferences = UserPreferences::from([...$locked->preferences->toArray(), ...$changes]);
+            $locked->save();
+
+            $this->preferences = $locked->preferences;
+            $this->syncOriginalAttribute('preferences');
+        });
+    }
+
+    public function resolvedTimezone(): string
+    {
+        return $this->timezone ?? (string) config('app.timezone');
+    }
+
+    /**
+     * @return Attribute<int|null, int|null>
+     */
+    protected function monthStartDay(): Attribute
+    {
+        return Attribute::set(static function (mixed $value): ?int {
+            $day = $value === null || $value === '' ? null : (int) $value;
+
+            if ($day !== null && ($day < 1 || $day > 28)) {
+                throw new InvalidArgumentException('Month start day must be between 1 and 28.');
+            }
+
+            return $day;
+        });
+    }
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array
@@ -269,6 +321,7 @@ final class User extends Authenticatable
             'pay_amount' => MoneyCast::class,
             'pay_frequency' => PayFrequency::class,
             'next_pay_date' => 'date',
+            'preferences' => UserPreferencesCast::class,
         ];
     }
 
