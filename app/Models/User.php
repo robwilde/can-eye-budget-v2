@@ -159,6 +159,12 @@ final class User extends Authenticatable
         return $this->hasMany(Payee::class);
     }
 
+    /** @return HasMany<Tag, $this> */
+    public function tags(): HasMany
+    {
+        return $this->hasMany(Tag::class);
+    }
+
     /** @return HasMany<UserCategoryBudgetTag, $this> */
     public function categoryBudgetTags(): HasMany
     {
