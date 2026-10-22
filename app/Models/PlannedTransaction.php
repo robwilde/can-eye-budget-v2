@@ -91,6 +91,12 @@ final class PlannedTransaction extends Model
         return $this->hasMany(Transaction::class);
     }
 
+    /** @return HasMany<PlannedOccurrence, $this> */
+    public function occurrences(): HasMany
+    {
+        return $this->hasMany(PlannedOccurrence::class);
+    }
+
     /**
      * @param  Builder<self>  $query
      * @return Builder<self>
