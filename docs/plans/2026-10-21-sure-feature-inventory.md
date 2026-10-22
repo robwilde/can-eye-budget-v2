@@ -83,7 +83,7 @@ Behaviour inventory of the user-facing features of Sure, a Rails personal-financ
 
 Several features build on others. Building in table order would mean redoing later work, so settle these first:
 
-1. **F43 tenancy decision.** Whether data stays per user or moves to a household changes every `user_id` query and every new user-owned model proposed in this document. Decide it before adding new models.
+1. **F43 tenancy decision.** Decided in `docs/decisions/0001-tenancy-stays-per-user.md` (#642): data stays per user, with no household. Every new user-owned model follows C2 as written.
 2. **F44 preference store.** F3, F27, F37, F38, F39 and F47 all store per-user preferences in it.
 3. **F9 series types and F12 stored occurrences.** F13 payments, F14 matching, F16 status lifecycle, F17 Bills pages, F19 paycheck plan and F20 reminders all read stored occurrences. F17 built earlier is an interim view only.
 4. **F7 tags.** F4 tag filters, F24 tag conditions, F25 tag actions and F30 tag auto-assignment need it.
@@ -2701,13 +2701,14 @@ The remaining features have no ordering constraint beyond the conventions above.
   - In production, passwords need at least 12 characters, mixed case, numbers and symbols, and must not appear in known breaches.
   - AuditAuthentication records login, logout, registration, password reset and verification. Failed logins and failed two-factor challenges are recorded as Failure.
   - Every user-owned model carries `user_id`, so each user is a separate tenant.
-- **Gap:** There is no family or household, roles, invitations, account sharing, permission levels, passkeys or SSO. Each login sees only its own data.
+- **Decision:** Data stays per user (ADR `docs/decisions/0001-tenancy-stays-per-user.md`, #642). Households, roles, invitations, account sharing and ownership transfer on purge are not built. Passkeys are raised as a separate issue. OIDC single sign-on is not built.
+- **Gap:** There is no family or household, roles, invitations, account sharing, permission levels, passkeys or SSO. Each login sees only its own data. That stays the target behaviour until a reopen condition in the ADR fires.
 - **Build it like:**
-  - New models: Household, HouseholdMembership with a role enum, and AccountShare with a permission enum and an inclusion flag for the viewer (C5).
-  - The viewer's inclusion flag is a label for that viewer's own balance sheet and lists only. Spend, income and transfer classification stay on the account-wide `is_tracked` flag through Transaction::countable(), countedDirection() and CategoryAttribution, so the transfer rule does not change with who is looking.
-  - Scoping is explicit `user_id` filters everywhere (C2), so every component and service query would have to move to one shared "accessible accounts" scope. Category stays global.
-  - The role on HouseholdMembership gates household actions such as the F36 export and account sharing. Instance admin is the separate admin flag on User from F48, so there is one admin definition for the instance.
-  - Invitation and member actions are audited Livewire actions (C3). UserActionInventoryTest pins three lists: `#[NotAudited]` exemptions, named write routes (POST, PUT, PATCH, DELETE), and every job class with its audited flag. A new audited Livewire method needs no test change; a new write route or job does. GET routes are not in the inventory; they inherit AttributeRequestToUser from the web group.
+  - Do not add Household, HouseholdMembership or AccountShare. If a reopen condition fires, the ADR sets the order of work: actor column on `audit_events`, a personal household per user, an accessible-accounts scope, then AccountShare, invitations and roles.
+  - Spend, income and transfer classification stays on the account-wide `is_tracked` flag through Transaction::countable(), PlannedTransaction::countedDirection() and CategoryAttribution, whoever is looking.
+  - Scoping is explicit `user_id` filters (C2). Category stays global.
+  - Instance admin is the admin flag on User from F48, which is the one admin definition for the instance. There are no household roles.
+  - Base currency, timezone, month-start day and assistant mode live on User through F44. Default sharing is not stored.
   - Migrations must run on both MariaDB and SQLite (C8).
 
 ### F44. Settings and preferences
