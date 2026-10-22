@@ -69,4 +69,12 @@ final class Tag extends Model
             ])->validate();
         });
     }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [];
+    }
 }
