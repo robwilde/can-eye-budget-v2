@@ -15,6 +15,7 @@ use App\Livewire\RecurringTransactionReview;
 use App\Models\Account;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\AccountValuationService;
 use App\Services\Reports\ReportAggregator;
 use App\Services\Transfers\TransferLinker;
 use App\Services\Transfers\UntrackedAccountCreator;
@@ -170,6 +171,8 @@ test('reconcile records date and difference', function () {
         ->set('reconcileBalance', '1250.00')
         ->set('reconcileDate', '2026-07-01')
         ->call('reconcile')
+        ->assertSet('reconcilePreview', ['before' => 100000, 'after' => 125000, 'date' => '2026-07-01'])
+        ->call('confirmReconcile')
         ->assertHasNoErrors();
 
     $hidden->refresh();
@@ -188,6 +191,7 @@ test('reconcile and track cannot touch another users account', function () {
         ->set('reconcileBalance', '5')
         ->set('reconcileDate', '2026-07-01')
         ->call('reconcile')
+        ->call('confirmReconcile')
         ->call('trackAccount', $other->id);
 
     expect($other->refresh()->is_tracked)->toBeFalse()
@@ -273,8 +277,7 @@ test('a forged account mode cannot turn an untracked edit into a plain balance w
 
     $fresh = $hidden->refresh();
     expect($fresh->balance)->toBe(125000)
-        ->and($fresh->reconcile_difference)->toBe(25000)
-        ->and($fresh->reconciled_on)->not->toBeNull();
+        ->and($fresh->valuations()->count())->toBe(1);
 });
 
 test('tracking an account keeps a transfer the user typed by hand on both sides', function () {
@@ -301,4 +304,28 @@ test('both track actions on the accounts page ask for confirmation', function ()
 
     expect(preg_match_all('/wire:click="trackAccount\(\d+\)"/', $html))->toBe(2)
         ->and(mb_substr_count($html, 'wire:confirm="Track this account?'))->toBe(2);
+});
+
+test('editing an untracked balance below its oldest entry shows an error and keeps the old name', function () {
+    $this->travelTo('2026-10-22');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create([
+        'is_tracked' => false,
+        'type' => AccountClass::Transaction,
+        'balance' => 0,
+        'balance_source' => null,
+        'name' => 'Cash',
+    ]);
+    app(AccountValuationService::class)->setCurrentBalance($account, 5000);
+    Transaction::factory()->for($account)->for($user)->create(['post_date' => '2024-01-01']);
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id)
+        ->set('name', 'Renamed')
+        ->set('balance', '75.00')
+        ->call('save')
+        ->assertHasErrors('balance');
+
+    expect($account->fresh()->name)->toBe('Cash')
+        ->and($account->fresh()->balance)->toBe(5000);
 });
