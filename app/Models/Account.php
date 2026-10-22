@@ -92,6 +92,12 @@ final class Account extends Model
         return $this->hasMany(BankImport::class);
     }
 
+    /** @return HasMany<AccountValuation, $this> */
+    public function valuations(): HasMany
+    {
+        return $this->hasMany(AccountValuation::class);
+    }
+
     /** @return HasMany<StatementReconciliation, $this> */
     public function statementReconciliations(): HasMany
     {
