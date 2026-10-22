@@ -21,8 +21,10 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\DB;
 
 /**
  * @property int $id
@@ -228,6 +230,12 @@ final class Transaction extends Model
         return $this->hasMany(TransactionSplit::class)->orderBy('position')->orderBy('id');
     }
 
+    /** @return BelongsToMany<Tag, $this> */
+    public function tags(): BelongsToMany
+    {
+        return $this->belongsToMany(Tag::class);
+    }
+
     public function isSplit(): bool
     {
         return $this->relationLoaded('splits')
@@ -404,7 +412,17 @@ final class Transaction extends Model
             unset($attributes['category_source']);
         }
 
-        return self::query()->create(array_merge($attributes, $overrides));
+        return DB::transaction(function () use ($attributes, $overrides): self {
+            $child = self::query()->create(array_merge($attributes, $overrides));
+
+            $tagIds = $this->tags()->pluck('tags.id');
+
+            if ($tagIds->isNotEmpty()) {
+                $child->tags()->attach($tagIds->all());
+            }
+
+            return $child;
+        });
     }
 
     /**
