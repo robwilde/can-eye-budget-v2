@@ -2744,6 +2744,7 @@ The remaining features have no ordering constraint beyond the conventions above.
 
 #### Maps to Can-I-Budget
 - **Status:** Partial
+- **Decision (ADR `docs/decisions/0001-tenancy-stays-per-user.md`, #642):** There is no family, so the "family settings" above become per-user settings. Each user edits their own base currency, timezone, locale, date format, month-start day and assistant mode. The family name, the "Family" or "Group" label, default account sharing and household budgets are not built. "Reset the family's data" and the family export mean the user's own data.
 - **Existing:**
   - Profile settings page: name and email. Changing the email clears `email_verified_at`. The resend prompt never renders, because User does not implement MustVerifyEmail.
   - Password and two-factor pages.
