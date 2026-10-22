@@ -9,11 +9,16 @@ use App\Enums\AccountClass;
 use App\Enums\AccountGroup;
 use App\Enums\AccountStatus;
 use App\Enums\ImportSource;
+use App\Enums\ValuationKind;
+use App\Exceptions\InvalidValuationException;
 use App\Models\Account;
+use App\Models\AccountValuation;
 use App\Models\User;
+use App\Services\AccountValuationService;
 use App\Services\Transfers\TransferLinker;
 use App\Services\Transfers\UntrackedAccountCreator;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
@@ -64,6 +69,16 @@ final class AccountManager extends Component
 
     public string $reconcileDate = '';
 
+    #[Locked]
+    public ?int $editingValuationId = null;
+
+    /** @var array{before: int, after: int, date: string}|null */
+    public ?array $reconcilePreview = null;
+
+    public string $openingBalance = '';
+
+    public string $openingBalanceDate = '';
+
     public function openAddModal(): void
     {
         $this->resetForm();
@@ -100,6 +115,10 @@ final class AccountManager extends Component
         $this->type = $account->type->value;
         $this->group = $account->group->value;
         $this->institution = $account->institution ?? '';
+
+        $opening = $account->valuations()->where('kind', ValuationKind::OpeningBalance)->first();
+        $this->openingBalance = $opening !== null ? number_format($opening->balance / 100, 2, '.', '') : '';
+        $this->openingBalanceDate = $opening?->valued_on->toDateString() ?? '';
         $this->isUntracked = ! $account->is_tracked;
         $this->showFormModal = true;
     }
@@ -136,16 +155,30 @@ final class AccountManager extends Component
             $mutableData['credit_limit'] = null;
         }
 
-        if ($this->editingAccountId) {
-            $account = $this->findUserAccount($this->editingAccountId);
+        $account = $this->editingAccountId ? $this->findUserAccount($this->editingAccountId) : null;
 
-            $account?->update($mutableData);
-        } else {
-            Account::query()->create($mutableData + [
-                'user_id' => auth()->id(),
-                'currency' => 'AUD',
-                'status' => AccountStatus::Active,
-            ]);
+        if ($this->editingAccountId && $account === null) {
+            return;
+        }
+
+        try {
+            DB::transaction(function () use ($account, $mutableData): void {
+                if ($account === null) {
+                    $account = Account::query()->create($mutableData + [
+                        'user_id' => auth()->id(),
+                        'currency' => 'AUD',
+                        'status' => AccountStatus::Active,
+                    ]);
+                } else {
+                    $account->update($mutableData);
+                }
+
+                $this->saveOpeningBalance($account);
+            });
+        } catch (InvalidValuationException $exception) {
+            $this->addError('openingBalanceDate', $exception->getMessage());
+
+            return;
         }
 
         $this->showFormModal = false;
@@ -156,11 +189,13 @@ final class AccountManager extends Component
     {
         $account = $this->findUserAccount($accountId);
 
-        if ($account === null || $account->is_tracked) {
+        if ($account === null || ! $account->isManuallyBalanced()) {
             return;
         }
 
         $this->resetValidation();
+        $this->editingValuationId = null;
+        $this->reconcilePreview = null;
         $this->reconcilingAccountId = $account->id;
         $this->reconcilingAccountName = $account->name;
         $this->reconcileBalance = number_format($account->balance / 100, 2, '.', '');
@@ -168,29 +203,87 @@ final class AccountManager extends Component
         $this->showReconcileModal = true;
     }
 
+    /** First step: validates the entry and shows the balance before and after, writing nothing. */
     public function reconcile(): void
     {
-        $validated = $this->validate([
-            'reconcileBalance' => ['required', 'numeric'],
-            'reconcileDate' => ['required', 'date', 'before_or_equal:today'],
-        ]);
+        $validated = $this->validateReconcileForm();
+        $account = $this->reconcilingAccount();
 
-        $account = $this->reconcilingAccountId ? $this->findUserAccount($this->reconcilingAccountId) : null;
-
-        if ($account === null || $account->is_tracked) {
+        if ($account === null) {
             return;
         }
 
-        $account->reconcileManualBalance(
-            (int) round((float) $validated['reconcileBalance'] * 100),
-            CarbonImmutable::parse($validated['reconcileDate']),
-        );
+        $date = CarbonImmutable::parse($validated['reconcileDate']);
 
-        $this->showReconcileModal = false;
-        $this->reconcilingAccountId = null;
-        $this->reconcilingAccountName = '';
-        $this->reconcileBalance = '';
-        $this->reconcileDate = '';
+        $this->reconcilePreview = [
+            'before' => app(AccountValuationService::class)->balanceOn($account, $date, inclusive: false, excluding: $this->editingValuation()),
+            'after' => $this->reconcileCents($validated['reconcileBalance']),
+            'date' => $date->toDateString(),
+        ];
+    }
+
+    public function confirmReconcile(): void
+    {
+        $validated = $this->validateReconcileForm();
+        $account = $this->reconcilingAccount();
+
+        if ($account === null) {
+            return;
+        }
+
+        $service = app(AccountValuationService::class);
+        $cents = $this->reconcileCents($validated['reconcileBalance']);
+        $date = CarbonImmutable::parse($validated['reconcileDate']);
+        $editing = $this->editingValuation();
+
+        try {
+            if ($this->editingValuationId !== null && $editing === null) {
+                return;
+            }
+
+            $editing !== null
+                ? $service->update($editing, $cents, $date)
+                : $service->reconcile($account, $cents, $date);
+        } catch (InvalidValuationException $exception) {
+            $this->addError('reconcileDate', $exception->getMessage());
+            $this->reconcilePreview = null;
+
+            return;
+        }
+
+        $this->closeReconcileModal();
+    }
+
+    public function editReconciliation(int $valuationId): void
+    {
+        $valuation = $this->findReconciliation($valuationId);
+
+        if ($valuation === null) {
+            return;
+        }
+
+        $this->resetValidation();
+        $this->reconcilePreview = null;
+        $this->editingValuationId = $valuation->id;
+        $this->reconcileBalance = number_format($valuation->balance / 100, 2, '.', '');
+        $this->reconcileDate = $valuation->valued_on->toDateString();
+    }
+
+    public function deleteReconciliation(int $valuationId): void
+    {
+        $valuation = $this->findReconciliation($valuationId);
+
+        if ($valuation === null) {
+            return;
+        }
+
+        app(AccountValuationService::class)->delete($valuation);
+
+        if ($this->editingValuationId === $valuation->id) {
+            $this->editingValuationId = null;
+        }
+
+        $this->reconcilePreview = null;
     }
 
     /** Converts an untracked account into a tracked manual account; its transactions are kept. */
@@ -269,6 +362,7 @@ final class AccountManager extends Component
             'formatMoney' => MoneyCast::format(...),
             'accountTypes' => AccountClass::cases(),
             'accountGroups' => AccountGroup::cases(),
+            'reconciliations' => $this->reconciliations(),
         ]);
     }
 
@@ -292,10 +386,18 @@ final class AccountManager extends Component
                 return;
             }
 
-            $account->update(['name' => $validated['name'], 'type' => $type, 'description' => $description]);
+            try {
+                DB::transaction(function () use ($account, $validated, $type, $description, $cents): void {
+                    $account->update(['name' => $validated['name'], 'type' => $type, 'description' => $description]);
 
-            if ($cents !== $account->balance) {
-                $account->reconcileManualBalance($cents);
+                    if ($cents !== $account->balance) {
+                        app(AccountValuationService::class)->setCurrentBalance($account, $cents);
+                    }
+                });
+            } catch (InvalidValuationException $exception) {
+                $this->addError('balance', $exception->getMessage());
+
+                return;
             }
         } else {
             app(UntrackedAccountCreator::class)->create(
@@ -323,6 +425,8 @@ final class AccountManager extends Component
         $this->group = '';
         $this->institution = '';
         $this->isUntracked = false;
+        $this->openingBalance = '';
+        $this->openingBalanceDate = '';
         $this->resetValidation();
     }
 
@@ -337,6 +441,8 @@ final class AccountManager extends Component
             'type' => ['required', Rule::enum(AccountClass::class)],
             'group' => ['required', Rule::enum(AccountGroup::class)],
             'institution' => ['nullable', 'string', 'max:255'],
+            'openingBalance' => ['nullable', 'numeric'],
+            'openingBalanceDate' => ['nullable', 'date', 'before_or_equal:today'],
         ];
     }
 
@@ -353,5 +459,84 @@ final class AccountManager extends Component
         return Account::query()
             ->where('user_id', auth()->id())
             ->find($accountId);
+    }
+
+    private function reconcilingAccount(): ?Account
+    {
+        $account = $this->reconcilingAccountId ? $this->findUserAccount($this->reconcilingAccountId) : null;
+
+        return $account !== null && $account->isManuallyBalanced() ? $account : null;
+    }
+
+    private function findReconciliation(int $valuationId): ?AccountValuation
+    {
+        if ($this->reconcilingAccountId === null) {
+            return null;
+        }
+
+        return AccountValuation::query()
+            ->forUser((int) auth()->id())
+            ->where('account_id', $this->reconcilingAccountId)
+            ->where('kind', ValuationKind::Reconciliation)
+            ->find($valuationId);
+    }
+
+    private function editingValuation(): ?AccountValuation
+    {
+        return $this->editingValuationId === null ? null : $this->findReconciliation($this->editingValuationId);
+    }
+
+    /** @return Collection<int, AccountValuation> */
+    private function reconciliations(): Collection
+    {
+        if ($this->reconcilingAccountId === null) {
+            return new Collection;
+        }
+
+        return AccountValuation::query()
+            ->forUser((int) auth()->id())
+            ->where('account_id', $this->reconcilingAccountId)
+            ->where('kind', ValuationKind::Reconciliation)
+            ->orderByDesc('valued_on')
+            ->get();
+    }
+
+    /** @return array{reconcileBalance: string, reconcileDate: string} */
+    private function validateReconcileForm(): array
+    {
+        /** @var array{reconcileBalance: string, reconcileDate: string} */
+        return $this->validate([
+            'reconcileBalance' => ['required', 'numeric'],
+            'reconcileDate' => ['required', 'date', 'before_or_equal:today'],
+        ]);
+    }
+
+    private function reconcileCents(string $amount): int
+    {
+        return (int) round((float) $amount * 100);
+    }
+
+    private function closeReconcileModal(): void
+    {
+        $this->showReconcileModal = false;
+        $this->reconcilingAccountId = null;
+        $this->reconcilingAccountName = '';
+        $this->reconcileBalance = '';
+        $this->reconcileDate = '';
+        $this->editingValuationId = null;
+        $this->reconcilePreview = null;
+    }
+
+    private function saveOpeningBalance(Account $account): void
+    {
+        if ($this->openingBalance === '') {
+            return;
+        }
+
+        app(AccountValuationService::class)->setOpeningBalance(
+            $account,
+            $this->reconcileCents($this->openingBalance),
+            $this->openingBalanceDate !== '' ? CarbonImmutable::parse($this->openingBalanceDate) : null,
+        );
     }
 }

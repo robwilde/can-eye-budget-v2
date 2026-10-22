@@ -171,19 +171,14 @@ final class Account extends Model
     }
 
     /**
-     * Manual-only balance: never touched by linked transfers. A monthly reconcile
-     * records the date and the difference between the old and the newly entered balance.
+     * Whether the user keeps this balance by hand, so valuations may set it. Untracked
+     * accounts always are; a provider-fed (Redbark, CSV) balance is not.
      */
-    public function reconcileManualBalance(int $newBalance, ?CarbonImmutable $on = null): void
+    public function isManuallyBalanced(): bool
     {
-        $difference = $newBalance - $this->balance;
-
-        $this->forceFill([
-            'balance' => $newBalance,
-            'balance_updated_at' => CarbonImmutable::now(),
-            'reconciled_on' => ($on ?? CarbonImmutable::today())->toDateString(),
-            'reconcile_difference' => $difference,
-        ])->save();
+        return ! $this->is_tracked
+            || $this->balance_source === null
+            || $this->balance_source === ImportSource::Manual;
     }
 
     /**
