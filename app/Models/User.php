@@ -99,6 +99,12 @@ final class User extends Authenticatable
         return $this->hasMany(Budget::class);
     }
 
+    /** @return HasMany<BudgetPlan, $this> */
+    public function budgetPlans(): HasMany
+    {
+        return $this->hasMany(BudgetPlan::class);
+    }
+
     /** @return HasMany<PlannedTransaction, $this> */
     public function plannedTransactions(): HasMany
     {

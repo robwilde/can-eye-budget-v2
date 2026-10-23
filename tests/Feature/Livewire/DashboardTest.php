@@ -10,6 +10,7 @@ use App\Enums\TransactionDirection;
 use App\Livewire\Dashboard;
 use App\Models\Account;
 use App\Models\Budget;
+use App\Models\BudgetPlan;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\RedbarkFeed;
@@ -192,6 +193,21 @@ test('budgets this cycle reports zero spent for an uncategorised budget instead 
 
     expect($rows['Groceries']['spent'])->toBe(447468)
         ->and($rows['Insurance']['spent'])->toBe(0);
+});
+
+test('budgets this cycle ignores lines that belong to a budget plan', function () {
+    $user = User::factory()->withPayCycle()->create();
+    Budget::factory()->for($user)->create(['name' => 'Insurance', 'limit_amount' => 30000]);
+    $plan = BudgetPlan::factory()->for($user)->create();
+    Budget::factory()->inPlan($plan)->create(['name' => 'Groceries', 'limit_amount' => null]);
+
+    $names = Livewire::actingAs($user)
+        ->test(Dashboard::class)
+        ->instance()
+        ->budgetsThisCycle()
+        ->map(fn (array $row): string => $row['budget']->name);
+
+    expect($names->all())->toBe(['Insurance']);
 });
 
 test('next three planned section renders upcoming plans', function () {

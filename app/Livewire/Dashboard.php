@@ -140,6 +140,7 @@ final class Dashboard extends Component
         $bounds = $user->currentPayCycleBounds();
 
         return $user->budgets()
+            ->whereNull('budget_plan_id')
             ->with('category')
             ->orderBy('name')
             ->get()
