@@ -8,6 +8,8 @@ use App\Enums\AccountClass;
 use App\Enums\AccountGroup;
 use App\Enums\AuditOutcome;
 use App\Enums\ImportSource;
+use App\Enums\TransactionDirection;
+use App\Enums\ValuationKind;
 use App\Livewire\AccountManager;
 use App\Models\Account;
 use App\Models\AccountValuation;
@@ -662,4 +664,145 @@ test('a foreign reconciliation cannot be edited by pointing the modal at another
         ->call('deleteReconciliation', $foreign->id);
 
     expect($theirs->valuations()->count())->toBe(1);
+});
+
+it('keeps an edited current balance on a manual account with an opening balance', function () {
+    $this->travelTo('2026-06-15 10:00:00');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance_source' => ImportSource::Manual]);
+    Transaction::factory()->for($user)->for($account)->create([
+        'amount' => 20000,
+        'direction' => TransactionDirection::Debit,
+        'post_date' => '2026-03-01',
+    ]);
+    app(AccountValuationService::class)->setOpeningBalance($account, 100000, CarbonImmutable::parse('2026-01-01'));
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id)
+        ->assertSet('balance', '800.00')
+        ->set('balance', '1500.00')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $opening = $account->valuations()->sole();
+    expect($account->fresh()->balance)->toBe(150000)
+        ->and($opening->kind)->toBe(ValuationKind::OpeningBalance)
+        ->and($opening->balance)->toBe(170000)
+        ->and($opening->valued_on->toDateString())->toBe('2026-01-01');
+});
+
+it('records an edited current balance as a reconciliation on a non-cash account', function () {
+    $this->travelTo('2026-06-15 10:00:00');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->savings()->create(['balance_source' => ImportSource::Manual]);
+    app(AccountValuationService::class)->setOpeningBalance($account, 100000, CarbonImmutable::parse('2026-01-01'));
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id)
+        ->set('balance', '1500.00')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $opening = $account->valuations()->where('kind', ValuationKind::OpeningBalance)->sole();
+    $reconciliation = $account->valuations()->where('kind', ValuationKind::Reconciliation)->sole();
+    expect($account->fresh()->balance)->toBe(150000)
+        ->and($opening->balance)->toBe(100000)
+        ->and($opening->valued_on->toDateString())->toBe('2026-01-01')
+        ->and($reconciliation->valued_on->toDateString())->toBe('2026-06-15')
+        ->and($reconciliation->balance)->toBe(150000)
+        ->and($reconciliation->difference)->toBe(50000);
+});
+
+it('leaves the balance alone when only account details change', function () {
+    $this->travelTo('2026-06-15 10:00:00');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance_source' => ImportSource::Manual]);
+    Transaction::factory()->for($user)->for($account)->create([
+        'amount' => 20000,
+        'direction' => TransactionDirection::Debit,
+        'post_date' => '2026-03-01',
+    ]);
+    app(AccountValuationService::class)->setOpeningBalance($account, 100000, CarbonImmutable::parse('2026-01-01'));
+    $before = $account->fresh();
+    $valuationsBefore = $account->valuations()->get()->map->only(['id', 'kind', 'valued_on', 'balance', 'difference', 'updated_at']);
+    $this->travelTo('2026-06-20 10:00:00');
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id)
+        ->set('name', 'Renamed')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $after = $account->fresh();
+    expect($after->name)->toBe('Renamed')
+        ->and($after->balance)->toBe(80000)
+        ->and($after->balance_updated_at)->toEqual($before->balance_updated_at)
+        ->and($account->valuations()->get()->map->only(['id', 'kind', 'valued_on', 'balance', 'difference', 'updated_at']))->toEqual($valuationsBefore);
+});
+
+it('ends on the entered current balance when the opening balance is edited in the same save', function () {
+    $this->travelTo('2026-06-15 10:00:00');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance_source' => ImportSource::Manual]);
+    Transaction::factory()->for($user)->for($account)->create([
+        'amount' => 20000,
+        'direction' => TransactionDirection::Debit,
+        'post_date' => '2026-03-01',
+    ]);
+    app(AccountValuationService::class)->setOpeningBalance($account, 100000, CarbonImmutable::parse('2026-01-01'));
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id)
+        ->set('openingBalance', '2000.00')
+        ->set('balance', '1500.00')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($account->fresh()->balance)->toBe(150000)
+        ->and($account->valuations()->sole()->balance)->toBe(170000);
+});
+
+it('keeps a reconciliation made after the form opened when only account details change', function () {
+    $this->travelTo('2026-06-15 10:00:00');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->savings()->create(['balance_source' => ImportSource::Manual]);
+    $service = app(AccountValuationService::class);
+    $service->setOpeningBalance($account, 100000, CarbonImmutable::parse('2026-01-01'));
+
+    $component = Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id);
+
+    $service->reconcile($account, 150000, CarbonImmutable::parse('2026-06-15'));
+
+    $component->set('name', 'Renamed')->call('save')->assertHasNoErrors();
+
+    $reconciliation = $account->valuations()->where('kind', ValuationKind::Reconciliation)->sole();
+    expect($account->fresh()->balance)->toBe(150000)
+        ->and($reconciliation->balance)->toBe(150000)
+        ->and($account->valuations()->count())->toBe(2);
+});
+
+it('keeps a current balance set after the form opened when only account details change', function () {
+    $this->travelTo('2026-06-15 10:00:00');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance_source' => ImportSource::Manual]);
+    Transaction::factory()->for($user)->for($account)->create([
+        'amount' => 20000,
+        'direction' => TransactionDirection::Debit,
+        'post_date' => '2026-03-01',
+    ]);
+    app(AccountValuationService::class)->setOpeningBalance($account, 100000, CarbonImmutable::parse('2026-01-01'));
+
+    $component = Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id);
+
+    app(AccountValuationService::class)->setCurrentBalance($account, 150000);
+
+    $component->set('name', 'Renamed')->call('save')->assertHasNoErrors();
+
+    $opening = $account->valuations()->sole();
+    expect($account->fresh()->balance)->toBe(150000)
+        ->and($opening->kind)->toBe(ValuationKind::OpeningBalance)
+        ->and($opening->balance)->toBe(170000)
+        ->and($opening->valued_on->toDateString())->toBe('2026-01-01');
 });
