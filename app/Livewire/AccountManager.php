@@ -59,6 +59,10 @@ final class AccountManager extends Component
     #[Locked]
     public bool $isUntracked = false;
 
+    /** The edited account's balance comes from a provider, so the form must not offer to change it. Server-set only. */
+    #[Locked]
+    public bool $balanceReadOnly = false;
+
     public bool $showReconcileModal = false;
 
     public ?int $reconcilingAccountId = null;
@@ -132,6 +136,7 @@ final class AccountManager extends Component
         $this->openedOpeningBalance = $opening?->balance;
         $this->openedOpeningBalanceDate = $opening?->valued_on->toDateString();
         $this->isUntracked = ! $account->is_tracked;
+        $this->balanceReadOnly = ! $account->isManuallyBalanced();
         $this->showFormModal = true;
     }
 
@@ -148,7 +153,20 @@ final class AccountManager extends Component
             return;
         }
 
-        $validated = $this->validate($this->formRules());
+        $account = $this->editingAccountId ? $this->findUserAccount($this->editingAccountId) : null;
+
+        if ($this->editingAccountId && $account === null) {
+            return;
+        }
+
+        $providerFed = $account !== null && ! $account->isManuallyBalanced();
+        $rules = $this->formRules();
+
+        if ($providerFed) {
+            unset($rules['balance']);
+        }
+
+        $validated = $this->validate($rules);
 
         $details = [
             'name' => $validated['name'],
@@ -164,17 +182,11 @@ final class AccountManager extends Component
             $details['credit_limit'] = null;
         }
 
-        $account = $this->editingAccountId ? $this->findUserAccount($this->editingAccountId) : null;
-
-        if ($this->editingAccountId && $account === null) {
-            return;
-        }
-
-        $cents = $this->reconcileCents($validated['balance']);
+        $cents = $providerFed ? 0 : $this->reconcileCents($validated['balance']);
         $failedField = 'openingBalanceDate';
 
         try {
-            DB::transaction(function () use ($account, $details, $cents, &$failedField): void {
+            DB::transaction(function () use ($account, $details, $cents, $providerFed, &$failedField): void {
                 $balanceChanged = false;
 
                 if ($account === null) {
@@ -183,11 +195,9 @@ final class AccountManager extends Component
                         'currency' => 'AUD',
                         'status' => AccountStatus::Active,
                     ]);
-                } elseif ($account->isManuallyBalanced()) {
-                    $balanceChanged = $cents !== $this->openedBalance;
-                    $account->update($details);
                 } else {
-                    $account->update($details + $this->manualBalanceAttributes($cents));
+                    $balanceChanged = ! $providerFed && $cents !== $this->openedBalance;
+                    $account->update($details);
                 }
 
                 $this->saveOpeningBalance($account);
@@ -450,6 +460,7 @@ final class AccountManager extends Component
         $this->group = '';
         $this->institution = '';
         $this->isUntracked = false;
+        $this->balanceReadOnly = false;
         $this->openingBalance = '';
         $this->openingBalanceDate = '';
         $this->resetValidation();
