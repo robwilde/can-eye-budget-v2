@@ -79,6 +79,15 @@ final class AccountManager extends Component
 
     public string $openingBalanceDate = '';
 
+    #[Locked]
+    public ?int $openedBalance = null;
+
+    #[Locked]
+    public ?int $openedOpeningBalance = null;
+
+    #[Locked]
+    public ?string $openedOpeningBalanceDate = null;
+
     public function openAddModal(): void
     {
         $this->resetForm();
@@ -107,6 +116,7 @@ final class AccountManager extends Component
         $this->editingAccountId = $account->id;
         $this->name = $account->name;
         $this->balance = number_format($account->balance / 100, 2, '.', '');
+        $this->openedBalance = $account->balance;
         $this->hasCreditLimit = $account->credit_limit !== null;
         $this->credit_limit = $account->credit_limit !== null
             ? number_format($account->credit_limit / 100, 2, '.', '')
@@ -119,6 +129,8 @@ final class AccountManager extends Component
         $opening = $account->valuations()->where('kind', ValuationKind::OpeningBalance)->first();
         $this->openingBalance = $opening !== null ? number_format($opening->balance / 100, 2, '.', '') : '';
         $this->openingBalanceDate = $opening?->valued_on->toDateString() ?? '';
+        $this->openedOpeningBalance = $opening?->balance;
+        $this->openedOpeningBalanceDate = $opening?->valued_on->toDateString();
         $this->isUntracked = ! $account->is_tracked;
         $this->showFormModal = true;
     }
@@ -138,11 +150,8 @@ final class AccountManager extends Component
 
         $validated = $this->validate($this->formRules());
 
-        $mutableData = [
+        $details = [
             'name' => $validated['name'],
-            'balance' => (int) round((float) $validated['balance'] * 100),
-            'balance_source' => ImportSource::Manual,
-            'balance_updated_at' => now(),
             'type' => $validated['type'],
             'group' => $validated['group'],
             'institution' => $validated['institution'] ?: null,
@@ -150,9 +159,9 @@ final class AccountManager extends Component
         ];
 
         if ($this->hasCreditLimit && $validated['credit_limit'] !== null && $validated['credit_limit'] !== '') {
-            $mutableData['credit_limit'] = (int) round((float) $validated['credit_limit'] * 100);
+            $details['credit_limit'] = $this->reconcileCents($validated['credit_limit']);
         } else {
-            $mutableData['credit_limit'] = null;
+            $details['credit_limit'] = null;
         }
 
         $account = $this->editingAccountId ? $this->findUserAccount($this->editingAccountId) : null;
@@ -161,22 +170,35 @@ final class AccountManager extends Component
             return;
         }
 
+        $cents = $this->reconcileCents($validated['balance']);
+        $failedField = 'openingBalanceDate';
+
         try {
-            DB::transaction(function () use ($account, $mutableData): void {
+            DB::transaction(function () use ($account, $details, $cents, &$failedField): void {
+                $balanceChanged = false;
+
                 if ($account === null) {
-                    $account = Account::query()->create($mutableData + [
+                    $account = Account::query()->create($details + $this->manualBalanceAttributes($cents) + [
                         'user_id' => auth()->id(),
                         'currency' => 'AUD',
                         'status' => AccountStatus::Active,
                     ]);
+                } elseif ($account->isManuallyBalanced()) {
+                    $balanceChanged = $cents !== $this->openedBalance;
+                    $account->update($details);
                 } else {
-                    $account->update($mutableData);
+                    $account->update($details + $this->manualBalanceAttributes($cents));
                 }
 
                 $this->saveOpeningBalance($account);
+
+                if ($balanceChanged) {
+                    $failedField = 'balance';
+                    app(AccountValuationService::class)->setCurrentBalance($account, $cents);
+                }
             });
         } catch (InvalidValuationException $exception) {
-            $this->addError('openingBalanceDate', $exception->getMessage());
+            $this->addError($failedField, $exception->getMessage());
 
             return;
         }
@@ -416,6 +438,9 @@ final class AccountManager extends Component
     private function resetForm(): void
     {
         $this->editingAccountId = null;
+        $this->openedBalance = null;
+        $this->openedOpeningBalance = null;
+        $this->openedOpeningBalanceDate = null;
         $this->name = '';
         $this->balance = '';
         $this->hasCreditLimit = false;
@@ -527,16 +552,31 @@ final class AccountManager extends Component
         $this->reconcilePreview = null;
     }
 
+    /** @return array{balance: int, balance_source: ImportSource, balance_updated_at: CarbonImmutable} */
+    private function manualBalanceAttributes(int $cents): array
+    {
+        return [
+            'balance' => $cents,
+            'balance_source' => ImportSource::Manual,
+            'balance_updated_at' => CarbonImmutable::now(),
+        ];
+    }
+
     private function saveOpeningBalance(Account $account): void
     {
         if ($this->openingBalance === '') {
             return;
         }
 
-        app(AccountValuationService::class)->setOpeningBalance(
-            $account,
-            $this->reconcileCents($this->openingBalance),
-            $this->openingBalanceDate !== '' ? CarbonImmutable::parse($this->openingBalanceDate) : null,
-        );
+        $cents = $this->reconcileCents($this->openingBalance);
+        $date = $this->openingBalanceDate !== '' ? $this->openingBalanceDate : null;
+
+        if ($cents === $this->openedOpeningBalance && $date === $this->openedOpeningBalanceDate) {
+            return;
+        }
+
+        $on = $date !== null ? CarbonImmutable::parse($date) : null;
+
+        app(AccountValuationService::class)->setOpeningBalance($account, $cents, $on);
     }
 }
