@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
     $this->travelTo('2026-10-22');
-    $this->service = new AccountValuationService;
+    $this->service = app(AccountValuationService::class);
 });
 
 function cashAccount(array $attributes = []): Account
