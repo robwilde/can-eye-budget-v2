@@ -7,6 +7,7 @@ namespace Database\Factories;
 use App\Enums\BudgetPeriod;
 use App\Models\Account;
 use App\Models\Budget;
+use App\Models\BudgetPlan;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
@@ -36,6 +37,18 @@ final class BudgetFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'category_id' => $category->id ?? Category::factory(),
+        ]);
+    }
+
+    public function inPlan(BudgetPlan $plan): self
+    {
+        return $this->withCategory()->state(fn (array $attributes) => [
+            'name' => '',
+            'user_id' => $plan->user_id,
+            'budget_plan_id' => $plan->id,
+            'period' => BudgetPeriod::Monthly,
+            'start_date' => $plan->period_start,
+            'end_date' => $plan->period_end,
         ]);
     }
 
