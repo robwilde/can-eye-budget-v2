@@ -68,6 +68,10 @@
                                 @endif
                             @endif
                             <div class="hidden items-center gap-1 md:flex">
+                                @if ($account->is_tracked && $account->isManuallyBalanced())
+                                    <flux:button variant="ghost" size="sm" icon="scale" wire:click="openReconcileModal({{ $account->id }})"
+                                                 :aria-label="__('Reconcile')" data-test="account-reconcile-balance-{{ $account->id }}"/>
+                                @endif
                                 <flux:button variant="ghost" size="sm" icon="pencil" wire:click="openEditModal({{ $account->id }})"/>
                                 <flux:button variant="ghost" size="sm" icon="trash" wire:click="confirmDelete({{ $account->id }})"
                                              class="text-red-500 hover:text-red-600"/>
@@ -80,6 +84,11 @@
                                     <flux:menu.item icon="pencil" wire:click="openEditModal({{ $account->id }})">
                                         {{ __('Edit') }}
                                     </flux:menu.item>
+                                    @if ($account->is_tracked && $account->isManuallyBalanced())
+                                        <flux:menu.item icon="scale" wire:click="openReconcileModal({{ $account->id }})">
+                                            {{ __('Reconcile') }}
+                                        </flux:menu.item>
+                                    @endif
                                     @unless ($account->is_tracked)
                                         <flux:menu.item icon="scale" wire:click="openReconcileModal({{ $account->id }})">
                                             {{ __('Reconcile') }}
@@ -145,7 +154,27 @@
                         placeholder="0.00"
                         required
                 />
+                @error('balance')
+                    <flux:text class="mt-1 text-red-600 dark:text-red-500" data-test="account-balance-error">{{ $message }}</flux:text>
+                @enderror
             </div>
+
+            @unless($isUntracked)
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="cib-label" for="account-opening-balance">{{ __('Opening Balance') }}</label>
+                    <flux:input id="account-opening-balance" wire:model="openingBalance" type="number" step="0.01" placeholder="0.00" data-test="account-opening-balance"/>
+                </div>
+                <div>
+                    <label class="cib-label" for="account-opening-date">{{ __('Opening Date') }}</label>
+                    <flux:input id="account-opening-date" wire:model="openingBalanceDate" type="date" data-test="account-opening-date"/>
+                </div>
+            </div>
+            @error('openingBalanceDate')
+                <flux:text class="text-red-600 dark:text-red-500" data-test="account-opening-error">{{ $message }}</flux:text>
+            @enderror
+            <flux:text class="text-xs">{{ __('Optional. When set, the current balance is worked out from the opening balance and your transactions.') }}</flux:text>
+            @endunless
 
             @unless($isUntracked)
             <flux:field variant="inline">
@@ -223,19 +252,55 @@
                 <flux:heading size="lg">{{ __('Reconcile') }} {{ $reconcilingAccountName }}</flux:heading>
                 <flux:text class="mt-2">{{ __('Enter the balance shown by your provider. The difference from the recorded balance is saved.') }}</flux:text>
             </div>
-            <div>
-                <label class="cib-label" for="reconcile-balance">{{ __('New Balance') }}</label>
-                <flux:input id="reconcile-balance" wire:model="reconcileBalance" type="number" step="0.01" required/>
-            </div>
-            <div>
-                <label class="cib-label" for="reconcile-date">{{ __('As at') }}</label>
-                <flux:input id="reconcile-date" wire:model="reconcileDate" type="date" required/>
-            </div>
-            <div class="flex">
-                <flux:spacer/>
-                <flux:button type="submit" variant="primary">{{ __('Reconcile') }}</flux:button>
-            </div>
+
+            @if($reconcilePreview === null)
+                <div>
+                    <label class="cib-label" for="reconcile-balance">{{ __('New Balance') }}</label>
+                    <flux:input id="reconcile-balance" wire:model="reconcileBalance" type="number" step="0.01" required/>
+                    @error('reconcileBalance') <flux:text class="mt-1 text-red-600 dark:text-red-500">{{ $message }}</flux:text> @enderror
+                </div>
+                <div>
+                    <label class="cib-label" for="reconcile-date">{{ __('As at') }}</label>
+                    <flux:input id="reconcile-date" wire:model="reconcileDate" type="date" required/>
+                    @error('reconcileDate')
+                        <flux:text class="mt-1 text-red-600 dark:text-red-500" data-test="reconcile-error">{{ $message }}</flux:text>
+                    @enderror
+                </div>
+                <div class="flex">
+                    <flux:spacer/>
+                    <flux:button type="submit" variant="primary" data-test="reconcile-review">{{ __('Review') }}</flux:button>
+                </div>
+            @else
+                <dl class="space-y-2 text-sm" data-test="reconcile-preview">
+                    <div class="flex justify-between"><dt>{{ __('As at') }}</dt><dd>{{ \Carbon\CarbonImmutable::parse($reconcilePreview['date'])->format('j M Y') }}</dd></div>
+                    <div class="flex justify-between"><dt>{{ __('Balance before') }}</dt><dd data-test="reconcile-before">{{ $formatMoney($reconcilePreview['before']) }}</dd></div>
+                    <div class="flex justify-between"><dt>{{ __('Balance after') }}</dt><dd data-test="reconcile-after">{{ $formatMoney($reconcilePreview['after']) }}</dd></div>
+                    <div class="flex justify-between font-medium"><dt>{{ __('Difference') }}</dt><dd>{{ $formatMoney($reconcilePreview['after'] - $reconcilePreview['before']) }}</dd></div>
+                </dl>
+                <div class="flex gap-2">
+                    <flux:button type="button" wire:click="$set('reconcilePreview', null)">{{ __('Back') }}</flux:button>
+                    <flux:spacer/>
+                    <flux:button type="button" variant="primary" wire:click="confirmReconcile" data-test="reconcile-confirm">{{ __('Confirm') }}</flux:button>
+                </div>
+            @endif
         </form>
+
+        @if($reconciliations->isNotEmpty())
+            <div class="mt-6 border-t border-zinc-200 pt-4 dark:border-zinc-700" data-test="reconciliation-history">
+                <flux:heading size="sm">{{ __('Earlier reconciliations') }}</flux:heading>
+                <ul class="mt-2 space-y-2">
+                    @foreach($reconciliations as $reconciliation)
+                        <li class="flex items-center justify-between gap-2 text-sm" data-test="reconciliation-{{ $reconciliation->id }}">
+                            <span>{{ $reconciliation->valued_on->format('j M Y') }} · {{ $formatMoney($reconciliation->balance) }}</span>
+                            <span class="flex gap-2">
+                                <button type="button" wire:click="editReconciliation({{ $reconciliation->id }})" class="cib-link" data-test="reconciliation-edit-{{ $reconciliation->id }}">{{ __('Edit') }}</button>
+                                <button type="button" wire:click="deleteReconciliation({{ $reconciliation->id }})" wire:confirm="{{ __('Delete this reconciliation?') }}" class="cib-link" data-test="reconciliation-delete-{{ $reconciliation->id }}">{{ __('Delete') }}</button>
+                            </span>
+                        </li>
+                    @endforeach
+                </ul>
+            </div>
+        @endif
     </flux:modal>
 
     <flux:modal wire:model="showDeleteModal" class="md:w-96">

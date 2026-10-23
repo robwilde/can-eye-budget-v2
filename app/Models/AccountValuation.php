@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property ValuationKind $kind
  * @property CarbonImmutable $valued_on
  * @property int $balance
+ * @property int|null $difference balance minus the balance the account implied just before this valuation
  * @property string|null $notes
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
@@ -38,6 +39,7 @@ final class AccountValuation extends Model
         'kind',
         'valued_on',
         'balance',
+        'difference',
         'notes',
     ];
 
@@ -72,6 +74,7 @@ final class AccountValuation extends Model
             'kind' => ValuationKind::class,
             'valued_on' => 'immutable_date',
             'balance' => MoneyCast::class,
+            'difference' => MoneyCast::class,
         ];
     }
 }

@@ -6,14 +6,19 @@ declare(strict_types=1);
 
 use App\Enums\AccountClass;
 use App\Enums\AccountGroup;
+use App\Enums\AuditOutcome;
 use App\Enums\ImportSource;
 use App\Livewire\AccountManager;
 use App\Models\Account;
+use App\Models\AccountValuation;
+use App\Models\AuditEvent;
 use App\Models\RedbarkAccount;
 use App\Models\RedbarkFeed;
 use App\Models\StatementReconciliation;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\AccountValuationService;
+use Carbon\CarbonImmutable;
 use Livewire\Livewire;
 
 test('component renders for authenticated user', function () {
@@ -457,4 +462,204 @@ test('a closed reconciliation for an older month does not count as last month', 
     Livewire::actingAs($user)
         ->test(AccountManager::class)
         ->assertSeeHtml('data-test="account-reconcile-link-'.$account->id.'"');
+});
+
+test('cannot reconcile another users account', function () {
+    $user = User::factory()->create();
+    $other = Account::factory()->for(User::factory()->create())->savings()->create(['balance_source' => ImportSource::Manual, 'balance' => 5000]);
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->set('reconcilingAccountId', $other->id)
+        ->set('reconcileBalance', '99.00')
+        ->set('reconcileDate', '2026-07-01')
+        ->call('reconcile')
+        ->assertSet('reconcilePreview', null)
+        ->call('confirmReconcile');
+
+    expect(AccountValuation::query()->count())->toBe(0)
+        ->and($other->fresh()->balance)->toBe(5000);
+});
+
+test('records an audit event when an account is reconciled', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->savings()->create(['balance_source' => ImportSource::Manual]);
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openReconcileModal', $account->id)
+        ->set('reconcileBalance', '120.00')
+        ->set('reconcileDate', '2026-07-01')
+        ->call('reconcile')
+        ->call('confirmReconcile');
+
+    $event = AuditEvent::query()->where('action', 'livewire.account-manager.confirmReconcile')->sole();
+    expect($event->user_id)->toBe($user->id)
+        ->and($event->outcome)->toBe(AuditOutcome::Success);
+});
+
+test('reviewing a reconciliation writes nothing until it is confirmed', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->savings()->create(['balance_source' => ImportSource::Manual, 'balance' => 10000]);
+
+    $component = Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openReconcileModal', $account->id)
+        ->set('reconcileBalance', '150.00')
+        ->set('reconcileDate', '2026-07-01')
+        ->call('reconcile')
+        ->assertSet('reconcilePreview', ['before' => 10000, 'after' => 15000, 'date' => '2026-07-01']);
+
+    expect(AccountValuation::query()->count())->toBe(0)
+        ->and($account->fresh()->balance)->toBe(10000);
+
+    $component->call('confirmReconcile')->assertSet('showReconcileModal', false);
+
+    expect($account->valuations()->sole()->balance)->toBe(15000);
+});
+
+test('shows the service error instead of saving an invalid reconciliation date', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->savings()->create(['balance_source' => ImportSource::Manual]);
+    app(AccountValuationService::class)->setOpeningBalance($account, 1000, CarbonImmutable::parse('2026-05-01'));
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openReconcileModal', $account->id)
+        ->set('reconcileBalance', '5.00')
+        ->set('reconcileDate', '2026-04-01')
+        ->call('reconcile')
+        ->call('confirmReconcile')
+        ->assertHasErrors('reconcileDate')
+        ->assertSet('reconcilePreview', null);
+
+    expect($account->valuations()->count())->toBe(1);
+});
+
+test('edits and deletes a reconciliation from the history list', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->savings()->create(['balance_source' => ImportSource::Manual]);
+    $valuation = app(AccountValuationService::class)->reconcile($account, 10000, CarbonImmutable::parse('2026-06-01'));
+
+    $component = Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openReconcileModal', $account->id)
+        ->assertSee('Earlier reconciliations')
+        ->call('editReconciliation', $valuation->id)
+        ->assertSet('reconcileBalance', '100.00')
+        ->set('reconcileBalance', '110.00')
+        ->call('reconcile')
+        ->call('confirmReconcile');
+
+    expect($account->valuations()->sole()->balance)->toBe(11000);
+
+    $component->call('openReconcileModal', $account->id)->call('deleteReconciliation', $valuation->id);
+
+    expect($account->valuations()->count())->toBe(0)
+        ->and($account->fresh()->reconciled_on)->toBeNull();
+});
+
+test('saves an opening balance from the account form', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openAddModal')
+        ->set('name', 'Everyday')
+        ->set('balance', '0')
+        ->set('openingBalance', '1000.00')
+        ->set('openingBalanceDate', '2026-01-01')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $account = Account::query()->where('user_id', $user->id)->sole();
+    expect($account->valuations()->sole()->balance)->toBe(100000);
+});
+
+test('rolls back the account rename when the opening balance date is not before the oldest entry', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance_source' => ImportSource::Manual]);
+    Transaction::factory()->for($user)->for($account)->create(['post_date' => '2026-03-01']);
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id)
+        ->set('openingBalance', '50.00')
+        ->set('openingBalanceDate', '2026-03-01')
+        ->set('name', 'Renamed')
+        ->call('save')
+        ->assertHasErrors('openingBalanceDate');
+
+    expect($account->valuations()->count())->toBe(0)
+        ->and($account->fresh()->name)->not->toBe('Renamed');
+});
+
+test('rolls back the new account when the opening balance date is too far back', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openAddModal')
+        ->set('name', 'Ancient')
+        ->set('balance', '0')
+        ->set('openingBalance', '10.00')
+        ->set('openingBalanceDate', '1990-01-01')
+        ->call('save')
+        ->assertHasErrors('openingBalanceDate');
+
+    expect(Account::query()->where('user_id', $user->id)->count())->toBe(0);
+});
+
+test('reopening the reconcile modal drops a dismissed edit so a new reconciliation is added', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->savings()->create(['balance_source' => ImportSource::Manual]);
+    $valuation = app(AccountValuationService::class)->reconcile($account, 10000, CarbonImmutable::parse('2026-06-01'));
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openReconcileModal', $account->id)
+        ->call('editReconciliation', $valuation->id)
+        ->set('showReconcileModal', false)
+        ->call('openReconcileModal', $account->id)
+        ->assertSet('editingValuationId', null)
+        ->set('reconcileBalance', '200.00')
+        ->call('reconcile')
+        ->call('confirmReconcile');
+
+    expect($account->valuations()->count())->toBe(2)
+        ->and($valuation->fresh()->balance)->toBe(10000);
+});
+
+test('reopening the reconcile modal drops a stale preview', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->savings()->create(['balance_source' => ImportSource::Manual]);
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openReconcileModal', $account->id)
+        ->call('reconcile')
+        ->assertNotSet('reconcilePreview', null)
+        ->set('showReconcileModal', false)
+        ->call('openReconcileModal', $account->id)
+        ->assertSet('reconcilePreview', null);
+});
+
+test('deleting another reconciliation keeps the one being edited', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->savings()->create(['balance_source' => ImportSource::Manual]);
+    $service = app(AccountValuationService::class);
+    $edited = $service->reconcile($account, 10000, CarbonImmutable::parse('2026-06-01'));
+    $other = $service->reconcile($account, 20000, CarbonImmutable::parse('2026-07-01'));
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openReconcileModal', $account->id)
+        ->call('editReconciliation', $edited->id)
+        ->call('deleteReconciliation', $other->id)
+        ->assertSet('editingValuationId', $edited->id);
+});
+
+test('a foreign reconciliation cannot be edited by pointing the modal at another users account', function () {
+    $user = User::factory()->create();
+    $mine = Account::factory()->for($user)->savings()->create(['balance_source' => ImportSource::Manual]);
+    $theirs = Account::factory()->for(User::factory()->create())->savings()->create(['balance_source' => ImportSource::Manual]);
+    $foreign = app(AccountValuationService::class)->reconcile($theirs, 7000, CarbonImmutable::parse('2026-06-01'));
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openReconcileModal', $mine->id)
+        ->set('reconcilingAccountId', $theirs->id)
+        ->call('editReconciliation', $foreign->id)
+        ->assertSet('editingValuationId', null)
+        ->call('deleteReconciliation', $foreign->id);
+
+    expect($theirs->valuations()->count())->toBe(1);
 });
