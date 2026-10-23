@@ -806,3 +806,135 @@ it('keeps a current balance set after the form opened when only account details 
         ->and($opening->balance)->toBe(170000)
         ->and($opening->valued_on->toDateString())->toBe('2026-01-01');
 });
+
+function providerFedAccount(User $user, ImportSource $source): Account
+{
+    return Account::factory()->for($user)->create([
+        'name' => 'Everyday',
+        'balance' => 123456,
+        'balance_source' => $source,
+        'balance_updated_at' => CarbonImmutable::parse('2026-06-15 09:00:00'),
+    ]);
+}
+
+function renameKeepsProviderBalance(ImportSource $source): void
+{
+    test()->travelTo('2026-06-20 10:00:00');
+    $user = User::factory()->create();
+    $account = providerFedAccount($user, $source);
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id)
+        ->set('name', 'Renamed')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $after = $account->fresh();
+    expect($after->name)->toBe('Renamed')
+        ->and($after->balance)->toBe(123456)
+        ->and($after->balance_source)->toBe($source)
+        ->and($after->balance_updated_at)->toEqual(CarbonImmutable::parse('2026-06-15 09:00:00'));
+}
+
+it('keeps balance and source when renaming a redbark account', function () {
+    renameKeepsProviderBalance(ImportSource::Redbark);
+});
+
+it('keeps balance and source when renaming a csv account', function () {
+    renameKeepsProviderBalance(ImportSource::Csv);
+});
+
+it('does not overwrite a provider balance updated after the edit form opened', function () {
+    $this->travelTo('2026-06-20 10:00:00');
+    $user = User::factory()->create();
+    $account = providerFedAccount($user, ImportSource::Redbark);
+
+    $component = Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id);
+
+    $account->update(['balance' => 200000, 'balance_updated_at' => CarbonImmutable::parse('2026-06-20 09:30:00')]);
+
+    $component->set('name', 'Renamed')->call('save')->assertHasNoErrors();
+
+    $after = $account->fresh();
+    expect($after->balance)->toBe(200000)
+        ->and($after->balance_source)->toBe(ImportSource::Redbark)
+        ->and($after->balance_updated_at)->toEqual(CarbonImmutable::parse('2026-06-20 09:30:00'));
+});
+
+it('still saves non-balance details on provider-fed accounts', function () {
+    $user = User::factory()->create();
+    $account = providerFedAccount($user, ImportSource::Csv);
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id)
+        ->set('name', 'Platinum Card')
+        ->set('type', AccountClass::CreditCard->value)
+        ->set('group', AccountGroup::LongTermSavings->value)
+        ->set('institution', 'Westpac')
+        ->set('description', 'Bills card')
+        ->set('hasCreditLimit', true)
+        ->set('credit_limit', '5000.00')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $after = $account->fresh();
+    expect($after->name)->toBe('Platinum Card')
+        ->and($after->type)->toBe(AccountClass::CreditCard)
+        ->and($after->group)->toBe(AccountGroup::LongTermSavings)
+        ->and($after->institution)->toBe('Westpac')
+        ->and($after->description)->toBe('Bills card')
+        ->and($after->credit_limit)->toBe(500000)
+        ->and($after->balance_source)->toBe(ImportSource::Csv);
+});
+
+it('shows the current balance read-only only when editing a provider-fed account', function (ImportSource $source, bool $readOnly) {
+    $user = User::factory()->create();
+    $account = providerFedAccount($user, $source);
+
+    $component = Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id);
+
+    preg_match('/<input[^>]*id="account-balance"[^>]*>/', $component->html(), $input);
+    expect(str_contains($input[0], 'readonly'))->toBe($readOnly);
+
+    $readOnly
+        ? $component->assertSeeHtml('data-test="account-balance-provider-note"')
+        : $component->assertDontSeeHtml('data-test="account-balance-provider-note"');
+})->with([
+    'redbark' => [ImportSource::Redbark, true],
+    'csv' => [ImportSource::Csv, true],
+    'manual' => [ImportSource::Manual, false],
+]);
+
+it('ignores a balance sent for a provider-fed account', function (string $balance) {
+    $this->travelTo('2026-06-20 10:00:00');
+    $user = User::factory()->create();
+    $account = providerFedAccount($user, ImportSource::Redbark);
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id)
+        ->set('balance', $balance)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $after = $account->fresh();
+    expect($after->balance)->toBe(123456)
+        ->and($after->balance_source)->toBe(ImportSource::Redbark)
+        ->and($after->balance_updated_at)->toEqual(CarbonImmutable::parse('2026-06-15 09:00:00'))
+        ->and($after->valuations()->exists())->toBeFalse();
+})->with([
+    'changed' => ['999.99'],
+    'blank' => [''],
+]);
+
+it('lets a new account set its balance after editing a provider-fed one', function () {
+    $user = User::factory()->create();
+    $account = providerFedAccount($user, ImportSource::Redbark);
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id)
+        ->assertSet('balanceReadOnly', true)
+        ->call('openAddModal')
+        ->assertSet('balanceReadOnly', false);
+});
