@@ -35,6 +35,7 @@ final class AccountBalanceHistoryBuilder
     public function rebuild(Account $account, ?CarbonImmutable $from = null): void
     {
         DB::transaction(function () use ($account, $from): void {
+            $account = Account::query()->whereKey($account->id)->lockForUpdate()->firstOrFail();
             $today = CarbonImmutable::today();
             $flows = $this->dailyFlows($account);
 
