@@ -13,6 +13,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 final class AccountDailyBalanceFactory extends Factory
 {
+    private static int $nextDayOffset = 0;
+
     /**
      * @return array<string, mixed>
      */
@@ -22,7 +24,7 @@ final class AccountDailyBalanceFactory extends Factory
 
         return [
             'account_id' => Account::factory(),
-            'balance_date' => fake()->unique()->dateTimeBetween('-1 year', 'now')->format('Y-m-d'),
+            'balance_date' => now()->subDays(self::$nextDayOffset++)->toDateString(),
             'start_balance' => $balance,
             'end_balance' => $balance,
             'currency' => 'AUD',
