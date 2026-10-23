@@ -11,18 +11,22 @@ use App\Exceptions\InvalidValuationException;
 use App\Models\Account;
 use App\Models\AccountValuation;
 use App\Models\Transaction;
+use App\Services\Projection\AccountBalanceHistoryBuilder;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 /**
  * Writes the stored balance valuations of an account. Every public method is one
- * DB transaction that locks the account row first, so concurrent writes serialise.
+ * DB transaction that locks the account row first, so concurrent writes serialise,
+ * and rebuilds the account's daily balance history inside that same transaction.
  */
 final class AccountValuationService
 {
     private const int MAX_YEARS_BACK = 30;
 
     private const int DEFAULT_OPENING_YEARS_BACK = 2;
+
+    public function __construct(private readonly AccountBalanceHistoryBuilder $history) {}
 
     /**
      * Sets or moves the opening balance. Without a date it is the earlier of two years ago
@@ -309,5 +313,7 @@ final class AccountValuationService
         }
 
         $account->forceFill($changes)->save();
+
+        $this->history->rebuild($account);
     }
 }
