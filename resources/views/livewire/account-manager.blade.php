@@ -152,11 +152,15 @@
                         type="number"
                         step="0.01"
                         placeholder="0.00"
-                        required
+                        :readonly="$balanceReadOnly"
+                        :required="! $balanceReadOnly"
                 />
                 @error('balance')
                     <flux:text class="mt-1 text-red-600 dark:text-red-500" data-test="account-balance-error">{{ $message }}</flux:text>
                 @enderror
+                @if($balanceReadOnly)
+                    <flux:text class="mt-1 text-xs" data-test="account-balance-provider-note">{{ __('This balance is kept up to date by your bank feed or import, so it cannot be edited here.') }}</flux:text>
+                @endif
             </div>
 
             @unless($isUntracked)
