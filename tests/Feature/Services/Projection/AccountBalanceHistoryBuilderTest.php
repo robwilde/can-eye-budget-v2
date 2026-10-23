@@ -146,6 +146,17 @@ test('works backwards from the stored balance when there is no valuation', funct
         ->and($account->dailyBalances()->sum('adjustments'))->toBe(0);
 });
 
+test('uses the current stored balance when the given account is stale', function () {
+    $account = historyAccount(50000);
+    postOn($account, '2026-05-04', 10000, TransactionDirection::Credit);
+    Account::query()->whereKey($account->id)->update(['balance' => 75000]);
+
+    $this->builder->rebuild($account);
+
+    expect(dayRow($account, '2026-05-04')->start_balance)->toBe(65000)
+        ->and(dayRow($account, '2026-05-12')->end_balance)->toBe(75000);
+});
+
 test('works backwards from the earliest valuation when there is no opening balance', function () {
     $account = historyAccount(999999);
     postOn($account, '2026-05-04', 10000, TransactionDirection::Credit);
