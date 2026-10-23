@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use App\Models\Account;
+use App\Models\User;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Collection;
@@ -25,6 +26,13 @@ final class RebuildBalanceHistoryCommand extends Command
     public function handle(AccountBalanceHistoryBuilder $builder): int
     {
         $userId = $this->option('user');
+
+        if ($userId !== null && ! User::query()->whereKey((int) $userId)->exists()) {
+            $this->error("User {$userId} not found.");
+
+            return self::FAILURE;
+        }
+
         $rebuilt = 0;
         $failed = 0;
 
