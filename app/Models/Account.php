@@ -98,6 +98,12 @@ final class Account extends Model
         return $this->hasMany(AccountValuation::class);
     }
 
+    /** @return HasMany<AccountDailyBalance, $this> */
+    public function dailyBalances(): HasMany
+    {
+        return $this->hasMany(AccountDailyBalance::class);
+    }
+
     /** @return HasMany<StatementReconciliation, $this> */
     public function statementReconciliations(): HasMany
     {
