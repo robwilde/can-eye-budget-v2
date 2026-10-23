@@ -183,3 +183,24 @@ test('rebuilds everything when a partial rebuild has nothing pinning earlier day
     expect(dayRow($account, '2026-05-04')->start_balance)->toBe(35000)
         ->and(dayRow($account, '2026-05-12')->end_balance)->toBe(50000);
 });
+
+test('ignores pending, deleted, future and pre-opening transactions', function () {
+    $account = historyAccount();
+    openingOn($account, '2026-05-01', 100000);
+    postOn($account, '2026-04-28', 7000, TransactionDirection::Credit);
+    Transaction::factory()->pending()->for($account)->for($account->user)->create([
+        'post_date' => '2026-05-03',
+        'amount' => 1000,
+        'direction' => TransactionDirection::Debit,
+    ]);
+    postOn($account, '2026-05-04', 2000, TransactionDirection::Debit)->delete();
+    postOn($account, '2026-05-20', 9000, TransactionDirection::Debit);
+
+    $this->builder->rebuild($account);
+
+    expect(dayRow($account, '2026-05-03')->outflows)->toBe(0)
+        ->and(dayRow($account, '2026-05-04')->outflows)->toBe(0)
+        ->and(dayRow($account, '2026-05-12')->end_balance)->toBe(100000)
+        ->and($account->dailyBalances()->count())->toBe(12)
+        ->and($account->dailyBalances()->whereDate('balance_date', '<', '2026-05-01')->exists())->toBeFalse();
+});
