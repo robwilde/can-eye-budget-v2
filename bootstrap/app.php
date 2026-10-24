@@ -35,6 +35,15 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withSchedule(function (Schedule $schedule): void {
         $schedule->command('horizon:snapshot')->everyFiveMinutes();
+        $schedule->command('horizon:status')
+            ->everyFiveMinutes()
+            ->sentryMonitor(
+                monitorSlug: 'horizon-status',
+                checkInMargin: 5,
+                maxRuntime: 1,
+                failureIssueThreshold: 2,
+                recoveryThreshold: 1,
+            );
         // Scheduler liveness: write a heartbeat file every minute for the healthcheck to verify
         // freshness without booting Laravel. Threshold 120s tolerates the scheduler's 60s tick
         // interval + jitter within Docker's 15s probe interval, 5 retries (75s worst-case).

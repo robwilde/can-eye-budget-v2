@@ -235,3 +235,16 @@ test('the scheduler heartbeat is dispatched in the background', function () {
     expect($heartbeat)->not->toBeNull();
     expect($heartbeat->runInBackground)->toBeTrue();
 });
+
+test('horizon status is checked every five minutes so an outage reaches sentry', function () {
+    $this->artisan('schedule:list')->assertSuccessful();
+
+    $expressions = collect(app(Schedule::class)->events())
+        ->filter(fn ($event): bool => str_ends_with((string) $event->command, 'horizon:status'))
+        ->pluck('expression')
+        ->unique()
+        ->values()
+        ->all();
+
+    expect($expressions)->toBe(['*/5 * * * *']);
+});
