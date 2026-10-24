@@ -507,6 +507,14 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
 
 ### Redeployment and rollback
 
+- Dokploy **Deploy** clones `develop` into `/etc/dokploy/applications/<appName>/code` and builds it; **Redeploy** rebuilds that existing checkout without
+  fetching from Git. Use Deploy to ship new commits. A Redeploy still re-resolves floating build inputs such as the `php:8.4-fpm-alpine` base tag. The
+  2026-10-24 Redeploys moved staging to PHP 8.4.27 but left it on 2026-09-26 application code (#804).
+- Push-to-deploy depends on one GitHub repo webhook per service, sending `push` events as JSON to `https://dokploy.mrwilde.dev/api/deploy/<refreshToken>`
+  (the token is per application and must never be committed). Dokploy's `autoDeploy` flag does nothing without a hook. The current staging setup has three
+  hooks, one each for `can-eye-web`, `can-eye-horizon` and `can-eye-scheduler`; check with `gh api repos/robwilde/can-eye-budget-v2/hooks`. A push to
+  `develop` returns `Application deployed successfully`, and pushes to other branches return `Branch Not Match` (HTTP 301), which is expected. All three
+  hooks fire on the same push, so `can-eye-horizon` and `can-eye-scheduler` can start before `can-eye-web` finishes migrating.
 - Every subsequent deploy re-runs the entrypoint, so migrations are applied automatically. Snapshot MariaDB before any deploy that carries new migrations; the 51
   existing migrations include changes that are not cleanly reversible in practice.
 - After deploying application code that queued workers must pick up, run `php artisan horizon:terminate` so supervisors restart on the new code. Redeploying
