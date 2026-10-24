@@ -2,6 +2,9 @@
 
 FROM php:8.4-fpm-alpine AS vendor
 
+# 8.4.27 fixes PHP2Shell (CVE-2026-109618/109619); a stale cached base must fail the build.
+RUN php -r 'if (version_compare(PHP_VERSION, "8.4.27", "<")) { fwrite(STDERR, "PHP " . PHP_VERSION . " is below 8.4.27\n"); exit(1); }'
+
 ADD --chmod=0755 https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
 RUN install-php-extensions bcmath pcntl pdo_mysql redis zip opcache
 
@@ -28,6 +31,8 @@ COPY --from=vendor /app/vendor ./vendor
 RUN npm run build
 
 FROM php:8.4-fpm-alpine AS runtime
+
+RUN php -r 'if (version_compare(PHP_VERSION, "8.4.27", "<")) { fwrite(STDERR, "PHP " . PHP_VERSION . " is below 8.4.27\n"); exit(1); }'
 
 ADD --chmod=0755 https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
 RUN install-php-extensions bcmath pcntl pdo_mysql redis zip opcache \
