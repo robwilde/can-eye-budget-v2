@@ -63,6 +63,14 @@ EXPOSE 80
 HEALTHCHECK --start-period=90s --interval=15s --timeout=5s --retries=5 \
   CMD /usr/local/bin/healthcheck.sh
 
+# IMAGE_ROLE gives each Dokploy app (web, horizon, scheduler) its own image ID. Otherwise the
+# three builds share one ID under three tags, and Dokploy's nightly `docker image prune --all`
+# untags all but one of them even while their containers run, so the next worker restart
+# fails with "pull access denied" (#803). LABEL only changes image config: layers stay shared.
+ARG IMAGE_ROLE
+RUN test -n "$IMAGE_ROLE" || { echo "IMAGE_ROLE build arg is required (#803)" >&2; exit 1; }
+LABEL dev.mrwilde.can-eye.image-role="${IMAGE_ROLE}"
+
 # No CMD: docker/entrypoint.sh resolves each role's process from CONTAINER_ROLE, so a
 # Dokploy Application needs neither its command nor its args field. A command written there
 # maps to Swarm ContainerSpec.Command and replaces this ENTRYPOINT outright; args map to
