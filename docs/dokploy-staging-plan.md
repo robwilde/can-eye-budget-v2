@@ -515,6 +515,13 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
   hooks, one each for `can-eye-web`, `can-eye-horizon` and `can-eye-scheduler`; check with `gh api repos/robwilde/can-eye-budget-v2/hooks`. A push to
   `develop` returns `Application deployed successfully`, and pushes to other branches return `Branch Not Match` (HTTP 301), which is expected. All three
   hooks fire on the same push, so `can-eye-horizon` and `can-eye-scheduler` can start before `can-eye-web` finishes migrating.
+- Each service sets one Dokploy build arg: `IMAGE_ROLE=web`, `IMAGE_ROLE=horizon` or `IMAGE_ROLE=scheduler`. The `Dockerfile` fails the build without it.
+  The arg gives each service its own image ID. If the three builds share one ID under three tags, Dokploy's nightly cleanup (23:50 UTC,
+  `docker image prune --all` among others) untags all but one, even while their containers run. The surviving tag is `can-eye-web`, which sorts last. The
+  next Horizon or scheduler restart then fails with `pull access denied for can-eye-…` and the service stays at 0/1 until a manual redeploy (#803). Check
+  with `docker image ls | grep can-eye`: three different image IDs.
+- `horizon:status` runs every five minutes under a Sentry cron monitor (`horizon-status`). A failed check-in (Horizon inactive or paused) or a missed one
+  (scheduler not running) opens a Sentry issue after two consecutive misses or failures. Who is notified depends on the Sentry project's alert rules.
 - Every subsequent deploy re-runs the entrypoint, so migrations are applied automatically. Snapshot MariaDB before any deploy that carries new migrations; the 51
   existing migrations include changes that are not cleanly reversible in practice.
 - After deploying application code that queued workers must pick up, run `php artisan horizon:terminate` so supervisors restart on the new code. Redeploying
