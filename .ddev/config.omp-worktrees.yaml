@@ -1,5 +1,6 @@
 # Create the worktree base as the host user before Docker bind-mounts it;
-# a missing bind source is otherwise created owned by root.
+# a missing bind source is otherwise created owned by root. A leading ~ is
+# expanded here because the shell does not expand it inside quotes.
 hooks:
   pre-start:
-    - exec-host: mkdir -p "${OMP_WORKTREE_DIR:-$HOME/.omp/wt}"
+    - exec-host: 'd="${OMP_WORKTREE_DIR:-$HOME/.omp/wt}"; case "$d" in "~") d="$HOME" ;; "~/"*) d="$HOME/${d#"~/"}" ;; esac; mkdir -p "$d"'
