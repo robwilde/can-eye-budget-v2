@@ -1,0 +1,5 @@
+# Create the worktree base as the host user before Docker bind-mounts it;
+# a missing bind source is otherwise created owned by root.
+hooks:
+  pre-start:
+    - exec-host: mkdir -p "${OMP_WORKTREE_DIR:-$HOME/.omp/wt}"

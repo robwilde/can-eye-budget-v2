@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Bootstrap a linked git worktree so `ddev exec --dir` can run tests in it.
+# Run from the worktree root. Idempotent. Never touches the main checkout.
+#
+# DDEV only mounts the project root (/var/www/html) and the OMP worktree base
+# (/omp-wt, see .ddev/docker-compose.omp-worktrees.yaml). ddev is always run
+# from the main checkout so the worktree's own .ddev/ is never consulted.
+
+set -euo pipefail
+
+WT="$(git rev-parse --show-toplevel)"
+MAIN="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+
+if [ "$WT" = "$MAIN" ]; then
+    echo "worktree-setup: run this inside a linked worktree, not the main checkout" >&2
+    exit 1
+fi
+
+CPATH="$("$MAIN/scripts/worktree-container-path" "$WT")"
+
+[ -f "$WT/.env" ] || cp "$MAIN/.env" "$WT/.env"
+
+# vendor must be a real copy: Composer resolves paths from the autoloader's own
+# location, so a symlink would make the worktree load the main checkout's code.
+if [ ! -f "$WT/vendor/autoload.php" ]; then
+    mkdir -p "$WT/vendor"
+    cp -a --reflink=auto "$MAIN/vendor/." "$WT/vendor/"
+fi
+
+if [ ! -f "$WT/public/build/manifest.json" ] && [ -d "$MAIN/public/build" ]; then
+    mkdir -p "$WT/public/build"
+    cp -a --reflink=auto "$MAIN/public/build/." "$WT/public/build/"
+fi
+
+COMPOSER_LOG="$(mktemp)"
+trap 'rm -f "$COMPOSER_LOG"' EXIT
+if ! (cd "$MAIN" && ddev exec --dir "$CPATH" composer dump-autoload --quiet >"$COMPOSER_LOG" 2>&1); then
+    grep -v -E 'nested project|To use the nested' "$COMPOSER_LOG" >&2 || true
+    echo "worktree-setup: composer dump-autoload failed" >&2
+    exit 1
+fi
+
+echo "worktree-setup: ready. Run commands with: ddev exec --dir $CPATH <cmd>"
