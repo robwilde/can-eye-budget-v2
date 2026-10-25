@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Run `php artisan <args>` in the DDEV web container, in the checkout that
+# contains the current directory (main checkout or linked worktree).
+# Used by .mcp.json so laravel-boost serves the active worktree. Keep stdout
+# clean: it carries the MCP protocol.
+
+set -euo pipefail
+
+MAIN="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+CPATH="$("$MAIN/scripts/worktree-container-path")"
+cd "$MAIN"
+exec ddev exec --dir "$CPATH" php artisan "$@"

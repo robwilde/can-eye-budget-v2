@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Print the path inside the DDEV web container for a checkout directory.
+# Usage: scripts/worktree-container-path [dir]   (default: current git toplevel)
+#
+#   <project root>/...            -> /var/www/html/...
+#   <OMP worktree base>/...       -> /omp-wt/...   (mounted by .ddev/docker-compose.omp-worktrees.yaml)
+
+set -euo pipefail
+
+DIR="$(cd "${1:-.}" && git rev-parse --show-toplevel)"
+MAIN="$(cd "$DIR" && dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+OMP_BASE="${OMP_WORKTREE_DIR:-$HOME/.omp/wt}"
+OMP_BASE="${OMP_BASE%/}"
+
+case "$DIR/" in
+    "$MAIN/") echo "/var/www/html" ;;
+    "$MAIN/"*) echo "/var/www/html/${DIR#"$MAIN"/}" ;;
+    "$OMP_BASE/"*) echo "/omp-wt/${DIR#"$OMP_BASE"/}" ;;
+    *) echo "worktree-container-path: $DIR is neither under $MAIN nor $OMP_BASE; DDEV cannot see it" >&2; exit 1 ;;
+esac
