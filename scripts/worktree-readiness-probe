@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Worktree readiness probe for OhMyPi + DDEV.
+# Worktree readiness probe for OhMyPi + DDEV (run: scripts/worktree-readiness-probe).
 #
 # Creates a throwaway git worktree where OhMyPi would put one (OMP_WORKTREE_DIR,
 # else the effective `worktree.base` setting, else ~/.omp/wt), overlays the
@@ -21,7 +21,8 @@ die() { echo "HARNESS ERROR: $*" >&2; exit 2; }
 now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$(now)" 'BEGIN { printf "%.2f", b - a }'; }
 
-ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repository"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || die "cannot resolve script directory"
+ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repository"
 cd "$ROOT" || die "cannot cd to $ROOT"
 T0="$(now)"
 
@@ -32,6 +33,7 @@ PROJECT="$(jq -r '.raw.name' <<<"$DESCRIBE")"
 [ "$APPROOT" = "$ROOT" ] || die "DDEV approot $APPROOT is not this checkout $ROOT"
 REGISTRY_BEFORE="$(ddev list -j 2>/dev/null | jq -r --arg n "$PROJECT" '.raw[] | select(.name == $n) | .approot')"
 
+# shellcheck disable=SC2088 # literal "~" patterns are intentional: omp settings store an unexpanded tilde
 expand_home() { case "$1" in "~") echo "$HOME" ;; "~/"*) echo "$HOME/${1#\~/}" ;; *) echo "$1" ;; esac; }
 
 omp_base_for() {
@@ -56,7 +58,6 @@ WT="$PROBE_DIR/wt"
 cleanup() {
     git -C "$ROOT" worktree remove --force "$WT" >/dev/null 2>&1
     rm -rf "$PROBE_DIR"
-    git -C "$ROOT" worktree prune >/dev/null 2>&1
 }
 trap cleanup EXIT
 
@@ -155,7 +156,7 @@ def recv(want_id, deadline):
     return None
 try:
     deadline = time.time() + 60
-    send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "autoresearch", "version": "1"}}})
+    send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "worktree-readiness-probe", "version": "1"}}})
     init = recv(1, deadline)
     if not init or "result" not in init:
         print("no initialize result"); sys.exit(1)
@@ -173,7 +174,6 @@ PY
 if [ -f "$WT/.mcp.json" ]; then
     BOOST_BASE="$(python3 -c "$MCP_PY" base_path "$WT/.mcp.json" "$WT" 2>/dev/null | tail -n1)"
     HANDSHAKE="$(python3 -c "$MCP_PY" handshake "$WT/.mcp.json" "$WT" 2>&1 | tail -n1)"
-    HANDSHAKE_RC=$?
 else
     BOOST_BASE=""
     HANDSHAKE="no .mcp.json"
