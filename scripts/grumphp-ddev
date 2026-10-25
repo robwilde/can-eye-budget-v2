@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Run GrumPHP inside the DDEV web container for the current checkout, which may
+# be the main checkout or a linked worktree (OhMyPi: ~/.omp/wt/<name>).
+#
+# Usage (stdin = staged diff, as GrumPHP hooks provide it):
+#   scripts/grumphp-ddev git:pre-commit --skip-success-output
+#   scripts/grumphp-ddev git:commit-msg --git-user=... --git-email=... <msg-file>
+#
+# Why not plain `ddev exec`: from a worktree it runs in the main checkout.
+# Here ddev runs from the main checkout with --dir set to the worktree's
+# container path. A worktree's `.git` file names the main checkout's git dir by
+# host path, so .ddev/docker-compose.omp-worktrees.yaml mounts that directory at
+# the same path inside the container; that also makes the commit-message file
+# (under the shared git dir) readable with its host path.
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOP="$(git rev-parse --show-toplevel)"
+MAIN="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+CPATH="$("$HERE/worktree-container-path" "$TOP")"
+
+cd "$MAIN"
+exec ddev exec --dir "$CPATH" php vendor/bin/grumphp "$@"

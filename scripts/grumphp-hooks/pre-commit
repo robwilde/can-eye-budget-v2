@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# GrumPHP hook template (grumphp.yml: hooks_dir). Installed by `grumphp git:init`.
+# Runs GrumPHP in DDEV for the main checkout or any linked worktree.
+
+DIFF=$(git -c diff.mnemonicprefix=false -c diff.noprefix=false --no-pager diff --raw -r -p -m -M --full-index --no-color --staged | cat)
+
+TOP="$(git rev-parse --show-toplevel)"
+MAIN="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+RUNNER="$TOP/scripts/grumphp-ddev"
+[ -x "$RUNNER" ] || RUNNER="$MAIN/scripts/grumphp-ddev"
+
+if [ -x "$RUNNER" ]; then
+    printf "%s\n" "${DIFF}" | "$RUNNER" git:pre-commit --skip-success-output
+else
+    (cd "$TOP" && printf "%s\n" "${DIFF}" | ddev exec php vendor/bin/grumphp git:pre-commit --skip-success-output)
+fi
