@@ -16,6 +16,9 @@ RUNNER="$TOP/scripts/grumphp-ddev"
 
 if [ -x "$RUNNER" ]; then
     printf "%s\n" "${DIFF}" | "$RUNNER" git:commit-msg "--git-user=$GIT_USER" "--git-email=$GIT_EMAIL" "$COMMIT_MSG_FILE"
+elif [ "$(cd "$TOP" && pwd -P)" != "$(cd "$MAIN" && pwd -P)" ]; then
+    echo "grumphp commit-msg: scripts/grumphp-ddev not found in $TOP or $MAIN; refusing plain 'ddev exec' from a linked worktree." >&2
+    exit 1
 else
     (cd "$TOP" && printf "%s\n" "${DIFF}" | ddev exec php vendor/bin/grumphp git:commit-msg "--git-user=$GIT_USER" "--git-email=$GIT_EMAIL" "$COMMIT_MSG_FILE")
 fi
