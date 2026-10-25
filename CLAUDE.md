@@ -23,6 +23,17 @@ All shell commands MUST use the `op` (OpCode) aliases defined in `op.conf`. Thes
 
 See `op.conf` for the complete list. When in doubt, read the file.
 
+## Git Worktrees
+
+OhMyPi creates worktrees under `~/.omp/wt` (or `$OMP_WORKTREE_DIR`, which must be an absolute path here: Docker Compose does not expand `~`) by cloning the checkout with reflinks, including `.env`, `vendor/` and `public/build/`. `.ddev/docker-compose.omp-worktrees.yaml` mounts that directory in the web container at `/omp-wt`; run `ddev restart` once after pulling it. `.ddev/config.omp-worktrees.yaml` creates the directory as your user before each `ddev start`, because Docker would otherwise create a missing bind source owned by root. DDEV fixes the mount from the `OMP_WORKTREE_DIR` of the shell that runs `ddev start`/`restart`, so export it in your login profile. Do NOT point `worktree.base` inside the repo: OhMyPi's clone copies the whole directory, so a base under the repo recurses into itself and fills the disk.
+
+1. Create: `omp worktree add -b <branch> ~/.omp/wt/<name> origin/develop` (or `git worktree add`).
+2. Bootstrap if `vendor/` or `.env` is missing: `cd ~/.omp/wt/<name> && scripts/worktree-setup` (idempotent; dumps autoload).
+3. Run anything with `cd <main checkout> && ddev exec --dir /omp-wt/<name> <cmd>`. `scripts/worktree-container-path` prints the container path for any checkout. Run `ddev` from the main checkout only: a bare `ddev exec` from a worktree directory targets the wrong place.
+4. Laravel Boost MCP starts through `scripts/boost-mcp`, which targets the checkout containing the current directory. This holds when OhMyPi is started from the worktree; isolated task subagents reuse the parent session's MCP connection, so they stay rooted in the parent checkout (untested).
+5. Tests use sqlite `:memory:` (`phpunit.xml`), so worktrees never touch the DDEV database. Horizon and the database remain shared with the main checkout.
+6. Commit hooks: `grumphp.yml` sets `hooks_dir: scripts/grumphp-hooks`, so `ddev exec php vendor/bin/grumphp git:init` installs worktree-aware `pre-commit`/`commit-msg` hooks that call `scripts/grumphp-ddev` (runs GrumPHP in the container against the worktree's own files). The same `.ddev` file also mounts the main `.git` at its host path inside the container, which a worktree's `.git` file points to; `ddev restart` once after pulling. Re-run `git:init` after pulling this change, since `.git/hooks` is local.
+
 <laravel-boost-guidelines>
 === foundation rules ===
 
