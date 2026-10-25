@@ -8,6 +8,7 @@
 
 set -euo pipefail
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WT="$(git rev-parse --show-toplevel)"
 MAIN="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
 
@@ -16,20 +17,27 @@ if [ "$WT" = "$MAIN" ]; then
     exit 1
 fi
 
-CPATH="$("$MAIN/scripts/worktree-container-path" "$WT")"
+CPATH="$("$HERE/worktree-container-path" "$WT")"
 
 [ -f "$WT/.env" ] || cp "$MAIN/.env" "$WT/.env"
 
+# Copy through DEST.partial so DEST only exists after a complete copy; a copy
+# killed halfway leaves a .partial that the next run discards.
+copy_tree() {
+    local src="$1" dest="$2"
+    rm -rf "$dest.partial"
+    mkdir -p "$(dirname "$dest")"
+    cp -a --reflink=auto "$src" "$dest.partial"
+    rm -rf "$dest"
+    mv "$dest.partial" "$dest"
+}
+
 # vendor must be a real copy: Composer resolves paths from the autoloader's own
 # location, so a symlink would make the worktree load the main checkout's code.
-if [ ! -f "$WT/vendor/autoload.php" ]; then
-    mkdir -p "$WT/vendor"
-    cp -a --reflink=auto "$MAIN/vendor/." "$WT/vendor/"
-fi
+[ -f "$WT/vendor/autoload.php" ] || copy_tree "$MAIN/vendor" "$WT/vendor"
 
 if [ ! -f "$WT/public/build/manifest.json" ] && [ -d "$MAIN/public/build" ]; then
-    mkdir -p "$WT/public/build"
-    cp -a --reflink=auto "$MAIN/public/build/." "$WT/public/build/"
+    copy_tree "$MAIN/public/build" "$WT/public/build"
 fi
 
 COMPOSER_LOG="$(mktemp)"
