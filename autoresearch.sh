@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+# Worktree readiness probe for OhMyPi + DDEV.
+#
+# Creates a throwaway git worktree where OhMyPi would put one (OMP_WORKTREE_DIR,
+# else the effective `worktree.base` setting, else ~/.omp/wt), overlays the
+# uncommitted changes of this checkout so it behaves as if they were committed,
+# then exercises what an agent needs inside that worktree: DDEV access, a
+# bootstrap step (contract: executable `scripts/worktree-setup`, run from the
+# worktree root), Pest, the laravel-boost MCP server, skills and context files.
+#
+# Primary metric: readiness_failures (lower is better, 0 = fully ready).
+# Exit 0 when the probe completed; exit 2 when the harness itself cannot run.
+
+set -uo pipefail
+
+PROBE_NAME="ar-probe-can-eye-budget-v2"
+CONTAINER_ROOT="/var/www/html"
+PEST_FILES=(tests/Unit/Support/AmountParserTest.php tests/Feature/DashboardTest.php)
+
+die() { echo "HARNESS ERROR: $*" >&2; exit 2; }
+now() { date +%s.%N; }
+elapsed() { awk -v a="$1" -v b="$(now)" 'BEGIN { printf "%.2f", b - a }'; }
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repository"
+cd "$ROOT" || die "cannot cd to $ROOT"
+T0="$(now)"
+
+DESCRIBE="$(ddev describe -j 2>/dev/null)" || die "ddev describe failed"
+APPROOT="$(jq -r '.raw.approot' <<<"$DESCRIBE")"
+PROJECT="$(jq -r '.raw.name' <<<"$DESCRIBE")"
+[ "$(jq -r '.raw.status' <<<"$DESCRIBE")" = "running" ] || die "DDEV project $PROJECT is not running"
+[ "$APPROOT" = "$ROOT" ] || die "DDEV approot $APPROOT is not this checkout $ROOT"
+REGISTRY_BEFORE="$(ddev list -j 2>/dev/null | jq -r --arg n "$PROJECT" '.raw[] | select(.name == $n) | .approot')"
+
+expand_home() { case "$1" in "~") echo "$HOME" ;; "~/"*) echo "$HOME/${1#\~/}" ;; *) echo "$1" ;; esac; }
+
+omp_base_for() {
+    local dir="$1" value
+    if [ -n "${OMP_WORKTREE_DIR:-}" ]; then
+        value="$OMP_WORKTREE_DIR"
+    else
+        value="$(cd "$dir" && omp config get worktree.base 2>/dev/null | tail -n1)"
+    fi
+    case "$value" in "" | "(not set)" | "null") value="$HOME/.omp/wt" ;; esac
+    value="$(expand_home "$value")"
+    case "$value" in /*) echo "${value%/}" ;; *) echo "$HOME/.omp/wt" ;; esac
+}
+
+OMP_BASE="$(omp_base_for "$ROOT")"
+
+mkdir -p "$OMP_BASE" || die "cannot create $OMP_BASE"
+case "$OMP_BASE/" in "$ROOT/"*) die "OMP base $OMP_BASE is inside the repo; clone-first creation would recurse" ;; esac
+PROBE_DIR="$(mktemp -d "$OMP_BASE/$PROBE_NAME.XXXXXX")" || die "cannot create a probe directory under $OMP_BASE"
+WT="$PROBE_DIR/wt"
+
+cleanup() {
+    git -C "$ROOT" worktree remove --force "$WT" >/dev/null 2>&1
+    rm -rf "$PROBE_DIR"
+    git -C "$ROOT" worktree prune >/dev/null 2>&1
+}
+trap cleanup EXIT
+
+ADD_LOG="$(mktemp)"
+timeout 180 omp worktree add --detach -q "$WT" HEAD </dev/null >"$ADD_LOG" 2>&1 || { tail -n3 "$ADD_LOG" >&2; rm -f "$ADD_LOG"; die "omp worktree add failed"; }
+rm -f "$ADD_LOG"
+
+DIFF="$(git diff HEAD --binary)"
+if [ -n "$DIFF" ]; then
+    git -C "$WT" apply --whitespace=nowarn <<<"$DIFF" || die "cannot overlay uncommitted changes"
+fi
+git ls-files -o --exclude-standard -z | tar --null -T - -cf - 2>/dev/null | tar -C "$WT" -xf - || die "cannot overlay untracked files"
+
+CPATH="$("$ROOT/scripts/worktree-container-path" "$WT" 2>/dev/null)" || CPATH=""
+
+FAILURES=0
+TOTAL=0
+check() {
+    local name="$1" result="$2" detail="${3:-}"
+    TOTAL=$((TOTAL + 1))
+    if [ "$result" = "pass" ]; then
+        echo "PASS $name"
+    else
+        FAILURES=$((FAILURES + 1))
+        echo "FAIL $name${detail:+ :: $detail}"
+    fi
+}
+pass_if() { if "$@" >/dev/null 2>&1; then echo pass; else echo fail; fi; }
+in_wt() { (cd "$WT" && "$@"); }
+cexec() { [ -n "$CPATH" ] && (cd "$ROOT" && ddev exec --dir "$CPATH" "$@"); }
+
+check omp_worktree_base_visible_to_ddev "$([ -n "$CPATH" ] && ddev exec test -d /omp-wt >/dev/null 2>&1 && echo pass || echo fail)" "base=$OMP_BASE cpath=$CPATH"
+check container_sees_worktree "$(pass_if cexec test -f artisan)"
+
+count_skills() { find "$1/.claude/skills" "$1/.agents/skills" -name SKILL.md 2>/dev/null | wc -l; }
+MAIN_SKILLS="$(count_skills "$ROOT")"
+WT_SKILLS="$(count_skills "$WT")"
+check skills_present "$([ "$WT_SKILLS" -gt 0 ] && [ "$WT_SKILLS" -eq "$MAIN_SKILLS" ] && echo pass || echo fail)" "main=$MAIN_SKILLS worktree=$WT_SKILLS"
+check mcp_config_present "$(pass_if jq -e '.mcpServers["laravel-boost"].command' "$WT/.mcp.json")"
+check agent_docs_explain_worktree_setup "$(pass_if grep -qs 'worktree-setup' "$WT/AGENTS.md" "$WT/CLAUDE.md")"
+
+T_BOOT="$(now)"
+if [ -x "$WT/scripts/worktree-setup" ] && in_wt ./scripts/worktree-setup >"$WT/.ar-setup.log" 2>&1; then
+    BOOT=pass
+else
+    BOOT=fail
+fi
+BOOT_SECONDS="$(elapsed "$T_BOOT")"
+check bootstrap_succeeds "$BOOT" "$(tail -n3 "$WT/.ar-setup.log" 2>/dev/null | tr '\n' ' ')"
+check env_present "$([ -f "$WT/.env" ] && echo pass || echo fail)"
+
+AUTOLOAD_FILE="$(cexec php -r 'require "vendor/autoload.php"; echo (new ReflectionClass(App\Models\User::class))->getFileName();' 2>/dev/null | tail -n1)"
+check vendor_autoloads_worktree_code "$([ -n "$CPATH" ] && [ "${AUTOLOAD_FILE#"$CPATH"/}" != "$AUTOLOAD_FILE" ] && echo pass || echo fail)" "User.php=$AUTOLOAD_FILE"
+check artisan_runs_in_worktree "$(pass_if cexec php artisan --version)"
+
+T_PEST="$(now)"
+PEST_OUT="$(cexec vendor/bin/pest "${PEST_FILES[@]}" 2>&1)"
+PEST_RC=$?
+PEST_SECONDS="$(elapsed "$T_PEST")"
+check pest_subset_passes_in_worktree "$([ -n "$CPATH" ] && [ $PEST_RC -eq 0 ] && echo pass || echo fail)" "$(tail -n4 <<<"$PEST_OUT" | tr '\n' ' ' | cut -c1-300)"
+
+MCP_PY="$(cat <<'PY'
+import json, subprocess, sys, select, time
+
+mode, cfg_path, cwd = sys.argv[1], sys.argv[2], sys.argv[3]
+server = json.load(open(cfg_path))["mcpServers"]["laravel-boost"]
+cmd = [server["command"], *server.get("args", [])]
+
+if mode == "base_path":
+    if "boost:mcp" not in cmd:
+        print("launcher has no boost:mcp argument"); sys.exit(1)
+    i = cmd.index("boost:mcp")
+    cmd = cmd[:i] + ["tinker", "--execute=echo base_path();"] + cmd[i + 1:]
+    out = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=120)
+    lines = [l.strip() for l in out.stdout.splitlines() if l.strip()]
+    print(lines[-1] if lines else "")
+    sys.exit(out.returncode)
+
+proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+def send(msg):
+    proc.stdin.write(json.dumps(msg) + "\n"); proc.stdin.flush()
+def recv(want_id, deadline):
+    while time.time() < deadline:
+        ready, _, _ = select.select([proc.stdout], [], [], 1)
+        if not ready:
+            continue
+        line = proc.stdout.readline()
+        if not line:
+            return None
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            print("non-JSON on stdout: " + line.strip()[:120]); return None
+        if msg.get("id") == want_id:
+            return msg
+    return None
+try:
+    deadline = time.time() + 60
+    send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "autoresearch", "version": "1"}}})
+    init = recv(1, deadline)
+    if not init or "result" not in init:
+        print("no initialize result"); sys.exit(1)
+    send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+    send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+    tools = recv(2, deadline)
+    if not tools or "result" not in tools:
+        print("no tools/list result"); sys.exit(1)
+    print("tools=%d" % len(tools["result"].get("tools", [])))
+finally:
+    proc.kill()
+PY
+)"
+
+if [ -f "$WT/.mcp.json" ]; then
+    BOOST_BASE="$(python3 -c "$MCP_PY" base_path "$WT/.mcp.json" "$WT" 2>/dev/null | tail -n1)"
+    HANDSHAKE="$(python3 -c "$MCP_PY" handshake "$WT/.mcp.json" "$WT" 2>&1 | tail -n1)"
+    HANDSHAKE_RC=$?
+else
+    BOOST_BASE=""
+    HANDSHAKE="no .mcp.json"
+fi
+check boost_mcp_launcher_targets_worktree "$([ -n "$CPATH" ] && [ "$BOOST_BASE" = "$CPATH" ] && echo pass || echo fail)" "base_path=$BOOST_BASE"
+check boost_mcp_handshake_from_worktree "$(grep -q '^tools=[1-9]' <<<"$HANDSHAKE" && echo pass || echo fail)" "$HANDSHAKE"
+
+SKILL_FILE="$WT/.claude/skills/can-i-budget-design/SKILL.md"
+SKILL_MARK="$(sed -n 's/^description: \(.\{40\}\).*/\1/p' "$SKILL_FILE" 2>/dev/null | head -n1)"
+SKILL_PROMPT='Use the read tool on skill://can-i-budget-design, then reply with the single word done.'
+SKILL_OUT="$(cd "$WT" && timeout 150 omp -p --mode json --tools read "$SKILL_PROMPT" </dev/null 2>/dev/null)"
+check omp_discovers_project_skill_in_worktree "$([ -n "$SKILL_MARK" ] && grep -qF -- "$SKILL_MARK" <<<"$SKILL_OUT" && echo pass || echo fail)" "marker='$SKILL_MARK'"
+
+printf '<?php\nclass ArProbeFormat{public function x(){return 1;}}\n' >"$WT/app/ArProbeFormat.php"
+PINT_OUT="$(ddev exec --dir "$CONTAINER_ROOT" vendor/bin/pint --test --format=json 2>/dev/null)"
+check main_pint_ignores_worktrees "$(jq -e 'type == "object"' <<<"$PINT_OUT" >/dev/null 2>&1 && ! grep -q 'ArProbeFormat' <<<"$PINT_OUT" && echo pass || echo fail)" "pint_output_bytes=${#PINT_OUT}"
+
+git -C "$WT" add app/ArProbeFormat.php
+HOOK_OUT="$(cd "$WT" && timeout 300 "$ROOT/.git/hooks/pre-commit" 2>&1)"
+HOOK_RC=$?
+check precommit_hook_runs_on_worktree_files "$([ $HOOK_RC -ne 0 ] && grep -qF 'app/ArProbeFormat.php' <<<"$HOOK_OUT" && echo pass || echo fail)" "rc=$HOOK_RC"
+git -C "$WT" reset -q HEAD -- app/ArProbeFormat.php
+
+MSG_FILE="$(git -C "$WT" rev-parse --path-format=absolute --git-dir)/COMMIT_EDITMSG"
+printf 'test: [0] hook probe\n' >"$MSG_FILE"
+check commitmsg_hook_accepts_absolute_path "$(pass_if bash -c "cd '$WT' && '$ROOT/.git/hooks/commit-msg' '$MSG_FILE'")"
+rm -f "$MSG_FILE"
+
+REGISTRY_AFTER="$(ddev list -j 2>/dev/null | jq -r --arg n "$PROJECT" '.raw[] | select(.name == $n) | .approot')"
+check ddev_registry_unchanged "$([ "$REGISTRY_BEFORE" = "$REGISTRY_AFTER" ] && [ "$REGISTRY_AFTER" = "$ROOT" ] && echo pass || echo fail)" "after=$REGISTRY_AFTER"
+
+echo "METRIC readiness_failures=$FAILURES"
+echo "METRIC checks_total=$TOTAL"
+echo "METRIC bootstrap_seconds=$BOOT_SECONDS"
+echo "METRIC pest_seconds=$PEST_SECONDS"
+echo "METRIC probe_seconds=$(elapsed "$T0")"
