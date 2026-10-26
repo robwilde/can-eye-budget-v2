@@ -395,6 +395,14 @@
                 />
             @endif
 
+            @if($mode === 'enter' && $transactionType !== 'transfer' && ! $originalWasTransfer && $editingPlannedTransactionId === null)
+                <flux:checkbox
+                    wire:model="excluded"
+                    :label="__('Exclude from totals and reports')"
+                    data-testid="exclude-toggle"
+                />
+            @endif
+
             {{-- Rule-suggest card (plan-mode, non-transfer, manual) --}}
             @if(!$isBankFeedTransaction && $mode === 'plan' && $transactionType !== 'transfer')
                 <div class="rule-suggest" role="complementary">
