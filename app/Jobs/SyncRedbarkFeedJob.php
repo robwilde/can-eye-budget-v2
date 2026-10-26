@@ -708,10 +708,12 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * D6. One transaction per account, so the balance and its rows land together. The account
-     * row is locked first, before any transaction row is inserted: on MariaDB an insert holds
-     * a shared lock on its account row, and upgrading that to the exclusive lock the balance
-     * update and the rebuild need deadlocks against any writer doing the same.
+     * D6. One transaction per account, so the balance and its rows land together. The feed
+     * link is locked and rechecked first, so an unlink that landed after the accounts were
+     * loaded leaves the account alone. The account row is then locked before any transaction
+     * row is inserted: on MariaDB an insert holds a shared lock on its account row, and
+     * upgrading that to the exclusive lock the balance update and the rebuild need
+     * deadlocks against any writer doing the same.
      *
      * @return array{created: int, updated: int, matched: int, accounts: int}
      */
@@ -735,6 +737,12 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             }
 
             $account->getConnection()->transaction(function () use ($ingestor, $matcher, $redbarkAccount, $account, &$created, &$updated, &$matched): void {
+                $link = RedbarkAccount::query()->whereKey($redbarkAccount->id)->lockForUpdate()->first();
+
+                if (! $link instanceof RedbarkAccount || $link->account_id !== $account->id || $link->ignored) {
+                    return;
+                }
+
                 app(AccountBalanceHistoryBuilder::class)->lockAccounts($account->id);
 
                 $rows = $redbarkAccount->raw_transactions_payload ?? [];
