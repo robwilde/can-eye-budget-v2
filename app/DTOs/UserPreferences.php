@@ -7,17 +7,22 @@ namespace App\DTOs;
 use App\Enums\SupportedLocale;
 use App\Enums\Theme;
 use App\Enums\TransactionPeriod;
+use App\Support\Currencies;
 use BackedEnum;
 use Spatie\LaravelData\Dto;
 
 final class UserPreferences extends Dto
 {
+    /**
+     * @param  list<string>  $allowedCurrencies  Currencies the pickers offer; empty means every supported currency.
+     */
     public function __construct(
         public readonly Theme $theme = Theme::System,
         public readonly ?SupportedLocale $locale = null,
         public readonly TransactionPeriod $defaultPeriod = TransactionPeriod::ThisMonth,
         public readonly bool $rulePromptEnabled = true,
         public readonly bool $previewFeatures = false,
+        public readonly array $allowedCurrencies = [],
     ) {}
 
     /**
@@ -35,6 +40,7 @@ final class UserPreferences extends Dto
             defaultPeriod: is_string($stored['defaultPeriod'] ?? null) ? TransactionPeriod::tryFrom($stored['defaultPeriod']) ?? $defaults->defaultPeriod : $defaults->defaultPeriod,
             rulePromptEnabled: is_bool($stored['rulePromptEnabled'] ?? null) ? $stored['rulePromptEnabled'] : $defaults->rulePromptEnabled,
             previewFeatures: is_bool($stored['previewFeatures'] ?? null) ? $stored['previewFeatures'] : $defaults->previewFeatures,
+            allowedCurrencies: is_array($stored['allowedCurrencies'] ?? null) ? Currencies::normaliseList($stored['allowedCurrencies']) : $defaults->allowedCurrencies,
         );
     }
 
