@@ -14,6 +14,7 @@ use App\Enums\TransferLinkSource;
 use App\Events\TransactionCategoryUpdated;
 use App\Support\CleanDescriptionDeriver;
 use App\Support\Recurring\MerchantSignature;
+use App\Support\Transactions\TransactionCurrency;
 use BackedEnum;
 use Carbon\CarbonImmutable;
 use Database\Factories\TransactionFactory;
@@ -60,6 +61,8 @@ use Illuminate\Support\Facades\DB;
  * @property bool $excluded
  * @property string|null $idempotency_key
  * @property list<string>|null $locked_fields
+ * @property string $currency
+ * @property float|null $exchange_rate
  * @property-read Collection<int, TransactionSplit> $splits
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
@@ -148,6 +151,8 @@ final class Transaction extends Model
         'excluded',
         'idempotency_key',
         'locked_fields',
+        'currency',
+        'exchange_rate',
     ];
 
     /**
@@ -506,6 +511,14 @@ final class Transaction extends Model
         $attributes['parent_transaction_id'] = $this->id;
         $attributes['locked_fields'] = $this->locked_fields;
 
+        if (TransactionCurrency::followsAccountChange($this, $overrides)) {
+            unset($attributes['currency']);
+        }
+
+        if (TransactionCurrency::dropsStaleRate($this, $overrides)) {
+            unset($attributes['exchange_rate']);
+        }
+
         // A caller that changes category_id is choosing a new category. Carrying the
         // parent's provenance onto that choice would let a rule's stamp survive a
         // human's edit, so drop it and let saving() re-derive it.
@@ -611,6 +624,8 @@ final class Transaction extends Model
 
     protected static function booted(): void
     {
+        self::saving(static fn (Transaction $transaction) => TransactionCurrency::apply($transaction));
+
         self::saving(static function (Transaction $transaction): void {
             $transaction->clearBlankCleanDescription();
 
@@ -683,6 +698,7 @@ final class Transaction extends Model
             'enrich_data' => 'array',
             'excluded' => 'boolean',
             'locked_fields' => 'array',
+            'exchange_rate' => 'float',
         ];
     }
 
