@@ -45,6 +45,15 @@ return [
         'model' => env('TYPESAFE_MODEL') ?: 'jev-latest',
     ],
 
+    'exchange_rates' => [
+        // Market-data provider for the exchange-rates:fetch command (#711). Off unless opted in;
+        // while off no request is made and the app keeps using cached rates. The client speaks
+        // the Frankfurter API shape: GET {base_url}/{date}?base=USD&symbols=EUR,AUD.
+        'enabled' => (bool) env('EXCHANGE_RATES_ENABLED', false),
+        'base_url' => env('EXCHANGE_RATES_BASE_URL') ?: 'https://api.frankfurter.dev/v1',
+        'api_key' => env('EXCHANGE_RATES_API_KEY'),
+    ],
+
     'redbark' => [
         'base_url' => env('REDBARK_BASE_URL') ?: 'https://api.redbark.com/v1',
         'include_pending' => (bool) env('REDBARK_INCLUDE_PENDING', false),
