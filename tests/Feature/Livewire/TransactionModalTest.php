@@ -747,7 +747,7 @@ test('edit transfer creates child pairs cross-linked to each other', function ()
         ->transfer_pair_id->toBe($debitChild->id);
 });
 
-test('delete transfer soft-deletes both sides', function () {
+test('delete transfer soft-deletes one side and keeps the other', function () {
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
     $toAccount = Account::factory()->for($user)->create();
@@ -777,7 +777,8 @@ test('delete transfer soft-deletes both sides', function () {
         ->assertDispatched('transaction-saved');
 
     expect(Transaction::query()->where('user_id', $user->id)->count())
-        ->toBe(0)
+        ->toBe(1)
+        ->and($credit->fresh()->transfer_pair_id)->toBeNull()
         ->and(Transaction::withTrashed()->where('user_id', $user->id)->count())->toBe(2);
 });
 
@@ -2245,7 +2246,7 @@ test('re-editing converted transaction works correctly', function () {
         ->transfer_pair_id->not->toBeNull();
 });
 
-test('deleting converted transfer deletes both sides', function () {
+test('deleting a converted transfer leg keeps the other leg as a standard transaction', function () {
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
     $toAccount = Account::factory()->for($user)->create();
@@ -2280,10 +2281,9 @@ test('deleting converted transfer deletes both sides', function () {
 
     expect(Transaction::query()->find($debitChild->id))
         ->toBeNull()
-        ->and(Transaction::query()->find($creditSide->id))->toBeNull()
-        ->and(Transaction::withTrashed()->find($debitChild->id))->not
-        ->toBeNull()
-        ->and(Transaction::withTrashed()->find($creditSide->id))->not->toBeNull();
+        ->and(Transaction::query()->find($creditSide->id))->not->toBeNull()
+        ->and($creditSide->fresh()->transfer_pair_id)->toBeNull()
+        ->and(Transaction::withTrashed()->find($debitChild->id))->not->toBeNull();
 });
 
 test('planned expense can be converted to planned transfer', function () {
@@ -2344,10 +2344,9 @@ test('planned transfer can be converted to planned expense', function () {
         ->and($planned->direction)->toBe(TransactionDirection::Debit);
 });
 
-test('redbark transaction with no opposite row to link cannot become a transfer and creates nothing', function () {
+test('redbark transaction with no opposite row and no account chosen cannot become a transfer', function () {
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
-    $toAccount = Account::factory()->for($user)->create();
     $category = Category::factory()->create(['is_hidden' => false]);
     $transaction = Transaction::factory()->for($user)->for($fromAccount)->fromRedbark()->create([
         'amount' => 3000,
@@ -2358,7 +2357,6 @@ test('redbark transaction with no opposite row to link cannot become a transfer 
         ->test(TransactionModal::class)
         ->dispatch('edit-transaction', id: $transaction->id)
         ->set('transactionType', 'transfer')
-        ->set('transferToAccountId', $toAccount->id)
         ->set('categoryId', $category->id)
         ->call('save')
         ->assertHasErrors(['transferToAccountId'])
@@ -4927,8 +4925,8 @@ test('convertFromTransfer keeps an imported credit leg and unlinks it', function
     $user = User::factory()->create();
     $from = Account::factory()->for($user)->create();
     $to = Account::factory()->for($user)->create();
-    $manualDebit = Transaction::factory()->for($user)->for($from)->create(['direction' => TransactionDirection::Debit, 'amount' => 5000]);
-    $credit = Transaction::factory()->for($user)->for($to)->create(['direction' => TransactionDirection::Credit, 'amount' => 5000]);
+    $manualDebit = Transaction::factory()->for($user)->for($from)->create(['direction' => TransactionDirection::Debit, 'amount' => 5000, 'post_date' => '2026-09-10']);
+    $credit = Transaction::factory()->for($user)->for($to)->create(['direction' => TransactionDirection::Credit, 'amount' => 5000, 'post_date' => '2026-09-10']);
     app(TransferLinker::class)->link($manualDebit, $credit, TransferLinkSource::Manual);
 
     $component = Livewire::actingAs($user)

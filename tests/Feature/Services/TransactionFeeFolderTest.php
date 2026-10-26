@@ -7,6 +7,7 @@
 declare(strict_types=1);
 
 use App\Enums\TransactionDirection;
+use App\Enums\TransferLinkSource;
 use App\Models\Account;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
@@ -66,6 +67,23 @@ test('folds a fee into its matching parent purchase', function () {
 
     expect($freshFee->trashed())->toBeTrue()
         ->and($freshFee->folded_into_transaction_id)->toBe($merged->id);
+});
+
+test('folding a fee into a suggested purchase drops the suggestion on both sides', function () {
+    $parent = makeParent($this->user, $this->account);
+    $partner = Transaction::factory()->for($this->user)->create([
+        'account_id' => Account::factory()->for($this->user)->create()->id,
+        'amount' => 1394,
+        'direction' => TransactionDirection::Credit,
+        'post_date' => CarbonImmutable::parse('2026-07-05'),
+    ]);
+    $parent->forceFill(['suggested_pair_id' => $partner->id, 'transfer_link_source' => TransferLinkSource::Suggested])->save();
+    $partner->forceFill(['suggested_pair_id' => $parent->id, 'transfer_link_source' => TransferLinkSource::Suggested])->save();
+
+    $merged = $this->folder->fold(makeFee($this->user, $this->account));
+
+    expect($merged->fresh()->suggested_pair_id)->toBeNull()
+        ->and($partner->fresh()->suggested_pair_id)->toBeNull();
 });
 
 test('merged child inherits the parent plan link', function () {
