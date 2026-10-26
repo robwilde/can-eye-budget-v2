@@ -56,6 +56,8 @@ final class AccountManager extends Component
 
     public string $institution = '';
 
+    public string $currency = '';
+
     /** The form is creating/editing an untracked (manual-balance, long-term) account. Server-set only. */
     #[Locked]
     public bool $isUntracked = false;
@@ -98,6 +100,7 @@ final class AccountManager extends Component
         $this->resetForm();
         $this->group = AccountGroup::DayToDay->value;
         $this->type = AccountClass::Transaction->value;
+        $this->currency = $this->authenticatedUser()->base_currency;
         $this->showFormModal = true;
     }
 
@@ -107,6 +110,7 @@ final class AccountManager extends Component
         $this->isUntracked = true;
         $this->group = AccountGroup::LongTermSavings->value;
         $this->type = AccountClass::Savings->value;
+        $this->currency = $this->authenticatedUser()->base_currency;
         $this->showFormModal = true;
     }
 
@@ -130,6 +134,7 @@ final class AccountManager extends Component
         $this->type = $account->type->value;
         $this->group = $account->group->value;
         $this->institution = $account->institution ?? '';
+        $this->currency = $account->currency;
 
         $opening = $account->valuations()->where('kind', ValuationKind::OpeningBalance)->first();
         $this->openingBalance = $opening !== null ? number_format($opening->balance / 100, 2, '.', '') : '';
@@ -187,13 +192,13 @@ final class AccountManager extends Component
         $failedField = 'openingBalanceDate';
 
         try {
-            DB::transaction(function () use ($account, $details, $cents, $providerFed, &$failedField): void {
+            DB::transaction(function () use ($account, $details, $cents, $providerFed, $validated, &$failedField): void {
                 $balanceChanged = false;
 
                 if ($account === null) {
                     $account = Account::query()->create($details + $this->manualBalanceAttributes($cents) + [
                         'user_id' => auth()->id(),
-                        'currency' => 'AUD',
+                        'currency' => $validated['currency'],
                         'status' => AccountStatus::Active,
                     ]);
 
@@ -440,6 +445,7 @@ final class AccountManager extends Component
             'grouped' => $grouped,
             'formatMoney' => MoneyCast::format(...),
             'accountTypes' => AccountClass::cases(),
+            'currencies' => $this->authenticatedUser()->allowedCurrencies(),
             'accountGroups' => AccountGroup::cases(),
             'reconciliations' => $this->reconciliations(),
         ]);
@@ -452,6 +458,7 @@ final class AccountManager extends Component
             'balance' => ['required', 'numeric'],
             'description' => ['nullable', 'string', 'max:1000'],
             'type' => ['required', Rule::enum(AccountClass::class)],
+            'currency' => $this->currencyRules(),
         ]);
 
         $type = AccountClass::from($validated['type']);
@@ -486,6 +493,7 @@ final class AccountManager extends Component
                     $type,
                     $cents,
                     $description,
+                    $validated['currency'],
                 );
 
                 app(AccountBalanceHistoryBuilder::class)->rebuild($account);
@@ -510,6 +518,7 @@ final class AccountManager extends Component
         $this->type = '';
         $this->group = '';
         $this->institution = '';
+        $this->currency = '';
         $this->isUntracked = false;
         $this->balanceReadOnly = false;
         $this->openingBalance = '';
@@ -528,9 +537,18 @@ final class AccountManager extends Component
             'type' => ['required', Rule::enum(AccountClass::class)],
             'group' => ['required', Rule::enum(AccountGroup::class)],
             'institution' => ['nullable', 'string', 'max:255'],
+            'currency' => $this->currencyRules(),
             'openingBalance' => ['nullable', 'numeric'],
             'openingBalanceDate' => ['nullable', 'date', 'before_or_equal:today'],
         ];
+    }
+
+    /** @return list<mixed> */
+    private function currencyRules(): array
+    {
+        return $this->editingAccountId
+            ? ['nullable']
+            : ['required', 'string', Rule::in($this->authenticatedUser()->allowedCurrencies())];
     }
 
     private function authenticatedUser(): User

@@ -22,6 +22,7 @@ use App\Models\Transaction;
 use App\Models\TransactionAttachment;
 use App\Models\User;
 use App\Services\CategoryRuleGenerator;
+use App\Services\ExchangeRateLookup;
 use App\Services\PendingMergeService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\TransactionIdempotency;
@@ -29,7 +30,9 @@ use App\Services\Transfers\TransferLinker;
 use App\Support\AmountParser;
 use App\Support\AmountParseResult;
 use Carbon\CarbonImmutable;
+use Carbon\Exceptions\InvalidFormatException;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -46,6 +49,8 @@ use Throwable;
 final class TransactionModal extends Component
 {
     use WithFileUploads;
+
+    private const int RATE_LOOKUP_TTL_SECONDS = 300;
 
     public bool $showModal = false;
 
@@ -82,6 +87,13 @@ final class TransactionModal extends Component
      */
     #[Locked]
     public string $submissionToken = '';
+
+    public string $currency = '';
+
+    public string $exchangeRate = '';
+
+    #[Locked]
+    public string $openedCurrency = '';
 
     public string $cleanDescription = '';
 
@@ -252,6 +264,7 @@ final class TransactionModal extends Component
         $this->date = $transaction->post_date->format('Y-m-d');
         $this->notes = $transaction->notes ?? '';
         $this->excluded = $transaction->excluded;
+        $this->fillCurrency($transaction);
         $this->categoriseMatchValue = app(CategoryRuleGenerator::class)->suggestMatchValue($transaction);
         $this->categoriseMatching = $transaction->category_id === null
             && $transaction->transfer_pair_id === null
@@ -284,6 +297,7 @@ final class TransactionModal extends Component
 
         $this->categoryId = $transaction->category_id;
         $this->date = CarbonImmutable::now()->format('Y-m-d');
+        $this->fillCurrency($transaction);
 
         $this->showModal = true;
     }
@@ -617,6 +631,9 @@ final class TransactionModal extends Component
             'lockedFields' => $this->lockedFieldLabels($this->editingOwnedTransaction()),
             'mergeSuggestion' => $this->mergeSuggestion(),
             'mergeCandidates' => $this->mergeCandidates(),
+            'currencies' => $this->offeredCurrencies(),
+            'accountCurrency' => $accounts->firstWhere('id', $this->accountId)?->currency,
+            'currentRate' => $this->currentRate($accounts->firstWhere('id', $this->accountId)),
         ]);
     }
 
@@ -913,6 +930,66 @@ final class TransactionModal extends Component
         return $this->editingTransactionId === null
             ? null
             : Transaction::query()->where('user_id', auth()->id())->find($this->editingTransactionId);
+    }
+
+    /** @return list<string> */
+    private function offeredCurrencies(): array
+    {
+        return array_values(array_unique([...auth()->user()->allowedCurrencies(), ...($this->openedCurrency !== '' ? [$this->openedCurrency] : [])]));
+    }
+
+    /**
+     * The rate that converts the chosen currency into the account's on the entry date, or null
+     * when no rate is known. Only a currency the form offers is looked up, and a future date is
+     * looked up as today, so a tampered request cannot make the provider chase arbitrary pairs
+     * or dates. The answer is kept briefly, a miss included, so re-renders do not ask again.
+     *
+     * @return array{rate: float|null}|null
+     */
+    private function currentRate(?Account $account): ?array
+    {
+        if ($account === null || $this->currency === '' || $this->currency === $account->currency || $this->mode !== 'enter') {
+            return null;
+        }
+
+        if (! in_array($this->currency, $this->offeredCurrencies(), true)) {
+            return null;
+        }
+
+        try {
+            $today = CarbonImmutable::today();
+            $date = $this->date !== '' ? CarbonImmutable::parse($this->date) : $today;
+            $date = $date->greaterThan($today) ? $today : $date;
+
+            return Cache::remember(
+                sprintf('transaction-modal-rate:%s:%s:%s', $this->currency, $account->currency, $date->toDateString()),
+                self::RATE_LOOKUP_TTL_SECONDS,
+                fn (): array => ['rate' => app(ExchangeRateLookup::class)->rateFor($this->currency, $account->currency, $date)],
+            );
+        } catch (InvalidFormatException) {
+            return null;
+        }
+    }
+
+    /**
+     * The currency and rate to store. A blank currency leaves the model to use the account's.
+     * When an edit moves the row to another account and the user left the currency as it was
+     * opened, the currency and rate are both omitted: the new version follows the new account, and
+     * the model drops a rate that no longer converts into it. A rate that equals the account
+     * currency is cleared by the write check.
+     *
+     * @return array{currency?: string|null, exchange_rate?: float|null}
+     */
+    private function currencyAttributes(?Transaction $editing = null): array
+    {
+        $attributes = ['exchange_rate' => $this->storesExchangeRate() && $this->exchangeRate !== '' ? (float) $this->exchangeRate : null];
+        $untouched = $editing !== null && $this->currency === $this->openedCurrency;
+
+        if ($untouched && (int) $this->accountId !== $editing->account_id) {
+            return [];
+        }
+
+        return ['currency' => $this->currency !== '' ? $this->currency : null, ...$attributes];
     }
 
     private function hasRealOppositeRows(Transaction $row): bool
@@ -1229,6 +1306,7 @@ final class TransactionModal extends Component
                     'post_date' => $this->date,
                     'notes' => $this->notes !== '' ? $this->notes : null,
                     'excluded' => $this->excluded,
+                    ...$this->currencyAttributes($transaction),
                 ]));
 
                 app(AccountBalanceHistoryBuilder::class)->rebuildForEdit($transaction, $child);
@@ -1765,6 +1843,7 @@ final class TransactionModal extends Component
             'source' => TransactionSource::Manual,
             'notes' => $this->notes !== '' ? $this->notes : null,
             'excluded' => $this->excluded,
+            ...$this->currencyAttributes(),
             'planned_transaction_id' => $plannedTransactionId,
         ];
     }
@@ -1923,6 +2002,9 @@ final class TransactionModal extends Component
         $this->notes = '';
         $this->excluded = false;
         $this->submissionToken = (string) Str::uuid();
+        $this->currency = '';
+        $this->exchangeRate = '';
+        $this->openedCurrency = '';
         $this->cleanDescription = '';
         $this->openedCleanDescription = '';
         $this->openedDescription = '';
@@ -1953,6 +2035,28 @@ final class TransactionModal extends Component
         };
     }
 
+    private function fillCurrency(Transaction $transaction): void
+    {
+        $this->currency = $transaction->currency === $this->accountCurrencyOf($transaction->account_id) ? '' : $transaction->currency;
+        $this->openedCurrency = $this->currency;
+        $this->exchangeRate = $transaction->exchange_rate === null ? '' : mb_rtrim(mb_rtrim(number_format($transaction->exchange_rate, 8, '.', ''), '0'), '.');
+    }
+
+    private function accountCurrencyOf(int $accountId): ?string
+    {
+        $currency = Account::query()->where('user_id', auth()->id())->whereKey($accountId)->value('currency');
+
+        return is_string($currency) ? $currency : null;
+    }
+
+    private function storesExchangeRate(): bool
+    {
+        return $this->mode === 'enter'
+            && $this->transactionType !== 'transfer'
+            && $this->currency !== ''
+            && $this->currency !== $this->accountCurrencyOf((int) $this->accountId);
+    }
+
     /** @return array<string, mixed> */
     private function formRules(): array
     {
@@ -1980,6 +2084,8 @@ final class TransactionModal extends Component
                 : ['required', 'date_format:Y-m-d'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'cleanDescription' => ['nullable', 'string', 'max:255'],
+            'currency' => ['nullable', 'string', Rule::in([...auth()->user()->allowedCurrencies(), $this->openedCurrency])],
+            'exchangeRate' => $this->storesExchangeRate() ? ['nullable', 'numeric', 'min:0.00000001', 'lt:10000000000'] : ['nullable'],
             'transferToAccountId' => $this->isTransfer()
                 ? [
                     $this->isBankFeedTransaction && ! $this->originalWasTransfer ? 'nullable' : 'required',

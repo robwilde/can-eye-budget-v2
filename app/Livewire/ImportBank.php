@@ -17,6 +17,7 @@ use App\Services\CsvImport\CsvParserService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use League\Csv\Exception;
 use League\Csv\SyntaxError;
@@ -49,6 +50,8 @@ final class ImportBank extends Component
 
     #[Validate('nullable|numeric')]
     public string $newAccountBalance = '';
+
+    public string $newAccountCurrency = '';
 
     #[Validate('nullable|numeric')]
     public string $currentBalance = '';
@@ -216,6 +219,7 @@ final class ImportBank extends Component
             'newAccountName',
             'newAccountLast4',
             'newAccountBalance',
+            'newAccountCurrency',
             'currentBalance',
             'balanceTouched',
             'headers',
@@ -290,6 +294,7 @@ final class ImportBank extends Component
 
         return view('livewire.import-bank', [
             'accounts' => $userAccounts,
+            'currencies' => auth()->user()->allowedCurrencies(),
             'bankImport' => $bankImport,
             'previewRows' => $previewRows,
             'summary' => $summary,
@@ -337,6 +342,7 @@ final class ImportBank extends Component
             'newAccountName' => ['required', 'string', 'max:255'],
             'newAccountLast4' => ['required', 'string', 'size:4'],
             'newAccountBalance' => ['nullable', 'numeric'],
+            'newAccountCurrency' => ['nullable', 'string', Rule::in($user->allowedCurrencies())],
         ]);
 
         return Account::query()->getConnection()->transaction(function () use ($user): Account {
@@ -346,7 +352,7 @@ final class ImportBank extends Component
                 'account_last4' => $this->newAccountLast4,
                 'type' => 'transaction',
                 'institution' => 'CSV import',
-                'currency' => 'AUD',
+                'currency' => mb_trim($this->newAccountCurrency) !== '' ? $this->newAccountCurrency : $user->base_currency,
                 'balance' => (int) round(((float) $this->newAccountBalance) * 100),
                 'balance_source' => $this->newAccountBalance === '' ? null : ImportSource::Csv,
                 'balance_updated_at' => $this->newAccountBalance === '' ? null : now(),
