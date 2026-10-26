@@ -129,6 +129,15 @@
             />
         @endif
 
+        <x-cib.filter-toggle
+            :options="[
+                ['value' => 'all', 'label' => 'Any receipts'],
+                ['value' => 'with', 'label' => 'Has receipts'],
+            ]"
+            :selected="$attachments"
+            wire-model="attachments"
+        />
+
         {{-- Suggested transfers are only "possible" (still counted normally) until
              confirmed; this filter and the review page show the pending queue. --}}
         @if($suggestedTransferCount > 0 || $transfers === 'suggested')
