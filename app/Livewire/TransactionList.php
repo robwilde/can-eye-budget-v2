@@ -15,6 +15,7 @@ use App\Enums\MerchantBrandStatus;
 use App\Enums\PayeeStatus;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionPeriod;
+use App\Enums\TransactionStatus;
 use App\Exceptions\GmailSearchException;
 use App\Jobs\ResolveMerchantBrandJob;
 use App\Livewire\Attributes\NotAudited;
@@ -40,6 +41,7 @@ use App\Services\TransactionEmailLinker;
 use App\Services\Transfers\TransferReviewQueue;
 use App\Support\AmountParser;
 use App\Support\Budget\BudgetTagResolver;
+use App\Support\Transactions\TransactionTotals;
 use ContextDev\Core\Exceptions\ContextDevException;
 use Flux\Flux;
 use Illuminate\Database\Eloquent\Builder;
@@ -80,6 +82,10 @@ final class TransactionList extends Component
 
     private const array VALID_TRANSFER_FILTERS = ['all', 'suggested'];
 
+    private const array VALID_AMOUNT_OPERATORS = ['any', 'eq', 'lt', 'gt'];
+
+    private const array AMOUNT_OPERATOR_SYMBOLS = ['eq' => '=', 'lt' => '<', 'gt' => '>'];
+
     private const array VALID_GROUP_MODES = ['date', 'merchant'];
 
     /**
@@ -117,6 +123,32 @@ final class TransactionList extends Component
 
     #[Url]
     public ?int $group = null;
+
+    #[Url(as: 'exact')]
+    public bool $exactCategory = false;
+
+    #[Url]
+    public string $amountOp = 'any';
+
+    /**
+     * The absolute amount the operator compares against, in integer cents.
+     */
+    #[Url]
+    public ?int $amountCents = null;
+
+    /**
+     * What the user types into the amount box, in dollars. Not URL-bound: the URL
+     * carries amountCents, and mount() rebuilds this from it.
+     */
+    public string $amountDollars = '';
+
+    /**
+     * Selected statuses (posted, pending). Both selected, or none, applies no filter.
+     *
+     * @var list<string>
+     */
+    #[Url]
+    public array $statuses = [];
 
     #[Url]
     public string $period = 'this-month';
@@ -280,6 +312,8 @@ final class TransactionList extends Component
      */
     private ?int $matchingCountCache = null;
 
+    private ?CategoryGroupMap $categoryMapCache = null;
+
     /**
      * @throws ContainerExceptionInterface
      * @throws NotFoundExceptionInterface
@@ -307,6 +341,10 @@ final class TransactionList extends Component
         if (! in_array($this->groupMode, self::VALID_GROUP_MODES, true)) {
             $this->groupMode = 'date';
         }
+
+        $this->normaliseAmountFilter();
+        $this->amountDollars = $this->amountCents === null ? '' : number_format($this->amountCents / 100, 2, '.', '');
+        $this->normaliseStatuses();
 
         // Clustering only exists while triaging uncategorised rows, and the
         // toggle that leaves it is rendered only there. Any other filter would
@@ -1293,11 +1331,49 @@ final class TransactionList extends Component
 
     public function updatedCategory(): void
     {
+        $this->exactCategory = false;
         $this->resetPage();
     }
 
     public function updatedGroup(): void
     {
+        $this->resetPage();
+    }
+
+    public function updatedAmountOp(): void
+    {
+        $this->normaliseAmountFilter();
+        $this->resetPage();
+    }
+
+    public function updatedAmountDollars(): void
+    {
+        $dollars = mb_trim(str_replace(',', '', $this->amountDollars));
+
+        $cents = is_numeric($dollars) ? abs(round((float) $dollars * 100)) : null;
+
+        $this->amountCents = $cents !== null && $cents < PHP_INT_MAX ? (int) $cents : null;
+        $this->normaliseAmountFilter();
+        $this->resetPage();
+    }
+
+    public function updatedStatuses(): void
+    {
+        $this->normaliseStatuses();
+        $this->resetPage();
+    }
+
+    public function clearAmountFilter(): void
+    {
+        $this->amountOp = 'any';
+        $this->amountCents = null;
+        $this->amountDollars = '';
+        $this->resetPage();
+    }
+
+    public function clearStatus(string $status): void
+    {
+        $this->statuses = array_values(array_diff($this->statuses, [$status]));
         $this->resetPage();
     }
 
@@ -1391,6 +1467,12 @@ final class TransactionList extends Component
             'groupName' => $this->group
                 ? CategoryGroup::query()->whereKey($this->group)->value('name')
                 : null,
+            'totals' => TransactionTotals::summarise(
+                $this->queryFor($filters),
+                auth()->user()->id,
+                $this->attributionIds($filters),
+                $transactions?->total(),
+            ),
             'formatMoney' => MoneyCast::format(...),
             'periodLabel' => $periodEnum->label(),
             'hasPayCycle' => auth()->user()->hasPayCycleConfigured(),
@@ -1448,6 +1530,81 @@ final class TransactionList extends Component
         }
 
         return [$lines, $cents];
+    }
+
+    private function normaliseAmountFilter(): void
+    {
+        if (! in_array($this->amountOp, self::VALID_AMOUNT_OPERATORS, true)) {
+            $this->amountOp = 'any';
+        }
+
+        if ($this->amountCents !== null) {
+            $this->amountCents = $this->amountCents === PHP_INT_MIN ? null : abs($this->amountCents);
+        }
+
+        if ($this->amountOp === 'any') {
+            $this->amountCents = null;
+            $this->amountDollars = '';
+        }
+    }
+
+    private function normaliseStatuses(): void
+    {
+        $valid = array_column(TransactionStatus::cases(), 'value');
+
+        $this->statuses = array_values(array_unique(array_intersect(array_filter($this->statuses, is_string(...)), $valid)));
+    }
+
+    private function categoryMap(): CategoryGroupMap
+    {
+        return $this->categoryMapCache ??= CategoryGroupMap::load();
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     * @return list<int>|null
+     */
+    private function categoryFilterIds(array $filters): ?array
+    {
+        if (! is_scalar($filters['category'] ?? null)) {
+            return null;
+        }
+
+        $id = (int) $filters['category'];
+
+        if (($filters['exactCategory'] ?? false) === true) {
+            return [$id];
+        }
+
+        return $this->categoryMap()->descendantIdsOf($id) ?: [$id];
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     * @return list<int>|null
+     */
+    private function groupFilterIds(array $filters): ?array
+    {
+        return is_int($filters['group'] ?? null)
+            ? $this->categoryMap()->categoryIdsInGroup($filters['group'])
+            : null;
+    }
+
+    /**
+     * The categories whose allocation lines the totals may sum, or null when no
+     * category or group filter is active.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return list<int>|null
+     */
+    private function attributionIds(array $filters): ?array
+    {
+        $sets = array_values(array_filter(
+            [$this->categoryFilterIds($filters), $this->groupFilterIds($filters)],
+            static fn (?array $ids): bool => $ids !== null,
+        ));
+
+        return $sets === [] ? null : array_values(array_intersect(...$sets));
     }
 
     /**
@@ -1988,6 +2145,10 @@ final class TransactionList extends Component
             'account' => $this->account,
             'category' => $this->category,
             'group' => $this->group,
+            'exactCategory' => $this->exactCategory,
+            'amountOp' => $this->amountOp,
+            'amountCents' => $this->amountCents,
+            'statuses' => $this->statuses,
             'planned' => $this->planned,
             'categorised' => $this->categorised,
             'source' => $this->source,
@@ -2026,6 +2187,18 @@ final class TransactionList extends Component
             default => null,
         };
 
+        $amountOp = $filters['amountOp'] ?? null;
+        $amountCents = is_int($filters['amountCents'] ?? null) ? abs($filters['amountCents']) : null;
+        $amountOperator = is_string($amountOp) && $amountCents !== null
+            ? (self::AMOUNT_OPERATOR_SYMBOLS[$amountOp] ?? null)
+            : null;
+
+        $statuses = is_array($filters['statuses'] ?? null)
+            ? array_values(array_intersect(array_column(TransactionStatus::cases(), 'value'), $filters['statuses']))
+            : [];
+        $statusFilter = count($statuses) === 1 ? $statuses[0] : null;
+        $categoryIds = $this->attributionIds($filters);
+
         return Transaction::query()
             ->where('user_id', auth()->id())
             ->current()
@@ -2038,18 +2211,16 @@ final class TransactionList extends Component
             // reach rows the page is incapable of showing.
             ->when(($filters['clusterableOnly'] ?? false) === true, fn ($q) => $q->whereNotNull('merchant_key'))
             ->when(is_scalar($filters['account'] ?? null) ? $filters['account'] : null, fn ($q, $id) => $q->where('account_id', $id))
-            ->when(is_scalar($filters['category'] ?? null) ? $filters['category'] : null, fn ($q, $id) => $q->where(fn ($q) => $q
-                ->where('category_id', $id)
-                ->orWhereHas('splits', fn ($s) => $s->where('category_id', $id))))
-            ->when(is_int($filters['group'] ?? null) ? $filters['group'] : null, function ($q, int $groupId) {
-                $ids = CategoryGroupMap::load()->categoryIdsInGroup($groupId);
-
-                return $ids === []
-                    ? $q->whereRaw('1 = 0')
-                    : $q->where(fn ($q) => $q
-                        ->whereIn('category_id', $ids)
-                        ->orWhereHas('splits', fn ($s) => $s->whereIn('category_id', $ids)));
-            })
+            ->when($categoryIds !== null, fn ($q) => $categoryIds === []
+                ? $q->whereRaw('1 = 0')
+                : $q->where(fn ($q) => $q
+                    ->whereIn('category_id', $categoryIds)
+                    ->orWhereHas('splits', fn ($s) => $s->whereIn('category_id', $categoryIds))))
+            ->when($amountOperator, fn ($q, string $operator) => $q->whereRaw(
+                "abs(transactions.amount) {$operator} ?",
+                [$amountCents],
+            ))
+            ->when($statusFilter, fn ($q, string $status) => $q->where('status', $status))
             ->when(($filters['planned'] ?? null) === 'planned', fn ($q) => $q->whereNotNull('planned_transaction_id'))
             ->when(($filters['planned'] ?? null) === 'unplanned', fn ($q) => $q->whereNull('planned_transaction_id'))
             // A linked transfer is one item: the modal opens the partner leg for a credit,
