@@ -10,6 +10,8 @@ use App\Contracts\GitHubServiceContract;
 use App\Contracts\GmailServiceContract;
 use App\Contracts\ScheduleSource;
 use App\Contracts\TypeSafeServiceContract;
+use App\Models\Transaction;
+use App\Observers\TransactionObserver;
 use App\Services\Bnpl\GmailScheduleSource;
 use App\Services\CategoryRuleGenerator;
 use App\Services\ContextDevService;
@@ -144,6 +146,8 @@ final class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureDefaults();
+
+        Transaction::observe(TransactionObserver::class);
 
         View::composer(
             ['*app.sidebar', '*app.partials.topbar'],
