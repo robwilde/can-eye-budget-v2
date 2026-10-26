@@ -11,9 +11,10 @@ use Illuminate\Support\Facades\DB;
 /**
  * Category-attribution atoms for a user's current transactions.
  *
- * Every money surface (budgets, reports, calendar, category counts) attributes
- * spend to categories through this single primitive so a split transaction is
- * counted once, against its allocation lines rather than its own category_id.
+ * Budgets, reports, filtered totals and category counts attribute spend to categories
+ * through this single primitive so a split transaction is counted once, against its
+ * allocation lines rather than its own category_id. Only money aggregation passes
+ * $forMoney; counting callers keep excluded rows.
  *
  * A current, unsplit transaction contributes one atom under its own category_id.
  * A split transaction contributes one atom per allocation line under the line's
@@ -25,18 +26,19 @@ use Illuminate\Support\Facades\DB;
  */
 final class CategoryAttribution
 {
-    public static function atoms(int $userId, bool $excludeUntracked = false): Builder
+    public static function atoms(int $userId, bool $forMoney = false): Builder
     {
         $unsplit = Transaction::query()
             ->current()
             ->where('transactions.user_id', $userId)
+            ->when($forMoney, fn ($q) => $q->where('transactions.excluded', false))
             ->toBase()
             ->whereNotExists(static function (Builder $query): void {
                 $query->select(DB::raw('1'))
                     ->from('transaction_splits as s')
                     ->whereColumn('s.transaction_id', 'transactions.id');
             })
-            ->when($excludeUntracked, fn (Builder $q): Builder => $q->whereNotExists(self::untrackedAccount(...)))
+            ->when($forMoney, fn (Builder $q): Builder => $q->whereNotExists(self::untrackedAccount(...)))
             ->select([
                 'transactions.id as transaction_id',
                 'transactions.category_id as category_id',
@@ -50,9 +52,10 @@ final class CategoryAttribution
         $split = Transaction::query()
             ->current()
             ->where('transactions.user_id', $userId)
+            ->when($forMoney, fn ($q) => $q->where('transactions.excluded', false))
             ->toBase()
             ->join('transaction_splits as s', 's.transaction_id', '=', 'transactions.id')
-            ->when($excludeUntracked, fn (Builder $q): Builder => $q->whereNotExists(self::untrackedAccount(...)))
+            ->when($forMoney, fn (Builder $q): Builder => $q->whereNotExists(self::untrackedAccount(...)))
             ->select([
                 'transactions.id as transaction_id',
                 's.category_id as category_id',
@@ -67,13 +70,14 @@ final class CategoryAttribution
     }
 
     /**
-     * @param  bool  $excludeUntracked  Money aggregation (budgets, reports) passes true: rows on
-     *                                  untracked accounts never count as spend or income. Counting
-     *                                  callers (category editor) keep them, matching their lists.
+     * @param  bool  $forMoney  Money aggregation (budgets, reports, totals) passes true: rows on
+     *                          untracked accounts and excluded rows never count as spend or
+     *                          income. Counting callers (category editor) keep both, matching
+     *                          their lists.
      */
-    public static function query(int $userId, bool $excludeUntracked = false): Builder
+    public static function query(int $userId, bool $forMoney = false): Builder
     {
-        return DB::query()->fromSub(self::atoms($userId, $excludeUntracked), 'atoms');
+        return DB::query()->fromSub(self::atoms($userId, $forMoney), 'atoms');
     }
 
     /** Untracked accounts hold transfer mirror legs only; they never count as spend or income. */
