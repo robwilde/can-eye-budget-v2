@@ -10,8 +10,10 @@ use App\Enums\TransactionStatus;
 use App\Models\BankImport;
 use App\Models\Transaction;
 use App\Services\CsvImport\CsvParserService;
+use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\TransactionIngestor;
 use App\Support\Audit\AttributeJobToUser;
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\QueryException;
@@ -74,6 +76,19 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
         $rowErrors = [];
         $mapping = $bankImport->column_mapping ?? [];
         $path = Storage::disk('local')->path($bankImport->stored_path);
+        $earliest = null;
+        $touch = static function (mixed $date) use (&$earliest): void {
+            $day = CarbonImmutable::parse($date)->startOfDay();
+
+            if ($earliest === null || $day->lessThan($earliest)) {
+                $earliest = $day;
+            }
+        };
+        $rebuild = static function () use (&$earliest, $bankImport): void {
+            if ($earliest !== null && $bankImport->account !== null) {
+                app(AccountBalanceHistoryBuilder::class)->rebuild($bankImport->account, $earliest);
+            }
+        };
 
         try {
             foreach ($parser->eachRow($path, $mapping) as $row) {
@@ -97,15 +112,18 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
                     ];
 
                     if ($existing === null) {
+                        $touch($row->postDate);
                         $ingestor->ingest(new Transaction([
                             'account_id' => $bankImport->account_id,
                             'csv_hash' => $row->csvHash,
                             ...$values,
-                        ]));
+                        ]), rebuildHistory: false);
                         $imported++;
 
                         continue;
                     }
+
+                    $previousDate = $existing->post_date;
 
                     if ($existing->trashed()) {
                         if ($existing->folded_into_transaction_id !== null) {
@@ -114,12 +132,20 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
 
                         $existing->fill($values);
                         $existing->restore();
+                        $touch($previousDate);
+                        $touch($row->postDate);
                         $restored++;
 
                         continue;
                     }
 
                     $existing->fill($values)->save();
+
+                    if ($existing->wasChanged()) {
+                        $touch($previousDate);
+                        $touch($row->postDate);
+                    }
+
                     $updated++;
                 } catch (Throwable $rowException) {
                     $skipped++;
@@ -136,7 +162,18 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
                     ]);
                 }
             }
+
+            $rebuild();
         } catch (Throwable $e) {
+            try {
+                $rebuild();
+            } catch (Throwable $rebuildException) {
+                Log::error('CSV import history rebuild failed', [
+                    'bankImportId' => $bankImport->id,
+                    'exception' => $rebuildException,
+                ]);
+            }
+
             $bankImport->update([
                 'status' => BankImportStatus::Failed,
                 'error_summary' => $e->getMessage(),

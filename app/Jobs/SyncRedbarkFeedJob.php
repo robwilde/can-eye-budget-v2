@@ -18,10 +18,12 @@ use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Exceptions\Redbark\RedbarkAuthenticationException;
 use App\Exceptions\Redbark\RedbarkException;
+use App\Models\Account;
 use App\Models\RedbarkAccount;
 use App\Models\RedbarkFeed;
 use App\Models\RedbarkSyncLog;
 use App\Models\Transaction;
+use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\RedbarkClientFactory;
 use App\Services\RedbarkTransactionMatcher;
 use App\Services\TransactionIngestor;
@@ -706,8 +708,10 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * D6. Balance first, then transactions, so an account's balance is already correct
-     * before anything renders.
+     * D6. One transaction per account, so the balance and its rows land together. The account
+     * row is locked first, before any transaction row is inserted: on MariaDB an insert holds
+     * a shared lock on its account row, and upgrading that to the exclusive lock the balance
+     * update and the rebuild need deadlocks against any writer doing the same.
      *
      * @return array{created: int, updated: int, matched: int, accounts: int}
      */
@@ -730,35 +734,97 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
                 continue;
             }
 
-            if ($redbarkAccount->current_balance !== null) {
-                $account->update([
-                    'balance' => $redbarkAccount->current_balance,
-                    'balance_source' => ImportSource::Redbark,
-                    'balance_updated_at' => now(),
-                    'currency' => $redbarkAccount->currency,
-                ]);
-            }
+            $account->getConnection()->transaction(function () use ($ingestor, $matcher, $redbarkAccount, $account, &$created, &$updated, &$matched): void {
+                app(AccountBalanceHistoryBuilder::class)->lockAccounts($account->id);
 
-            $rows = $redbarkAccount->raw_transactions_payload ?? [];
-            $payloadIds = array_values(array_filter(
-                array_map(static fn (array $row): mixed => $row['id'] ?? null, $rows),
-                static fn (mixed $id): bool => is_string($id) && $id !== '',
-            ));
+                $rows = $redbarkAccount->raw_transactions_payload ?? [];
+                $payloadIds = array_values(array_filter(
+                    array_map(static fn (array $row): mixed => $row['id'] ?? null, $rows),
+                    static fn (mixed $id): bool => is_string($id) && $id !== '',
+                ));
+                $earliestStored = $this->earliestStoredDate($account, $payloadIds);
+                $rowsChanged = false;
 
-            foreach ($rows as $row) {
-                $result = $this->applyRow($ingestor, $matcher, $redbarkAccount, $row, $payloadIds);
+                foreach ($rows as $row) {
+                    $result = $this->applyRow($ingestor, $matcher, $redbarkAccount, $row, $payloadIds);
 
-                if ($result === 'created') {
-                    $created++;
-                } elseif ($result === 'updated') {
-                    $updated++;
-                } elseif ($result === 'matched') {
-                    $matched++;
+                    if ($result === 'created') {
+                        $created++;
+                    } elseif ($result === 'updated') {
+                        $updated++;
+                    } elseif ($result === 'matched') {
+                        $matched++;
+                    }
+
+                    $rowsChanged = $rowsChanged || $result !== 'skipped';
                 }
-            }
+
+                $balanceChanged = false;
+
+                if ($redbarkAccount->current_balance !== null) {
+                    $account->update([
+                        'balance' => $redbarkAccount->current_balance,
+                        'balance_source' => ImportSource::Redbark,
+                        'balance_updated_at' => now(),
+                        'currency' => $redbarkAccount->currency,
+                    ]);
+                    $balanceChanged = $account->wasChanged('balance');
+                }
+
+                if ($balanceChanged || $rowsChanged) {
+                    $this->rebuildHistory($account, $rows, $earliestStored);
+                }
+            });
         }
 
         return ['created' => $created, 'updated' => $updated, 'matched' => $matched, 'accounts' => $accounts->count()];
+    }
+
+    /**
+     * The earliest post date already stored for the payload's ids, read before the rows are
+     * applied: an update can move a row later, and the rebuild must still start from where
+     * it used to sit.
+     *
+     * @param  list<string>  $payloadIds
+     */
+    private function earliestStoredDate(Account $account, array $payloadIds): ?CarbonImmutable
+    {
+        if ($payloadIds === []) {
+            return null;
+        }
+
+        $earliest = Transaction::withTrashed()
+            ->where('account_id', $account->id)
+            ->whereIn('redbark_id', $payloadIds)
+            ->min('post_date');
+
+        return is_string($earliest) ? CarbonImmutable::parse($earliest) : null;
+    }
+
+    /**
+     * One rebuild per account per sync. The window starts a claim window before the
+     * earliest payload row, because a settled pending row keeps the older date it was
+     * first stored under, and no later than the earliest date a payload row held before
+     * this sync moved it.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function rebuildHistory(Account $account, array $rows, ?CarbonImmutable $earliestStored): void
+    {
+        $dates = array_filter(array_map(
+            fn (array $row): ?CarbonImmutable => $this->parseDate($row['date'] ?? null) ?? $this->parseDate($row['postDate'] ?? null),
+            $rows,
+        ));
+
+        $from = $dates === []
+            ? null
+            : min($dates)->subDays(self::PENDING_CLAIM_WINDOW_DAYS);
+
+        if ($from !== null && $earliestStored !== null && $earliestStored->lessThan($from)) {
+            $from = $earliestStored;
+        }
+
+        app(AccountBalanceHistoryBuilder::class)->rebuild($account, $from);
     }
 
     /**
@@ -907,7 +973,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
         ]);
         $this->offerNames($created, $names);
 
-        $ingestor->ingest($created);
+        $ingestor->ingest($created, rebuildHistory: false);
 
         return 'created';
     }
