@@ -236,7 +236,7 @@
                     <div class="rounded-md border-2 border-cib-black bg-cib-cream-50 px-4 py-3 space-y-2" data-testid="transfer-candidates">
                         @if($candidates->isEmpty())
                             <flux:text size="sm">
-                                {{ __('No matching transaction found to link. Pick a hidden (untracked) account above to record the other side.') }}
+                                {{ __('No matching transaction found to link. Pick an account above to record the other side on.') }}
                             </flux:text>
                         @else
                             <flux:text size="sm" class="font-bold">
