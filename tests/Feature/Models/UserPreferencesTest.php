@@ -108,3 +108,30 @@ test('reading default preferences does not make the user dirty', function () {
 
     expect($user->isDirty())->toBeFalse();
 });
+
+test('offers every supported currency when no allowed list is stored', function () {
+    $user = User::factory()->create();
+
+    expect($user->allowedCurrencies())->toContain('AUD', 'EUR', 'USD')
+        ->and($user->preferences->allowedCurrencies)->toBe([]);
+});
+
+test('always includes the base currency in a stored allowed list', function () {
+    $user = User::factory()->withPreferences(['allowedCurrencies' => ['eur', 'USD', 'EUR', 'nope']])->create(['base_currency' => 'AUD']);
+
+    expect($user->fresh()->preferences->allowedCurrencies)->toBe(['EUR', 'USD'])
+        ->and($user->fresh()->allowedCurrencies())->toBe(['AUD', 'EUR', 'USD']);
+});
+
+test('stores the base currency per user', function () {
+    $acting = User::factory()->create();
+    $other = User::factory()->create();
+
+    $acting->update(['base_currency' => 'EUR']);
+    $acting->updatePreferences(['allowedCurrencies' => ['EUR', 'USD']]);
+
+    expect($other->fresh()->base_currency)->toBe('AUD')
+        ->and($other->fresh()->preferences->allowedCurrencies)->toBe([])
+        ->and($acting->fresh()->base_currency)->toBe('EUR')
+        ->and($acting->fresh()->preferences->allowedCurrencies)->toBe(['EUR', 'USD']);
+});

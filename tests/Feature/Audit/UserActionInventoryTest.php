@@ -122,6 +122,7 @@ test('the setup journey actions are recorded under their expected audit names', 
         'transaction-modal' => ['save'],
         'pages::settings.providers' => ['save', 'syncNow', 'disconnect'],
         'pages::settings.pay-cycle' => ['save'],
+        'pages::settings.currency' => ['save'],
     ];
 
     foreach ($expected as $name => $methods) {
