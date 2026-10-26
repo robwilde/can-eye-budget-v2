@@ -14,6 +14,7 @@ use App\Models\BankImport;
 use App\Models\Transaction;
 use App\Services\CsvImport\CsvColumnMapper;
 use App\Services\CsvImport\CsvParserService;
+use App\Services\Projection\AccountBalanceHistoryBuilder;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
@@ -168,11 +169,17 @@ final class ImportBank extends Component
             ->update(['column_mapping' => $this->mapping]);
 
         if ($this->currentBalance !== '') {
-            $account->update([
-                'balance' => (int) round(((float) $this->currentBalance) * 100),
-                'balance_source' => ImportSource::Csv,
-                'balance_updated_at' => now(),
-            ]);
+            Account::query()->getConnection()->transaction(function () use ($account): void {
+                $account->update([
+                    'balance' => (int) round(((float) $this->currentBalance) * 100),
+                    'balance_source' => ImportSource::Csv,
+                    'balance_updated_at' => now(),
+                ]);
+
+                if ($account->wasChanged('balance')) {
+                    app(AccountBalanceHistoryBuilder::class)->rebuild($account);
+                }
+            });
         }
 
         ImportCsvTransactionsJob::dispatch($bankImport);
@@ -328,19 +335,25 @@ final class ImportBank extends Component
             'newAccountBalance' => ['nullable', 'numeric'],
         ]);
 
-        return Account::query()->create([
-            'user_id' => $user->id,
-            'name' => $this->newAccountName,
-            'account_last4' => $this->newAccountLast4,
-            'type' => 'transaction',
-            'institution' => 'CSV import',
-            'currency' => 'AUD',
-            'balance' => (int) round(((float) $this->newAccountBalance) * 100),
-            'balance_source' => $this->newAccountBalance === '' ? null : ImportSource::Csv,
-            'balance_updated_at' => $this->newAccountBalance === '' ? null : now(),
-            'group' => 'day-to-day',
-            'status' => 'active',
-            'import_source' => ImportSource::Csv,
-        ]);
+        return Account::query()->getConnection()->transaction(function () use ($user): Account {
+            $account = Account::query()->create([
+                'user_id' => $user->id,
+                'name' => $this->newAccountName,
+                'account_last4' => $this->newAccountLast4,
+                'type' => 'transaction',
+                'institution' => 'CSV import',
+                'currency' => 'AUD',
+                'balance' => (int) round(((float) $this->newAccountBalance) * 100),
+                'balance_source' => $this->newAccountBalance === '' ? null : ImportSource::Csv,
+                'balance_updated_at' => $this->newAccountBalance === '' ? null : now(),
+                'group' => 'day-to-day',
+                'status' => 'active',
+                'import_source' => ImportSource::Csv,
+            ]);
+
+            app(AccountBalanceHistoryBuilder::class)->rebuild($account);
+
+            return $account;
+        });
     }
 }
