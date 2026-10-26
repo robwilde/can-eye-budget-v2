@@ -307,6 +307,21 @@ final class User extends Authenticatable
     }
 
     /**
+     * Deleting a user cascades their accounts, transactions and receipts in SQL, which fires no
+     * Transaction events, so the receipt files are collected first and removed after the delete.
+     */
+    protected static function booted(): void
+    {
+        self::deleting(static function (self $user): void {
+            TransactionAttachment::remember($user, TransactionAttachment::query()->forUser($user)->get(['disk', 'path']));
+        });
+
+        self::deleted(static function (self $user): void {
+            TransactionAttachment::purgeRemembered($user);
+        });
+    }
+
+    /**
      * @return Attribute<int|null, int|null>
      */
     protected function monthStartDay(): Attribute

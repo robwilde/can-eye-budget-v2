@@ -254,6 +254,23 @@ final class Account extends Model
     }
 
     /**
+     * Deleting an account cascades its transactions and their receipts in SQL, which fires no
+     * Transaction events, so the receipt files are collected first and removed after the delete.
+     */
+    protected static function booted(): void
+    {
+        self::deleting(static function (self $account): void {
+            TransactionAttachment::remember($account, TransactionAttachment::query()
+                ->whereIn('transaction_id', Transaction::withTrashed()->where('account_id', $account->id)->select('id'))
+                ->get(['disk', 'path']));
+        });
+
+        self::deleted(static function (self $account): void {
+            TransactionAttachment::purgeRemembered($account);
+        });
+    }
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array
