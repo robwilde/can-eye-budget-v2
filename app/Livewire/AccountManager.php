@@ -347,6 +347,43 @@ final class AccountManager extends Component
         });
     }
 
+    public function disableAccount(int $accountId): void
+    {
+        $account = $this->findUserAccount($accountId);
+
+        if ($account === null || $account->status === AccountStatus::Inactive) {
+            return;
+        }
+
+        $account->update(['status' => AccountStatus::Inactive, 'disabled_at' => CarbonImmutable::today()]);
+    }
+
+    public function enableAccount(int $accountId): void
+    {
+        $account = $this->findUserAccount($accountId);
+
+        if ($account === null || $account->status !== AccountStatus::Inactive) {
+            return;
+        }
+
+        $account->update(['status' => AccountStatus::Active, 'disabled_at' => null]);
+    }
+
+    /** Detaches the bank feed link and keeps every transaction; the account is manual from then on. */
+    public function unlinkAccount(int $accountId): void
+    {
+        $account = $this->findUserAccount($accountId);
+
+        if ($account === null || ! $account->redbarkAccount()->exists()) {
+            return;
+        }
+
+        Account::query()->getConnection()->transaction(function () use ($account): void {
+            $account->redbarkAccount()->update(['account_id' => null, 'ignored' => true]);
+            $account->update(['import_source' => ImportSource::Manual, 'balance_source' => ImportSource::Manual]);
+        });
+    }
+
     public function confirmDelete(int $accountId): void
     {
         $account = $this->findUserAccount($accountId);
@@ -355,6 +392,7 @@ final class AccountManager extends Component
             return;
         }
 
+        $this->resetErrorBag('delete');
         $this->deletingAccountId = $account->id;
         $this->deletingAccountName = $account->name;
         $this->deletingTransactionCount = $account->transactions()->count();
@@ -368,6 +406,12 @@ final class AccountManager extends Component
         }
 
         $account = $this->findUserAccount($this->deletingAccountId);
+
+        if ($account?->redbarkAccount()->exists()) {
+            $this->addError('delete', __('This account is linked to a bank feed. Unlink it first, then delete it.'));
+
+            return;
+        }
 
         $account?->delete();
 

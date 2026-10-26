@@ -245,7 +245,11 @@ final class ImportBank extends Component
 
     public function render(CsvParserService $parser): View
     {
-        $userAccounts = auth()->user()->accounts()->tracked()->visible()->get();
+        $userAccounts = auth()->user()->accounts()
+            ->tracked()
+            ->visible()
+            ->where(fn ($query) => $query->active()->orWhere('id', $this->accountId))
+            ->get();
         $bankImport = $this->bankImportId !== null
             ? BankImport::query()->where('user_id', auth()->id())->find($this->bankImportId)
             : null;

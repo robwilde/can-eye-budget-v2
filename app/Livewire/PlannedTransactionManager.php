@@ -49,9 +49,13 @@ final class PlannedTransactionManager extends Component
     public function mount(): void
     {
         $user = $this->authenticatedUser();
-        $firstAccountId = $user->accounts()->tracked()->orderBy('id')->value('id');
+        $usable = $user->accounts()->active()->tracked();
+        $primaryId = $user->primary_account_id === null
+            ? null
+            : (clone $usable)->whereKey($user->primary_account_id)->value('id');
+        $firstAccountId = $primaryId ?? (clone $usable)->orderBy('id')->value('id');
 
-        $this->accountId = $user->primary_account_id ?? ($firstAccountId === null ? null : (int) $firstAccountId);
+        $this->accountId = $firstAccountId === null ? null : (int) $firstAccountId;
     }
 
     public function openEdit(int $id): void
@@ -197,6 +201,7 @@ final class PlannedTransactionManager extends Component
         return Account::query()
             ->where('user_id', $user->id)
             ->tracked()
+            ->where(fn ($query) => $query->active()->orWhere('id', $this->accountId))
             ->orderBy('name')
             ->get(['id', 'name']);
     }
