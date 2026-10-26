@@ -14,8 +14,10 @@ use App\Enums\TransferLinkSource;
 use App\Events\TransactionCategoryUpdated;
 use App\Support\CleanDescriptionDeriver;
 use App\Support\Recurring\MerchantSignature;
+use BackedEnum;
 use Carbon\CarbonImmutable;
 use Database\Factories\TransactionFactory;
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -57,6 +59,7 @@ use Illuminate\Support\Facades\DB;
  * @property string|null $notes
  * @property bool $excluded
  * @property string|null $idempotency_key
+ * @property list<string>|null $locked_fields
  * @property-read Collection<int, TransactionSplit> $splits
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
@@ -75,6 +78,23 @@ final class Transaction extends Model
      * them under '' alongside anything else that normalises to nothing.
      */
     public const string UNKNOWN_MERCHANT_KEY = '(Unknown)';
+
+    /**
+     * The fields a user can change in the transaction modal. Changing one locks it against
+     * provider syncs until the user chooses Unlock.
+     *
+     * @var list<string>
+     */
+    public const array LOCKABLE_FIELDS = [
+        'description',
+        'clean_description',
+        'notes',
+        'category_id',
+        'amount',
+        'direction',
+        'post_date',
+        'account_id',
+    ];
 
     /**
      * Transient, per-instance: whether a category change on this model should
@@ -127,6 +147,7 @@ final class Transaction extends Model
         'notes',
         'excluded',
         'idempotency_key',
+        'locked_fields',
     ];
 
     /**
@@ -273,6 +294,45 @@ final class Transaction extends Model
     public function attachments(): HasMany
     {
         return $this->hasMany(TransactionAttachment::class);
+    }
+
+    /**
+     * Fills only the attributes the user has not locked against provider syncs.
+     *
+     * @param  array<string, mixed>  $values
+     */
+    public function fillUnlocked(array $values): static
+    {
+        return $this->fill(array_diff_key($values, array_flip($this->locked_fields ?? [])));
+    }
+
+    /**
+     * The amount of a bank-feed row is never edited by the user, so an amount lock there is the
+     * system's: it is what keeps a folded fee's combined amount safe from the bank sync.
+     */
+    public function hasSystemAmountLock(): bool
+    {
+        return $this->source === TransactionSource::Redbark && in_array('amount', $this->locked_fields ?? [], true);
+    }
+
+    /**
+     * The lock list this row would carry after $changes: the current locks plus every lockable
+     * field whose new value differs from the stored one.
+     *
+     * @param  array<string, mixed>  $changes
+     * @return list<string>
+     */
+    public function lockedFieldsAfter(array $changes): array
+    {
+        $locked = $this->locked_fields ?? [];
+
+        foreach (self::LOCKABLE_FIELDS as $field) {
+            if (array_key_exists($field, $changes) && $this->comparable($field, $changes[$field]) !== $this->comparable($field, $this->getAttribute($field))) {
+                $locked[] = $field;
+            }
+        }
+
+        return array_values(array_unique($locked));
     }
 
     public function isSplit(): bool
@@ -444,6 +504,7 @@ final class Transaction extends Model
             ->toArray();
 
         $attributes['parent_transaction_id'] = $this->id;
+        $attributes['locked_fields'] = $this->locked_fields;
 
         // A caller that changes category_id is choosing a new category. Carrying the
         // parent's provenance onto that choice would let a rule's stamp survive a
@@ -621,6 +682,17 @@ final class Transaction extends Model
             'transaction_date' => 'date',
             'enrich_data' => 'array',
             'excluded' => 'boolean',
+            'locked_fields' => 'array',
         ];
+    }
+
+    private function comparable(string $field, mixed $value): string
+    {
+        return match (true) {
+            $value instanceof BackedEnum => (string) $value->value,
+            $value instanceof DateTimeInterface => $value->format('Y-m-d'),
+            $field === 'amount' => (string) abs((int) $value),
+            default => (string) $value,
+        };
     }
 }
