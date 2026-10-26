@@ -428,6 +428,43 @@
                 </div>
             @endif
 
+            @if($editingTransactionId && $lockedFields !== [])
+                <hr class="panel-rule">
+
+                <div class="flex items-center justify-between gap-2 text-sm" data-test="locked-fields">
+                    <span>{{ __('Edited by you: :fields. The bank sync will not overwrite them.', ['fields' => implode(', ', $lockedFields)]) }}</span>
+                    <button type="button" wire:click="unlockTransaction" class="cib-link" data-test="unlock-transaction">{{ __('Unlock') }}</button>
+                </div>
+            @endif
+
+            @if($editingTransactionId && ($mergeSuggestion || $mergeCandidates->isNotEmpty()))
+                <hr class="panel-rule">
+
+                <div class="space-y-2" data-test="pending-merge">
+                    <span class="cib-label">{{ __('Merge into the posted transaction') }}</span>
+
+                    @if($mergeSuggestion)
+                        <div class="flex items-center justify-between gap-2 text-sm" data-test="merge-suggestion">
+                            <span>{{ __('Suggested:') }} {{ $mergeSuggestion->post_date->format('D j M') }} · {{ $mergeSuggestion->description }} · {{ $formatMoney(abs($mergeSuggestion->amount)) }}</span>
+                            <flux:button type="button" size="sm" wire:click="mergePending({{ $mergeSuggestion->id }})" data-test="merge-suggested">{{ __('Merge') }}</flux:button>
+                        </div>
+                    @endif
+
+                    @foreach($mergeCandidates as $candidate)
+                        <div class="flex items-center justify-between gap-2 text-sm" wire:key="merge-candidate-{{ $candidate->id }}">
+                            <span>{{ $candidate->post_date->format('D j M') }} · {{ $candidate->description }} · {{ $formatMoney(abs($candidate->amount)) }}</span>
+                            <button type="button" wire:click="mergePending({{ $candidate->id }})" class="cib-link" data-test="merge-candidate-{{ $candidate->id }}">{{ __('Merge') }}</button>
+                        </div>
+                    @endforeach
+
+                    @if($mergeCandidates->count() >= $mergeCandidateLimit)
+                        <button type="button" wire:click="$set('mergeCandidateLimit', {{ $mergeCandidateLimit + 10 }})" class="cib-link" data-test="merge-show-more">{{ __('Show more') }}</button>
+                    @endif
+
+                    @error('mergeCandidate')<p class="text-sm text-red-700" data-test="merge-error">{{ $message }}</p>@enderror
+                </div>
+            @endif
+
             {{-- Rule-suggest card (plan-mode, non-transfer, manual) --}}
             @if(!$isBankFeedTransaction && $mode === 'plan' && $transactionType !== 'transfer')
                 <div class="rule-suggest" role="complementary">
