@@ -38,6 +38,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property array<string, string>|null $column_mapping
  * @property AccountGroup $group
  * @property AccountStatus $status
+ * @property CarbonImmutable|null $disabled_at
  * @property bool $is_tracked
  * @property CarbonImmutable|null $reconciled_on
  * @property int|null $reconcile_difference
@@ -69,6 +70,7 @@ final class Account extends Model
         'column_mapping',
         'group',
         'status',
+        'disabled_at',
         'is_tracked',
         'reconciled_on',
         'reconcile_difference',
@@ -260,6 +262,7 @@ final class Account extends Model
             'type' => AccountClass::class,
             'group' => AccountGroup::class,
             'status' => AccountStatus::class,
+            'disabled_at' => 'immutable_date',
             'import_source' => ImportSource::class,
             'balance' => MoneyCast::class,
             'balance_source' => ImportSource::class,
