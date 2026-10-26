@@ -88,6 +88,7 @@ Several features build on others. Building in table order would mean redoing lat
 3. **F9 series types and F12 stored occurrences.** F13 payments, F14 matching, F16 status lifecycle, F17 Bills pages, F19 paycheck plan and F20 reminders all read stored occurrences. F17 built earlier is an interim view only.
 4. **F7 tags.** F4 tag filters, F24 tag conditions, F25 tag actions and F30 tag auto-assignment need it.
 5. **F2 balance history.** F37 net-worth and balance widgets and F39 balance sections need it; F3 currency conversion applies to it once both exist.
+6. **F3 exchange rates.** The rates table and lookup (#710) come before the currency columns and modal (#712), because the modal shows the current rate through `ExchangeRateLookup`.
 
 The remaining features have no ordering constraint beyond the conventions above.
 
@@ -226,7 +227,7 @@ The remaining features have no ordering constraint beyond the conventions above.
   - No daily balance history, no per-account balance chart, no net-worth figure or series and no balance sheet. AccountClass::isAsset exists but nothing calls it.
 - **Build it like:**
   - A new AccountValuation model (scoped through Account), with a kind enum and a unique account-plus-date index.
-  - A derived per-account daily balance table, rebuilt by a service beside Services/Projection. Every write that moves a balance or the transaction history triggers a rebuild: TransactionIngestor, TransactionModal writes (new versions, transfers and deletes), TransferLinker (including untracked mirrors), TransactionFeeFolder, ExpireRedbarkHoldsCommand hold removal, the SyncRedbarkFeedJob balance update, and balance writes by AccountManager and ImportBank. A valuation write rebuilds it inside the same DB transaction.
+  - A derived per-account daily balance table, rebuilt by a service beside Services/Projection. Every write that moves a balance or the transaction history triggers a rebuild: TransactionIngestor, TransactionModal writes (new versions, transfers and deletes), TransferLinker (including untracked mirrors), TransactionFeeFolder, ExpireRedbarkHoldsCommand hold removal, the SyncRedbarkFeedJob balance update, and balance writes by AccountManager and ImportBank. A valuation write rebuilds it inside the same DB transaction. Every writer added later that moves a balance (bulk delete and date edit, fee rows, missing-leg creation, pending merge, split, cross-currency legs) calls the rebuild inside the same DB transaction as its write.
   - Net worth is the signed sum of the balances of active accounts, since debt is already stored negative. AccountClass::isAsset is used only for balance-sheet grouping. Align Account::amountOwed and User::totalOwed with AccountClass::isAsset so there is one liability definition (Mortgage counts as debt).
   - Conventions C1, C2, C5, C7, C8.
 
@@ -266,13 +267,14 @@ The remaining features have no ordering constraint beyond the conventions above.
   - Account has a three-letter currency (default AUD).
   - SyncRedbarkFeedJob and RedbarkAccountSetup copy the bank feed's currency, normalised by RedbarkCurrency, with AUD as the fallback.
   - AccountClass has a "foreign" account type.
+  - `users.base_currency` (default AUD) exists, added by #669.
 - **Gap:**
   - AccountManager, ImportBank and UntrackedAccountCreator always create AUD accounts, and transactions carry no currency.
-  - There are no exchange rates, no base currency, no conversion and no cross-currency transfers. User::totalAvailable and User::totalOwed add cents across accounts whatever their currency.
+  - There are no exchange rates, no conversion and no cross-currency transfers. User::totalAvailable and User::totalOwed add cents across accounts whatever their currency.
 - **Build it like:**
   - A new ExchangeRate model as global reference data, like Category: a unique pair-plus-date index and a decimal rate.
   - A fetch service, tested with Http::fake.
-  - A base currency stored in the F44 preference store (a column on User), and a currency on Transaction.
+  - Allowed currencies in the F44 preference store (the base currency column on User exists already), and a currency on Transaction.
   - Convert in User::totalAvailable, User::totalOwed and Services/Reports, behind a budget-config flag.
   - Conventions C1, C2, C5, C6, C7, C8.
 
@@ -362,7 +364,7 @@ The remaining features have no ordering constraint beyond the conventions above.
   - TransactionSplit: category, amount and notes lines.
   - TransactionModal: add, edit, copy and delete. New rows reject an amount of zero or less, and it never deletes an original bank-feed row.
   - TransactionList:
-    - URL-bound filters for direction, planned, categorised, category source, suggested transfers, account, category, category group, and period or date range;
+    - URL-bound filters for direction, planned, categorised, category source, suggested transfers, account, category, category group, and period or date range (the period and date range are also kept in the session);
     - search over description, clean description and merchant name;
     - sorting and merchant-cluster mode;
     - a split panel: at least two lines, each greater than zero, summing to the total; transfers cannot be split;
@@ -381,7 +383,7 @@ The remaining features have no ordering constraint beyond the conventions above.
   - New user-owned Tag and TransactionAttachment models, with pivot and index names of 64 characters or fewer (C5, C2, C8).
   - Transaction edits create a new version (createChild), which copies only row attributes, so tags and attachments must be carried over to the new version.
   - An excluded flag on Transaction, honoured by the countable scope and CategoryAttribution.
-  - Bulk delete and bulk edit as audited TransactionList methods that re-scope the frozen selection to the user (C3). Bulk delete skips original bank-feed rows and reuses deleteTransaction's transfer-partner handling: a bank-feed partner is unlinked through TransferLinker and a manual partner is deleted. Audited Livewire methods need no UserActionInventoryTest change (C4).
+  - Bulk delete and bulk edit as audited TransactionList methods that re-scope the frozen selection to the user (C3). Bulk delete skips original bank-feed rows and reuses deleteTransaction's transfer-partner handling: a bank-feed partner is unlinked through TransferLinker, and deleting a manual leg dissolves the link and keeps a partner on a tracked account (a mirror leg on an untracked account goes with it), as in F5. Audited Livewire methods need no UserActionInventoryTest change (C4).
   - Amounts in cents (C1), with Pest feature tests per action (C7).
 
 ### F5. Transfers
@@ -449,6 +451,7 @@ The remaining features have no ordering constraint beyond the conventions above.
     - candidates: opposite direction, same absolute amount, different account, within WINDOW_DAYS = 3;
     - link, suggest, confirm, unlink, markNotTransfer, linkToHiddenAccount and releaseMirrors, all under row locks in one DB transaction;
     - an uncategorised leg inherits its partner's Transfer category.
+    - dissolve, on deleting a manual leg (#715): a partner on a tracked account survives as an ordinary transaction stamped Unlinked, a mirror partner on an untracked account is deleted with it, and a bank-feed partner is unlinked instead.
   - TransferDetector:
     - first applies remembered TransferRules, then suggests mutual single-candidate pairs among bank-feed rows carrying TransferSignal ("transfer" in the description, or the Transfer category);
     - runs from TransferDetectionStage and the transfers:detect command.
@@ -461,7 +464,6 @@ The remaining features have no ordering constraint beyond the conventions above.
   - Matching needs exact amounts within 3 days; there is no 30-day manual window.
   - Auto-detection covers bank-feed rows only.
   - For bank-feed rows, a missing leg can only be an untracked mirror. Manual and CSV rows already get the missing leg created on any chosen account.
-  - Deleting a manual transfer leg deletes both legs; there is no surviving standard transaction. A leg whose partner is a bank-feed row is unlinked instead.
 - **Build it like:**
   - Extend TransferLinker and the TransactionModal transfer form with optional fee amounts that create fee Transaction rows in the same DB transaction (C1, C8).
   - Add a transfer-kind enum, derived from the destination AccountClass (C5). It is a label only and leaves countable() and CategoryAttribution unchanged, so a payment into a tracked loan, mortgage or investment account still never counts.
@@ -2752,8 +2754,9 @@ The remaining features have no ordering constraint beyond the conventions above.
   - Providers page: the Redbark or SimpleFIN feed, GmailConnection and AnalysisSuggestions.
   - Account deletion behind a password-confirmed modal.
   - User stores `primary_account_id`.
+  - User stores `base_currency` (default AUD), `timezone`, `month_start_day` and a `preferences` JSON column cast to UserPreferences (#669). No settings page edits them yet.
   - TransactionPeriod::PayCycle, resolved through User::currentPayCycleBounds, is the nearest existing equivalent of a month-start day.
-- **Gap:** There is no photo, theme (the head partial forces the light theme), language, currency, date format, per-user timezone (only the single `app.timezone`), month-start day or display preferences, and no data reset.
+- **Gap:** There is no photo, theme (the head partial forces the light theme), language, date format, settings page for the base currency, no allowed-currencies setting, per-user timezone (only the single `app.timezone`), month-start day or display preferences, and no data reset.
 - **Build it like:**
   - One preference store, owned by this feature. Settings that queries depend on (base currency, timezone, month-start day) are columns on User. UI preferences (dashboard layout, Sankey grouping, report section order, rule-prompt opt-out, preview features) live in one `preferences` JSON column on User, cast to a final DTO that sits with the existing DTO classes. Option enums back both (C5). Every other feature that needs a per-user preference stores it in this preference store.
   - Month-start day extends TransactionPeriod with a new case rather than adding a second period enum.
