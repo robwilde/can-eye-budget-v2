@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Contracts\ContextDevServiceContract;
+use App\Contracts\ExchangeRateProviderContract;
 use App\Contracts\GitHubServiceContract;
 use App\Contracts\GmailServiceContract;
 use App\Contracts\ScheduleSource;
@@ -12,6 +13,7 @@ use App\Contracts\TypeSafeServiceContract;
 use App\Services\Bnpl\GmailScheduleSource;
 use App\Services\CategoryRuleGenerator;
 use App\Services\ContextDevService;
+use App\Services\ExchangeRateClient;
 use App\Services\GitHubService;
 use App\Services\GmailService;
 use App\Services\MerchantBrands\ContextDevCreditBalance;
@@ -107,6 +109,14 @@ final class AppServiceProvider extends ServiceProvider
         ));
 
         $this->app->alias(GitHubServiceContract::class, GitHubService::class);
+
+        $this->app->singleton(ExchangeRateClient::class, fn (): ExchangeRateClient => new ExchangeRateClient(
+            enabled: (bool) config('services.exchange_rates.enabled'),
+            baseUrl: (string) config('services.exchange_rates.base_url'),
+            apiKey: (string) config('services.exchange_rates.api_key'),
+        ));
+
+        $this->app->bind(ExchangeRateProviderContract::class, ExchangeRateClient::class);
 
         $this->app->singleton(TransactionAnalysisPipeline::class, fn (): TransactionAnalysisPipeline => new TransactionAnalysisPipeline(
             stages: [
