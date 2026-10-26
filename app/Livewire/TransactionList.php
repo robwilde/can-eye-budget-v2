@@ -39,6 +39,7 @@ use App\Services\Payees\PayeeConfirmer;
 use App\Services\Payees\PayeeReviewQueue;
 use App\Services\Reports\CategoryGroupMap;
 use App\Services\TransactionEmailLinker;
+use App\Services\Transfers\TransferLinker;
 use App\Services\Transfers\TransferReviewQueue;
 use App\Support\AmountParser;
 use App\Support\Budget\BudgetTagResolver;
@@ -938,6 +939,43 @@ final class TransactionList extends Component
             text: $skipped > 0 ? $text." {$skipped} skipped: today's allowance." : $text,
             variant: 'success',
         );
+    }
+
+    /**
+     * Set a row's excluded flag as a new version, so the edit is kept in the row's history.
+     * Excluded rows stay listed and still move the account balance, but leave every total.
+     * The caller names the state it saw the button offer, so a stale list never flips the row
+     * the other way: a row already in that state is left alone. A transfer leg can be included
+     * again but never excluded, since a pair is counted as a whole by the countable rule.
+     * Retried on a deadlock or lock timeout, which the lineage gap lock can raise on MariaDB.
+     */
+    public function toggleExcluded(int $transactionId, bool $excluded): void
+    {
+        $toggled = Transaction::query()->getConnection()->transaction(function () use ($transactionId, $excluded): bool {
+            $current = Transaction::lockCurrentVersion($transactionId, (int) auth()->id());
+
+            if ($current->excluded === $excluded || ($excluded && $current->transfer_pair_id !== null)) {
+                return false;
+            }
+
+            $child = $current->createChild(['excluded' => $excluded]);
+
+            foreach ($current->splits as $split) {
+                $split->replicate()->fill(['transaction_id' => $child->id])->save();
+            }
+
+            foreach ($current->emails as $email) {
+                $email->replicate()->fill(['transaction_id' => $child->id])->save();
+            }
+
+            app(TransferLinker::class)->followVersion($current, $child);
+
+            return true;
+        }, 3);
+
+        if ($toggled) {
+            $this->dispatch('transaction-saved');
+        }
     }
 
     /**

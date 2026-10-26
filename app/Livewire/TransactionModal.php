@@ -20,13 +20,14 @@ use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Services\CategoryRuleGenerator;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
-use App\Services\TransactionIngestor;
+use App\Services\TransactionIdempotency;
 use App\Services\Transfers\TransferLinker;
 use App\Support\AmountParser;
 use App\Support\AmountParseResult;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Livewire\Attributes\Locked;
@@ -57,6 +58,15 @@ final class TransactionModal extends Component
     public string $date = '';
 
     public string $notes = '';
+
+    public bool $excluded = false;
+
+    /**
+     * One token per add-form submission: a repeat submit with the same token returns the
+     * first transaction instead of inserting again. Regenerated on every form reset.
+     */
+    #[Locked]
+    public string $submissionToken = '';
 
     public string $cleanDescription = '';
 
@@ -132,6 +142,11 @@ final class TransactionModal extends Component
 
     /** Per request: this request's own updates changed a list the user had ticked. */
     private bool $categoriseConsentWithdrawn = false;
+
+    public function mount(): void
+    {
+        $this->submissionToken = (string) Str::uuid();
+    }
 
     #[On('open-transaction-modal')]
     public function openForAdd(string $date): void
@@ -215,6 +230,7 @@ final class TransactionModal extends Component
         $this->categoryId = $transaction->category_id;
         $this->date = $transaction->post_date->format('Y-m-d');
         $this->notes = $transaction->notes ?? '';
+        $this->excluded = $transaction->excluded;
         $this->categoriseMatchValue = app(CategoryRuleGenerator::class)->suggestMatchValue($transaction);
         $this->categoriseMatching = $transaction->category_id === null
             && $transaction->transfer_pair_id === null
@@ -849,8 +865,9 @@ final class TransactionModal extends Component
             return false;
         }
 
-        app(TransactionIngestor::class)->ingest(
+        app(TransactionIdempotency::class)->ingestOnce(
             new Transaction($this->manualSingleAttributes($parsed, null)),
+            $this->submissionToken,
         );
 
         return true;
@@ -928,6 +945,7 @@ final class TransactionModal extends Component
                 return $transaction->createChild([
                     'category_id' => $this->categoryId,
                     'notes' => $this->notes !== '' ? $this->notes : null,
+                    'excluded' => $this->excluded,
                     ...$this->editedDescriptors($transaction),
                 ]);
             });
@@ -949,6 +967,7 @@ final class TransactionModal extends Component
                     ...$this->editedDescriptors($transaction),
                     'post_date' => $this->date,
                     'notes' => $this->notes !== '' ? $this->notes : null,
+                    'excluded' => $this->excluded,
                 ]);
 
                 app(AccountBalanceHistoryBuilder::class)->rebuildForEdit($transaction, $child);
@@ -1478,6 +1497,7 @@ final class TransactionModal extends Component
             'status' => TransactionStatus::Posted,
             'source' => TransactionSource::Manual,
             'notes' => $this->notes !== '' ? $this->notes : null,
+            'excluded' => $this->excluded,
             'planned_transaction_id' => $plannedTransactionId,
         ];
     }
@@ -1631,6 +1651,8 @@ final class TransactionModal extends Component
         $this->categoryId = null;
         $this->date = '';
         $this->notes = '';
+        $this->excluded = false;
+        $this->submissionToken = (string) Str::uuid();
         $this->cleanDescription = '';
         $this->openedCleanDescription = '';
         $this->openedDescription = '';
