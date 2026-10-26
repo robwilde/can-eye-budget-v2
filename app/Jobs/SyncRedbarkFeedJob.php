@@ -919,8 +919,14 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
                 return 'updated';
             }
 
-            $this->applyValues($existing, $values);
-            $existing->save();
+            $current = Transaction::lockCurrentVersion($existing->id, $existing->user_id);
+
+            if ($current->isNot($existing)) {
+                $existing->forceFill(['status' => $values['status']])->save();
+            }
+
+            $this->applyValues($current, $values);
+            $current->save();
             $this->persistNames($existing, $names);
 
             return 'updated';
@@ -996,12 +1002,12 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
     private function applyValues(Transaction $transaction, array $values): void
     {
         if ($transaction->source === TransactionSource::Redbark) {
-            $transaction->fill($values);
+            $transaction->fillUnlocked($values);
 
             return;
         }
 
-        $transaction->fill([
+        $transaction->fillUnlocked([
             'status' => $values['status'],
             'enrich_data' => $values['enrich_data'],
             'merchant_name' => $transaction->merchant_name ?? $values['merchant_name'],
@@ -1064,6 +1070,10 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
      */
     private function nameRow(Transaction $row, array $names): void
     {
+        if (in_array('clean_description', $row->locked_fields ?? [], true)) {
+            return;
+        }
+
         $this->offerNames($row, $names);
 
         if ($row->isDirty()) {
