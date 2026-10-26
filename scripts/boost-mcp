@@ -6,7 +6,8 @@
 
 set -euo pipefail
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAIN="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
-CPATH="$("$MAIN/scripts/worktree-container-path")"
+CPATH="$("$HERE/worktree-container-path")"
 cd "$MAIN"
 exec ddev exec --dir "$CPATH" php artisan "$@"

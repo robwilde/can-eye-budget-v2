@@ -4,13 +4,28 @@
 #
 #   <project root>/...            -> /var/www/html/...
 #   <OMP worktree base>/...       -> /omp-wt/...   (mounted by .ddev/docker-compose.omp-worktrees.yaml)
+#
+# All three paths are compared in physical form (pwd -P): git reports a
+# symlink-resolved toplevel, while OMP_WORKTREE_DIR may be given as `~/...` or
+# via a symlink (e.g. /home -> /var/home).
 
 set -euo pipefail
 
 DIR="$(cd "${1:-.}" && git rev-parse --show-toplevel)"
+DIR="$(cd "$DIR" && pwd -P)"
 MAIN="$(cd "$DIR" && dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+MAIN="$(cd "$MAIN" && pwd -P)"
+
 OMP_BASE="${OMP_WORKTREE_DIR:-$HOME/.omp/wt}"
+case "$OMP_BASE" in
+    \~) OMP_BASE="$HOME" ;;
+    \~/*) OMP_BASE="$HOME/${OMP_BASE#\~/}" ;;
+esac
 OMP_BASE="${OMP_BASE%/}"
+# A missing base cannot contain DIR; keep the literal so the error names it.
+if [ -d "$OMP_BASE" ]; then
+    OMP_BASE="$(cd "$OMP_BASE" && pwd -P)"
+fi
 
 case "$DIR/" in
     "$MAIN/") echo "/var/www/html" ;;
