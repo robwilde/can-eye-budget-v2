@@ -160,7 +160,7 @@
                     : ($incomingFeedTransfer ? __('To account') : __('From account'));
             @endphp
             <flux:select
-                wire:model="accountId"
+                wire:model.live="accountId"
                 :label="$ownAccountLabel"
                 required
                 :disabled="$isBankFeedTransaction"
@@ -379,6 +379,46 @@
                             type="date"
                             required
                         />
+                    @endif
+                </div>
+            @endif
+
+            @if($mode === 'enter' && $transactionType !== 'transfer' && ! $originalWasTransfer && $editingPlannedTransactionId === null)
+                <div class="space-y-2" data-testid="currency-fields">
+                    <div class="grid grid-cols-2 gap-3">
+                        @unless($isBankFeedTransaction)
+                            <flux:select wire:model.live="currency" :label="__('Currency')" data-testid="currency-select">
+                                <flux:select.option value="">{{ $accountCurrency ?? __('Account currency') }}</flux:select.option>
+                                @foreach($currencies as $code)
+                                    @if($code !== $accountCurrency || $code === $currency)
+                                        <flux:select.option value="{{ $code }}">{{ $code }}</flux:select.option>
+                                    @endif
+                                @endforeach
+                            </flux:select>
+                        @endunless
+
+                        @if(! $isBankFeedTransaction && $currency !== '' && $accountCurrency !== null && $currency !== $accountCurrency)
+                            <flux:input
+                                wire:model="exchangeRate"
+                                :label="__('Exchange rate (optional)')"
+                                type="number"
+                                step="any"
+                                min="0"
+                                data-testid="exchange-rate"
+                            />
+                        @endif
+                    </div>
+
+                    @if($accountCurrency !== null && ($currency === '' || $currency === $accountCurrency))
+                        <flux:text size="sm" data-testid="same-currency">{{ __('Same currency') }}</flux:text>
+                    @elseif($currentRate !== null)
+                        <flux:text size="sm" data-testid="current-rate">
+                            @if($currentRate['rate'] !== null)
+                                {{ __('Current rate: 1 :from = :rate :to', ['from' => $currency, 'rate' => rtrim(rtrim(number_format($currentRate['rate'], 8, '.', ''), '0'), '.'), 'to' => $accountCurrency]) }}
+                            @else
+                                {{ __('No rate is available for this date.') }}
+                            @endif
+                        </flux:text>
                     @endif
                 </div>
             @endif
