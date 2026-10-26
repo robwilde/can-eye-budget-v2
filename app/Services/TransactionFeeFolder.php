@@ -40,6 +40,7 @@ final readonly class TransactionFeeFolder
 
             $merged = $parent->createChild([
                 'amount' => $parent->amount + $fee->amount,
+                'locked_fields' => array_values(array_unique([...($parent->locked_fields ?? []), 'amount'])),
                 'csv_hash' => null,
                 'notes' => $parent->notes === null || $parent->notes === ''
                     ? $note
