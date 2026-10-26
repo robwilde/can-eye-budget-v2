@@ -144,6 +144,57 @@
         <flux:button variant="ghost" size="sm" icon="arrows-right-left" href="{{ route('transfers.review') }}" wire:navigate>Review transfers</flux:button>
     </div>
 
+    <div class="flex flex-wrap items-center gap-3" data-testid="amount-status-filters">
+        <flux:select wire:model.live="amountOp" size="sm" class="w-auto" aria-label="Amount comparison">
+            <flux:select.option value="any">Any amount</flux:select.option>
+            <flux:select.option value="eq">Amount =</flux:select.option>
+            <flux:select.option value="lt">Amount &lt;</flux:select.option>
+            <flux:select.option value="gt">Amount &gt;</flux:select.option>
+        </flux:select>
+        <flux:input
+            type="number"
+            min="0"
+            step="0.01"
+            wire:model.live.debounce.500ms="amountDollars"
+            placeholder="0.00"
+            size="sm"
+            class="w-28"
+            aria-label="Amount in dollars"
+            :disabled="$amountOp === 'any'"
+        />
+        <flux:checkbox.group wire:model.live="statuses" class="flex items-center gap-3" aria-label="Status">
+            <flux:checkbox value="posted" label="Posted"/>
+            <flux:checkbox value="pending" label="Pending"/>
+        </flux:checkbox.group>
+
+        @if($amountOp !== 'any' && $amountCents !== null)
+            <flux:badge size="sm" data-testid="amount-filter-chip">
+                Amount {{ ['eq' => '=', 'lt' => '<', 'gt' => '>'][$amountOp] }} {{ $formatMoney($amountCents) }}
+                <button type="button" wire:click="clearAmountFilter" aria-label="Clear amount filter" class="ml-1">
+                    <flux:icon.x-mark class="size-3"/>
+                </button>
+            </flux:badge>
+        @endif
+        @if(count($statuses) === 1)
+            <flux:badge size="sm" data-testid="status-filter-chip">
+                {{ ucfirst($statuses[0]) }} only
+                <button type="button" wire:click="clearStatus('{{ $statuses[0] }}')" aria-label="Clear status filter" class="ml-1">
+                    <flux:icon.x-mark class="size-3"/>
+                </button>
+            </flux:badge>
+        @endif
+    </div>
+
+    <div class="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm" data-testid="totals-bar">
+        <span data-testid="totals-count">{{ number_format($totals['count']) }} {{ Str::plural('transaction', $totals['count']) }}</span>
+        <span data-testid="totals-income">Income {{ $formatMoney($totals['income']) }}</span>
+        <span data-testid="totals-expenses">Expenses {{ $formatMoney($totals['expenses']) }}</span>
+        @if($totals['transfersOnly'])
+            <span data-testid="totals-inflow">Inflow {{ $formatMoney($totals['inflow']) }}</span>
+            <span data-testid="totals-outflow">Outflow {{ $formatMoney($totals['outflow']) }}</span>
+        @endif
+    </div>
+
     <div class="flex flex-wrap items-center gap-3">
         <flux:input wire:model.live.debounce.300ms="search" placeholder="Search transactions..." icon="magnifying-glass" size="sm" class="min-w-48 flex-1"/>
 
