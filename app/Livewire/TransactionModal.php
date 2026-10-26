@@ -18,6 +18,7 @@ use App\Models\Account;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
+use App\Models\TransactionAttachment;
 use App\Services\CategoryRuleGenerator;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\TransactionIdempotency;
@@ -27,19 +28,28 @@ use App\Support\AmountParseResult;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Component;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
+use Livewire\WithFileUploads;
 use Throwable;
 
 final class TransactionModal extends Component
 {
+    use WithFileUploads;
+
     public bool $showModal = false;
 
     public ?int $editingTransactionId = null;
+
+    /** @var list<TemporaryUploadedFile> */
+    public array $newAttachments = [];
 
     #[Locked]
     public bool $isBankFeedTransaction = false;
@@ -598,7 +608,113 @@ final class TransactionModal extends Component
             'formatMoney' => MoneyCast::format(...),
             'parsedAmount' => $parsed->amount ?? 0,
             'parsedDescription' => $parsed->description ?? '',
+            'attachments' => $this->currentAttachments(),
         ]);
+    }
+
+    /**
+     * Stores the chosen receipts on the transaction being edited. Types, size and the
+     * per-transaction cap are checked here, not trusted from the browser; the count is
+     * re-read under a row lock so two uploads cannot together exceed it.
+     *
+     * @throws Throwable
+     */
+    public function attachFiles(): void
+    {
+        $transaction = $this->editingOwnedTransaction();
+
+        if (! $transaction instanceof Transaction) {
+            $this->addError('newAttachments', __('This transaction was changed elsewhere. Close it and open the latest version.'));
+
+            return;
+        }
+
+        $this->validate([
+            'newAttachments' => ['required', 'array'],
+            'newAttachments.*' => ['file', 'mimes:'.TransactionAttachment::MIMES, 'max:'.TransactionAttachment::MAX_KILOBYTES],
+        ], [
+            'newAttachments.*.mimes' => __('Attach images or PDF files only.'),
+            'newAttachments.*.max' => __('Each file can be at most 10 MB.'),
+        ]);
+
+        $written = [];
+
+        try {
+            $stored = $transaction->getConnection()->transaction(function () use ($transaction, &$written): bool {
+                Transaction::query()->whereKey($transaction->id)->lockForUpdate()->first();
+
+                if (! Transaction::query()->current()->whereKey($transaction->id)->exists()) {
+                    $this->addError('newAttachments', __('This transaction was changed elsewhere. Close it and open the latest version.'));
+
+                    return false;
+                }
+
+                $existing = TransactionAttachment::query()->where('transaction_id', $transaction->id)->count();
+
+                if ($existing + count($this->newAttachments) > TransactionAttachment::MAX_PER_TRANSACTION) {
+                    $this->addError('newAttachments', __('A transaction can have at most :max attachments.', ['max' => TransactionAttachment::MAX_PER_TRANSACTION]));
+
+                    return false;
+                }
+
+                foreach ($this->newAttachments as $file) {
+                    $path = 'transaction-attachments/'.$transaction->id.'/'.$file->hashName();
+                    $copied = Storage::disk(TransactionAttachment::DISK)->writeStream($path, $file->readStream());
+
+                    if (! $copied || ! Storage::disk(TransactionAttachment::DISK)->exists($path)) {
+                        Storage::disk(TransactionAttachment::DISK)->delete($path);
+
+                        throw ValidationException::withMessages(['newAttachments' => __('The files could not be saved. Try again.')]);
+                    }
+
+                    $written[] = $path;
+
+                    TransactionAttachment::query()->create([
+                        'transaction_id' => $transaction->id,
+                        'disk' => TransactionAttachment::DISK,
+                        'path' => $path,
+                        'original_name' => mb_substr(basename($file->getClientOriginalName()), 0, 255),
+                        'mime_type' => (string) $file->getMimeType(),
+                        'size_bytes' => (int) $file->getSize(),
+                    ]);
+                }
+
+                return true;
+            });
+        } catch (Throwable $e) {
+            Storage::disk(TransactionAttachment::DISK)->delete($written);
+
+            throw $e;
+        }
+
+        if ($stored) {
+            $this->newAttachments = [];
+            $this->dispatch('transaction-saved');
+        }
+    }
+
+    /**
+     * @throws Throwable
+     */
+    public function removeAttachment(int $attachmentId): void
+    {
+        $transaction = $this->editingOwnedTransaction();
+
+        $attachment = $transaction instanceof Transaction
+            ? TransactionAttachment::query()->where('transaction_id', $transaction->id)->find($attachmentId)
+            : null;
+
+        if (! $attachment instanceof TransactionAttachment) {
+            return;
+        }
+
+        $attachment->getConnection()->transaction(function () use ($attachment): void {
+            $attachment->delete();
+
+            $attachment->getConnection()->afterCommit(static fn (): bool => Storage::disk($attachment->disk)->delete($attachment->path));
+        });
+
+        $this->dispatch('transaction-saved');
     }
 
     public function deletePlannedTransaction(): void
@@ -664,6 +780,27 @@ final class TransactionModal extends Component
     public function updatedCleanDescription(): void
     {
         $this->refreshCategoriseContradictions();
+    }
+
+    /** @return Collection<int, TransactionAttachment> */
+    private function currentAttachments(): Collection
+    {
+        if ($this->editingTransactionId === null) {
+            return new Collection;
+        }
+
+        return TransactionAttachment::query()
+            ->forUser((int) auth()->id())
+            ->where('transaction_id', $this->editingTransactionId)
+            ->orderBy('id')
+            ->get();
+    }
+
+    private function editingOwnedTransaction(): ?Transaction
+    {
+        return $this->editingTransactionId === null
+            ? null
+            : Transaction::query()->where('user_id', auth()->id())->find($this->editingTransactionId);
     }
 
     private function hasRealOppositeRows(Transaction $row): bool
@@ -1654,6 +1791,7 @@ final class TransactionModal extends Component
     {
         $this->editingTransactionId = null;
         $this->openedTransactionId = null;
+        $this->newAttachments = [];
         $this->editingPlannedTransactionId = null;
         $this->occurrenceDate = null;
         $this->categoriseMatching = false;
