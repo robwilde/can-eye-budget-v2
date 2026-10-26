@@ -189,11 +189,10 @@ final readonly class TransferDetector
         // Rows already carrying a pending suggestion stay in the graph: they still compete as
         // matches (a later Round Up must not look unique because its rival is pending), but
         // a pair is never emitted for a leg that is already suggested, so a re-run is a no-op.
-        $rows = $this->importedLinkable($user)
+        $rows = $this->suggestable($user)
             ->tap(TransferSignal::whereCandidate(...))
             ->get()
             ->reject(fn (Transaction $t): bool => in_array($t->id, $claimed, true))
-            ->filter($this->isImported(...))
             ->filter(TransferSignal::isCandidate(...));
 
         $debits = $rows->where('direction', TransactionDirection::Debit);
@@ -255,6 +254,26 @@ final readonly class TransferDetector
             ->current()
             ->linkable()
             ->whereIn('source', array_map(fn (TransactionSource $s): string => $s->value, TransactionSource::bankFeed()))
+            ->with('category.parent')
+            ->orderBy('id');
+    }
+
+    /**
+     * Rows a suggestion may pair: bank-feed rows plus the user's own manual and CSV rows, still
+     * linkable. Planned rows are synthetic and never suggested.
+     *
+     * @return Builder<Transaction>
+     */
+    private function suggestable(User $user): Builder
+    {
+        return Transaction::query()
+            ->where('user_id', $user->id)
+            ->current()
+            ->linkable()
+            ->whereIn('source', array_map(
+                fn (TransactionSource $s): string => $s->value,
+                [...TransactionSource::bankFeed(), TransactionSource::Manual, TransactionSource::Csv],
+            ))
             ->with('category.parent')
             ->orderBy('id');
     }

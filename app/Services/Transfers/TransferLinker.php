@@ -9,9 +9,11 @@ use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Enums\TransferLinkSource;
+use App\Exceptions\AccountNotTrackedException;
 use App\Exceptions\AccountNotUntrackedException;
 use App\Exceptions\RealOppositeRowExistsException;
 use App\Exceptions\TransferAlreadyLinkedException;
+use App\Exceptions\TransferLegsTooFarApartException;
 use App\Exceptions\TransferLinkRefusedException;
 use App\Models\Account;
 use App\Models\Transaction;
@@ -34,16 +36,21 @@ final class TransferLinker
 {
     public const int WINDOW_DAYS = 3;
 
+    public const int MANUAL_WINDOW_DAYS = 30;
+
     public function __construct(private AccountBalanceHistoryBuilder $history) {}
 
     /**
      * Unlinked rows on tracked accounts that could be the opposite leg of $transaction:
      * same user, opposite direction, same absolute amount, within the date window,
-     * different account, not already linked and not previously rejected.
+     * different account, not already linked and not previously rejected. Suggestions use
+     * the default window; a manual search passes MANUAL_WINDOW_DAYS. $lockOnAccountId narrows
+     * the search to that account and reads it with a locking read in id order, so a write
+     * recheck inside a transaction sees the latest commits.
      *
      * @return Collection<int, Transaction>
      */
-    public function candidatesFor(Transaction $transaction, bool $includeRejected = false): Collection
+    public function candidatesFor(Transaction $transaction, bool $includeRejected = false, int $windowDays = self::WINDOW_DAYS, ?int $lockOnAccountId = null): Collection
     {
         $query = Transaction::query()
             ->where('user_id', $transaction->user_id)
@@ -55,14 +62,18 @@ final class TransferLinker
                 : TransactionDirection::Debit)
             ->whereRaw('ABS(amount) = ?', [abs($transaction->amount)])
             ->whereBetween('post_date', [
-                $transaction->post_date->subDays(self::WINDOW_DAYS)->toDateString(),
-                $transaction->post_date->addDays(self::WINDOW_DAYS)->toDateString(),
+                $transaction->post_date->subDays($windowDays)->toDateString(),
+                $transaction->post_date->addDays($windowDays)->toDateString(),
             ]);
 
         if ($includeRejected) {
             $query->whereNull('transfer_pair_id')->onTrackedAccounts();
         } else {
             $query->linkable();
+        }
+
+        if ($lockOnAccountId !== null) {
+            $query->where('account_id', $lockOnAccountId)->orderBy('id')->lockForUpdate();
         }
 
         return $query->get();
@@ -76,12 +87,17 @@ final class TransferLinker
      * @return bool false when either row was linked to a different row in the meantime, or
      *              (for automatic Rule links) was rejected by the user; nothing is written then
      *
+     * @throws TransferLegsTooFarApartException when the legs are more than MANUAL_WINDOW_DAYS apart
      * @throws Throwable
      */
     public function link(Transaction $a, Transaction $b, TransferLinkSource $source): bool
     {
         if ($a->user_id !== $b->user_id || $a->id === $b->id) {
             throw new InvalidArgumentException('Transfer legs must be two different rows of one user.');
+        }
+
+        if (abs($a->post_date->diffInDays($b->post_date)) > self::MANUAL_WINDOW_DAYS) {
+            throw new TransferLegsTooFarApartException(__('The two transactions are more than :days days apart.', ['days' => self::MANUAL_WINDOW_DAYS]));
         }
 
         $linked = DB::transaction(function () use ($a, $b, $source): bool {
@@ -154,6 +170,10 @@ final class TransferLinker
             throw new InvalidArgumentException('Transfer legs must be two different rows of one user.');
         }
 
+        if (abs($a->post_date->diffInDays($b->post_date)) > self::WINDOW_DAYS) {
+            return false;
+        }
+
         return DB::transaction(function () use ($a, $b): bool {
             $rows = Transaction::query()
                 ->current()
@@ -210,19 +230,7 @@ final class TransferLinker
                 throw new RealOppositeRowExistsException('A matching transaction exists; link to it instead of a hidden account.');
             }
 
-            $mirror = Transaction::query()->create([
-                'user_id' => $transaction->user_id,
-                'account_id' => $account->id,
-                'category_id' => $transaction->category_id,
-                'amount' => -$transaction->amount,
-                'direction' => $transaction->direction === TransactionDirection::Debit
-                    ? TransactionDirection::Credit
-                    : TransactionDirection::Debit,
-                'description' => $transaction->description,
-                'post_date' => $transaction->post_date,
-                'source' => TransactionSource::Manual,
-                'status' => TransactionStatus::Posted,
-            ]);
+            $mirror = Transaction::query()->create($this->oppositeLegAttributes($transaction, $account));
 
             // Throwing rolls the mirror back: a failed link must never leave an orphan leg.
             if (! $this->link($transaction, $mirror, $source)) {
@@ -233,6 +241,128 @@ final class TransferLinker
 
             return $mirror;
         });
+    }
+
+    /**
+     * Creates the missing leg of a transfer on one of the user's tracked accounts and links
+     * the two. The caller has already offered any real opposite row; this is the explicit
+     * "no matching row, create it there" choice, so it is allowed for bank-feed rows too.
+     *
+     * @throws TransferLinkRefusedException when the row was linked elsewhere meanwhile
+     * @throws Throwable
+     */
+    public function createMissingLeg(Transaction $transaction, Account $account, TransferLinkSource $source): Transaction
+    {
+        if ($account->user_id !== $transaction->user_id || $account->id === $transaction->account_id) {
+            throw new InvalidArgumentException('The missing leg must go on a different account of the same user.');
+        }
+
+        return Transaction::query()->getConnection()->transaction(function () use ($transaction, $account, $source): Transaction {
+            $lockedAccount = Account::query()->whereKey($account->id)->lockForUpdate()->first();
+
+            if (! $lockedAccount instanceof Account || ! $lockedAccount->is_tracked) {
+                throw new AccountNotTrackedException(__('Pick a tracked account for the missing transaction.'));
+            }
+
+            $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->first();
+
+            if (! $locked instanceof Transaction || $locked->transfer_pair_id !== null) {
+                throw new TransferAlreadyLinkedException('That row is already linked to another transaction.');
+            }
+
+            $realMatch = $this->candidatesFor($locked, includeRejected: true, windowDays: self::MANUAL_WINDOW_DAYS, lockOnAccountId: $account->id)
+                ->isNotEmpty();
+
+            if ($realMatch) {
+                throw new RealOppositeRowExistsException(__('A matching transaction appeared on that account; link to it instead.'));
+            }
+
+            $leg = Transaction::query()->create($this->oppositeLegAttributes($transaction, $account));
+
+            if (! $this->link($transaction, $leg, $source)) {
+                throw new TransferAlreadyLinkedException('That row is already linked to another transaction.');
+            }
+
+            $this->history->rebuildForTransactions($leg);
+
+            return $leg;
+        });
+    }
+
+    /**
+     * A manual or CSV row was versioned: a pending suggestion follows the new version, and is
+     * dropped on both sides when the edit changed what the pair was matched on.
+     *
+     * @throws Throwable
+     */
+    public function followEditedVersion(Transaction $parent, Transaction $child): void
+    {
+        Transaction::query()->getConnection()->transaction(function () use ($parent, $child): void {
+            $this->followVersion($parent, $child);
+
+            $matchChanged = $parent->account_id !== $child->account_id
+                || abs($parent->amount) !== abs($child->amount)
+                || $parent->direction !== $child->direction
+                || ! $parent->post_date->isSameDay($child->post_date);
+
+            if (! $matchChanged || $child->suggested_pair_id === null) {
+                return;
+            }
+
+            $partner = $this->lockedPartner($child, 'suggested_pair_id');
+
+            foreach (array_filter([$child, $partner]) as $leg) {
+                $leg->forceFill(['suggested_pair_id' => null, 'transfer_link_source' => null])->save();
+            }
+        });
+    }
+
+    /**
+     * A transfer leg is being deleted. A partner on a tracked account survives as an ordinary
+     * transaction, stamped Unlinked like unlink() so a Transfer category no longer keeps it out
+     * of the totals, and it can still be linked by hand. A partner that is a mirror (a manual
+     * row on an untracked account: ledger bookkeeping that is never listed) goes with the row.
+     *
+     * @throws Throwable
+     */
+    public function dissolve(Transaction $deleted): void
+    {
+        Transaction::query()->getConnection()->transaction(function () use ($deleted): void {
+            $partner = $this->lockedPartner($deleted, 'transfer_pair_id');
+
+            if (! $partner instanceof Transaction) {
+                return;
+            }
+
+            if ($this->isMirror($partner)) {
+                $partner->delete();
+                $this->history->rebuildForTransactions($partner);
+
+                return;
+            }
+
+            $partner->forceFill(['transfer_pair_id' => null, 'transfer_link_source' => TransferLinkSource::Unlinked])->save();
+        });
+    }
+
+    /**
+     * A versioned transfer leg is being deleted, so its parent becomes the current row again.
+     * That parent and the partner version it was paired with still point at each other, but
+     * the partner has since been superseded: unlink both so the restored row is not left as
+     * half of a transfer whose other leg is no longer current.
+     */
+    public function releaseRestoredVersion(Transaction $deleted): void
+    {
+        if ($deleted->parent_transaction_id === null) {
+            return;
+        }
+
+        Transaction::query()
+            ->where('user_id', $deleted->user_id)
+            ->whereNotNull('transfer_pair_id')
+            ->where(fn ($q) => $q->whereKey($deleted->parent_transaction_id)
+                ->orWhere('transfer_pair_id', $deleted->parent_transaction_id))
+            ->update(['transfer_pair_id' => null, 'transfer_link_source' => TransferLinkSource::Unlinked->value]);
     }
 
     /**
@@ -536,6 +666,24 @@ final class TransferLinker
         }
 
         return ['category_id' => $other->category_id, 'category_source' => CategorySource::Rule];
+    }
+
+    /** @return array<string, mixed> */
+    private function oppositeLegAttributes(Transaction $transaction, Account $account): array
+    {
+        return [
+            'user_id' => $transaction->user_id,
+            'account_id' => $account->id,
+            'category_id' => $transaction->category_id,
+            'amount' => -$transaction->amount,
+            'direction' => $transaction->direction === TransactionDirection::Debit
+                ? TransactionDirection::Credit
+                : TransactionDirection::Debit,
+            'description' => $transaction->description,
+            'post_date' => $transaction->post_date,
+            'source' => TransactionSource::Manual,
+            'status' => TransactionStatus::Posted,
+        ];
     }
 
     private function isRejected(Transaction $transaction): bool
