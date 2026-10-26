@@ -20,6 +20,7 @@ use App\Models\StatementReconciliationLine;
 use App\Models\Transaction;
 use App\Services\CsvImport\CsvParserService;
 use App\Services\CsvImport\ParsedTransactionDto;
+use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\RedbarkTransactionMatcher;
 use App\Services\TransactionIngestor;
 use Carbon\CarbonImmutable;
@@ -43,6 +44,7 @@ final readonly class StatementReconciler
     public function __construct(
         private CsvParserService $parser,
         private TransactionIngestor $ingestor,
+        private AccountBalanceHistoryBuilder $history,
     ) {}
 
     public function build(StatementReconciliation $reconciliation): void
@@ -193,6 +195,8 @@ final readonly class StatementReconciler
                 'source' => TransactionSource::Csv,
             ];
 
+            $this->history->lockAccounts($reconciliation->account_id);
+
             $existing = Transaction::withTrashed()
                 ->where('account_id', $reconciliation->account_id)
                 ->where('csv_hash', $line->csv_hash)
@@ -203,13 +207,17 @@ final readonly class StatementReconciler
                     throw new StatementLineAlreadyFolded('This statement line was folded into its parent transaction.');
                 }
 
+                $before = $existing->replicate();
                 $existing->fill($values);
                 $existing->restore();
+                $this->history->rebuildForTransactions($before, $existing);
                 $transaction = $existing;
             } elseif ($existing !== null) {
                 // A live row with this hash the matcher could not pair (e.g. a blank
                 // description has no fingerprint): reuse it, as a CSV re-import would.
+                $before = $existing->replicate();
                 $existing->fill($values)->save();
+                $this->history->rebuildForTransactions($before, $existing);
                 $transaction = $existing;
             } else {
                 $transaction = $this->ingestor->ingest(new Transaction([

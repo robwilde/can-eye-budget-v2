@@ -16,6 +16,7 @@ use App\Exceptions\TransferLinkRefusedException;
 use App\Models\Account;
 use App\Models\Transaction;
 use App\Models\TransferRule;
+use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Support\Transfers\TransferSignal;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -32,6 +33,8 @@ use Throwable;
 final class TransferLinker
 {
     public const int WINDOW_DAYS = 3;
+
+    public function __construct(private AccountBalanceHistoryBuilder $history) {}
 
     /**
      * Unlinked rows on tracked accounts that could be the opposite leg of $transaction:
@@ -226,6 +229,8 @@ final class TransferLinker
                 throw new TransferAlreadyLinkedException('That row is already linked to another transaction.');
             }
 
+            $this->history->rebuildForTransactions($mirror);
+
             return $mirror;
         });
     }
@@ -319,6 +324,7 @@ final class TransferLinker
 
             if ($this->isMirror($pair)) {
                 $pair->delete();
+                $this->history->rebuildForTransactions($pair);
 
                 return;
             }
@@ -471,6 +477,7 @@ final class TransferLinker
                 ->get();
 
             $replaced = 0;
+            $deletedMirrors = [];
 
             foreach ($mirrors as $mirror) {
                 $original = Transaction::query()->whereKey($mirror->transfer_pair_id)->lockForUpdate()->first();
@@ -504,8 +511,13 @@ final class TransferLinker
                 }
 
                 $mirror->delete();
+                $deletedMirrors[] = $mirror;
                 $this->link($original->refresh(), $candidate, $source);
                 $replaced++;
+            }
+
+            if ($deletedMirrors !== []) {
+                $this->history->rebuildForTransactions(...$deletedMirrors);
             }
 
             return $replaced;

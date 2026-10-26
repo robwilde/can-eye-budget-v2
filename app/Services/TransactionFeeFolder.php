@@ -6,10 +6,13 @@ namespace App\Services;
 
 use App\Casts\MoneyCast;
 use App\Models\Transaction;
+use App\Services\Projection\AccountBalanceHistoryBuilder;
 use Illuminate\Support\Facades\DB;
 
 final readonly class TransactionFeeFolder
 {
+    public function __construct(private AccountBalanceHistoryBuilder $history) {}
+
     /**
      * Fold an international transaction fee into its matching parent purchase.
      *
@@ -27,6 +30,8 @@ final readonly class TransactionFeeFolder
         }
 
         return DB::transaction(function () use ($fee, $parent): Transaction {
+            $this->history->lockAccounts($parent->account_id);
+
             $note = sprintf('Includes intl transaction fee %s (folded)', MoneyCast::format($fee->amount));
 
             $merged = $parent->createChild([
@@ -40,6 +45,8 @@ final readonly class TransactionFeeFolder
             $fee->folded_into_transaction_id = $merged->id;
             $fee->save();
             $fee->delete();
+
+            $this->history->rebuildForTransactions($parent, $merged, $fee);
 
             return $merged;
         });
