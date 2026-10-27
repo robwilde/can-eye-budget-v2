@@ -30,3 +30,8 @@ Schedule::command('app:scan-bnpl-emails')
     ->dailyAt('04:00')
     ->name('bnpl:scan-emails')
     ->withoutOverlapping();
+
+Schedule::command('exchange-rates:fetch')
+    ->dailyAt('05:00')
+    ->name('exchange-rates:fetch')
+    ->withoutOverlapping();
