@@ -58,6 +58,15 @@ final class ExchangeRate extends Model
         return $stored > 0 && $stored < self::RATE_LIMIT;
     }
 
+    /**
+     * The rate as the column stores it: a fixed eight-decimal string, so it is not bound as a
+     * PHP float with 14 significant digits. Writes that bypass the saving hook use this form.
+     */
+    public static function storedRate(float $rate): string
+    {
+        return number_format($rate, self::RATE_SCALE, '.', '');
+    }
+
     protected static function booted(): void
     {
         self::saving(static function (self $exchangeRate): void {
@@ -82,10 +91,5 @@ final class ExchangeRate extends Model
             'rate_date' => 'date:Y-m-d',
             'rate' => 'float',
         ];
-    }
-
-    private static function storedRate(float $rate): string
-    {
-        return number_format($rate, self::RATE_SCALE, '.', '');
     }
 }
