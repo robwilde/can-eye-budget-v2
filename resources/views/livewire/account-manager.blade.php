@@ -48,6 +48,9 @@
                             <x-slot:meta>{{ $metaText }}</x-slot:meta>
                         @endif
                         <x-slot:actions>
+                            @if ($account->status === \App\Enums\AccountStatus::Inactive)
+                                <x-cib.stat-pill tone="neutral" data-test="account-disabled-{{ $account->id }}">{{ __('Disabled') }}</x-cib.stat-pill>
+                            @endif
                             @unless ($account->is_tracked)
                                 <x-cib.stat-pill tone="neutral" data-test="account-untracked-{{ $account->id }}">{{ __('Untracked') }}</x-cib.stat-pill>
                                 <button type="button" wire:click="openReconcileModal({{ $account->id }})"
@@ -73,6 +76,20 @@
                                                  :aria-label="__('Reconcile')" data-test="account-reconcile-balance-{{ $account->id }}"/>
                                 @endif
                                 <flux:button variant="ghost" size="sm" icon="pencil" wire:click="openEditModal({{ $account->id }})"/>
+                                @if ($account->redbarkAccount !== null)
+                                    <flux:button variant="ghost" size="sm" icon="link-slash" wire:click="unlinkAccount({{ $account->id }})"
+                                                 wire:confirm="{{ __('Unlink this account from your bank feed? Every transaction is kept and the account becomes manual.') }}"
+                                                 :aria-label="__('Unlink bank feed')" data-test="account-unlink-{{ $account->id }}"/>
+                                @endif
+                                @if ($account->status === \App\Enums\AccountStatus::Inactive)
+                                    <flux:button variant="ghost" size="sm" icon="clock" href="{{ route('transactions', ['account' => $account->id, 'period' => 'all']) }}"
+                                                 :aria-label="__('View history')" data-test="account-history-{{ $account->id }}"/>
+                                    <flux:button variant="ghost" size="sm" icon="play" wire:click="enableAccount({{ $account->id }})"
+                                                 :aria-label="__('Enable')" data-test="account-enable-{{ $account->id }}"/>
+                                @else
+                                    <flux:button variant="ghost" size="sm" icon="pause" wire:click="disableAccount({{ $account->id }})"
+                                                 :aria-label="__('Disable')" data-test="account-disable-{{ $account->id }}"/>
+                                @endif
                                 <flux:button variant="ghost" size="sm" icon="trash" wire:click="confirmDelete({{ $account->id }})"
                                              class="text-red-500 hover:text-red-600"/>
                             </div>
@@ -98,6 +115,24 @@
                                             {{ __('Track this account') }}
                                         </flux:menu.item>
                                     @endunless
+                                    @if ($account->redbarkAccount !== null)
+                                        <flux:menu.item icon="link-slash" wire:click="unlinkAccount({{ $account->id }})"
+                                                        wire:confirm="{{ __('Unlink this account from your bank feed? Every transaction is kept and the account becomes manual.') }}">
+                                            {{ __('Unlink bank feed') }}
+                                        </flux:menu.item>
+                                    @endif
+                                    @if ($account->status === \App\Enums\AccountStatus::Inactive)
+                                        <flux:menu.item icon="clock" href="{{ route('transactions', ['account' => $account->id, 'period' => 'all']) }}">
+                                            {{ __('View history') }}
+                                        </flux:menu.item>
+                                        <flux:menu.item icon="play" wire:click="enableAccount({{ $account->id }})">
+                                            {{ __('Enable') }}
+                                        </flux:menu.item>
+                                    @else
+                                        <flux:menu.item icon="pause" wire:click="disableAccount({{ $account->id }})">
+                                            {{ __('Disable') }}
+                                        </flux:menu.item>
+                                    @endif
                                     <flux:menu.item icon="trash" variant="danger" wire:click="confirmDelete({{ $account->id }})">
                                         {{ __('Delete') }}
                                     </flux:menu.item>
@@ -322,6 +357,9 @@
                         ]) }}
                     </flux:text>
                 @endif
+                @error('delete')
+                    <flux:text class="mt-2 font-medium text-red-600 dark:text-red-500" data-test="delete-error">{{ $message }}</flux:text>
+                @enderror
             </div>
             <div class="flex gap-2">
                 <flux:spacer/>

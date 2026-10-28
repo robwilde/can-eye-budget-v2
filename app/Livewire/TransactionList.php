@@ -9,6 +9,7 @@ use App\Contracts\ContextDevServiceContract;
 use App\Contracts\GmailServiceContract;
 use App\DTOs\CategoryRulePreview;
 use App\DTOs\EmailSearchResult;
+use App\Enums\AccountStatus;
 use App\Enums\BudgetTag;
 use App\Enums\CategorySource;
 use App\Enums\MerchantBrandStatus;
@@ -1414,8 +1415,8 @@ final class TransactionList extends Component
 
         $accounts = Account::query()
             ->where('user_id', auth()->id())
-            ->active()
             ->tracked()
+            ->where(fn ($query) => $query->active()->orWhere('id', $this->account))
             ->get(['id', 'name']);
 
         $grouped = $transactions === null
@@ -2204,7 +2205,13 @@ final class TransactionList extends Component
             ->current()
             // Mirror legs on untracked (hidden) accounts are ledger bookkeeping,
             // never something to list, cluster or total.
-            ->whereHas('account', fn ($a) => $a->where('is_tracked', true))
+            ->whereHas('account', function (Builder $a) use ($filters): void {
+                $a->where('is_tracked', true);
+
+                if (! is_scalar($filters['account'] ?? null)) {
+                    $a->where('status', '!=', AccountStatus::Inactive);
+                }
+            })
             ->when($directionEnum, fn ($q, $dir) => $q->where('direction', $dir))
             // Merchant mode renders clusters, and a NULL merchant_key can never
             // be one, so a count or a bulk write taken in that mode must not

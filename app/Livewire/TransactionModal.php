@@ -123,6 +123,10 @@ final class TransactionModal extends Component
     #[Locked]
     public bool $originalWasTransfer = false;
 
+    /** The transfer destination the row had when it was opened, kept valid even once disabled. */
+    #[Locked]
+    public ?int $openedTransferToAccountId = null;
+
     /** Explicit choice among several possible opposite legs when linking a bank-feed row. */
     public ?int $selectedCandidateId = null;
 
@@ -187,6 +191,7 @@ final class TransactionModal extends Component
 
                 $this->accountId = $debitSide->account_id;
                 $this->transferToAccountId = $creditSide->account_id;
+                $this->openedTransferToAccountId = $creditSide->account_id;
             }
         } else {
             $this->transactionType = $transaction->direction === TransactionDirection::Debit
@@ -267,6 +272,7 @@ final class TransactionModal extends Component
         if ($planned->transfer_to_account_id !== null) {
             $this->transactionType = 'transfer';
             $this->transferToAccountId = $planned->transfer_to_account_id;
+            $this->openedTransferToAccountId = $planned->transfer_to_account_id;
         } else {
             $this->transactionType = $planned->direction === TransactionDirection::Debit
                 ? 'expense'
@@ -551,7 +557,7 @@ final class TransactionModal extends Component
         $accounts = auth()
             ->user()
             ->accounts()
-            ->active()
+            ->where(fn ($query) => $query->active()->orWhereIn('id', array_filter([$this->accountId, $this->transferToAccountId])))
             ->visible()
             ->orderBy('name')
             ->get();
@@ -1631,6 +1637,7 @@ final class TransactionModal extends Component
         $this->openedNameIsDeliberate = false;
         $this->transferToAccountId = null;
         $this->originalWasTransfer = false;
+        $this->openedTransferToAccountId = null;
         $this->selectedCandidateId = null;
         $this->mode = 'enter';
         $this->frequency = 'every-month';
@@ -1687,7 +1694,12 @@ final class TransactionModal extends Component
                     // Any active account of the user, tracked or untracked (hidden).
                     Rule::exists('accounts', 'id')
                         ->where('user_id', auth()->id())
-                        ->whereIn('status', [AccountStatus::Active->value, AccountStatus::Available->value]),
+                        ->where(fn ($query) => $query->where(fn ($usable) => $usable
+                            ->whereIn('status', [AccountStatus::Active->value, AccountStatus::Available->value])
+                            ->when(
+                                $this->openedTransferToAccountId !== null,
+                                fn ($opened) => $opened->orWhere('id', $this->openedTransferToAccountId),
+                            ))),
                     Rule::notIn([$this->accountId]),
                 ]
                 : ['nullable'],
