@@ -19,6 +19,7 @@ use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Services\CategoryRuleGenerator;
+use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\TransactionIngestor;
 use App\Services\Transfers\TransferLinker;
 use App\Support\AmountParser;
@@ -414,6 +415,8 @@ final class TransactionModal extends Component
         }
 
         DB::transaction(static function () use ($transaction): void {
+            $deleted = [$transaction];
+
             if ($transaction->transfer_pair_id) {
                 $pair = Transaction::query()
                     ->where('id', $transaction->transfer_pair_id)
@@ -423,12 +426,15 @@ final class TransactionModal extends Component
                 // Imported rows are never deleted; only a manual/mirror partner goes with this row.
                 if ($pair instanceof Transaction && $pair->source->isBankFeed()) {
                     app(TransferLinker::class)->unlink($transaction);
-                } else {
-                    $pair?->delete();
+                } elseif ($pair instanceof Transaction) {
+                    $pair->delete();
+                    $deleted[] = $pair;
                 }
             }
 
             $transaction->delete();
+
+            app(AccountBalanceHistoryBuilder::class)->rebuildForTransactions(...$deleted);
         });
 
         $this->showModal = false;
@@ -910,6 +916,7 @@ final class TransactionModal extends Component
 
         if ($transaction->source->isBankFeed()) {
             $child = DB::transaction(function () use ($transaction): Transaction {
+                app(AccountBalanceHistoryBuilder::class)->lockAccounts($transaction->account_id);
                 $this->reloadCleanNamesUnderLock($transaction);
 
                 return $transaction->createChild([
@@ -923,9 +930,10 @@ final class TransactionModal extends Component
             app(TransferLinker::class)->followVersion($transaction, $child);
         } else {
             $child = DB::transaction(function () use ($transaction, $parsed): Transaction {
+                app(AccountBalanceHistoryBuilder::class)->lockAccounts($transaction->account_id, $this->accountId);
                 $this->reloadCleanNamesUnderLock($transaction);
 
-                return $transaction->createChild([
+                $child = $transaction->createChild([
                     'account_id' => $this->accountId,
                     'category_id' => $this->categoryId,
                     'amount' => $parsed->amount,
@@ -936,6 +944,10 @@ final class TransactionModal extends Component
                     'post_date' => $this->date,
                     'notes' => $this->notes !== '' ? $this->notes : null,
                 ]);
+
+                app(AccountBalanceHistoryBuilder::class)->rebuildForEdit($transaction, $child);
+
+                return $child;
             });
         }
 
@@ -1033,6 +1045,7 @@ final class TransactionModal extends Component
         [$debitSide, $creditSide, $parsed] = $resolved;
 
         DB::transaction(function () use ($debitSide, $creditSide, $parsed): void {
+            app(AccountBalanceHistoryBuilder::class)->lockAccounts($debitSide->account_id, $creditSide->account_id, $this->accountId, $this->transferToAccountId);
             $this->reloadCleanNamesUnderLock($debitSide, $creditSide);
 
             $shared = [
@@ -1050,6 +1063,8 @@ final class TransactionModal extends Component
 
             $debitChild->update(['transfer_pair_id' => $creditChild->id] + $manual);
             $creditChild->update(['transfer_pair_id' => $debitChild->id] + $manual);
+
+            app(AccountBalanceHistoryBuilder::class)->rebuildForEdits([$debitSide, $debitChild], [$creditSide, $creditChild]);
         });
 
         return true;
@@ -1069,6 +1084,7 @@ final class TransactionModal extends Component
         [$transaction, $parsed] = $resolved;
 
         DB::transaction(function () use ($transaction, $parsed): void {
+            app(AccountBalanceHistoryBuilder::class)->lockAccounts($transaction->account_id, $this->accountId, $this->transferToAccountId);
             $this->reloadCleanNamesUnderLock($transaction);
 
             $shared = [
@@ -1096,6 +1112,8 @@ final class TransactionModal extends Component
 
             $debitChild->update(['transfer_pair_id' => $credit->id] + $manual);
             $credit->update(['transfer_pair_id' => $debitChild->id] + $manual);
+
+            app(AccountBalanceHistoryBuilder::class)->rebuildForTransactions($transaction, $debitChild, $credit);
         });
 
         return true;
@@ -1119,6 +1137,7 @@ final class TransactionModal extends Component
             : TransactionDirection::Credit;
 
         DB::transaction(function () use ($debitSide, $creditSide, $parsed, $direction): void {
+            app(AccountBalanceHistoryBuilder::class)->lockAccounts($debitSide->account_id, $creditSide->account_id, $this->accountId);
             $this->reloadCleanNamesUnderLock($debitSide, $creditSide);
 
             // An imported row is never deleted: unlink it (stamping both legs) and keep it.
@@ -1128,7 +1147,7 @@ final class TransactionModal extends Component
                 app(TransferLinker::class)->unlink($debitSide);
             }
 
-            $debitSide->createChild([
+            $child = $debitSide->createChild([
                 'account_id' => $this->accountId,
                 'direction' => $direction,
                 'amount' => $parsed->amount,
@@ -1143,6 +1162,10 @@ final class TransactionModal extends Component
             if (! $keepCreditSide) {
                 $creditSide->delete();
             }
+
+            app(AccountBalanceHistoryBuilder::class)->rebuildForTransactions(
+                ...($keepCreditSide ? [$debitSide, $child] : [$debitSide, $child, $creditSide]),
+            );
         });
 
         return true;
@@ -1423,7 +1446,12 @@ final class TransactionModal extends Component
 
     private function createSingleTransaction(AmountParseResult $parsed, ?int $plannedTransactionId = null): void
     {
-        Transaction::query()->create($this->manualSingleAttributes($parsed, $plannedTransactionId));
+        Transaction::query()->getConnection()->transaction(function () use ($parsed, $plannedTransactionId): void {
+            app(AccountBalanceHistoryBuilder::class)->lockAccounts($this->accountId);
+            $transaction = Transaction::query()->create($this->manualSingleAttributes($parsed, $plannedTransactionId));
+
+            app(AccountBalanceHistoryBuilder::class)->rebuildForTransactions($transaction);
+        });
     }
 
     /**
@@ -1462,6 +1490,8 @@ final class TransactionModal extends Component
             'notes' => $this->notes !== '' ? $this->notes : null,
         ];
 
+        app(AccountBalanceHistoryBuilder::class)->lockAccounts($this->accountId, $this->transferToAccountId);
+
         $debit = Transaction::query()->create($shared + [
             'account_id' => $this->accountId,
             'direction' => TransactionDirection::Debit,
@@ -1476,6 +1506,8 @@ final class TransactionModal extends Component
 
         $debit->update(['transfer_pair_id' => $credit->id] + $manual);
         $credit->update(['transfer_pair_id' => $debit->id] + $manual);
+
+        app(AccountBalanceHistoryBuilder::class)->rebuildForTransactions($debit, $credit);
     }
 
     /** @return array<string, mixed> */

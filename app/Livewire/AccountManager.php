@@ -15,6 +15,7 @@ use App\Models\Account;
 use App\Models\AccountValuation;
 use App\Models\User;
 use App\Services\AccountValuationService;
+use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\Transfers\TransferLinker;
 use App\Services\Transfers\UntrackedAccountCreator;
 use Carbon\CarbonImmutable;
@@ -195,6 +196,8 @@ final class AccountManager extends Component
                         'currency' => 'AUD',
                         'status' => AccountStatus::Active,
                     ]);
+
+                    app(AccountBalanceHistoryBuilder::class)->rebuild($account);
                 } else {
                     $balanceChanged = ! $providerFed && $cents !== $this->openedBalance;
                     $account->update($details);
@@ -432,13 +435,17 @@ final class AccountManager extends Component
                 return;
             }
         } else {
-            app(UntrackedAccountCreator::class)->create(
-                $this->authenticatedUser(),
-                $validated['name'],
-                $type,
-                $cents,
-                $description,
-            );
+            Account::query()->getConnection()->transaction(function () use ($validated, $type, $cents, $description): void {
+                $account = app(UntrackedAccountCreator::class)->create(
+                    $this->authenticatedUser(),
+                    $validated['name'],
+                    $type,
+                    $cents,
+                    $description,
+                );
+
+                app(AccountBalanceHistoryBuilder::class)->rebuild($account);
+            });
         }
 
         $this->showFormModal = false;

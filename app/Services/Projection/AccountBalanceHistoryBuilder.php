@@ -67,6 +67,126 @@ final class AccountBalanceHistoryBuilder
     }
 
     /**
+     * Rebuilds, for each account the transactions sit on, from the earliest post date among
+     * them. Pass every version a write touched (the row before and after an edit, a deleted
+     * row) so the earliest affected day is covered; the live parent version a deleted row
+     * hands current status back to is added here. Accounts are rebuilt in id order inside
+     * the caller's DB transaction.
+     */
+    public function rebuildForTransactions(Transaction ...$transactions): void
+    {
+        $earliest = [];
+
+        foreach ($this->withRestoredParents($transactions) as $transaction) {
+            $key = $transaction->account_id;
+            $day = CarbonImmutable::parse($transaction->post_date)->startOfDay();
+
+            if (! isset($earliest[$key]) || $day->lessThan($earliest[$key]['from'])) {
+                $earliest[$key] = ['userId' => $transaction->user_id, 'from' => $day];
+            }
+        }
+
+        ksort($earliest);
+
+        Account::query()->getConnection()->transaction(function () use ($earliest): void {
+            foreach ($earliest as $accountId => ['userId' => $userId, 'from' => $from]) {
+                $account = Account::query()->where('user_id', $userId)->find($accountId);
+
+                if ($account instanceof Account) {
+                    $this->rebuild($account, $from);
+                }
+            }
+        });
+    }
+
+    /**
+     * Rebuilds after an edit that produced a new version, but only when the edit moved
+     * money: a change of account, amount, direction, post date or status. A change to the
+     * description, notes, category or merchant leaves the history alone.
+     */
+    public function rebuildForEdit(Transaction $before, Transaction $after): void
+    {
+        $this->rebuildForEdits([$before, $after]);
+    }
+
+    /**
+     * One rebuild for several edited rows (the two legs of a transfer): the pairs that moved
+     * money are rebuilt together, so each account is locked once, in id order, from its
+     * earliest affected day.
+     *
+     * @param  array{Transaction, Transaction}  ...$edits  [before, after] pairs
+     */
+    public function rebuildForEdits(array ...$edits): void
+    {
+        $touched = [];
+
+        foreach ($edits as [$before, $after]) {
+            if ($this->movesBalance($before) !== $this->movesBalance($after)) {
+                array_push($touched, $before, $after);
+            }
+        }
+
+        if ($touched !== []) {
+            $this->rebuildForTransactions(...$touched);
+        }
+    }
+
+    /**
+     * Takes the account rows' write locks, in id order. Call it first in any transaction that
+     * inserts transactions and then rebuilds: on MariaDB the foreign key makes each insert
+     * hold a shared lock on the account row, so two such writers that insert first and only
+     * then ask for the exclusive lock rebuild() needs deadlock each other.
+     */
+    public function lockAccounts(?int ...$accountIds): void
+    {
+        $ids = array_values(array_unique(array_filter($accountIds)));
+
+        if ($ids === []) {
+            return;
+        }
+
+        sort($ids);
+
+        Account::query()->whereIn('id', $ids)->orderBy('id')->lockForUpdate()->get(['id']);
+    }
+
+    /**
+     * Deleting a revision makes its undeleted parent the current version again, so the
+     * parent's own account and date are affected too.
+     *
+     * @param  array<int, Transaction>  $transactions
+     * @return list<Transaction>
+     */
+    private function withRestoredParents(array $transactions): array
+    {
+        $deleted = collect($transactions)
+            ->filter(fn (Transaction $transaction): bool => $transaction->trashed() && $transaction->parent_transaction_id !== null);
+
+        if ($deleted->isEmpty()) {
+            return array_values($transactions);
+        }
+
+        $parents = Transaction::query()
+            ->whereIn('user_id', $deleted->pluck('user_id')->unique()->values())
+            ->whereIn('id', $deleted->pluck('parent_transaction_id')->unique()->values())
+            ->get();
+
+        return [...array_values($transactions), ...$parents->all()];
+    }
+
+    /** @return array{int, int, string, string, string} */
+    private function movesBalance(Transaction $transaction): array
+    {
+        return [
+            $transaction->account_id,
+            $transaction->amount,
+            $transaction->direction->value,
+            $transaction->status->value,
+            CarbonImmutable::parse($transaction->post_date)->toDateString(),
+        ];
+    }
+
+    /**
      * @param  array<string, array{inflows: int, outflows: int}>  $flows
      * @param  array<string, AccountValuation>  $valuations
      * @return array{0: CarbonImmutable, 1: int}
@@ -144,6 +264,8 @@ final class AccountBalanceHistoryBuilder
 
     /**
      * Credits and debits per day of the account's posted, current, non-deleted transactions.
+     * Amounts count by magnitude: the direction decides the sign, because bank-feed and CSV
+     * rows store debits as negative cents while manual entries store them positive.
      *
      * @return array<string, array{inflows: int, outflows: int}>
      */
@@ -157,8 +279,8 @@ final class AccountBalanceHistoryBuilder
             ->where('status', TransactionStatus::Posted)
             ->toBase()
             ->selectRaw('date(post_date) as day')
-            ->selectRaw("coalesce(sum(case when direction = 'credit' then amount else 0 end), 0) as inflows")
-            ->selectRaw("coalesce(sum(case when direction = 'debit' then amount else 0 end), 0) as outflows")
+            ->selectRaw("coalesce(sum(case when direction = 'credit' then abs(amount) else 0 end), 0) as inflows")
+            ->selectRaw("coalesce(sum(case when direction = 'debit' then abs(amount) else 0 end), 0) as outflows")
             ->groupByRaw('date(post_date)')
             ->get();
 

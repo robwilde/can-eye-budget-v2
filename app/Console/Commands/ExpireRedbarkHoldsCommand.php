@@ -9,6 +9,7 @@ use App\Enums\TransactionStatus;
 use App\Jobs\SyncRedbarkFeedJob;
 use App\Models\RedbarkAccount;
 use App\Models\Transaction;
+use App\Services\Projection\AccountBalanceHistoryBuilder;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
@@ -19,7 +20,7 @@ final class ExpireRedbarkHoldsCommand extends Command
 
     protected $description = 'Void Redbark holds that never received a settlement row';
 
-    public function handle(): int
+    public function handle(AccountBalanceHistoryBuilder $history): int
     {
         $days = (int) ($this->option('days') ?? config('services.redbark.hold_ttl_days'));
 
@@ -38,7 +39,7 @@ final class ExpireRedbarkHoldsCommand extends Command
         $expired = 0;
         $reverted = 0;
 
-        RedbarkAccount::query()->linked()->chunkById(100, function ($redbarkAccounts) use ($cutoff, $dryRun, &$expired, &$reverted): void {
+        RedbarkAccount::query()->linked()->chunkById(100, function ($redbarkAccounts) use ($cutoff, $dryRun, $history, &$expired, &$reverted): void {
             foreach ($redbarkAccounts as $redbarkAccount) {
                 $rows = $redbarkAccount->raw_transactions_payload ?? [];
                 $payloadIds = array_values(array_filter(
@@ -54,23 +55,29 @@ final class ExpireRedbarkHoldsCommand extends Command
                     // Still in the payload means the bank is still reporting it as
                     // uncleared: that is a live hold, not an orphan, however old it is.
                     ->when($payloadIds !== [], fn (Builder $query): Builder => $query->whereNotIn('redbark_id', $payloadIds))
-                    ->chunkById(500, function ($transactions) use ($dryRun, &$expired, &$reverted): void {
-                        foreach ($transactions as $transaction) {
-                            if ($transaction->source === TransactionSource::Redbark) {
-                                // Feed-created: the authorisation was released and the
-                                // money never left.
-                                $dryRun || $transaction->delete();
-                                $expired++;
+                    ->chunkById(500, function ($transactions) use ($redbarkAccount, $dryRun, $history, &$expired, &$reverted): void {
+                        Transaction::query()->getConnection()->transaction(function () use ($transactions, $redbarkAccount, $dryRun, $history, &$expired, &$reverted): void {
+                            $dryRun || $history->lockAccounts($redbarkAccount->account_id);
 
-                                continue;
+                            foreach ($transactions as $transaction) {
+                                if ($transaction->source === TransactionSource::Redbark) {
+                                    // Feed-created: the authorisation was released and the
+                                    // money never left.
+                                    $dryRun || $transaction->delete();
+                                    $expired++;
+
+                                    continue;
+                                }
+
+                                // Adopted CSV or manual row. The user's own record stands;
+                                // only the Pending status the feed stamped on it is wrong.
+                                // Deleting it would destroy their data.
+                                $dryRun || $transaction->update(['status' => TransactionStatus::Posted]);
+                                $reverted++;
                             }
 
-                            // Adopted CSV or manual row. The user's own record stands;
-                            // only the Pending status the feed stamped on it is wrong.
-                            // Deleting it would destroy their data.
-                            $dryRun || $transaction->update(['status' => TransactionStatus::Posted]);
-                            $reverted++;
-                        }
+                            $dryRun || $history->rebuildForTransactions(...$transactions->all());
+                        });
                     });
             }
         });
