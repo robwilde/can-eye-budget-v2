@@ -84,6 +84,36 @@ final readonly class CategoryGroupMap
     }
 
     /**
+     * The category and every descendant below it, at any depth.
+     *
+     * @return list<int>
+     */
+    public function descendantIdsOf(int $categoryId): array
+    {
+        if (! isset($this->nodes[$categoryId])) {
+            return [];
+        }
+
+        $ids = [$categoryId => true];
+
+        do {
+            $added = false;
+
+            foreach ($this->nodes as $id => $node) {
+                if (! isset($ids[$id]) && $node['parent_id'] !== null && isset($ids[$node['parent_id']])) {
+                    $ids[$id] = true;
+                    $added = true;
+                }
+            }
+        } while ($added);
+
+        $ids = array_keys($ids);
+        sort($ids);
+
+        return $ids;
+    }
+
+    /**
      * The direct child of the anchor on the path to the category, so deeper
      * levels roll up into it. Null when the category is the anchor itself.
      */

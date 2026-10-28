@@ -66,6 +66,7 @@
                     <a
                         href="{{ route('transactions', array_filter([
                             'category' => $child['id'],
+                            'exact' => 1,
                             'period' => $period,
                             'direction' => $directionParam,
                             'from' => $from,

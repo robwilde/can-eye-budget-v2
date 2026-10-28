@@ -60,3 +60,18 @@ test('deleting a group leaves its categories without a group', function () {
 
     expect($root->fresh()->group_id)->toBeNull();
 });
+
+test('descendantIdsOf returns the category and every descendant at any depth', function () {
+    $root = Category::factory()->create();
+    $child = Category::factory()->withParent($root)->create();
+    $grandchild = Category::factory()->withParent($child)->create();
+    $sibling = Category::factory()->withParent($root)->create();
+    $unrelated = Category::factory()->create();
+
+    $map = CategoryGroupMap::load();
+
+    expect($map->descendantIdsOf($root->id))->toBe(collect([$root->id, $child->id, $grandchild->id, $sibling->id])->sort()->values()->all())
+        ->and($map->descendantIdsOf($child->id))->toBe([$child->id, $grandchild->id])
+        ->and($map->descendantIdsOf($unrelated->id))->toBe([$unrelated->id])
+        ->and($map->descendantIdsOf(999999))->toBe([]);
+});

@@ -573,3 +573,22 @@ test('inline children exclude the root category own direct spend', function () {
         ->and(collect($office['children'])->pluck('id')->all())->toBe([$child->id])
         ->and(collect($office['children'])->pluck('path')->all())->toBe(['Office / Software']);
 });
+
+test('subcategory rows link to their exact category so the list matches the row total', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $root = Category::factory()->create(['name' => 'Office']);
+    $child = Category::factory()->withParent($root)->create(['name' => 'Software']);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $child->id,
+        'amount' => 3000,
+        'post_date' => now(),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CategoryReport::class)
+        ->set('showSubcategories', true)
+        ->assertSeeHtml('category='.$child->id.'&amp;exact=1');
+});
