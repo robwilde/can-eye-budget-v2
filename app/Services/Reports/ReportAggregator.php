@@ -135,7 +135,7 @@ final class ReportAggregator
         $monthExpr = $this->monthExpression();
         $transferCategoryIds = $this->transferCategoryIds();
 
-        $rows = CategoryAttribution::query($user->id, excludeUntracked: true)
+        $rows = CategoryAttribution::query($user->id, forMoney: true)
             ->where(fn ($counted) => $counted
                 ->where(fn ($ordinary) => $ordinary
                     ->whereNull('transfer_pair_id')

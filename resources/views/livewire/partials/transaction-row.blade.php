@@ -39,7 +39,7 @@
     ]);
     $isPlanned = $transaction->planned_transaction_id !== null;
     $isPossibleTransfer = $transaction->suggested_pair_id !== null && $transaction->transfer_pair_id === null;
-    $hasDesktopMeta = $metaParts !== [] || $isPlanned || $isPossibleTransfer || $transaction->isSplit() || $transaction->emails->isNotEmpty();
+    $hasDesktopMeta = $metaParts !== [] || $isPlanned || $isPossibleTransfer || $transaction->excluded || $transaction->isSplit() || $transaction->emails->isNotEmpty();
     $hasCleanDescription = filled($transaction->clean_description);
     $displayName = $hasCleanDescription ? $transaction->clean_description : $transaction->description;
     $bulkExcluded = $this->isBulkExcluded($transaction);
@@ -97,7 +97,7 @@
             <x-slot:category>
                 <span @class(['empty' => $categoryLabel === null]) data-testid="category-{{ $transaction->id }}">{{ $categoryLabel ?? 'Uncategorised' }}</span>
             </x-slot:category>
-            <x-slot:meta :class="$hasDesktopMeta ? null : 'phone-only'">{{ implode(' · ', $metaParts) }}<span class="tx-cat-inline">{{ $metaParts !== [] ? ' · ' : '' }}{{ $categoryLabel ?? 'Uncategorised' }}</span>@if($isPlanned) <span class="pill plan">Planned</span>@endif@if($isPossibleTransfer) <span class="pill split" data-testid="possible-transfer-{{ $transaction->id }}">Possible transfer</span>@endif@if($transaction->isSplit()) <span class="pill split">Split ({{ $transaction->splits->count() }})</span>@endif@if($transaction->emails->isNotEmpty()) <span class="pill email">{{ $transaction->emails->count() }} email{{ $transaction->emails->count() > 1 ? 's' : '' }}</span>@endif</x-slot:meta>
+            <x-slot:meta :class="$hasDesktopMeta ? null : 'phone-only'">{{ implode(' · ', $metaParts) }}<span class="tx-cat-inline">{{ $metaParts !== [] ? ' · ' : '' }}{{ $categoryLabel ?? 'Uncategorised' }}</span>@if($isPlanned) <span class="pill plan">Planned</span>@endif@if($isPossibleTransfer) <span class="pill split" data-testid="possible-transfer-{{ $transaction->id }}">Possible transfer</span>@endif@if($transaction->excluded) <span class="pill" data-testid="excluded-{{ $transaction->id }}">Excluded</span>@endif@if($transaction->isSplit()) <span class="pill split">Split ({{ $transaction->splits->count() }})</span>@endif@if($transaction->emails->isNotEmpty()) <span class="pill email">{{ $transaction->emails->count() }} email{{ $transaction->emails->count() > 1 ? 's' : '' }}</span>@endif</x-slot:meta>
             <x-slot:actions>
                 @if($brand !== null)
                     <flux:button variant="ghost" size="sm" icon="no-symbol"
@@ -109,6 +109,14 @@
                                  wire:click="identifyMerchant({{ $transaction->id }})"
                                  wire:loading.attr="disabled" wire:target="identifyMerchant({{ $transaction->id }})"
                                  data-testid="identify-merchant-{{ $transaction->id }}" aria-label="Identify merchant"/>
+                @endif
+                @if($transaction->transfer_pair_id === null || $transaction->excluded)
+                    @php $nextExcluded = $transaction->excluded ? 'false' : 'true'; @endphp
+                    <flux:button variant="ghost" size="sm" :icon="$transaction->excluded ? 'eye' : 'eye-slash'"
+                                 wire:click="toggleExcluded({{ $transaction->id }}, {{ $nextExcluded }})"
+                                 wire:loading.attr="disabled" wire:target="toggleExcluded({{ $transaction->id }}, {{ $nextExcluded }})"
+                                 data-testid="toggle-excluded-{{ $transaction->id }}"
+                                 :aria-label="$transaction->excluded ? 'Include in totals' : 'Exclude from totals'"/>
                 @endif
                 @if($transaction->transfer_pair_id === null)
                     <flux:button variant="ghost" size="sm" icon="scissors"

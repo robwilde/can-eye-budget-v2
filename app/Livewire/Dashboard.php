@@ -153,7 +153,7 @@ final class Dashboard extends Component
                     ];
                 }
 
-                $query = CategoryAttribution::query($budget->user_id, excludeUntracked: true)
+                $query = CategoryAttribution::query($budget->user_id, forMoney: true)
                     ->where('direction', TransactionDirection::Debit->value)
                     ->where('category_id', $budget->category_id);
 

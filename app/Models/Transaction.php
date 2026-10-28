@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -54,6 +55,8 @@ use Illuminate\Support\Facades\DB;
  * @property int|null $parent_transaction_id
  * @property int|null $folded_into_transaction_id
  * @property string|null $notes
+ * @property bool $excluded
+ * @property string|null $idempotency_key
  * @property-read Collection<int, TransactionSplit> $splits
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
@@ -122,7 +125,37 @@ final class Transaction extends Model
         'parent_transaction_id',
         'folded_into_transaction_id',
         'notes',
+        'excluded',
+        'idempotency_key',
     ];
+
+    /**
+     * The current version of a row's lineage, locked for the caller's write. Every read is a
+     * locking read, taken from the row down through its children, so a version committed by a
+     * concurrent edit is followed rather than hidden by a stale snapshot, and a lineage never
+     * ends up with two current rows. Call inside a transaction.
+     *
+     * @throws ModelNotFoundException when the id is not one of the user's transactions
+     */
+    public static function lockCurrentVersion(int $id, int $userId): self
+    {
+        $current = self::query()->where('user_id', $userId)->whereKey($id)->lockForUpdate()->firstOrFail();
+
+        while (true) {
+            $child = self::query()
+                ->where('user_id', $userId)
+                ->where('parent_transaction_id', $current->id)
+                ->latest('id')
+                ->lockForUpdate()
+                ->first();
+
+            if ($child === null) {
+                return $current;
+            }
+
+            $current = $child;
+        }
+    }
 
     public static function findCurrentVersion(int $id, int $userId): ?self
     {
@@ -357,15 +390,18 @@ final class Transaction extends Model
      * Rows that move money in or out of the tracked accounts: ordinary rows plus the tracked
      * leg of a transfer whose other leg sits on an untracked account (tracked -> untracked is
      * spend, untracked -> tracked is income). Tracked <-> tracked pairs net to zero and stay out.
+     * Excluded rows never count.
      *
      * @param  Builder<self>  $query
      * @return Builder<self>
      */
     public function scopeCountable(Builder $query): Builder
     {
-        return $query->where(fn (Builder $q): Builder => $q
-            ->excludingTransfers()
-            ->orWhere(fn (Builder $t): Builder => $t->pairedWithUntrackedAccount()));
+        return $query
+            ->where('transactions.excluded', false)
+            ->where(fn (Builder $q): Builder => $q
+                ->excludingTransfers()
+                ->orWhere(fn (Builder $t): Builder => $t->pairedWithUntrackedAccount()));
     }
 
     /**
@@ -395,7 +431,7 @@ final class Transaction extends Model
      */
     public function createChild(array $overrides = []): self
     {
-        $excluded = ['id', 'created_at', 'updated_at', 'deleted_at', 'parent_transaction_id', 'redbark_id'];
+        $excluded = ['id', 'created_at', 'updated_at', 'deleted_at', 'parent_transaction_id', 'redbark_id', 'idempotency_key'];
 
         $attributes = collect($this->getAttributes())
             ->except($excluded)
@@ -576,6 +612,7 @@ final class Transaction extends Model
             'post_date' => 'date',
             'transaction_date' => 'date',
             'enrich_data' => 'array',
+            'excluded' => 'boolean',
         ];
     }
 }
