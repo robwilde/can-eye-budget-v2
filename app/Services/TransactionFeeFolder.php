@@ -7,11 +7,15 @@ namespace App\Services;
 use App\Casts\MoneyCast;
 use App\Models\Transaction;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
+use App\Services\Transfers\TransferLinker;
 use Illuminate\Support\Facades\DB;
 
 final readonly class TransactionFeeFolder
 {
-    public function __construct(private AccountBalanceHistoryBuilder $history) {}
+    public function __construct(
+        private AccountBalanceHistoryBuilder $history,
+        private TransferLinker $linker,
+    ) {}
 
     /**
      * Fold an international transaction fee into its matching parent purchase.
@@ -41,6 +45,8 @@ final readonly class TransactionFeeFolder
                     ? $note
                     : $parent->notes."\n".$note,
             ]);
+
+            $this->linker->followEditedVersion($parent, $merged);
 
             $fee->folded_into_transaction_id = $merged->id;
             $fee->save();

@@ -655,7 +655,7 @@ test('detection loads only imported rows that carry a transfer signal', function
         ->and(Transaction::query()->whereNotNull('suggested_pair_id')->count())->toBe(2);
 });
 
-test('csv rows are not suggested: detection works on bank-feed rows only', function () {
+test('csv rows that carry a transfer signal are suggested', function () {
     Transaction::factory()->for($this->user)->fromCsv()->create([
         'account_id' => $this->optimus->id,
         'direction' => TransactionDirection::Debit,
@@ -673,7 +673,7 @@ test('csv rows are not suggested: detection works on bank-feed rows only', funct
 
     $this->artisan('transfers:detect')->assertSuccessful();
 
-    expect(Transaction::query()->whereNotNull('suggested_pair_id')->count())->toBe(0);
+    expect(Transaction::query()->whereNotNull('suggested_pair_id')->count())->toBe(2);
 });
 
 test('a version superseded by an edit is refused, the current version links', function () {

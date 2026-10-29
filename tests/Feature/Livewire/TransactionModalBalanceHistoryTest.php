@@ -149,7 +149,7 @@ test('rebuilds both accounts when a transfer is created', function () {
         ->and(modalHistoryEnd($to, '2026-05-12'))->toBe(50000);
 });
 
-test('rebuilds both accounts when a manual transfer is deleted with its partner', function () {
+test('rebuilds only the deleted legs account when a manual transfer leg is deleted', function () {
     $from = modalHistoryAccount($this->user);
     $to = modalHistoryAccount($this->user, 20000);
 
@@ -171,7 +171,7 @@ test('rebuilds both accounts when a manual transfer is deleted with its partner'
         ->call('deleteTransaction');
 
     expect(modalHistoryEnd($from, '2026-05-12'))->toBe(100000)
-        ->and(modalHistoryEnd($to, '2026-05-12'))->toBe(20000);
+        ->and(modalHistoryEnd($to, '2026-05-12'))->toBe(50000);
 });
 
 test('rebuilds both accounts when a transfer amount is edited', function () {
