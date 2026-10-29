@@ -403,6 +403,31 @@
                 />
             @endif
 
+            @if($editingTransactionId && $mode === 'enter')
+                <hr class="panel-rule">
+
+                <div class="space-y-2" data-test="transaction-attachments">
+                    <span class="cib-label">{{ __('Receipts') }}</span>
+
+                    @foreach($attachments as $attachment)
+                        <div class="flex items-center justify-between gap-2 text-sm" wire:key="attachment-{{ $attachment->id }}">
+                            <a href="{{ route('transactions.attachments.download', $attachment->id) }}" class="cib-link" data-test="attachment-download-{{ $attachment->id }}">{{ $attachment->original_name }}</a>
+                            <button type="button" wire:click="removeAttachment({{ $attachment->id }})" class="cib-link" data-test="attachment-remove-{{ $attachment->id }}">{{ __('Remove') }}</button>
+                        </div>
+                    @endforeach
+
+                    @if($attachments->count() < \App\Models\TransactionAttachment::MAX_PER_TRANSACTION)
+                        <input type="file" wire:model="newAttachments" aria-label="{{ __('Receipts') }}" multiple accept="image/*,application/pdf" class="text-sm" data-test="attachment-input">
+                        @if($newAttachments !== [])
+                            <flux:button type="button" size="sm" wire:click="attachFiles" data-test="attachment-add">{{ __('Attach') }}</flux:button>
+                        @endif
+                    @endif
+
+                    @error('newAttachments')<p class="text-sm text-red-700" data-test="attachment-error">{{ $message }}</p>@enderror
+                    @error('newAttachments.*')<p class="text-sm text-red-700" data-test="attachment-error">{{ $message }}</p>@enderror
+                </div>
+            @endif
+
             {{-- Rule-suggest card (plan-mode, non-transfer, manual) --}}
             @if(!$isBankFeedTransaction && $mode === 'plan' && $transactionType !== 'transfer')
                 <div class="rule-suggest" role="complementary">

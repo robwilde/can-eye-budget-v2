@@ -269,6 +269,12 @@ final class Transaction extends Model
         return $this->belongsToMany(Tag::class);
     }
 
+    /** @return HasMany<TransactionAttachment, $this> */
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(TransactionAttachment::class);
+    }
+
     public function isSplit(): bool
     {
         return $this->relationLoaded('splits')
@@ -456,6 +462,8 @@ final class Transaction extends Model
             if ($tagIds->isNotEmpty()) {
                 $child->tags()->attach($tagIds->all());
             }
+
+            $this->attachments()->update(['transaction_id' => $child->id]);
 
             return $child;
         });

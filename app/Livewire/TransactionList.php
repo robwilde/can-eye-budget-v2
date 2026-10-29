@@ -88,6 +88,8 @@ final class TransactionList extends Component
 
     private const array AMOUNT_OPERATOR_SYMBOLS = ['eq' => '=', 'lt' => '<', 'gt' => '>'];
 
+    private const array VALID_ATTACHMENT_FILTERS = ['all', 'with'];
+
     private const array VALID_GROUP_MODES = ['date', 'merchant'];
 
     /**
@@ -119,6 +121,9 @@ final class TransactionList extends Component
 
     #[Url]
     public string $transfers = 'all';
+
+    #[Url(except: 'all')]
+    public string $attachments = 'all';
 
     #[Url]
     public ?int $category = null;
@@ -342,6 +347,10 @@ final class TransactionList extends Component
 
         if (! in_array($this->groupMode, self::VALID_GROUP_MODES, true)) {
             $this->groupMode = 'date';
+        }
+
+        if (! in_array($this->attachments, self::VALID_ATTACHMENT_FILTERS, true)) {
+            $this->attachments = 'all';
         }
 
         $this->normaliseAmountFilter();
@@ -1363,6 +1372,15 @@ final class TransactionList extends Component
         $this->resetPage();
     }
 
+    public function updatedAttachments(): void
+    {
+        if (! in_array($this->attachments, self::VALID_ATTACHMENT_FILTERS, true)) {
+            $this->attachments = 'all';
+        }
+
+        $this->resetPage();
+    }
+
     public function updatedAccount(): void
     {
         $this->resetPage();
@@ -2196,6 +2214,7 @@ final class TransactionList extends Component
             'from' => $this->from,
             'to' => $this->to,
             'search' => $this->search,
+            'attachments' => $this->attachments,
             'clusterableOnly' => $this->inMerchantMode(),
         ];
     }
@@ -2288,6 +2307,7 @@ final class TransactionList extends Component
             ->when(($filters['source'] ?? null) === 'rule', fn ($q) => $q
                 ->where('category_source', CategorySource::Rule->value))
             ->when(($filters['transfers'] ?? null) === 'suggested', fn ($q) => $q->possibleTransfer())
+            ->when(($filters['attachments'] ?? null) === 'with', fn ($q) => $q->whereHas('attachments'))
             ->when($filters['search'] ?? null, fn ($q, $term) => $q->where(function ($q) use ($term) {
                 $q->where('description', 'like', "%{$term}%")
                     ->orWhere('clean_description', 'like', "%{$term}%")

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\TransactionAttachmentController;
 use App\Livewire\ReconcileStatement;
 use Illuminate\Support\Facades\Route;
 
@@ -16,6 +17,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('connect-bank', 'connect-bank')->name('connect-bank');
     Route::view('import-bank', 'import-bank')->name('import-bank');
     Route::view('transactions', 'transactions')->name('transactions');
+    Route::get('transactions/attachments/{attachment}', TransactionAttachmentController::class)->where('attachment', '[0-9]{1,18}')->name('transactions.attachments.download');
     Route::view('transfers/review', 'transfers-review')->name('transfers.review');
     Route::view('calendar', 'calendar')->name('calendar');
     Route::view('reports', 'reports')->name('reports');
