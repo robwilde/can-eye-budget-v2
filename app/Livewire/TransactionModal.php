@@ -12,6 +12,7 @@ use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Enums\TransferLinkSource;
+use App\Exceptions\PendingMergeRefusedException;
 use App\Exceptions\TransferAlreadyLinkedException;
 use App\Exceptions\TransferLinkRefusedException;
 use App\Models\Account;
@@ -19,7 +20,9 @@ use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\TransactionAttachment;
+use App\Models\User;
 use App\Services\CategoryRuleGenerator;
+use App\Services\PendingMergeService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\TransactionIdempotency;
 use App\Services\Transfers\TransferLinker;
@@ -47,6 +50,8 @@ final class TransactionModal extends Component
     public bool $showModal = false;
 
     public ?int $editingTransactionId = null;
+
+    public int $mergeCandidateLimit = PendingMergeService::PAGE_SIZE;
 
     /** @var list<TemporaryUploadedFile> */
     public array $newAttachments = [];
@@ -609,6 +614,9 @@ final class TransactionModal extends Component
             'parsedAmount' => $parsed->amount ?? 0,
             'parsedDescription' => $parsed->description ?? '',
             'attachments' => $this->currentAttachments(),
+            'lockedFields' => $this->lockedFieldLabels($this->editingOwnedTransaction()),
+            'mergeSuggestion' => $this->mergeSuggestion(),
+            'mergeCandidates' => $this->mergeCandidates(),
         ]);
     }
 
@@ -780,6 +788,110 @@ final class TransactionModal extends Component
     public function updatedCleanDescription(): void
     {
         $this->refreshCategoriseContradictions();
+    }
+
+    /**
+     * Lets the next bank sync overwrite the fields the user changed on the transaction being edited.
+     *
+     * @throws Throwable
+     */
+    public function unlockTransaction(): void
+    {
+        $transaction = $this->editingOwnedTransaction();
+
+        if (! $transaction instanceof Transaction || $transaction->locked_fields === null) {
+            return;
+        }
+
+        $kept = $transaction->hasSystemAmountLock() ? ['amount'] : [];
+
+        $transaction->forceFill(['locked_fields' => $kept ?: null])->save();
+    }
+
+    /**
+     * Merges the pending transaction being edited into the chosen posted row of the same account.
+     *
+     * @throws Throwable
+     */
+    public function mergePending(int $postedId): void
+    {
+        $pending = $this->editingOwnedTransaction();
+        $user = auth()->user();
+
+        if (! $pending instanceof Transaction || $pending->status !== TransactionStatus::Pending || ! $user instanceof User) {
+            return;
+        }
+
+        try {
+            app(PendingMergeService::class)->merge($user, $pending->id, $postedId);
+        } catch (PendingMergeRefusedException $e) {
+            $this->addError('mergeCandidate', $e->getMessage());
+
+            return;
+        }
+
+        $this->showModal = false;
+        $this->resetForm();
+        $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    private function withLockedFields(Transaction $transaction, array $overrides): array
+    {
+        return $overrides + ['locked_fields' => $transaction->lockedFieldsAfter($overrides) ?: null];
+    }
+
+    /**
+     * What the user locked, in words; the amount lock a folded fee put there is the system's.
+     *
+     * @return list<string>
+     */
+    private function lockedFieldLabels(?Transaction $transaction): array
+    {
+        if (! $transaction instanceof Transaction) {
+            return [];
+        }
+
+        $fields = $transaction->locked_fields ?? [];
+
+        if ($transaction->hasSystemAmountLock()) {
+            $fields = array_values(array_diff($fields, ['amount']));
+        }
+
+        $labels = [
+            'description' => 'description',
+            'clean_description' => 'name',
+            'notes' => 'notes',
+            'category_id' => 'category',
+            'amount' => 'amount',
+            'direction' => 'type',
+            'post_date' => 'date',
+            'account_id' => 'account',
+        ];
+
+        return array_map(static fn (string $field): string => __($labels[$field] ?? $field), $fields);
+    }
+
+    private function mergeSuggestion(): ?Transaction
+    {
+        $pending = $this->editingOwnedTransaction();
+
+        return $pending instanceof Transaction && $pending->status === TransactionStatus::Pending
+            ? app(PendingMergeService::class)->suggestionFor($pending)
+            : null;
+    }
+
+    /** @return Collection<int, Transaction> */
+    private function mergeCandidates(): Collection
+    {
+        $pending = $this->editingOwnedTransaction();
+
+        return $pending instanceof Transaction && $pending->status === TransactionStatus::Pending
+            ? app(PendingMergeService::class)->candidatesFor($pending, min(max($this->mergeCandidateLimit, PendingMergeService::PAGE_SIZE), 200))
+            : new Collection;
     }
 
     /** @return Collection<int, TransactionAttachment> */
@@ -1091,12 +1203,12 @@ final class TransactionModal extends Component
                 app(AccountBalanceHistoryBuilder::class)->lockAccounts($transaction->account_id);
                 $this->reloadCleanNamesUnderLock($transaction);
 
-                return $transaction->createChild([
+                return $transaction->createChild($this->withLockedFields($transaction, [
                     'category_id' => $this->categoryId,
                     'notes' => $this->notes !== '' ? $this->notes : null,
                     'excluded' => $this->excluded,
                     ...$this->editedDescriptors($transaction),
-                ]);
+                ]));
             });
 
             // The partner follows the new version, but only for links that still hold under lock.
@@ -1106,7 +1218,7 @@ final class TransactionModal extends Component
                 app(AccountBalanceHistoryBuilder::class)->lockAccounts($transaction->account_id, $this->accountId);
                 $this->reloadCleanNamesUnderLock($transaction);
 
-                $child = $transaction->createChild([
+                $child = $transaction->createChild($this->withLockedFields($transaction, [
                     'account_id' => $this->accountId,
                     'category_id' => $this->categoryId,
                     'amount' => $parsed->amount,
@@ -1117,7 +1229,7 @@ final class TransactionModal extends Component
                     'post_date' => $this->date,
                     'notes' => $this->notes !== '' ? $this->notes : null,
                     'excluded' => $this->excluded,
-                ]);
+                ]));
 
                 app(AccountBalanceHistoryBuilder::class)->rebuildForEdit($transaction, $child);
                 app(TransferLinker::class)->followEditedVersion($transaction, $child);
@@ -1789,6 +1901,7 @@ final class TransactionModal extends Component
 
     private function resetForm(): void
     {
+        $this->mergeCandidateLimit = PendingMergeService::PAGE_SIZE;
         $this->editingTransactionId = null;
         $this->openedTransactionId = null;
         $this->newAttachments = [];
