@@ -90,6 +90,12 @@
                             data-testid="import-bank-new-balance"
                         />
                         <flux:text size="sm" class="text-fg-3">Optional — the account's balance right now. Leave blank for 0.</flux:text>
+                        <flux:select wire:model="newAccountCurrency" label="Currency" data-testid="import-bank-new-currency">
+                            <flux:select.option value="">Base currency</flux:select.option>
+                            @foreach($currencies as $code)
+                                <flux:select.option value="{{ $code }}">{{ $code }}</flux:select.option>
+                            @endforeach
+                        </flux:select>
                     @endif
                 </div>
 

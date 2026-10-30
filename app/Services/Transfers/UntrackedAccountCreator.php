@@ -10,6 +10,7 @@ use App\Enums\AccountStatus;
 use App\Enums\ImportSource;
 use App\Models\Account;
 use App\Models\User;
+use InvalidArgumentException;
 
 final class UntrackedAccountCreator
 {
@@ -22,7 +23,14 @@ final class UntrackedAccountCreator
         AccountClass $type = AccountClass::Savings,
         int $balanceCents = 0,
         ?string $description = null,
+        ?string $currency = null,
     ): Account {
+        $currency = mb_strtoupper($currency ?? $user->base_currency);
+
+        if (! in_array($currency, $user->allowedCurrencies(), true)) {
+            throw new InvalidArgumentException("{$currency} is not an allowed currency.");
+        }
+
         return Account::query()->create([
             'user_id' => $user->id,
             'name' => $name,
@@ -33,7 +41,7 @@ final class UntrackedAccountCreator
             'balance' => $balanceCents,
             'balance_updated_at' => now(),
             'description' => $description,
-            'currency' => 'AUD',
+            'currency' => $currency,
             'status' => AccountStatus::Active,
         ]);
     }

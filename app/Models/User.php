@@ -10,6 +10,7 @@ use App\DTOs\UserPreferences;
 use App\Enums\AccountClass;
 use App\Enums\PayFrequency;
 use App\Enums\TransactionDirection;
+use App\Support\Currencies;
 use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -37,6 +38,13 @@ final class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable, TwoFactorAuthenticatable;
+
+    /**
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'base_currency' => 'AUD',
+    ];
 
     /**
      * The attributes that are mass assignable.
@@ -299,6 +307,19 @@ final class User extends Authenticatable
             $this->preferences = $locked->preferences;
             $this->syncOriginalAttribute('preferences');
         });
+    }
+
+    /**
+     * The currencies the pickers offer: every supported currency unless the user narrowed the
+     * list, and always including their base currency.
+     *
+     * @return list<string>
+     */
+    public function allowedCurrencies(): array
+    {
+        $chosen = $this->preferences->allowedCurrencies;
+
+        return array_values(array_unique([$this->base_currency, ...($chosen === [] ? Currencies::codes() : $chosen)]));
     }
 
     public function resolvedTimezone(): string

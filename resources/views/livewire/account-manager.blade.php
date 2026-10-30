@@ -246,6 +246,21 @@
             </div>
 
             <div>
+                <label class="cib-label" for="account-currency">{{ __('Currency') }}</label>
+                <flux:select id="account-currency" wire:model="currency" :disabled="$editingAccountId !== null" data-test="account-currency">
+                    @foreach($currencies as $code)
+                        <flux:select.option value="{{ $code }}">{{ $code }}</flux:select.option>
+                    @endforeach
+                    @if($editingAccountId !== null && ! in_array($currency, $currencies, true))
+                        <flux:select.option value="{{ $currency }}">{{ $currency }}</flux:select.option>
+                    @endif
+                </flux:select>
+                @error('currency')
+                    <flux:text class="mt-1 text-red-600 dark:text-red-500" data-test="account-currency-error">{{ $message }}</flux:text>
+                @enderror
+            </div>
+
+            <div>
                 <label class="cib-label" for="account-type">{{ __('Account Type') }}</label>
                 <flux:select id="account-type" wire:model="type" required>
                     @foreach($accountTypes as $accountType)
