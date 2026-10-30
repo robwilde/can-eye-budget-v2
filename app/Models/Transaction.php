@@ -519,6 +519,12 @@ final class Transaction extends Model
             unset($attributes['exchange_rate']);
         }
 
+        foreach ($attributes as $key => $value) {
+            if ($this->isJsonCastable($key)) {
+                $attributes[$key] = $this->getAttribute($key);
+            }
+        }
+
         // A caller that changes category_id is choosing a new category. Carrying the
         // parent's provenance onto that choice would let a rule's stamp survive a
         // human's edit, so drop it and let saving() re-derive it.
