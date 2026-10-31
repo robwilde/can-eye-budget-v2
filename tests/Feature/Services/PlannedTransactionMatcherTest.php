@@ -247,3 +247,99 @@ test('does not reach back past the lookback window', function () {
     expect($this->matcher->matchForUser($this->user))->toBe(0)
         ->and($tx->fresh()->planned_transaction_id)->toBeNull();
 });
+
+test('does not match an excluded transaction', function () {
+    activeRentPlan($this->user, $this->account);
+
+    $tx = Transaction::factory()->for($this->user)->debit()->create([
+        'account_id' => $this->account->id,
+        'amount' => -50000,
+        'post_date' => '2026-06-10',
+        'planned_transaction_id' => null,
+        'excluded' => true,
+    ]);
+
+    expect($this->matcher->matchForUser($this->user))->toBe(0)
+        ->and($tx->fresh()->planned_transaction_id)->toBeNull();
+});
+
+test('matches the counted row when an excluded row of the same amount sits on the day', function () {
+    $plan = activeRentPlan($this->user, $this->account);
+
+    $excluded = Transaction::factory()->for($this->user)->debit()->create([
+        'account_id' => $this->account->id,
+        'amount' => -50000,
+        'post_date' => '2026-06-10',
+        'planned_transaction_id' => null,
+        'excluded' => true,
+    ]);
+    $counted = Transaction::factory()->for($this->user)->debit()->create([
+        'account_id' => $this->account->id,
+        'amount' => -50000,
+        'post_date' => '2026-06-10',
+        'planned_transaction_id' => null,
+    ]);
+
+    expect($this->matcher->matchForUser($this->user))->toBe(1)
+        ->and($counted->fresh()->planned_transaction_id)->toBe($plan->id)
+        ->and($excluded->fresh()->planned_transaction_id)->toBeNull();
+});
+
+test('an occurrence held only by an excluded row is matched to a counted row and the excluded link is released', function () {
+    $plan = activeRentPlan($this->user, $this->account);
+
+    $excluded = Transaction::factory()->for($this->user)->debit()->create([
+        'account_id' => $this->account->id,
+        'amount' => -50000,
+        'post_date' => '2026-06-10',
+        'planned_transaction_id' => $plan->id,
+        'excluded' => true,
+    ]);
+    $counted = Transaction::factory()->for($this->user)->debit()->create([
+        'account_id' => $this->account->id,
+        'amount' => -50000,
+        'post_date' => '2026-06-10',
+        'planned_transaction_id' => null,
+    ]);
+
+    expect($this->matcher->matchForUser($this->user))->toBe(1)
+        ->and($counted->fresh()->planned_transaction_id)->toBe($plan->id)
+        ->and($excluded->fresh()->planned_transaction_id)->toBeNull();
+});
+
+test('on a short cadence a released excluded link leaves the next occurrence free for its own payment', function () {
+    $plan = PlannedTransaction::factory()->for($this->user)->create([
+        'account_id' => $this->account->id,
+        'amount' => 50000,
+        'direction' => TransactionDirection::Debit,
+        'frequency' => RecurrenceFrequency::Every4Days,
+        'start_date' => '2026-06-06',
+        'is_active' => true,
+    ]);
+
+    $excluded = Transaction::factory()->for($this->user)->debit()->create([
+        'account_id' => $this->account->id,
+        'amount' => -50000,
+        'post_date' => '2026-06-10',
+        'planned_transaction_id' => $plan->id,
+        'excluded' => true,
+    ]);
+    $early = Transaction::factory()->for($this->user)->debit()->create([
+        'account_id' => $this->account->id,
+        'amount' => -50000,
+        'post_date' => '2026-06-11',
+        'planned_transaction_id' => null,
+    ]);
+    $next = Transaction::factory()->for($this->user)->debit()->create([
+        'account_id' => $this->account->id,
+        'amount' => -50000,
+        'post_date' => '2026-06-14',
+        'planned_transaction_id' => null,
+    ]);
+
+    $this->matcher->matchForUser($this->user);
+
+    expect($excluded->fresh()->planned_transaction_id)->toBeNull()
+        ->and($early->fresh()->planned_transaction_id)->toBe($plan->id)
+        ->and($next->fresh()->planned_transaction_id)->toBe($plan->id);
+});

@@ -392,3 +392,29 @@ it('says one transaction for a single-row cluster', function () {
         ->set('groupMode', 'merchant')
         ->assertSeeHtml('NETFLIX.COM, 1 transaction,');
 });
+
+it('leaves excluded rows out of the cluster total but keeps them in the cluster', function () {
+    $other = Account::factory()->for($this->user)->create();
+
+    clusterTxn($this->user, $this->account, 'NETFLIX.COM', ['amount' => 1000]);
+    $excluded = clusterTxn($this->user, $this->account, 'NETFLIX.COM', ['amount' => 5000, 'excluded' => true]);
+    $debitLeg = clusterTxn($this->user, $this->account, 'NETFLIX.COM', ['amount' => 300]);
+    $creditLeg = clusterTxn($this->user, $other, 'NETFLIX.COM', [
+        'amount' => 300,
+        'direction' => TransactionDirection::Credit,
+        'transfer_pair_id' => $debitLeg->id,
+    ]);
+    $debitLeg->update(['transfer_pair_id' => $creditLeg->id]);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->set('groupMode', 'merchant')
+        ->call('toggleCluster', 'NETFLIX.COM');
+
+    $cluster = collect($component->viewData('clusters')->items())->firstWhere('merchant_key', 'NETFLIX.COM');
+
+    expect((int) $cluster->total_amount)->toBe(1600)
+        ->and((int) $cluster->row_count)->toBe(4)
+        ->and($component->viewData('clusterRows')->pluck('id')->all())->toContain($excluded->id);
+});
