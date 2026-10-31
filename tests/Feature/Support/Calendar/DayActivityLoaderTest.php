@@ -1216,3 +1216,96 @@ test('an occurrence dated today is still planned', function () {
 
     expect($activity['2026-06-11']->plannedCents)->toBe(9000);
 });
+
+test('an excluded row stays on its day but leaves the posted and income totals', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $other = Account::factory()->for($user)->create();
+    $date = CarbonImmutable::create(2026, 6, 10);
+
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id, 'amount' => -1200, 'post_date' => $date,
+    ]);
+    $excludedExpense = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id, 'amount' => -5000, 'post_date' => $date, 'excluded' => true,
+    ]);
+    $excludedIncome = Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $account->id, 'amount' => 9000, 'post_date' => $date, 'excluded' => true,
+    ]);
+    $debitLeg = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id, 'amount' => -700, 'post_date' => $date,
+    ]);
+    $creditLeg = Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $other->id, 'amount' => 700, 'post_date' => $date, 'transfer_pair_id' => $debitLeg->id,
+    ]);
+    $debitLeg->update(['transfer_pair_id' => $creditLeg->id]);
+
+    $day = (new DayActivityLoader)->load($date, $date, $user->id, includeTransfers: true)[$date->format('Y-m-d')];
+
+    expect($day->postedCents)->toBe(1200)
+        ->and($day->incomeCents)->toBe(0)
+        ->and(collect($day->pips)->pluck('transactionId'))->toContain($excludedExpense->id, $excludedIncome->id)
+        ->and(collect($day->pips)->where('kind', 'xfer'))->toHaveCount(1);
+});
+
+test('an excluded split row leaves the day totals but keeps its line pips', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->for($user)->create();
+    $date = CarbonImmutable::create(2026, 6, 10);
+
+    $split = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id, 'amount' => -5000, 'post_date' => $date, 'excluded' => true,
+    ]);
+    $split->splits()->create(['category_id' => $category->id, 'amount' => 5000]);
+
+    $day = (new DayActivityLoader)->load($date, $date, $user->id)[$date->format('Y-m-d')];
+
+    expect($day->postedCents)->toBe(0)
+        ->and($day->pips)->toHaveCount(1);
+});
+
+test('an excluded row linked to a plan does not suppress the occurrence', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $date = CarbonImmutable::create(2026, 6, 14);
+
+    $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
+        'amount' => 77000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => $date,
+    ]);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'amount' => -77000,
+        'post_date' => $date,
+        'planned_transaction_id' => $planned->id,
+        'excluded' => true,
+    ]);
+
+    $day = (new DayActivityLoader)->load($date, $date, $user->id)[$date->format('Y-m-d')];
+
+    expect(collect($day->pips)->pluck('kind')->sort()->values()->all())->toBe(['out', 'plan'])
+        ->and($day->postedCents)->toBe(0)
+        ->and($day->plannedCents)->toBe(77000);
+});
+
+test('an excluded leg paired with an untracked account keeps its pip but not its spend', function () {
+    $user = User::factory()->create();
+    $checking = Account::factory()->for($user)->create();
+    $hidden = Account::factory()->for($user)->untracked()->create();
+    $date = CarbonImmutable::create(2026, 6, 10);
+
+    $debit = Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $checking->id, 'amount' => -20000, 'post_date' => $date, 'excluded' => true,
+    ]);
+    $mirror = Transaction::factory()->for($user)->credit()->create([
+        'account_id' => $hidden->id, 'amount' => 20000, 'post_date' => $date, 'transfer_pair_id' => $debit->id,
+    ]);
+    $debit->update(['transfer_pair_id' => $mirror->id]);
+
+    $day = (new DayActivityLoader)->load($date, $date, $user->id, includeTransfers: true)[$date->format('Y-m-d')];
+
+    expect($day->postedCents)->toBe(0)
+        ->and(collect($day->pips)->where('kind', 'xfer'))->toHaveCount(1);
+});

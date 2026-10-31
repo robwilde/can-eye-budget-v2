@@ -109,7 +109,7 @@ final readonly class DayActivityLoader
         $transferIds = array_flip($transferRows->modelKeys());
 
         foreach ($withinTolerance->concat($transferRows) as $tx) {
-            if ($tx->planned_transaction_id === null) {
+            if ($tx->planned_transaction_id === null || $tx->excluded) {
                 continue;
             }
 
@@ -158,6 +158,10 @@ final readonly class DayActivityLoader
                 detail: self::transactionLabel($transfer) ?? ($transfer->description !== '' ? $transfer->description : null),
                 transferFlow: $flow,
             );
+
+            if ($transfer->excluded) {
+                continue;
+            }
 
             if ($flow === 'out') {
                 $transferSpendByDate[$key] = ($transferSpendByDate[$key] ?? 0) + $amount;
@@ -228,9 +232,9 @@ final readonly class DayActivityLoader
                 $absAmount = abs((int) $tx->amount);
                 $isCredit = $tx->direction === TransactionDirection::Credit;
 
-                if ($isCredit) {
+                if (! $tx->excluded && $isCredit) {
                     $incomeCents += $absAmount;
-                } else {
+                } elseif (! $tx->excluded) {
                     $postedCents += $absAmount;
                 }
 

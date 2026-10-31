@@ -52,6 +52,7 @@ final readonly class PlannedTransactionMatcher
             ->current()
             ->excludingTransfers()
             ->whereNull('planned_transaction_id')
+            ->where('excluded', false)
             ->whereBetween('post_date', [$postDateFrom, $windowEnd])
             ->get(['id', 'account_id', 'direction', 'amount', 'post_date'])
             ->groupBy(fn (Transaction $t): string => $t->account_id.'|'.$t->direction->value);
@@ -62,6 +63,7 @@ final readonly class PlannedTransactionMatcher
             ->current()
             ->excludingTransfers()
             ->whereIn('planned_transaction_id', $planIds)
+            ->where('excluded', false)
             ->whereBetween('post_date', [$postDateFrom, $windowEnd])
             ->get(['id', 'planned_transaction_id', 'post_date'])
             ->groupBy('planned_transaction_id');
@@ -99,11 +101,28 @@ final readonly class PlannedTransactionMatcher
                 if ($affected === 1) {
                     $consumedIds[$candidate->id] = true;
                     $matched++;
+                    $this->releaseExcludedLinks($user, $plan, $occurrence, $tolerance);
                 }
             }
         }
 
         return $matched;
+    }
+
+    /**
+     * Unlinks excluded rows from an occurrence a counted row now pays, so including one of
+     * them again cannot leave two counted rows fulfilling the same occurrence.
+     */
+    private function releaseExcludedLinks(User $user, PlannedTransaction $plan, CarbonImmutable $occurrence, int $tolerance): void
+    {
+        Transaction::query()
+            ->where('user_id', $user->id)
+            ->current()
+            ->excludingTransfers()
+            ->where('planned_transaction_id', $plan->id)
+            ->where('excluded', true)
+            ->whereBetween('post_date', [$occurrence->subDays($tolerance), $occurrence->addDays($tolerance)])
+            ->update(['planned_transaction_id' => null]);
     }
 
     /**
