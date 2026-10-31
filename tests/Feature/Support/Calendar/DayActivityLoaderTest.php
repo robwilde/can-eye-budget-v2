@@ -106,7 +106,7 @@ test('debit becomes out pip and contributes to postedCents', function () {
 test('planned occurrences become plan pips and contribute to plannedCents', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Rent']);
+    $category = Category::factory()->for($user)->create(['name' => 'Rent']);
 
     $date = CarbonImmutable::create(2026, 6, 14);
 
@@ -291,7 +291,7 @@ test('actual and planned on same day appear together with correct tallies', func
 test('reconciled debit suppresses the planned pip and relabels the posted pip with the plan category', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Rent', 'icon' => 'home']);
+    $category = Category::factory()->for($user)->create(['name' => 'Rent', 'icon' => 'home']);
     $date = CarbonImmutable::create(2026, 6, 14);
 
     $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
@@ -352,9 +352,9 @@ test('an unmatched posted transaction is not flagged as matched', function () {
 test('a split reconciled transaction renders per-line pips flagged as matched', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
-    $fuel = Category::factory()->create(['name' => 'Fuel']);
-    $planned = Category::factory()->create(['name' => 'Afterpay']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $fuel = Category::factory()->for($user)->create(['name' => 'Fuel']);
+    $planned = Category::factory()->for($user)->create(['name' => 'Afterpay']);
     $date = CarbonImmutable::create(2026, 6, 14);
 
     $plannedTransaction = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
@@ -397,7 +397,7 @@ test('a split reconciled transaction renders per-line pips flagged as matched', 
 test('reconciled income credit suppresses the planned income pip', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Salary', 'icon' => 'banknotes']);
+    $category = Category::factory()->for($user)->create(['name' => 'Salary', 'icon' => 'banknotes']);
     $date = CarbonImmutable::create(2026, 6, 15);
 
     $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
@@ -463,7 +463,7 @@ test('monthly recurring planned keeps unreconciled occurrences when one is recon
 test('reconciled posting outside the date tolerance does not suppress the planned pip', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Rent']);
+    $category = Category::factory()->for($user)->create(['name' => 'Rent']);
     $occurrence = CarbonImmutable::create(2026, 6, 14);
 
     $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
@@ -501,7 +501,7 @@ test('reconciled posting outside the date tolerance does not suppress the planne
 test('reconciled posting exactly on the tolerance boundary suppresses the planned pip', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Rent', 'icon' => 'home']);
+    $category = Category::factory()->for($user)->create(['name' => 'Rent', 'icon' => 'home']);
     $occurrence = CarbonImmutable::create(2026, 6, 14);
 
     $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
@@ -602,7 +602,7 @@ test('superseded child reconciled transaction suppresses the occurrence once', f
 test('un-reconciled child shows both the posted and the planned pip', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Rent']);
+    $category = Category::factory()->for($user)->create(['name' => 'Rent']);
     $date = CarbonImmutable::create(2026, 6, 14);
 
     $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
@@ -639,7 +639,7 @@ test('un-reconciled child shows both the posted and the planned pip', function (
 test('planned reconciled then deactivated leaves only the posted pip', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Rent', 'icon' => 'home']);
+    $category = Category::factory()->for($user)->create(['name' => 'Rent', 'icon' => 'home']);
     $date = CarbonImmutable::create(2026, 6, 14);
 
     $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
@@ -673,8 +673,8 @@ test('planned reconciled then deactivated leaves only the posted pip', function 
 test('two plans on the same day suppress only the reconciled one', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $rent = Category::factory()->create(['name' => 'Rent']);
-    $power = Category::factory()->create(['name' => 'Power']);
+    $rent = Category::factory()->for($user)->create(['name' => 'Rent']);
+    $power = Category::factory()->for($user)->create(['name' => 'Power']);
     $date = CarbonImmutable::create(2026, 6, 14);
 
     $reconciledPlan = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
@@ -792,7 +792,7 @@ test('plannedCents excludes a suppressed occurrence but keeps unreconciled occur
 test('categorised planned pip tooltip equals the plan description', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Electricity']);
+    $category = Category::factory()->for($user)->create(['name' => 'Electricity']);
     $date = CarbonImmutable::create(2026, 6, 10);
 
     PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
@@ -842,7 +842,7 @@ test('uncategorised planned pip has null tooltip because name equals description
 test('reconciled posted pip tooltip equals the bank transaction description', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Rent']);
+    $category = Category::factory()->for($user)->create(['name' => 'Rent']);
     $date = CarbonImmutable::create(2026, 6, 14);
 
     $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
@@ -875,7 +875,7 @@ test('reconciled posted pip tooltip equals the bank transaction description', fu
 test('categorised posted pip tooltip equals the transaction description', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Groceries']);
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
     $date = CarbonImmutable::create(2026, 6, 20);
 
     Transaction::factory()->for($user)->debit()->create([
@@ -928,7 +928,7 @@ test('uncategorised posted pip whose name equals its description has null toolti
 test('categorised posted pip shows the clean description with the raw description as tooltip', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Groceries']);
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
     $date = CarbonImmutable::create(2026, 6, 20);
 
     Transaction::factory()->for($user)->debit()->create([
@@ -950,7 +950,7 @@ test('categorised posted pip shows the clean description with the raw descriptio
 test('categorised posted pip with a blank clean description falls back to the category name', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Groceries']);
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
     $date = CarbonImmutable::create(2026, 6, 20);
 
     Transaction::factory()->for($user)->debit()->create([
@@ -970,7 +970,7 @@ test('categorised posted pip with a blank clean description falls back to the ca
 test('reconciled posted pip shows the clean description ahead of the plan category', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Rent']);
+    $category = Category::factory()->for($user)->create(['name' => 'Rent']);
     $date = CarbonImmutable::create(2026, 6, 14);
 
     $planned = PlannedTransaction::factory()->for($user)->for($account)->noRepeat()->create([
@@ -1000,7 +1000,7 @@ test('reconciled posted pip shows the clean description ahead of the plan catego
 test('split pips keep their category names and fall back to the clean description when uncategorised', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
     $date = CarbonImmutable::create(2026, 6, 14);
 
     $transaction = Transaction::factory()->for($user)->debit()->create([
@@ -1027,9 +1027,9 @@ test('split pips keep their category names and fall back to the clean descriptio
 test('split pips carry tone, full nested category path and the clean-description fallback', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $root = Category::factory()->create(['name' => 'Personal']);
-    $mid = Category::factory()->create(['name' => 'Food', 'parent_id' => $root->id]);
-    $leaf = Category::factory()->create(['name' => 'Groceries', 'parent_id' => $mid->id]);
+    $root = Category::factory()->for($user)->create(['name' => 'Personal']);
+    $mid = Category::factory()->for($user)->create(['name' => 'Food', 'parent_id' => $root->id]);
+    $leaf = Category::factory()->for($user)->create(['name' => 'Groceries', 'parent_id' => $mid->id]);
     $date = CarbonImmutable::create(2026, 6, 14);
 
     $transaction = Transaction::factory()->for($user)->debit()->create([
@@ -1063,7 +1063,7 @@ test('category paths and inherited icons at any depth cost the same queries rega
         foreach (range(1, $pipCount) as $i) {
             $leaf = null;
             foreach (['A', 'B', 'C', 'D'] as $name) {
-                $leaf = Category::factory()->create([
+                $leaf = Category::factory()->for($user)->create([
                     'name' => $name,
                     'parent_id' => $leaf?->id,
                     'icon' => $name === 'A' ? 'star' : null,

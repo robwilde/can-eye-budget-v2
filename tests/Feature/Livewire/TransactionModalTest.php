@@ -145,7 +145,7 @@ test('category is optional', function () {
 test('saves transaction with category when provided', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
@@ -178,10 +178,9 @@ test('account dropdown shows only current user active accounts', function () {
 });
 
 test('category dropdown shows only visible categories', function () {
-    Category::factory()->create(['name' => 'Groceries', 'is_hidden' => false]);
-    Category::factory()->create(['name' => 'Hidden Cat', 'is_hidden' => true]);
-
     $user = User::factory()->create();
+    Category::factory()->for($user)->create(['name' => 'Groceries', 'is_hidden' => false]);
+    Category::factory()->for($user)->create(['name' => 'Hidden Cat', 'is_hidden' => true]);
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
@@ -193,13 +192,12 @@ test('category dropdown shows only visible categories', function () {
 });
 
 test('categories are sorted by full path in transaction modal render', function () {
-    $bills = Category::factory()->create(['name' => 'Bills']);
+    $user = User::factory()->create();
+    $bills = Category::factory()->for($user)->create(['name' => 'Bills']);
     Category::factory()->withParent($bills)->create(['name' => 'Zebra']);
 
-    $entertainment = Category::factory()->create(['name' => 'Entertainment']);
+    $entertainment = Category::factory()->for($user)->create(['name' => 'Entertainment']);
     Category::factory()->withParent($entertainment)->create(['name' => 'Alpha']);
-
-    $user = User::factory()->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
@@ -216,9 +214,9 @@ test('categories are sorted by full path in transaction modal render', function 
 
 test('renders the category combobox wired with visible full-path options', function () {
     $user = User::factory()->create();
-    $bills = Category::factory()->create(['name' => 'Bills']);
+    $bills = Category::factory()->for($user)->create(['name' => 'Bills']);
     Category::factory()->withParent($bills)->create(['name' => 'Internet']);
-    Category::factory()->create(['name' => 'HiddenZebra', 'is_hidden' => true]);
+    Category::factory()->for($user)->create(['name' => 'HiddenZebra', 'is_hidden' => true]);
 
     $html = Livewire::actingAs($user)
         ->test(TransactionModal::class)
@@ -320,7 +318,7 @@ test('rejects zero amount description input', function () {
 test('rejects hidden category via crafted request', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $hiddenCategory = Category::factory()->create(['is_hidden' => true]);
+    $hiddenCategory = Category::factory()->for($user)->create(['is_hidden' => true]);
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
@@ -335,7 +333,7 @@ test('rejects hidden category via crafted request', function () {
 test('opens for edit with pre-filled data from manual transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
     $transaction = Transaction::factory()->for($user)->for($account)->create([
         'amount' => 4250,
         'direction' => TransactionDirection::Debit,
@@ -387,7 +385,7 @@ test('redbark transaction sets read-only flag', function () {
 test('redbark transaction allows updating category and notes via child', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
     $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'category_id' => null,
         'notes' => null,
@@ -426,7 +424,7 @@ test('manual transaction creates child with updated fields', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $newAccount = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
     $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
         'amount' => 4250,
         'direction' => TransactionDirection::Debit,
@@ -1236,7 +1234,7 @@ test('editing planned transaction with mode enter still validates transactionTyp
 test('editing planned transaction updates correctly', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
         'start_date' => '2026-03-15',
@@ -1672,7 +1670,7 @@ test('switching from transfer to expense hides notes field', function () {
 test('switching from transfer clears notes before save', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     Livewire::actingAs($user)
         ->test(TransactionModal::class)
@@ -1906,7 +1904,7 @@ test('deleting a child resurfaces the parent as current', function () {
 test('cannot delete redbark original but can delete redbark child', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $redbarkOriginal = Transaction::factory()->for($user)->for($account)->fromRedbark()->create();
 
@@ -2347,7 +2345,7 @@ test('planned transfer can be converted to planned expense', function () {
 test('redbark transaction with no opposite row and no account chosen cannot become a transfer', function () {
     $user = User::factory()->create();
     $fromAccount = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
     $transaction = Transaction::factory()->for($user)->for($fromAccount)->fromRedbark()->create([
         'amount' => 3000,
         'direction' => TransactionDirection::Debit,
@@ -2369,7 +2367,7 @@ test('redbark transaction with no opposite row and no account chosen cannot beco
 test('redbark debit cannot be saved as income via tampered transactionType', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
     $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'amount' => 5000,
         'direction' => TransactionDirection::Debit,
@@ -2397,7 +2395,7 @@ test('converting an entered expense to a plan keeps and reconciles the source', 
 
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $transaction = Transaction::factory()->for($user)->for($account)->manual()->create([
         'amount' => 5000,
@@ -2526,7 +2524,7 @@ test('converting an entered transfer to a plan keeps both sides', function () {
 test('converting planned expense to entered expense hard-deletes planned and creates transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $planned = PlannedTransaction::factory()->for($user)->create([
         'account_id' => $account->id,
@@ -2830,7 +2828,7 @@ test('converting an edited transaction to a plan keeps and reconciles the curren
 
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $parent = Transaction::factory()->for($user)->for($account)->manual()->create([
         'amount' => 5000,
@@ -2971,7 +2969,7 @@ test('planning from a redbark row prefills from the row and creates a new plan w
 
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $transaction = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'amount' => 3000,
@@ -3231,7 +3229,7 @@ test('copy-transaction prefills a new entry from an existing transaction', funct
 
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->create([
         'amount' => 20000,
@@ -3258,7 +3256,7 @@ test('converting an entered transaction to a plan reconciles the source on that 
 
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $date = CarbonImmutable::parse('2026-03-18');
 
@@ -3327,7 +3325,7 @@ test('entering a past planned occurrence creates a linked posted transaction and
 
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
     $planned = PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
         'direction' => TransactionDirection::Debit,
         'amount' => 5000,
@@ -3431,7 +3429,7 @@ test('converting to a plan with categorise-matching ticked creates a rule and ca
 
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->manual()->create([
         'merchant_name' => 'Netflix',
@@ -3478,7 +3476,7 @@ test('converting to a plan with categorise-matching unticked creates no rule and
 
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->manual()->create([
         'merchant_name' => 'Netflix',
@@ -3517,7 +3515,7 @@ test('the categorise-matching value prefills the suggested merchant token and ap
 
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->manual()->create([
         'merchant_name' => null,
@@ -3624,7 +3622,7 @@ test('a manual entry with no matching plan is left entered (unlinked)', function
 test('editing a transaction with categorise-matching ticked creates a rule and categorises matching transactions', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->manual()->create([
         'merchant_name' => 'Netflix',
@@ -3671,7 +3669,7 @@ test('editing a transaction with categorise-matching ticked creates a rule and c
 test('editing a transaction with categorise-matching unticked creates no rule and leaves siblings untouched', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->manual()->create([
         'merchant_name' => 'Netflix',
@@ -3707,7 +3705,7 @@ test('editing a transaction with categorise-matching unticked creates no rule an
 test('editing a redbark transaction with categorise-matching ticked creates a rule and categorises matching transactions', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'merchant_name' => 'Netflix',
@@ -3750,7 +3748,7 @@ test('saving a bank-feed row with a clean description and categorise-matching ti
 
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'merchant_name' => null,
@@ -3798,7 +3796,7 @@ test('saving a bank-feed row with a clean description and categorise-matching ti
 test('a clean description sent for a manual row never reaches the generated rule', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->manual()->create([
         'merchant_name' => null,
@@ -3935,7 +3933,7 @@ test('opening a transfer leaves categorise matching unticked', function () {
 test('opening a split transaction leaves categorise matching unticked and saving a category creates no rule', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $split = Transaction::factory()->for($user)->for($account)->fromRedbark()->debit()->create([
         'merchant_name' => 'Netflix',
@@ -3944,8 +3942,8 @@ test('opening a split transaction leaves categorise matching unticked and saving
         'category_id' => null,
     ]);
     $split->splits()->createMany([
-        ['category_id' => Category::factory()->create()->id, 'amount' => -6000, 'position' => 0],
-        ['category_id' => Category::factory()->create()->id, 'amount' => -4000, 'position' => 1],
+        ['category_id' => Category::factory()->for($user)->create()->id, 'amount' => -6000, 'position' => 0],
+        ['category_id' => Category::factory()->for($user)->create()->id, 'amount' => -4000, 'position' => 1],
     ]);
     $sibling = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'merchant_name' => 'Netflix',
@@ -3968,7 +3966,7 @@ test('opening a split transaction leaves categorise matching unticked and saving
 test('categorising an uncategorised transaction creates the rule without ticking the box', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $sibling = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'merchant_name' => 'Netflix',
@@ -4023,7 +4021,7 @@ test('saving an uncategorised transaction without a category creates no rule', f
 test('editing a zero-amount transaction can set a category', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     $transaction = Transaction::factory()->for($user)->for($account)->fromCsv()->create([
         'description' => 'Purchases - Month End Balance',
@@ -4143,8 +4141,8 @@ test('editing a transaction to a negative amount is rejected', function () {
 test('categorise-matching warns when the match value catches transactions the user filed elsewhere', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Entertainment', 'is_hidden' => false]);
-    $other = Category::factory()->create(['name' => 'Education', 'is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['name' => 'Entertainment', 'is_hidden' => false]);
+    $other = Category::factory()->for($user)->create(['name' => 'Education', 'is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->manual()->create([
         'description' => 'NETFLIX',
@@ -4176,8 +4174,8 @@ test('categorise-matching warns when the match value catches transactions the us
 test('categorise-matching still warns when the match value is blank and the rule falls back to the merchant name', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Entertainment', 'is_hidden' => false]);
-    $other = Category::factory()->create(['name' => 'Education', 'is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['name' => 'Entertainment', 'is_hidden' => false]);
+    $other = Category::factory()->for($user)->create(['name' => 'Education', 'is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->manual()->create([
         'description' => 'NETFLIX',
@@ -4209,8 +4207,8 @@ function contradictionSetup(): array
 {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $target = Category::factory()->create(['name' => 'Entertainment', 'is_hidden' => false]);
-    $other = Category::factory()->create(['name' => 'Education', 'is_hidden' => false]);
+    $target = Category::factory()->for($user)->create(['name' => 'Entertainment', 'is_hidden' => false]);
+    $other = Category::factory()->for($user)->create(['name' => 'Education', 'is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->manual()->create([
         'description' => 'NETFLIX',
@@ -4369,7 +4367,7 @@ test('the move tick is cleared when the listed transactions change and kept when
 
 test('changing the category clears the move tick even when the same transactions stay listed', function () {
     [$user, $account, $target, $other, $source] = contradictionSetup();
-    $music = Category::factory()->create(['name' => 'Music', 'is_hidden' => false]);
+    $music = Category::factory()->for($user)->create(['name' => 'Music', 'is_hidden' => false]);
     $course = contradictingRow($user, $account, $other, 'NETFLIX TRAINING COURSE');
 
     tickMoveContradictions(Livewire::actingAs($user)
@@ -5076,4 +5074,21 @@ test('saving a note on a feed row never unlinks a pair a rule linked while the m
     expect($current->transfer_pair_id)->toBe($credit->id)
         ->and($credit->fresh()->transfer_pair_id)->toBe($current->id)
         ->and($current->transfer_link_source)->toBe(TransferLinkSource::Rule);
+});
+
+test("rejects another user's category via crafted request", function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $theirs = Category::factory()->create(['is_hidden' => false]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->set('descriptionInput', '10 lunch')
+        ->set('accountId', $account->id)
+        ->set('categoryId', $theirs->id)
+        ->call('save')
+        ->assertHasErrors(['categoryId']);
+
+    expect(Transaction::query()->where('user_id', $user->id)->count())->toBe(0);
 });

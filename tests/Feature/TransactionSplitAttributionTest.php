@@ -18,9 +18,9 @@ use Livewire\Livewire;
 test('budget spend follows split lines not the parent category', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $ownCategory = Category::factory()->create();
-    $groceries = Category::factory()->create();
-    $fuel = Category::factory()->create();
+    $ownCategory = Category::factory()->for($user)->create();
+    $groceries = Category::factory()->for($user)->create();
+    $fuel = Category::factory()->for($user)->create();
 
     $budget = Budget::factory()->for($user)->create([
         'category_id' => $groceries->id,
@@ -49,9 +49,9 @@ test('budget spend follows split lines not the parent category', function () {
 test('reports break a split transaction into its line categories without double counting', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $ownCategory = Category::factory()->create();
-    $groceries = Category::factory()->create();
-    $fuel = Category::factory()->create();
+    $ownCategory = Category::factory()->for($user)->create();
+    $groceries = Category::factory()->for($user)->create();
+    $fuel = Category::factory()->for($user)->create();
 
     $transaction = Transaction::factory()->for($user)->for($account)->debit()->create([
         'category_id' => $ownCategory->id,
@@ -82,8 +82,8 @@ test('reports break a split transaction into its line categories without double 
 test('calendar renders one pip per split line and keeps the day total', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
-    $fuel = Category::factory()->create(['name' => 'Fuel']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $fuel = Category::factory()->for($user)->create(['name' => 'Fuel']);
 
     $date = CarbonImmutable::create(2026, 6, 12);
 
@@ -112,8 +112,8 @@ test('calendar renders one pip per split line and keeps the day total', function
 test('category editor count folds a split transaction once per category', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create();
-    $fuel = Category::factory()->create();
+    $groceries = Category::factory()->for($user)->create();
+    $fuel = Category::factory()->for($user)->create();
 
     $transaction = Transaction::factory()->for($user)->for($account)->create([
         'category_id' => null,
@@ -140,8 +140,8 @@ test('category editor count folds a split transaction once per category', functi
 test('dashboard budget spend attributes split debits to their line categories', function () {
     $user = User::factory()->has(Account::factory())->create();
     $account = $user->accounts()->first();
-    $ownCategory = Category::factory()->create();
-    $groceries = Category::factory()->create();
+    $ownCategory = Category::factory()->for($user)->create();
+    $groceries = Category::factory()->for($user)->create();
 
     Budget::factory()->for($user)->create([
         'category_id' => $groceries->id,

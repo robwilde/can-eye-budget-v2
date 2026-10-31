@@ -121,7 +121,7 @@ test('rules are listed and deleting one leaves existing links alone', function (
 });
 
 test('link to hidden account creates the mirror and a rule that auto-links later rows', function () {
-    $transferCategory = Category::factory()->create(['name' => 'Transfer']);
+    $transferCategory = Category::factory()->for($this->user)->create(['name' => 'Transfer']);
     $lone = reviewRow($this->user, $this->optimus, -30000, '2026-09-11', 'Pot top up');
     $lone->forceFill(['category_id' => $transferCategory->id])->save();
 
@@ -199,7 +199,7 @@ test('a pending suggestion carries a possible-transfer badge that disappears onc
 });
 
 test('a row marked not a transfer does not reappear under unmatched transfers', function () {
-    $category = Category::factory()->create(['name' => 'Transfer']);
+    $category = Category::factory()->for($this->user)->create(['name' => 'Transfer']);
     $this->debit->forceFill(['category_id' => $category->id])->save();
 
     $component = Livewire::actingAs($this->user)->test(TransferReview::class);
@@ -238,7 +238,7 @@ test('untracked accounts are not offered in the transaction list account filter'
 });
 
 test('an unmatched transfer row can be dismissed as not a transfer and then counts normally', function () {
-    $category = Category::factory()->create(['name' => 'Transfer']);
+    $category = Category::factory()->for($this->user)->create(['name' => 'Transfer']);
     $lone = reviewRow($this->user, $this->optimus, -12300, '2026-09-12', 'Lone transfer row');
     $lone->forceFill(['category_id' => $category->id])->save();
 
@@ -264,7 +264,7 @@ test('confirming a pair that changed under the reviewer reports it and creates n
 });
 
 test('linking to a hidden account is refused while real opposite rows exist', function () {
-    $category = Category::factory()->create(['name' => 'Transfer']);
+    $category = Category::factory()->for($this->user)->create(['name' => 'Transfer']);
     $lone = reviewRow($this->user, $this->optimus, -9900, '2026-09-11', 'Ambiguous transfer');
     $lone->forceFill(['category_id' => $category->id])->save();
     // Two equally good real credits: ambiguous, so it is never suggested and lands in Unmatched.
@@ -284,7 +284,7 @@ test('linking to a hidden account is refused while real opposite rows exist', fu
 });
 
 test('a refused hidden-account link explains itself and rolls back a newly created account', function () {
-    $category = Category::factory()->create(['name' => 'Transfer']);
+    $category = Category::factory()->for($this->user)->create(['name' => 'Transfer']);
     $lone = reviewRow($this->user, $this->optimus, -9900, '2026-09-11', 'Ambiguous transfer');
     $lone->forceFill(['category_id' => $category->id])->save();
     reviewRow($this->user, $this->cc, 9900, '2026-09-11');
@@ -302,7 +302,7 @@ test('a refused hidden-account link explains itself and rolls back a newly creat
 });
 
 test('the unmatched queue is the bank-feed transfer signal: description or category, imported rows only', function () {
-    $category = Category::factory()->create(['name' => 'Transfer']);
+    $category = Category::factory()->for($this->user)->create(['name' => 'Transfer']);
     reviewRow($this->user, $this->optimus, -1111, '2026-09-12', 'Transfer from savings xxxx1');
     $byCategory = reviewRow($this->user, $this->optimus, -2222, '2026-09-12', 'Optmus to CC');
     $byCategory->forceFill(['category_id' => $category->id])->save();

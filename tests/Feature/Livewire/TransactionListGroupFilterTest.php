@@ -21,8 +21,8 @@ beforeEach(function (): void {
     $this->travelTo(CarbonImmutable::parse('2026-10-15'));
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
-    $this->food = CategoryGroup::factory()->create(['name' => 'Food Group']);
-    $this->savings = CategoryGroup::factory()->create(['name' => 'Savings Group']);
+    $this->food = CategoryGroup::factory()->for($this->user)->create(['name' => 'Food Group']);
+    $this->savings = CategoryGroup::factory()->for($this->user)->create(['name' => 'Savings Group']);
 });
 
 function groupFilterRow(User $user, Account $account, ?Category $category, string $description, string $date = '2026-10-10'): Transaction
@@ -49,10 +49,10 @@ function groupFilterList(User $user, int $groupId): Testable
 }
 
 test('the group filter lists rows in the group root and its inheriting children but not an overriding child', function () {
-    $root = Category::factory()->create(['group_id' => $this->food->id]);
+    $root = Category::factory()->for($this->user)->create(['group_id' => $this->food->id]);
     $inheriting = Category::factory()->withParent($root)->create();
     $override = Category::factory()->withParent($root)->create(['group_id' => $this->savings->id]);
-    $unrelated = Category::factory()->create(['group_id' => $this->savings->id]);
+    $unrelated = Category::factory()->for($this->user)->create(['group_id' => $this->savings->id]);
 
     groupFilterRow($this->user, $this->account, $root, 'ROOT ROW');
     groupFilterRow($this->user, $this->account, $inheriting, 'INHERITING ROW');
@@ -69,7 +69,7 @@ test('the group filter lists rows in the group root and its inheriting children 
 });
 
 test('the group filter keeps rows inside the requested dates and direction', function () {
-    $root = Category::factory()->create(['group_id' => $this->food->id]);
+    $root = Category::factory()->for($this->user)->create(['group_id' => $this->food->id]);
 
     groupFilterRow($this->user, $this->account, $root, 'IN RANGE');
     groupFilterRow($this->user, $this->account, $root, 'LAST MONTH', '2026-09-30');
@@ -89,10 +89,10 @@ test('the group filter keeps rows inside the requested dates and direction', fun
 });
 
 test('a split row with a line in the group is listed and one without is not', function () {
-    $foodRoot = Category::factory()->create(['group_id' => $this->food->id]);
+    $foodRoot = Category::factory()->for($this->user)->create(['group_id' => $this->food->id]);
     $foodChild = Category::factory()->withParent($foodRoot)->create();
-    $savingsRoot = Category::factory()->create(['group_id' => $this->savings->id]);
-    $plain = Category::factory()->create();
+    $savingsRoot = Category::factory()->for($this->user)->create(['group_id' => $this->savings->id]);
+    $plain = Category::factory()->for($this->user)->create();
 
     $mixed = groupFilterRow($this->user, $this->account, null, 'MIXED SPLIT');
     $mixed->splits()->createMany([
@@ -112,7 +112,7 @@ test('a split row with a line in the group is listed and one without is not', fu
 });
 
 test('the group filter never lists another users rows', function () {
-    $root = Category::factory()->create(['group_id' => $this->food->id]);
+    $root = Category::factory()->for($this->user)->create(['group_id' => $this->food->id]);
     $other = User::factory()->create();
     $otherAccount = Account::factory()->for($other)->create();
 
@@ -124,8 +124,24 @@ test('the group filter never lists another users rows', function () {
         ->assertDontSee('THEIR ROW');
 });
 
+test("another user's group id lists nothing and never shows their group name", function () {
+    $other = User::factory()->create();
+    $otherAccount = Account::factory()->for($other)->create();
+    $theirGroup = CategoryGroup::factory()->for($other)->create(['name' => 'Their Group']);
+    $theirRoot = Category::factory()->for($other)->create(['group_id' => $theirGroup->id]);
+    $root = Category::factory()->for($this->user)->create(['group_id' => $this->food->id]);
+
+    groupFilterRow($this->user, $this->account, $root, 'MY ROW');
+    groupFilterRow($other, $otherAccount, $theirRoot, 'THEIR ROW');
+
+    groupFilterList($this->user, $theirGroup->id)
+        ->assertDontSee('MY ROW')
+        ->assertDontSee('THEIR ROW')
+        ->assertDontSee('Their Group');
+});
+
 test('an unknown group id lists nothing rather than everything', function () {
-    $root = Category::factory()->create(['group_id' => $this->food->id]);
+    $root = Category::factory()->for($this->user)->create(['group_id' => $this->food->id]);
     groupFilterRow($this->user, $this->account, $root, 'FOOD ROW');
     groupFilterRow($this->user, $this->account, null, 'LOOSE ROW');
 
@@ -142,7 +158,7 @@ test('an active group filter shows its name in the heading and a chip', function
 });
 
 test('clearing the chip removes the group filter and restores every row', function () {
-    $root = Category::factory()->create(['group_id' => $this->food->id]);
+    $root = Category::factory()->for($this->user)->create(['group_id' => $this->food->id]);
     groupFilterRow($this->user, $this->account, $root, 'FOOD ROW');
     groupFilterRow($this->user, $this->account, null, 'LOOSE ROW');
 
@@ -166,13 +182,13 @@ test('changing the group filter returns to the first page', function () {
 });
 
 test('categoryIdsInGroup returns ascending ids resolving to the group through their anchor', function () {
-    $root = Category::factory()->create(['group_id' => $this->food->id]);
+    $root = Category::factory()->for($this->user)->create(['group_id' => $this->food->id]);
     $child = Category::factory()->withParent($root)->create();
     $grandchild = Category::factory()->withParent($child)->create();
     $override = Category::factory()->withParent($root)->create(['group_id' => $this->savings->id]);
     $overrideChild = Category::factory()->withParent($override)->create();
 
-    $map = CategoryGroupMap::load();
+    $map = CategoryGroupMap::load($this->user->id);
 
     expect($map->categoryIdsInGroup($this->food->id))->toBe([$root->id, $child->id, $grandchild->id])
         ->and($map->categoryIdsInGroup($this->savings->id))->toBe([$override->id, $overrideChild->id])

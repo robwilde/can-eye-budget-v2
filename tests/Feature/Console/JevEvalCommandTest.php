@@ -20,10 +20,10 @@ beforeEach(function () {
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
 
-    $this->food = Category::factory()->create(['name' => 'Food', 'parent_id' => null]);
-    $this->groceries = Category::factory()->create(['name' => 'Groceries', 'parent_id' => $this->food->id]);
-    $this->dining = Category::factory()->create(['name' => 'Dining', 'parent_id' => $this->food->id]);
-    $this->transport = Category::factory()->create(['name' => 'Transport', 'parent_id' => null]);
+    $this->food = Category::factory()->for($this->user)->create(['name' => 'Food', 'parent_id' => null]);
+    $this->groceries = Category::factory()->for($this->user)->create(['name' => 'Groceries', 'parent_id' => $this->food->id]);
+    $this->dining = Category::factory()->for($this->user)->create(['name' => 'Dining', 'parent_id' => $this->food->id]);
+    $this->transport = Category::factory()->for($this->user)->create(['name' => 'Transport', 'parent_id' => null]);
 });
 
 /** A manually categorised merchant debit. */
@@ -171,4 +171,32 @@ test('reports accuracy on a held-out fixture without touching transactions', fun
         ->assertSuccessful();
 
     expect(Transaction::query()->orderBy('id')->get()->toArray())->toBe($before);
+});
+
+test('pools same-named top-level categories of different users into one row', function () {
+    $other = User::factory()->create();
+    $otherAccount = Account::factory()->for($other)->create();
+    $otherFood = Category::factory()->for($other)->create(['name' => 'Food', 'parent_id' => null]);
+    $otherGroceries = Category::factory()->for($other)->create(['name' => 'Groceries', 'parent_id' => $otherFood->id]);
+    $otherDining = Category::factory()->for($other)->create(['name' => 'Dining', 'parent_id' => $otherFood->id]);
+    $otherTransport = Category::factory()->for($other)->create(['name' => 'Transport', 'parent_id' => null]);
+    $otherTest = (object) ['user' => $other, 'account' => $otherAccount];
+
+    foreach (range(1, 8) as $day) {
+        jevTruth($this, 'OLD'.chr(64 + $day), $this->transport, "2026-01-0{$day}");
+        jevTruth($otherTest, 'BOLD'.chr(64 + $day), $otherTransport, "2026-01-0{$day}");
+    }
+    jevTruth($this, 'ALDI', $this->groceries, '2026-06-01');
+    jevTruth($this, 'SUSHI TRAIN', $this->dining, '2026-06-02');
+    jevTruth($otherTest, 'COLES', $otherGroceries, '2026-06-01');
+    jevTruth($otherTest, 'PIZZA HUT', $otherDining, '2026-06-02');
+
+    fakeJev(['ALDI' => 'Food / Groceries', 'SUSHI TRAIN' => 'Food / Groceries', 'COLES' => 'Food / Groceries', 'PIZZA HUT' => 'Food / Groceries']);
+
+    $this->artisan('categories:jev-eval')
+        ->expectsOutputToContain('Held-out merchants: 4')
+        ->expectsTable(['Top-level category', 'n', 'no hint', 'with hint'], [
+            ['Food', '4', '50.0% (2/4)', '50.0% (2/4)'],
+        ])
+        ->assertSuccessful();
 });

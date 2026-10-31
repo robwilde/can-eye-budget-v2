@@ -528,7 +528,7 @@ final class TransactionList extends Component
 
     public function updatedClusterIntent(): void
     {
-        $options = $this->narrowedByIntent(Category::visibleSortedByFullPath());
+        $options = $this->narrowedByIntent(Category::visibleSortedByFullPath($this->authenticatedUser()->id));
 
         if ($options->contains('id', (int) $this->bulkCategoryId)) {
             return;
@@ -1276,7 +1276,7 @@ final class TransactionList extends Component
 
         $categoryIds = array_column($lines, 'category_id');
 
-        if (Category::query()->whereIn('id', $categoryIds)->count() !== count(array_unique($categoryIds))) {
+        if (Category::query()->where('user_id', auth()->id())->whereIn('id', $categoryIds)->count() !== count(array_unique($categoryIds))) {
             $this->splitError = 'One or more categories are invalid.';
 
             return;
@@ -1519,10 +1519,10 @@ final class TransactionList extends Component
             'clusterRows' => $clusterRows,
             'accounts' => $accounts,
             'categoryName' => $this->category
-                ? Category::query()->whereKey($this->category)->value('name')
+                ? Category::query()->where('user_id', auth()->id())->whereKey($this->category)->value('name')
                 : null,
             'groupName' => $this->group
-                ? CategoryGroup::query()->whereKey($this->group)->value('name')
+                ? CategoryGroup::query()->where('user_id', auth()->id())->whereKey($this->group)->value('name')
                 : null,
             'totals' => TransactionTotals::summarise(
                 $this->queryFor($filters),
@@ -1536,9 +1536,9 @@ final class TransactionList extends Component
             'suggestedTransferCount' => app(TransferReviewQueue::class)->suggestedPairs(auth()->user())->count(),
             'showCustomRange' => $periodEnum === TransactionPeriod::Custom,
             'gmailEnabled' => app(GmailServiceContract::class)->isConfigured(auth()->user()),
-            'splitCategories' => Category::visibleSortedByFullPath(),
+            'splitCategories' => Category::visibleSortedByFullPath($this->authenticatedUser()->id),
             'clusterSuggestion' => $this->clusterSuggestion(),
-            'bulkCategories' => $this->narrowedByIntent(Category::visibleSortedByFullPath()),
+            'bulkCategories' => $this->narrowedByIntent(Category::visibleSortedByFullPath($this->authenticatedUser()->id)),
             'selectionCount' => $this->selectionCount(),
             'pageEligibleIds' => $pageEligibleIds,
             'matchingCount' => $this->matchingEligibleCount(),
@@ -1614,7 +1614,7 @@ final class TransactionList extends Component
 
     private function categoryMap(): CategoryGroupMap
     {
-        return $this->categoryMapCache ??= CategoryGroupMap::load();
+        return $this->categoryMapCache ??= CategoryGroupMap::load($this->authenticatedUser()->id);
     }
 
     /**
@@ -2030,7 +2030,7 @@ final class TransactionList extends Component
             return null;
         }
 
-        if (! Category::visible()->whereKey($categoryId)->exists()) {
+        if (! Category::visible()->where('user_id', auth()->id())->whereKey($categoryId)->exists()) {
             $this->bulkError = 'That category is not available.';
 
             return null;
@@ -2054,7 +2054,7 @@ final class TransactionList extends Component
 
         $categoryId = (int) $this->bulkCategoryId;
 
-        if ($categoryId <= 0 || ! Category::visible()->whereKey($categoryId)->exists()) {
+        if ($categoryId <= 0 || ! Category::visible()->where('user_id', auth()->id())->whereKey($categoryId)->exists()) {
             return;
         }
 
@@ -2415,7 +2415,7 @@ final class TransactionList extends Component
 
         $user = $this->authenticatedUser();
         $chosen = (int) $this->bulkCategoryId;
-        $category = $chosen > 0 ? Category::allWithLinkedParents()->firstWhere('id', $chosen) : null;
+        $category = $chosen > 0 ? Category::allWithLinkedParents($user->id)->firstWhere('id', $chosen) : null;
 
         return [
             'payee' => $payee,

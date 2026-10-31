@@ -30,7 +30,7 @@ test('transaction list page renders with data', function () {
 test('category filter from URL shows correct transactions', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -160,7 +160,7 @@ test('multiple filters work together via URL', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create(['name' => 'Everyday']);
     $otherAccount = Account::factory()->for($user)->create(['name' => 'Savings']);
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -211,7 +211,7 @@ test('period filter changes update the list', function () {
 test('bulk bar category dropdown opens above the input and stays on screen', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    Category::factory()->create(['name' => 'Groceries']);
+    Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     $transaction = Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,

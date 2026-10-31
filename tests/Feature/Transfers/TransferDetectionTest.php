@@ -196,7 +196,7 @@ test('the analysis pipeline links transfers before other stages run and suggests
 });
 
 test('a suggested pair still counts until confirmed, then neither leg counts', function () {
-    $category = Category::factory()->create(['name' => 'Transfer']);
+    $category = Category::factory()->for($this->user)->create(['name' => 'Transfer']);
     $debit = feedRow($this->user, $this->optimus, -252100, '2026-09-10');
     $debit->update(['category_id' => $category->id]);
     $credit = feedRow($this->user, $this->cc, 252100, '2026-09-10');
@@ -243,8 +243,8 @@ test('a suggested pair is unchanged in report totals until confirmed', function 
 });
 
 test('reports and the eloquent scope agree on what a transfer is', function () {
-    $transferCategory = Category::factory()->create(['name' => 'Transfer']);
-    $child = Category::factory()->create(['name' => 'Savings', 'parent_id' => $transferCategory->id]);
+    $transferCategory = Category::factory()->for($this->user)->create(['name' => 'Transfer']);
+    $child = Category::factory()->for($this->user)->create(['name' => 'Savings', 'parent_id' => $transferCategory->id]);
     $plain = feedRow($this->user, $this->optimus, 1000, '2026-09-05');
     $paired = feedRow($this->user, $this->optimus, 2000, '2026-09-06');
     $pairedLeg = feedRow($this->user, $this->cc, -2000, '2026-09-06');
@@ -277,7 +277,7 @@ test('rows without a transfer signal are never suggested, however well the amoun
 });
 
 test('a row categorised as Transfer is a candidate even without the keyword', function () {
-    $category = Category::factory()->create(['name' => 'Transfer']);
+    $category = Category::factory()->for($this->user)->create(['name' => 'Transfer']);
     $debit = feedRow($this->user, $this->optimus, -252100, '2026-09-10', 'Optmus to CC');
     $debit->update(['category_id' => $category->id]);
     $credit = feedRow($this->user, $this->cc, 252100, '2026-09-10', 'Deposit');
@@ -338,7 +338,7 @@ test('rules only link imported rows, never manual ones', function () {
 });
 
 test('linking gives an uncategorised leg the Transfer category and refuses a row linked elsewhere', function () {
-    $category = Category::factory()->create(['name' => 'Transfer']);
+    $category = Category::factory()->for($this->user)->create(['name' => 'Transfer']);
     $debit = feedRow($this->user, $this->optimus, -5000, '2026-09-10');
     $debit->update(['category_id' => $category->id]);
     $credit = feedRow($this->user, $this->cc, 5000, '2026-09-10');
@@ -353,7 +353,7 @@ test('linking gives an uncategorised leg the Transfer category and refuses a row
 });
 
 test('the #354/#92 pair: suggested, still income until confirmed, then a rule links the next one', function () {
-    $category = Category::factory()->create(['name' => 'Transfer']);
+    $category = Category::factory()->for($this->user)->create(['name' => 'Transfer']);
     $debit = feedRow($this->user, $this->optimus, -252100, '2026-09-10', 'Transfer Optimus to CC to SAV xxxx4373 MOBILE#2532147918');
     $debit->update(['category_id' => $category->id]);
     $credit = feedRow($this->user, $this->cc, 252100, '2026-09-10', 'Transfer Optimus to CC from SAV xxxx5066 MOBILE#2532147918');
@@ -441,7 +441,7 @@ test('confirming a pair claimed elsewhere writes no rules and reports failure', 
 });
 
 test('unlinking a transfer whose legs are categorised Transfer makes them count again', function () {
-    $category = Category::factory()->create(['name' => 'Transfer']);
+    $category = Category::factory()->for($this->user)->create(['name' => 'Transfer']);
     $debit = feedRow($this->user, $this->optimus, -252100, '2026-09-10');
     $debit->update(['category_id' => $category->id]);
     $credit = feedRow($this->user, $this->cc, 252100, '2026-09-10');
@@ -464,7 +464,7 @@ test('unlinking a transfer whose legs are categorised Transfer makes them count 
 });
 
 test('a suggestion rejected as not a transfer counts normally even when categorised Transfer', function () {
-    $category = Category::factory()->create(['name' => 'Transfer']);
+    $category = Category::factory()->for($this->user)->create(['name' => 'Transfer']);
     $debit = feedRow($this->user, $this->optimus, -5000, '2026-09-10');
     $debit->update(['category_id' => $category->id]);
     feedRow($this->user, $this->cc, 5000, '2026-09-10');
@@ -759,7 +759,7 @@ test('a confirmed pair confirmed again is a no-op that does not recreate a delet
 });
 
 test('a row filed under Transfer by a category rule is detected in the same pipeline run', function () {
-    $category = Category::factory()->create(['name' => 'Transfer']);
+    $category = Category::factory()->for($this->user)->create(['name' => 'Transfer']);
     $group = App\Models\UserRuleGroup::factory()->for($this->user)->create();
     App\Models\UserRule::factory()->create([
         'user_id' => $this->user->id,

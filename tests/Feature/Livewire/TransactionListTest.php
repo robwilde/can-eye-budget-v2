@@ -68,8 +68,8 @@ test('shows only current user transactions', function () {
 test('filters by category_id', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
-    $transport = Category::factory()->create(['name' => 'Transport']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $transport = Category::factory()->for($user)->create(['name' => 'Transport']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -94,7 +94,7 @@ test('filters by category_id', function () {
 test('renders a category filter combobox', function () {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
-    Category::factory()->create(['name' => 'Groceries']);
+    Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     Livewire::actingAs($user)
         ->test(TransactionList::class)
@@ -106,8 +106,8 @@ test('renders a category filter combobox', function () {
 test('clearing the category filter shows every transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
-    $transport = Category::factory()->create(['name' => 'Transport']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $transport = Category::factory()->for($user)->create(['name' => 'Transport']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -158,7 +158,7 @@ test('filters by period', function () {
 test('shows transaction description amount date and category', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Groceries']);
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -185,7 +185,7 @@ test('empty state when no matching transactions', function () {
 
 test('shows category name in header when filtered', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create(['name' => 'Groceries']);
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     Livewire::actingAs($user)
         ->test(TransactionList::class, ['category' => $category->id])
@@ -504,7 +504,7 @@ test('all filters work together', function () {
     $user = User::factory()->create();
     $accountA = Account::factory()->for($user)->create(['name' => 'Everyday']);
     $accountB = Account::factory()->for($user)->create(['name' => 'Savings']);
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $accountA->id,
@@ -548,7 +548,7 @@ test('all filters work together', function () {
 test('filter state persists via url query string', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     Livewire::actingAs($user)
         ->test(TransactionList::class, [
@@ -1361,7 +1361,7 @@ test('changing custom range dates stores them in the session', function () {
 test('categorised filter shows only transactions with a category', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -1386,7 +1386,7 @@ test('categorised filter shows only transactions with a category', function () {
 test('uncategorised filter shows only transactions without a category', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -1412,7 +1412,7 @@ test('a linked transfer leg whose partner is categorised is categorised, not unc
     $user = User::factory()->create();
     $from = Account::factory()->for($user)->create();
     $to = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     $debit = Transaction::factory()->for($user)->debit()->create([
         'account_id' => $from->id,
@@ -1484,7 +1484,7 @@ test('a linked transfer leg whose partner is split is categorised, not uncategor
     $user = User::factory()->create();
     $from = Account::factory()->for($user)->create();
     $to = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     $debit = Transaction::factory()->for($user)->debit()->create([
         'account_id' => $from->id,
@@ -1514,7 +1514,7 @@ test('a linked transfer leg whose partner is split is categorised, not uncategor
 test('invalid categorised value normalizes to all', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -1787,8 +1787,8 @@ function splitTransaction(User $user, int $amount = -10000): Transaction
 test('saveSplit persists exact-cover lines carrying the parent sign', function () {
     $user = User::factory()->create();
     $transaction = splitTransaction($user, -10000);
-    $groceries = Category::factory()->create();
-    $fuel = Category::factory()->create();
+    $groceries = Category::factory()->for($user)->create();
+    $fuel = Category::factory()->for($user)->create();
 
     Livewire::actingAs($user)
         ->test(TransactionList::class)
@@ -1819,8 +1819,8 @@ test('saveSplit persists exact-cover lines carrying the parent sign', function (
 test('saveSplit rejects a line note longer than 255 characters', function () {
     $user = User::factory()->create();
     $transaction = splitTransaction($user, -10000);
-    $groceries = Category::factory()->create();
-    $fuel = Category::factory()->create();
+    $groceries = Category::factory()->for($user)->create();
+    $fuel = Category::factory()->for($user)->create();
 
     Livewire::actingAs($user)
         ->test(TransactionList::class)
@@ -1838,8 +1838,8 @@ test('saveSplit rejects a line note longer than 255 characters', function () {
 test('saveSplit rejects lines that do not cover the total', function () {
     $user = User::factory()->create();
     $transaction = splitTransaction($user, -10000);
-    $groceries = Category::factory()->create();
-    $fuel = Category::factory()->create();
+    $groceries = Category::factory()->for($user)->create();
+    $fuel = Category::factory()->for($user)->create();
 
     Livewire::actingAs($user)
         ->test(TransactionList::class)
@@ -1857,7 +1857,7 @@ test('saveSplit rejects lines that do not cover the total', function () {
 test('saveSplit requires a category on every line', function () {
     $user = User::factory()->create();
     $transaction = splitTransaction($user, -10000);
-    $groceries = Category::factory()->create();
+    $groceries = Category::factory()->for($user)->create();
 
     Livewire::actingAs($user)
         ->test(TransactionList::class)
@@ -1875,7 +1875,7 @@ test('saveSplit requires a category on every line', function () {
 test('saveSplit rejects a single-line split', function () {
     $user = User::factory()->create();
     $transaction = splitTransaction($user, -10000);
-    $groceries = Category::factory()->create();
+    $groceries = Category::factory()->for($user)->create();
 
     Livewire::actingAs($user)
         ->test(TransactionList::class)
@@ -1892,8 +1892,8 @@ test('saveSplit rejects a single-line split', function () {
 test('unsplit removes every split line and reverts to the own category', function () {
     $user = User::factory()->create();
     $transaction = splitTransaction($user, -10000);
-    $groceries = Category::factory()->create();
-    $fuel = Category::factory()->create();
+    $groceries = Category::factory()->for($user)->create();
+    $fuel = Category::factory()->for($user)->create();
 
     $transaction->splits()->createMany([
         ['category_id' => $groceries->id, 'amount' => -7000, 'position' => 0],
@@ -1931,8 +1931,8 @@ test('toggleSplit refuses another users transaction', function () {
 test('category filter matches transactions by their split lines', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $ownCategory = Category::factory()->create();
-    $groceries = Category::factory()->create();
+    $ownCategory = Category::factory()->for($user)->create();
+    $groceries = Category::factory()->for($user)->create();
 
     $transaction = Transaction::factory()->for($user)->for($account)->debit()->create([
         'category_id' => $ownCategory->id,
@@ -1954,8 +1954,8 @@ test('category filter matches transactions by their split lines', function () {
 test('categorised filter treats a split transaction as categorised', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create();
-    $fuel = Category::factory()->create();
+    $groceries = Category::factory()->for($user)->create();
+    $fuel = Category::factory()->for($user)->create();
 
     $transaction = Transaction::factory()->for($user)->for($account)->debit()->create([
         'category_id' => null,
@@ -1982,9 +1982,9 @@ test('categorised filter treats a split transaction as categorised', function ()
 test('each row shows its category in its own cell', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create(['name' => 'Everyday']);
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
-    $catA = Category::factory()->create(['name' => 'Cat A']);
-    $catB = Category::factory()->create(['name' => 'Cat B']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $catA = Category::factory()->for($user)->create(['name' => 'Cat A']);
+    $catB = Category::factory()->for($user)->create(['name' => 'Cat B']);
 
     $categorised = Transaction::factory()->for($user)->for($account)->debit()->create([
         'category_id' => $groceries->id,
@@ -2021,7 +2021,7 @@ test('each row shows its category in its own cell', function () {
 test('a row whose meta line would only carry its category keeps the label for phones alone', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     Transaction::factory()->for($user)->for($account)->debit()->create([
         'category_id' => $groceries->id,
@@ -2063,7 +2063,7 @@ test('a transfer-paired transaction cannot be split', function () {
 test('saveSplit rejects a line whose category select was never chosen', function () {
     $user = User::factory()->create();
     $transaction = splitTransaction($user, -10000);
-    $groceries = Category::factory()->create();
+    $groceries = Category::factory()->for($user)->create();
 
     Livewire::actingAs($user)
         ->test(TransactionList::class)
@@ -2208,8 +2208,8 @@ test('toggleSplit pre-fills lines from a linked receipt email', function () {
     $user = User::factory()->create();
     $transaction = splitTransaction($user, -5599);
     TransactionEmail::factory()->for($user)->for($transaction)->create(['details' => twoItemReceipt()]);
-    $a = Category::factory()->create();
-    $b = Category::factory()->create();
+    $a = Category::factory()->for($user)->create();
+    $b = Category::factory()->for($user)->create();
 
     Livewire::actingAs($user)
         ->test(TransactionList::class)
@@ -2274,8 +2274,8 @@ test('toggleSplit prefers the receipt whose items add up to the transaction amou
 test('toggleSplit keeps saved splits ahead of a linked receipt', function () {
     $user = User::factory()->create();
     $transaction = splitTransaction($user, -5599);
-    $groceries = Category::factory()->create();
-    $fuel = Category::factory()->create();
+    $groceries = Category::factory()->for($user)->create();
+    $fuel = Category::factory()->for($user)->create();
     $transaction->splits()->createMany([
         ['category_id' => $groceries->id, 'amount' => -4000, 'notes' => 'food', 'position' => 0],
         ['category_id' => $fuel->id, 'amount' => -1599, 'notes' => 'fuel', 'position' => 1],
@@ -2293,7 +2293,7 @@ test('toggleSplit keeps saved splits ahead of a linked receipt', function () {
 
 test('toggleSplit falls back to blank lines when the linked email has no line items', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     $transaction = splitTransaction($user, -1601);
     $transaction->update(['category_id' => $category->id]);
     TransactionEmail::factory()->for($user)->for($transaction)->create(['details' => [
@@ -2327,8 +2327,8 @@ test('toggleSplit caps a pre-filled note at 255 characters without splitting mul
             ['merchant' => 'Petbarn', 'reference' => '2', 'installment' => '1 of 4', 'amount' => 1000],
         ],
     ]]);
-    $a = Category::factory()->create();
-    $b = Category::factory()->create();
+    $a = Category::factory()->for($user)->create();
+    $b = Category::factory()->for($user)->create();
 
     $component = Livewire::actingAs($user)
         ->test(TransactionList::class)
@@ -2343,4 +2343,23 @@ test('toggleSplit caps a pre-filled note at 255 characters without splitting mul
         ->assertSet('splitError', null);
 
     expect($transaction->fresh()->splits()->count())->toBe(2);
+});
+
+test("saveSplit rejects another user's category", function () {
+    $user = User::factory()->create();
+    $transaction = splitTransaction($user, -10000);
+    $groceries = Category::factory()->for($user)->create();
+    $theirs = Category::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('toggleSplit', $transaction->id)
+        ->set('splitLines', [
+            ['category_id' => $groceries->id, 'amount' => '70.00', 'notes' => ''],
+            ['category_id' => $theirs->id, 'amount' => '30.00', 'notes' => ''],
+        ])
+        ->call('saveSplit')
+        ->assertSet('splitError', 'One or more categories are invalid.');
+
+    $this->assertDatabaseCount('transaction_splits', 0);
 });

@@ -565,7 +565,7 @@ final class CategoryReport extends Component
 
         $map = [];
 
-        foreach (Category::query()->get(['id', 'name', 'parent_id', 'icon', 'color']) as $category) {
+        foreach (Category::query()->where('user_id', $this->user()->id)->get(['id', 'name', 'parent_id', 'icon', 'color']) as $category) {
             $map[$category->id] = [
                 'id' => $category->id,
                 'name' => $category->name,

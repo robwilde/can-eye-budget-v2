@@ -16,7 +16,7 @@ beforeEach(function () {
 
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
-    ensureSeedCategories();
+    ensureSeedCategories($this->user);
 });
 
 function mineRulesArgs(User $user, Account $account, array $extra = []): array
@@ -44,18 +44,20 @@ function triggerValues(): Illuminate\Support\Collection
  * categories at specific ids. Paths are read back off the unresolved seeds
  * CategorySeedRules reports, which is the only public view of them.
  */
-function ensureSeedCategories(): void
+function ensureSeedCategories(User $user): void
 {
-    foreach (app(CategorySeedRules::class)->resolve()['skipped'] as $entry) {
+    foreach (app(CategorySeedRules::class)->resolve($user->id)['skipped'] as $entry) {
         $path = mb_substr($entry, (int) mb_strpos($entry, ' → ') + mb_strlen(' → '));
         $parent = null;
 
         foreach (explode(' / ', $path) as $segment) {
             $parent = Category::query()
+                ->where('user_id', $user->id)
                 ->where('name', $segment)
                 ->where('parent_id', $parent?->id)
                 ->first()
                 ?? Category::query()->create([
+                    'user_id' => $user->id,
                     'name' => $segment,
                     'parent_id' => $parent?->id,
                     'is_hidden' => false,
@@ -65,7 +67,7 @@ function ensureSeedCategories(): void
 }
 
 test('mines an unambiguous merchant into a rule and categorises the existing sibling', function () {
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($this->user)->create();
     categorised($this->user, $this->account, 'VISA -QUOKKA LABS             CITY AU  111111 #7173', $category->id);
     $sibling = Transaction::factory()->for($this->user)->for($this->account)->manual()->create([
         'description' => 'VISA -QUOKKA LABS             CITY AU  222222 #7173',
@@ -85,8 +87,8 @@ test('mines an unambiguous merchant into a rule and categorises the existing sib
 });
 
 test('reports a merchant with two categories as ambiguous and creates no rule', function () {
-    $catA = Category::factory()->create();
-    $catB = Category::factory()->create();
+    $catA = Category::factory()->for($this->user)->create();
+    $catB = Category::factory()->for($this->user)->create();
     categorised($this->user, $this->account, 'VISA -NUMBAT CO               CITY AU  111111 #7173', $catA->id);
     categorised($this->user, $this->account, 'VISA -NUMBAT CO               CITY AU  222222 #7173', $catB->id);
 
@@ -98,7 +100,7 @@ test('reports a merchant with two categories as ambiguous and creates no rule', 
 });
 
 test('does not duplicate a rule that already covers the merchant with the same category', function () {
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($this->user)->create();
     $group = UserRuleGroup::factory()->for($this->user)->create();
     UserRule::factory()->autoApply()->create([
         'user_id' => $this->user->id,
@@ -114,8 +116,8 @@ test('does not duplicate a rule that already covers the merchant with the same c
 });
 
 test('reports a conflicting rule and creates no rule for that merchant', function () {
-    $catA = Category::factory()->create();
-    $catB = Category::factory()->create();
+    $catA = Category::factory()->for($this->user)->create();
+    $catB = Category::factory()->for($this->user)->create();
     $group = UserRuleGroup::factory()->for($this->user)->create();
     UserRule::factory()->autoApply()->create([
         'user_id' => $this->user->id,
@@ -136,7 +138,7 @@ test('reports a conflicting rule and creates no rule for that merchant', functio
 });
 
 test('dry run writes no rules and leaves transactions uncategorised', function () {
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($this->user)->create();
     categorised($this->user, $this->account, 'VISA -QUOKKA LABS             CITY AU  111111 #7173', $category->id);
     $sibling = Transaction::factory()->for($this->user)->for($this->account)->manual()->create([
         'description' => 'VISA -QUOKKA LABS             CITY AU  222222 #7173',
@@ -155,8 +157,8 @@ test('dry run writes no rules and leaves transactions uncategorised', function (
 });
 
 test('coverage excludes narrowed candidates the CSV cannot represent instead of scoring them against placeholder fields', function () {
-    $coffee = Category::factory()->create();
-    $equipment = Category::factory()->create();
+    $coffee = Category::factory()->for($this->user)->create();
+    $equipment = Category::factory()->for($this->user)->create();
     categorised($this->user, $this->account, 'ACME COFFEE  BRISBANE', $coffee->id)->update(['amount' => 450]);
     categorised($this->user, $this->account, 'ACME COFFEE  SYDNEY', $coffee->id)->update(['amount' => 650]);
     categorised($this->user, $this->account, 'ACME COFFEE MACHINES  SYDNEY', $equipment->id)->update(['amount' => 89900]);

@@ -25,7 +25,7 @@ beforeEach(function (): void {
     $this->travelTo(CarbonImmutable::parse('2026-06-15'));
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
-    $this->category = Category::factory()->create(['is_hidden' => false]);
+    $this->category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 });
 
 function bulkTxn(User $user, Account $account, array $overrides = []): Transaction
@@ -119,7 +119,7 @@ it('refuses to categorise a transfer even when its id is selected', function () 
 });
 
 it('refuses to categorise a split transaction even when its id is selected', function () {
-    $splitCategory = Category::factory()->create(['is_hidden' => false]);
+    $splitCategory = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $txn = bulkTxn($this->user, $this->account);
     $txn->splits()->create([
         'category_id' => $splitCategory->id,
@@ -137,7 +137,7 @@ it('refuses to categorise a split transaction even when its id is selected', fun
 });
 
 it('rejects an empty or hidden category without writing anything', function () {
-    $hidden = Category::factory()->create(['is_hidden' => true]);
+    $hidden = Category::factory()->for($this->user)->create(['is_hidden' => true]);
     $txn = bulkTxn($this->user, $this->account);
 
     $component = Livewire::actingAs($this->user)
@@ -213,7 +213,7 @@ it('excludes transfers and splits from the select-all-matching count and write',
     $other = bulkTxn($this->user, $this->account);
     $transfer = bulkTxn($this->user, $this->account, ['transfer_pair_id' => $other->id]);
 
-    $splitCategory = Category::factory()->create(['is_hidden' => false]);
+    $splitCategory = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $split = bulkTxn($this->user, $this->account);
     $split->splits()->create([
         'category_id' => $splitCategory->id,
@@ -553,7 +553,7 @@ it('leaves an unselected planned sibling untouched while a single edit still pro
     // out, so planned grouping is unchanged for every other writer.
     $selected->fresh()->update(['category_id' => $this->category->id, 'category_source' => null]);
     $sibling = bulkTxn($this->user, $this->account, ['planned_transaction_id' => $planned->id]);
-    $secondCategory = Category::factory()->create(['is_hidden' => false]);
+    $secondCategory = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $selected->fresh()->update(['category_id' => $secondCategory->id]);
 
@@ -804,4 +804,19 @@ it('mirrors nothing into the checkboxes when the selected cluster is collapsed',
     // Nothing is on screen to tick, and the scope still carries the write.
     expect($component->get('selected'))->toBe([])
         ->and($component->viewData('selectionCount'))->toBe(4);
+});
+
+it("refuses another user's category without writing anything", function () {
+    $theirs = Category::factory()->create(['is_hidden' => false]);
+    $txn = bulkTxn($this->user, $this->account);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('selected', [$txn->id => true])
+        ->set('bulkCategoryId', (string) $theirs->id)
+        ->call('applyCategoryToSelection');
+
+    expect($component->get('bulkError'))->toBe('That category is not available.')
+        ->and($txn->fresh()->category_id)->toBeNull()
+        ->and($component->viewData('bulkCategories')->pluck('id')->all())->not->toContain($theirs->id);
 });

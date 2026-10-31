@@ -29,11 +29,11 @@ beforeEach(function () {
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
 
-    $this->groceries = Category::factory()->create(['name' => 'Groceries', 'parent_id' => null, 'budget_tag' => BudgetTag::Needs]);
-    $this->eatingOut = Category::factory()->create(['name' => 'Eating Out', 'parent_id' => null, 'budget_tag' => BudgetTag::Wants]);
-    $this->restaurant = Category::factory()->create(['name' => 'Restaurant', 'parent_id' => $this->eatingOut->id]);
-    $this->quickFoods = Category::factory()->create(['name' => 'Quick Foods', 'parent_id' => $this->eatingOut->id]);
-    $this->income = Category::factory()->create(['name' => 'Income', 'parent_id' => null, 'budget_tag' => null]);
+    $this->groceries = Category::factory()->for($this->user)->create(['name' => 'Groceries', 'parent_id' => null, 'budget_tag' => BudgetTag::Needs]);
+    $this->eatingOut = Category::factory()->for($this->user)->create(['name' => 'Eating Out', 'parent_id' => null, 'budget_tag' => BudgetTag::Wants]);
+    $this->restaurant = Category::factory()->for($this->user)->create(['name' => 'Restaurant', 'parent_id' => $this->eatingOut->id]);
+    $this->quickFoods = Category::factory()->for($this->user)->create(['name' => 'Quick Foods', 'parent_id' => $this->eatingOut->id]);
+    $this->income = Category::factory()->for($this->user)->create(['name' => 'Income', 'parent_id' => null, 'budget_tag' => null]);
 });
 
 function payeeRow(object $test, string $merchant, array $overrides = []): Transaction

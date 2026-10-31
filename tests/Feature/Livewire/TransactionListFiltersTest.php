@@ -59,9 +59,9 @@ function listedIds(Testable $component): array
 }
 
 it('includes subcategories when filtering by a parent category', function () {
-    $food = Category::factory()->create(['is_hidden' => false]);
+    $food = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $groceries = Category::factory()->withParent($food)->create();
-    $other = Category::factory()->create();
+    $other = Category::factory()->for($this->user)->create();
     $inFood = filterRow($this->user, $this->account, ['category_id' => $food->id]);
     $inGroceries = filterRow($this->user, $this->account, ['category_id' => $groceries->id]);
     filterRow($this->user, $this->account, ['category_id' => $other->id]);
@@ -72,7 +72,7 @@ it('includes subcategories when filtering by a parent category', function () {
 });
 
 it('does not widen a child category filter to its parent', function () {
-    $food = Category::factory()->create();
+    $food = Category::factory()->for($this->user)->create();
     $groceries = Category::factory()->withParent($food)->create();
     filterRow($this->user, $this->account, ['category_id' => $food->id]);
     $inGroceries = filterRow($this->user, $this->account, ['category_id' => $groceries->id]);
@@ -267,10 +267,10 @@ it('totals only the users own transactions', function () {
 });
 
 it('carries the amount, status and category filters into a bulk select-all scope', function () {
-    $food = Category::factory()->create(['is_hidden' => false]);
+    $food = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $groceries = Category::factory()->withParent($food)->create();
-    $target = Category::factory()->create(['is_hidden' => false]);
-    $unrelated = Category::factory()->create(['is_hidden' => false]);
+    $target = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $unrelated = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $match = filterRow($this->user, $this->account, ['amount' => 5000, 'category_id' => $groceries->id]);
     $tooSmall = filterRow($this->user, $this->account, ['amount' => 1000, 'category_id' => $groceries->id]);
@@ -346,8 +346,8 @@ it('survives a status list holding non-string entries', function () {
 });
 
 it('totals a split transaction by the split lines inside the filtered category', function () {
-    $groceries = Category::factory()->create();
-    $fuel = Category::factory()->create();
+    $groceries = Category::factory()->for($this->user)->create();
+    $fuel = Category::factory()->for($this->user)->create();
     $split = filterRow($this->user, $this->account, ['amount' => 10000]);
     TransactionSplit::factory()->create(['transaction_id' => $split->id, 'category_id' => $groceries->id, 'amount' => 2000]);
     TransactionSplit::factory()->create(['transaction_id' => $split->id, 'category_id' => $fuel->id, 'amount' => 8000]);
@@ -360,7 +360,7 @@ it('totals a split transaction by the split lines inside the filtered category',
 });
 
 it('totals the whole amount of a split transaction when no category is filtered', function () {
-    $groceries = Category::factory()->create();
+    $groceries = Category::factory()->for($this->user)->create();
     $split = filterRow($this->user, $this->account, ['amount' => 10000]);
     TransactionSplit::factory()->create(['transaction_id' => $split->id, 'category_id' => $groceries->id, 'amount' => 10000]);
 
@@ -368,7 +368,7 @@ it('totals the whole amount of a split transaction when no category is filtered'
 });
 
 it('limits the list to the exact category when the exact flag is set', function () {
-    $food = Category::factory()->create();
+    $food = Category::factory()->for($this->user)->create();
     $groceries = Category::factory()->withParent($food)->create();
     $inFood = filterRow($this->user, $this->account, ['category_id' => $food->id, 'amount' => 1000]);
     $inGroceries = filterRow($this->user, $this->account, ['category_id' => $groceries->id, 'amount' => 2000]);
@@ -382,7 +382,7 @@ it('limits the list to the exact category when the exact flag is set', function 
 });
 
 it('widens to subcategories again once the user picks a category', function () {
-    $food = Category::factory()->create();
+    $food = Category::factory()->for($this->user)->create();
     $groceries = Category::factory()->withParent($food)->create();
     $inGroceries = filterRow($this->user, $this->account, ['category_id' => $groceries->id]);
 
@@ -394,10 +394,10 @@ it('widens to subcategories again once the user picks a category', function () {
 });
 
 it('applies a category and a group filter to the same split line', function () {
-    $mixed = CategoryGroup::factory()->create();
-    $fuelOnly = CategoryGroup::factory()->create();
-    $groceries = Category::factory()->create(['group_id' => $mixed->id]);
-    $fuel = Category::factory()->create(['group_id' => $fuelOnly->id]);
+    $mixed = CategoryGroup::factory()->for($this->user)->create();
+    $fuelOnly = CategoryGroup::factory()->for($this->user)->create();
+    $groceries = Category::factory()->for($this->user)->create(['group_id' => $mixed->id]);
+    $fuel = Category::factory()->for($this->user)->create(['group_id' => $fuelOnly->id]);
     $split = filterRow($this->user, $this->account, ['amount' => 10000]);
     TransactionSplit::factory()->create(['transaction_id' => $split->id, 'category_id' => $groceries->id, 'amount' => 2000]);
     TransactionSplit::factory()->create(['transaction_id' => $split->id, 'category_id' => $fuel->id, 'amount' => 8000]);

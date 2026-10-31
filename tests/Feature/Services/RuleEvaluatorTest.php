@@ -254,7 +254,7 @@ test('category_id is_empty matches null category', function () {
 });
 
 test('category_id equals matches assigned category', function () {
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($this->user)->create();
     $transaction = createTestTransaction($this->user, $this->account, ['category_id' => $category->id]);
     $rule = createTestRule($this->user, $this->group, [
         ['field' => 'category_id', 'operator' => 'equals', 'value' => (string) $category->id],

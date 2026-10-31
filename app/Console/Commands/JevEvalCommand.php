@@ -11,6 +11,7 @@ use App\Enums\TransactionDirection;
 use App\Exceptions\TypeSafe\TypeSafeException;
 use App\Models\Category;
 use App\Models\Transaction;
+use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 
@@ -76,29 +77,43 @@ final class JevEvalCommand extends Command
 
         $typeSafe = app(TypeSafeServiceContract::class);
 
-        $categories = Category::visibleSortedByFullPath()->keyBy('id');
-        $heldOut = $this->heldOut($categories);
+        $userIds = filled($this->option('user'))
+            ? [(int) $this->option('user')]
+            : User::query()->orderBy('id')->pluck('id')->all();
+        $limit = filled($this->option('limit')) ? max(0, (int) $this->option('limit')) : null;
 
-        if ($heldOut->isEmpty()) {
-            $this->warn('No manually categorised merchant debits to evaluate.');
-
-            return self::SUCCESS;
-        }
-
-        $hubs = $categories->filter(fn (Category $category): bool => $category->parent_id === null);
+        $allCategories = collect();
+        $results = ['no hint' => [], 'with hint' => []];
 
         try {
-            $results = [
-                'no hint' => $this->evaluate($typeSafe, $heldOut, $categories, $hubs, withHint: false),
-                'with hint' => $this->evaluate($typeSafe, $heldOut, $categories, $hubs, withHint: true),
-            ];
+            foreach ($userIds as $userId) {
+                $categories = Category::visibleSortedByFullPath($userId)->keyBy('id');
+                $heldOut = $this->heldOut($categories, $userId, $limit);
+
+                if ($heldOut->isEmpty()) {
+                    continue;
+                }
+
+                $limit = $limit === null ? null : $limit - $heldOut->count();
+                $hubs = $categories->filter(fn (Category $category): bool => $category->parent_id === null);
+                $allCategories = $allCategories->union($categories);
+
+                $results['no hint'] = [...$results['no hint'], ...$this->evaluate($typeSafe, $heldOut, $categories, $hubs, withHint: false)];
+                $results['with hint'] = [...$results['with hint'], ...$this->evaluate($typeSafe, $heldOut, $categories, $hubs, withHint: true)];
+            }
         } catch (TypeSafeException $e) {
             $this->error($e->getMessage());
 
             return self::FAILURE;
         }
 
-        $this->report($results, $categories);
+        if ($results['no hint'] === []) {
+            $this->warn('No manually categorised merchant debits to evaluate.');
+
+            return self::SUCCESS;
+        }
+
+        $this->report($results, $allCategories);
 
         return self::SUCCESS;
     }
@@ -106,15 +121,14 @@ final class JevEvalCommand extends Command
     /**
      * Newest manual categorisation per merchant_key, newest 20% of merchants kept.
      *
-     * @param  Collection<int, Category>  $categories  visible categories by id
+     * @param  Collection<int, Category>  $categories  the user's visible categories by id
      * @return Collection<int, Transaction>
      */
-    private function heldOut(Collection $categories): Collection
+    private function heldOut(Collection $categories, int $userId, ?int $limit): Collection
     {
-        $userId = $this->option('user');
-
         $truth = Transaction::query()
             ->select(['id', 'merchant_key', 'merchant_name', 'category_id', 'enrich_data', 'post_date'])
+            ->where('user_id', $userId)
             ->where('direction', TransactionDirection::Debit)
             ->whereNull('transfer_pair_id')
             ->where('category_source', CategorySource::Manual)
@@ -122,7 +136,6 @@ final class JevEvalCommand extends Command
             ->whereNotNull('merchant_key')
             ->whereNotNull('merchant_name')
             ->where('merchant_name', '!=', '')
-            ->when(filled($userId), fn ($query) => $query->where('user_id', (int) $userId))
             ->orderByDesc('post_date')
             ->orderByDesc('id')
             ->get()
@@ -131,10 +144,9 @@ final class JevEvalCommand extends Command
             ->values();
 
         $count = (int) ceil($truth->count() * self::HOLD_OUT_SHARE);
-        $limit = $this->option('limit');
 
-        if (filled($limit)) {
-            $count = min($count, max(0, (int) $limit));
+        if ($limit !== null) {
+            $count = min($count, $limit);
         }
 
         return $truth->take($count);
@@ -285,17 +297,19 @@ final class JevEvalCommand extends Command
 
         $this->line('');
         $this->info('Top-1 accuracy per top-level category:');
-        $hubIds = array_values(array_unique(array_column($first, 'truth_hub')));
+        // Each user has their own copy of the tree, so group by name rather than id.
+        $hubName = fn (array $x): string => $categories->get($x['truth_hub'])->name ?? '?';
+        $hubNames = array_values(array_unique(array_map($hubName, $first)));
         $this->table(
             ['Top-level category', 'n', ...$variants],
-            array_map(fn (int $hubId): array => [
-                $categories->get($hubId)->name ?? '?',
-                (string) count(array_filter($first, fn (array $x): bool => $x['truth_hub'] === $hubId)),
+            array_map(fn (string $name): array => [
+                $name,
+                (string) count(array_filter($first, fn (array $x): bool => $hubName($x) === $name)),
                 ...array_map(fn (array $r): string => $this->rate(
-                    array_values(array_filter($r, fn (array $x): bool => $x['truth_hub'] === $hubId)),
+                    array_values(array_filter($r, fn (array $x): bool => $hubName($x) === $name)),
                     fn (array $x): bool => $x['predicted'] === $x['truth'],
                 ), $results),
-            ], $hubIds),
+            ], $hubNames),
         );
 
         foreach ($results as $variant => $rows) {

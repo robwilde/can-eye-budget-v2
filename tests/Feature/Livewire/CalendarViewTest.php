@@ -97,7 +97,7 @@ test('today is marked when current month is in view', function () {
 test('shows transactions for current month', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Groceries']);
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
     $date = CarbonImmutable::now()->startOfMonth()->addDays(5);
 
     Transaction::factory()->for($user)->debit()->create([
@@ -534,7 +534,7 @@ test('planned transaction occurrences appear as plan pips', function () {
     $this->travelTo(CarbonImmutable::now()->startOfMonth());
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Rent']);
+    $category = Category::factory()->for($user)->create(['name' => 'Rent']);
     $date = CarbonImmutable::now()->startOfMonth()->addDays(14);
 
     PlannedTransaction::factory()->for($user)->for($account)->monthly()->create([
@@ -583,8 +583,8 @@ test('posted credit pip carries inc tone, parent-child category path and the des
     $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $parent = Category::factory()->create(['name' => 'Income']);
-    $child = Category::factory()->create(['name' => 'Salary', 'parent_id' => $parent->id]);
+    $parent = Category::factory()->for($user)->create(['name' => 'Income']);
+    $child = Category::factory()->for($user)->create(['name' => 'Salary', 'parent_id' => $parent->id]);
     $date = CarbonImmutable::now()->startOfMonth()->addDays(5);
 
     Transaction::factory()->for($user)->credit()->create([
@@ -609,7 +609,7 @@ test('grid colours entered pips by direction and flags only planned pips as fill
     $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Rent']);
+    $category = Category::factory()->for($user)->create(['name' => 'Rent']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -861,7 +861,7 @@ test('a Transfer-categorised row with no pair is shown but not counted', functio
     $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Transfer']);
+    $category = Category::factory()->for($user)->create(['name' => 'Transfer']);
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
         'category_id' => $category->id,
@@ -999,7 +999,7 @@ test('the add-transaction button opens the modal pre-dated to the selected day',
 test('categorised transaction renders title tooltip in calendar grid html', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Fuel']);
+    $category = Category::factory()->for($user)->create(['name' => 'Fuel']);
     $date = CarbonImmutable::now()->startOfMonth()->addDays(4);
 
     Transaction::factory()->for($user)->debit()->create([
@@ -1019,7 +1019,7 @@ test('categorised transaction renders title tooltip in calendar grid html', func
 test('categorised transaction renders title tooltip in selected-day detail panel', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Fuel']);
+    $category = Category::factory()->for($user)->create(['name' => 'Fuel']);
     $date = CarbonImmutable::now()->startOfMonth()->addDays(4);
 
     Transaction::factory()->for($user)->debit()->create([
@@ -1107,8 +1107,8 @@ test('blade does not render import-edge class when no csv-imported transactions 
 function calendarMoneyFlowFixture(User $user): array
 {
     $account = Account::factory()->for($user)->create();
-    $salary = Category::factory()->create(['name' => 'Salary']);
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $salary = Category::factory()->for($user)->create(['name' => 'Salary']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     Transaction::factory()->for($user)->credit()->create(['account_id' => $account->id, 'category_id' => $salary->id, 'amount' => 250000, 'post_date' => '2026-10-03']);
     Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $groceries->id, 'amount' => -40000, 'post_date' => '2026-10-04']);
@@ -1166,7 +1166,7 @@ test('the money flow section renders for a month with spend but no income', func
     $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
     Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $groceries->id, 'amount' => -5000, 'post_date' => '2026-10-04']);
 
     $component = Livewire::actingAs($user)->test(CalendarView::class);
@@ -1185,7 +1185,7 @@ test('the bars keep their day ticks when actual spend dwarfs the plan', function
     $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
     Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $groceries->id, 'amount' => -500000, 'post_date' => '2026-10-04']);
 
     Livewire::actingAs($user)->test(CalendarView::class)
@@ -1199,7 +1199,7 @@ test('monthFlow and cashFlow only hold the signed-in user data', function () {
     calendarMoneyFlowFixture($user);
 
     $strangerAccount = Account::factory()->for($stranger)->create();
-    $strangerCategory = Category::factory()->create(['name' => 'Stranger spend']);
+    $strangerCategory = Category::factory()->for($stranger)->create(['name' => 'Stranger spend']);
     Transaction::factory()->for($stranger)->debit()->create(['account_id' => $strangerAccount->id, 'category_id' => $strangerCategory->id, 'amount' => -99999, 'post_date' => '2026-10-06']);
     Transaction::factory()->for($stranger)->credit()->create(['account_id' => $strangerAccount->id, 'category_id' => $strangerCategory->id, 'amount' => 88888, 'post_date' => '2026-10-07']);
     PlannedTransaction::factory()->for($stranger)->for($strangerAccount)->monthly()->create([
@@ -1225,7 +1225,7 @@ test('month navigation refreshes monthFlow and cashFlow', function () {
     $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
     Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $groceries->id, 'amount' => -5000, 'post_date' => '2026-10-04']);
     Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $groceries->id, 'amount' => -7000, 'post_date' => '2026-09-04']);
     Transaction::factory()->for($user)->credit()->create(['account_id' => $account->id, 'amount' => 90000, 'post_date' => '2026-11-04']);
@@ -1281,8 +1281,8 @@ test('an outflow row for a category group links to the transactions list filtere
     $this->travelTo('2026-10-15');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $group = CategoryGroup::factory()->create(['name' => 'Food Group']);
-    $groceries = Category::factory()->create(['name' => 'Groceries', 'group_id' => $group->id]);
+    $group = CategoryGroup::factory()->for($user)->create(['name' => 'Food Group']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries', 'group_id' => $group->id]);
     Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $groceries->id, 'amount' => -40000, 'post_date' => '2026-10-04']);
 
     $html = Livewire::actingAs($user)->test(CalendarView::class)->html();

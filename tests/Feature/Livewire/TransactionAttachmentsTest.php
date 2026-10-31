@@ -218,7 +218,7 @@ test('lists only transactions with receipts when asked, and bulk select-all resp
     $withReceipt = $this->transaction;
     $without = Transaction::factory()->for($this->user)->for($this->account)->manual()->create(['post_date' => now()->toDateString()]);
     attachmentOn($withReceipt);
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $component = Livewire::actingAs($this->user)
         ->test(TransactionList::class)

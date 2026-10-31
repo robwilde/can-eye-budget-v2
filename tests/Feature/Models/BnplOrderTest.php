@@ -59,7 +59,7 @@ test('parsed_payload is cast to array', function () {
 test('belongs to a user, account, category and planned transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     $plan = PlannedTransaction::factory()->for($user)->for($account)->create();
 
     $order = BnplOrder::factory()->for($user)->create([

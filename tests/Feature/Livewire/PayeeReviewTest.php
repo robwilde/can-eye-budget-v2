@@ -22,10 +22,10 @@ beforeEach(function (): void {
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
 
-    $this->groceries = Category::factory()->create(['name' => 'Groceries', 'budget_tag' => BudgetTag::Needs]);
-    $this->software = Category::factory()->create(['name' => 'Software & Online Services', 'budget_tag' => BudgetTag::Needs]);
+    $this->groceries = Category::factory()->for($this->user)->create(['name' => 'Groceries', 'budget_tag' => BudgetTag::Needs]);
+    $this->software = Category::factory()->for($this->user)->create(['name' => 'Software & Online Services', 'budget_tag' => BudgetTag::Needs]);
     $this->aiApps = Category::factory()->withParent($this->software)->create(['name' => 'AI Apps']);
-    $this->personal = Category::factory()->create(['name' => 'Personal & Shopping', 'budget_tag' => BudgetTag::Wants]);
+    $this->personal = Category::factory()->for($this->user)->create(['name' => 'Personal & Shopping', 'budget_tag' => BudgetTag::Wants]);
     $this->clothes = Category::factory()->withParent($this->personal)->create(['name' => 'Clothes']);
 });
 

@@ -62,8 +62,9 @@ test('planned transaction belongs to an account', function () {
 });
 
 test('planned transaction belongs to a category', function () {
-    $planned = PlannedTransaction::factory()->create([
-        'category_id' => Category::factory(),
+    $user = User::factory()->create();
+    $planned = PlannedTransaction::factory()->for($user)->create([
+        'category_id' => Category::factory()->for($user),
     ]);
 
     expect($planned->category)->toBeInstanceOf(Category::class);
@@ -128,8 +129,9 @@ test('deleting an account cascades to planned transactions', function () {
 });
 
 test('deleting a category nullifies planned transaction category_id', function () {
-    $category = Category::factory()->create();
-    $planned = PlannedTransaction::factory()->create(['category_id' => $category->id]);
+    $user = User::factory()->create();
+    $category = Category::factory()->for($user)->create();
+    $planned = PlannedTransaction::factory()->for($user)->create(['category_id' => $category->id]);
 
     $category->delete();
 
@@ -498,23 +500,26 @@ test('excludingTransfers excludes plans with transfer_to_account_id set', functi
 });
 
 test('excludingTransfers excludes plans categorised as Transfer', function () {
-    $transferCategory = Category::factory()->create(['name' => 'Transfer']);
-    PlannedTransaction::factory()->create(['category_id' => $transferCategory->id]);
+    $user = User::factory()->create();
+    $transferCategory = Category::factory()->for($user)->create(['name' => 'Transfer']);
+    PlannedTransaction::factory()->for($user)->create(['category_id' => $transferCategory->id]);
 
     expect(PlannedTransaction::excludingTransfers()->count())->toBe(0);
 });
 
 test('excludingTransfers excludes plans whose parent category is Transfer', function () {
-    $parent = Category::factory()->create(['name' => 'Transfer']);
-    $child = Category::factory()->create(['name' => 'Optimus to CC', 'parent_id' => $parent->id]);
-    PlannedTransaction::factory()->create(['category_id' => $child->id]);
+    $user = User::factory()->create();
+    $parent = Category::factory()->for($user)->create(['name' => 'Transfer']);
+    $child = Category::factory()->for($user)->create(['name' => 'Optimus to CC', 'parent_id' => $parent->id]);
+    PlannedTransaction::factory()->for($user)->create(['category_id' => $child->id]);
 
     expect(PlannedTransaction::excludingTransfers()->count())->toBe(0);
 });
 
 test('excludingTransfers includes plans with no transfer_to_account_id and non-Transfer category', function () {
-    $category = Category::factory()->create(['name' => 'Groceries']);
-    PlannedTransaction::factory()->create([
+    $user = User::factory()->create();
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    PlannedTransaction::factory()->for($user)->create([
         'category_id' => $category->id,
         'transfer_to_account_id' => null,
     ]);

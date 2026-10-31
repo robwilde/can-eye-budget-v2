@@ -40,7 +40,7 @@ test('authenticated user sees the reports page with both directions and mode tab
 test('rolls a sub-category transaction up to its root and hides detail until expanded', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $root = Category::factory()->create(['name' => 'Retail Trade']);
+    $root = Category::factory()->for($user)->create(['name' => 'Retail Trade']);
     $child = Category::factory()->withParent($root)->create(['name' => 'Food Retailing']);
     $grandchild = Category::factory()->withParent($child)->create(['name' => 'Supermarkets']);
 
@@ -61,7 +61,7 @@ test('rolls a sub-category transaction up to its root and hides detail until exp
 test('sums the absolute amount regardless of the stored sign', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -85,8 +85,8 @@ test('sums the absolute amount regardless of the stored sign', function () {
 test('expenses and incomes are shown at the same time', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $spend = Category::factory()->create(['name' => 'Dining']);
-    $earn = Category::factory()->create(['name' => 'Salary']);
+    $spend = Category::factory()->for($user)->create(['name' => 'Dining']);
+    $earn = Category::factory()->for($user)->create(['name' => 'Salary']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -110,7 +110,7 @@ test('expenses and incomes are shown at the same time', function () {
 test('expanding a root reveals its full-path descendants inline', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $root = Category::factory()->create(['name' => 'Retail Trade']);
+    $root = Category::factory()->for($user)->create(['name' => 'Retail Trade']);
     $child = Category::factory()->withParent($root)->create(['name' => 'Food Retailing']);
 
     Transaction::factory()->for($user)->debit()->create([
@@ -132,7 +132,7 @@ test('expanding a root reveals its full-path descendants inline', function () {
 test('the subcategories toggle expands every root at once', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $root = Category::factory()->create(['name' => 'Retail Trade']);
+    $root = Category::factory()->for($user)->create(['name' => 'Retail Trade']);
     $child = Category::factory()->withParent($root)->create(['name' => 'Food Retailing']);
 
     Transaction::factory()->for($user)->debit()->create([
@@ -163,7 +163,7 @@ test('the top toggle limits the list to the five largest categories', function (
     ];
 
     foreach ($amounts as $name => $amount) {
-        $category = Category::factory()->create(['name' => $name]);
+        $category = Category::factory()->for($user)->create(['name' => $name]);
         Transaction::factory()->for($user)->debit()->create([
             'account_id' => $account->id,
             'category_id' => $category->id,
@@ -185,7 +185,7 @@ test('the top toggle limits the list to the five largest categories', function (
 test('plan mode reports planned amounts that are absent from real mode', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $rent = Category::factory()->create(['name' => 'Rent']);
+    $rent = Category::factory()->for($user)->create(['name' => 'Rent']);
 
     PlannedTransaction::factory()->for($user)->create([
         'account_id' => $account->id,
@@ -208,8 +208,8 @@ test('plan mode reports planned amounts that are absent from real mode', functio
 test('period filter includes only transactions inside the selected range', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $recent = Category::factory()->create(['name' => 'Dining']);
-    $old = Category::factory()->create(['name' => 'Transport']);
+    $recent = Category::factory()->for($user)->create(['name' => 'Dining']);
+    $old = Category::factory()->for($user)->create(['name' => 'Transport']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -238,8 +238,8 @@ test('period filter includes only transactions inside the selected range', funct
 test('transactions in a transfer pair never appear in buckets or summary', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
-    $moved = Category::factory()->create(['name' => 'MovedMoney']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $moved = Category::factory()->for($user)->create(['name' => 'MovedMoney']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -272,7 +272,7 @@ test('transactions in a transfer pair never appear in buckets or summary', funct
 test('superseded transaction versions are counted once at the child amount', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     $parent = Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -294,8 +294,8 @@ test('other users transactions never appear', function () {
     $account = Account::factory()->for($user)->create();
     $other = User::factory()->create();
     $otherAccount = Account::factory()->for($other)->create();
-    $mine = Category::factory()->create(['name' => 'MyGroceries']);
-    $theirs = Category::factory()->create(['name' => 'TheirGroceries']);
+    $mine = Category::factory()->for($user)->create(['name' => 'MyGroceries']);
+    $theirs = Category::factory()->for($other)->create(['name' => 'TheirGroceries']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -313,7 +313,9 @@ test('other users transactions never appear', function () {
     Livewire::actingAs($user)
         ->test(CategoryReport::class)
         ->assertSee('MyGroceries')
-        ->assertDontSee('TheirGroceries');
+        ->assertDontSee('TheirGroceries')
+        ->assertDontSee(MoneyCast::format(7000))
+        ->assertDontSee('Uncategorised');
 });
 
 test('null-category transactions produce an uncategorised bucket', function () {
@@ -365,8 +367,8 @@ test('summary reports in, out, net with per-month and percentage-of-income figur
 test('each bucket carries its share of the direction total', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $big = Category::factory()->create(['name' => 'Housing']);
-    $small = Category::factory()->create(['name' => 'Fun']);
+    $big = Category::factory()->for($user)->create(['name' => 'Housing']);
+    $small = Category::factory()->for($user)->create(['name' => 'Fun']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -424,7 +426,7 @@ test('the monthly chart series covers each month in the range', function () {
 test('treemap nodes are produced per direction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $spend = Category::factory()->create(['name' => 'Dining']);
+    $spend = Category::factory()->for($user)->create(['name' => 'Dining']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -470,7 +472,7 @@ test('custom date bounds are normalised to canonical dates or cleared', function
 test('a cyclic category chain collapses into the uncategorised bucket', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $a = Category::factory()->create(['name' => 'LoopA']);
+    $a = Category::factory()->for($user)->create(['name' => 'LoopA']);
     $b = Category::factory()->withParent($a)->create(['name' => 'LoopB']);
     $a->update(['parent_id' => $b->id]);
 
@@ -492,7 +494,7 @@ test('a chain deeper than ten levels still rolls up to the true root', function 
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
 
-    $root = Category::factory()->create(['name' => 'DeepRoot']);
+    $root = Category::factory()->for($user)->create(['name' => 'DeepRoot']);
     $current = $root;
 
     for ($level = 1; $level <= 11; $level++) {
@@ -515,8 +517,8 @@ test('a chain deeper than ten levels still rolls up to the true root', function 
 test('category colours are whitelisted to safe hex before reaching inline styles', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $safe = Category::factory()->withColor('#AABBCC')->create(['name' => 'SafeColour']);
-    $evil = Category::factory()->withColor('red;background-image:url(//x)')->create(['name' => 'EvilColour']);
+    $safe = Category::factory()->for($user)->withColor('#AABBCC')->create(['name' => 'SafeColour']);
+    $evil = Category::factory()->for($user)->withColor('red;background-image:url(//x)')->create(['name' => 'EvilColour']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -546,7 +548,7 @@ test('category colours are whitelisted to safe hex before reaching inline styles
 test('inline children exclude the root category own direct spend', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $root = Category::factory()->create(['name' => 'Office']);
+    $root = Category::factory()->for($user)->create(['name' => 'Office']);
     $child = Category::factory()->withParent($root)->create(['name' => 'Software']);
 
     Transaction::factory()->for($user)->debit()->create([
@@ -577,7 +579,7 @@ test('inline children exclude the root category own direct spend', function () {
 test('subcategory rows link to their exact category so the list matches the row total', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $root = Category::factory()->create(['name' => 'Office']);
+    $root = Category::factory()->for($user)->create(['name' => 'Office']);
     $child = Category::factory()->withParent($root)->create(['name' => 'Software']);
 
     Transaction::factory()->for($user)->debit()->create([

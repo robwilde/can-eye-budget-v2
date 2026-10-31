@@ -24,7 +24,7 @@ JS;
 test('selecting a category sets the transaction modal categoryId', function () use ($openModal, $findModal) {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     $this->actingAs($user);
 
@@ -42,7 +42,7 @@ test('selecting a category sets the transaction modal categoryId', function () u
 test('clearing the category sets the transaction modal categoryId to null', function () use ($openModal, $findModal) {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     $this->actingAs($user);
 
@@ -64,7 +64,7 @@ test('clearing the category sets the transaction modal categoryId to null', func
 test('escape closes the category listbox', function () use ($openModal, $listboxClosed) {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
-    Category::factory()->create(['name' => 'Groceries']);
+    Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     $this->actingAs($user);
 
@@ -82,7 +82,7 @@ test('escape closes the category listbox', function () use ($openModal, $listbox
 test('clicking outside the combobox closes the category listbox', function () use ($openModal, $listboxClosed) {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
-    Category::factory()->create(['name' => 'Groceries']);
+    Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     $this->actingAs($user);
 

@@ -185,6 +185,18 @@ final class User extends Authenticatable
         return $this->hasMany(UserCategoryBudgetTag::class);
     }
 
+    /** @return HasMany<Category, $this> */
+    public function categories(): HasMany
+    {
+        return $this->hasMany(Category::class);
+    }
+
+    /** @return HasMany<CategoryGroup, $this> */
+    public function categoryGroups(): HasMany
+    {
+        return $this->hasMany(CategoryGroup::class);
+    }
+
     public function hasPayCycleConfigured(): bool
     {
         return $this->pay_amount !== null

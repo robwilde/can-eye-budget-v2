@@ -49,7 +49,7 @@ function excludableRow(User $user, Account $account, array $overrides = []): Tra
 }
 
 it('leaves excluded transactions out of totals but lists them', function () {
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($this->user)->create();
     $counted = excludableRow($this->user, $this->account, ['amount' => 1200, 'category_id' => $category->id]);
     $excluded = excludableRow($this->user, $this->account, ['amount' => 5000, 'category_id' => $category->id, 'excluded' => true]);
 
@@ -70,7 +70,7 @@ it('leaves excluded transactions out of totals but lists them', function () {
 });
 
 it('leaves excluded split lines out of category attribution', function () {
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($this->user)->create();
     $split = excludableRow($this->user, $this->account, ['amount' => 5000, 'excluded' => true]);
     $split->splits()->create(['category_id' => $category->id, 'amount' => 5000]);
 
@@ -216,8 +216,8 @@ it('excludes a transaction from the list as a new version and includes it again'
 });
 
 it('keeps splits and linked emails on the current version when exclusion is toggled', function () {
-    $food = Category::factory()->create();
-    $fun = Category::factory()->create();
+    $food = Category::factory()->for($this->user)->create();
+    $fun = Category::factory()->for($this->user)->create();
     $transaction = excludableRow($this->user, $this->account, ['amount' => 5000]);
     $transaction->splits()->createMany([
         ['category_id' => $food->id, 'amount' => 3000, 'position' => 1],
@@ -342,7 +342,7 @@ it('keeps an already excluded row excluded when its notes are edited in the moda
 });
 
 it('still counts excluded transactions when warning before a category is deleted', function () {
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($this->user)->create();
     excludableRow($this->user, $this->account, ['category_id' => $category->id, 'excluded' => true]);
 
     Livewire::actingAs($this->user)

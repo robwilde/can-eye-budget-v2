@@ -8,6 +8,8 @@ use App\Concerns\PasswordValidationRules;
 use App\Concerns\ProfileValidationRules;
 use App\Models\User;
 use App\Services\MonthEndBalanceRuleProvisioner;
+use App\Services\UserCategoryProvisioner;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Laravel\Fortify\Contracts\CreatesNewUsers;
 
@@ -27,14 +29,17 @@ final class CreateNewUser implements CreatesNewUsers
             'password' => $this->passwordRules(),
         ])->validate();
 
-        $user = User::create([
-            'name' => $input['name'],
-            'email' => $input['email'],
-            'password' => $input['password'],
-        ]);
+        return DB::transaction(function () use ($input): User {
+            $user = User::create([
+                'name' => $input['name'],
+                'email' => $input['email'],
+                'password' => $input['password'],
+            ]);
 
-        app(MonthEndBalanceRuleProvisioner::class)->provisionForUser($user->id);
+            app(UserCategoryProvisioner::class)->provision($user);
+            app(MonthEndBalanceRuleProvisioner::class)->provisionForUser($user->id);
 
-        return $user;
+            return $user;
+        });
     }
 }

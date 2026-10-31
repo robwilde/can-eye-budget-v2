@@ -25,7 +25,7 @@ beforeEach(function (): void {
     $this->applier = app(UserRuleApplier::class);
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
-    $this->category = Category::factory()->create(['is_hidden' => false]);
+    $this->category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 });
 
 function applierRule(User $user, int $categoryId, string $match): UserRule
@@ -80,7 +80,7 @@ it('categorises every matching row and returns how many it applied to', function
 
 it('leaves transfers and split parents alone', function () {
     $rule = applierRule($this->user, $this->category->id, 'NETFLIX');
-    $splitCategory = Category::factory()->create(['is_hidden' => false]);
+    $splitCategory = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $split = applierTxn($this->user, $this->account);
     $split->splits()->create([
@@ -100,7 +100,7 @@ it('leaves transfers and split parents alone', function () {
 
 it('does not overwrite a category a person set', function () {
     $rule = applierRule($this->user, $this->category->id, 'NETFLIX');
-    $manual = Category::factory()->create(['is_hidden' => false]);
+    $manual = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $txn = applierTxn($this->user, $this->account, [
         'category_id' => $manual->id,

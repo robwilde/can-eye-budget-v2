@@ -159,7 +159,7 @@ final class PlannedTransactionManager extends Component
         return view('livewire.planned-transaction-manager', [
             'accounts' => $this->accountsForUser($user),
             'plans' => $this->plannedTransactionsForSelectedAccount($user),
-            'categories' => Category::visibleSortedByFullPath(),
+            'categories' => Category::visibleSortedByFullPath($user->id),
             'frequencies' => RecurrenceFrequency::cases(),
             'directions' => TransactionDirection::cases(),
         ]);
@@ -269,6 +269,7 @@ final class PlannedTransactionManager extends Component
         $categoryId = (int) $this->categoryId;
 
         return Category::query()
+            ->where('user_id', $this->authenticatedUser()->id)
             ->visible()
             ->whereKey($categoryId)
             ->exists()

@@ -40,8 +40,8 @@ function provenanceTransaction(User $user, Account $account, array $overrides = 
 }
 
 it('does not let a rule overwrite a manually-set category', function () {
-    $chosen = Category::factory()->create(['is_hidden' => false]);
-    $ruleTarget = Category::factory()->create(['is_hidden' => false]);
+    $chosen = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $ruleTarget = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $transaction = provenanceTransaction($this->user, $this->account, [
         'category_id' => $chosen->id,
@@ -57,7 +57,7 @@ it('does not let a rule overwrite a manually-set category', function () {
 });
 
 it('categorises an uncategorised transaction and stamps the rule as the source', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $transaction = provenanceTransaction($this->user, $this->account);
 
     $this->executor->execute($transaction, [
@@ -69,8 +69,8 @@ it('categorises an uncategorised transaction and stamps the rule as the source',
 });
 
 it('lets a rule correct a feed-supplied category and restamps it as the rule', function () {
-    $old = Category::factory()->create(['is_hidden' => false]);
-    $new = Category::factory()->create(['is_hidden' => false]);
+    $old = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $new = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $transaction = provenanceTransaction($this->user, $this->account, [
         'category_id' => $old->id,
@@ -86,8 +86,8 @@ it('lets a rule correct a feed-supplied category and restamps it as the rule', f
 });
 
 it('skips a split transaction', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
-    $splitCategory = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $splitCategory = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $transaction = provenanceTransaction($this->user, $this->account);
 
     $transaction->splits()->create([
@@ -105,7 +105,7 @@ it('skips a split transaction', function () {
 });
 
 it('skips a transfer', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $other = provenanceTransaction($this->user, $this->account);
 
     $transaction = provenanceTransaction($this->user, $this->account, [
@@ -121,7 +121,7 @@ it('skips a transfer', function () {
 });
 
 it('clears the source when a category is removed', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $transaction = provenanceTransaction($this->user, $this->account, [
         'category_id' => $category->id,
@@ -134,7 +134,7 @@ it('clears the source when a category is removed', function () {
 });
 
 it('treats an undeclared source as manual so rules leave it alone', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $transaction = provenanceTransaction($this->user, $this->account, [
         'category_id' => $category->id,
@@ -144,8 +144,8 @@ it('treats an undeclared source as manual so rules leave it alone', function () 
 });
 
 it('leaves a feed-stamped row untouched when the rule targets a hidden category', function () {
-    $seeded = Category::factory()->create(['is_hidden' => false]);
-    $hidden = Category::factory()->create(['is_hidden' => true]);
+    $seeded = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $hidden = Category::factory()->for($this->user)->create(['is_hidden' => true]);
 
     $transaction = provenanceTransaction($this->user, $this->account, [
         'category_id' => $seeded->id,
@@ -161,8 +161,8 @@ it('leaves a feed-stamped row untouched when the rule targets a hidden category'
 });
 
 it('protects a categorised row whose source is missing, treating it as manual', function () {
-    $chosen = Category::factory()->create(['is_hidden' => false]);
-    $ruleTarget = Category::factory()->create(['is_hidden' => false]);
+    $chosen = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $ruleTarget = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $transaction = provenanceTransaction($this->user, $this->account, [
         'category_id' => $chosen->id,
@@ -181,8 +181,8 @@ it('protects a categorised row whose source is missing, treating it as manual', 
 });
 
 it('stamps a category accepted from a recurring suggestion as manual', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
-    $ruleTarget = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $ruleTarget = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $transaction = provenanceTransaction($this->user, $this->account);
 
     $suggestion = AnalysisSuggestion::factory()->create([
@@ -214,8 +214,8 @@ it('stamps a category accepted from a recurring suggestion as manual', function 
 });
 
 it('re-derives provenance when a child is created with a different category', function () {
-    $ruleGuess = Category::factory()->create(['is_hidden' => false]);
-    $userPick = Category::factory()->create(['is_hidden' => false]);
+    $ruleGuess = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $userPick = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $transaction = provenanceTransaction($this->user, $this->account, [
         'category_id' => $ruleGuess->id,
@@ -229,7 +229,7 @@ it('re-derives provenance when a child is created with a different category', fu
 });
 
 it('keeps a rule stamp when a child is created with the same category', function () {
-    $ruleGuess = Category::factory()->create(['is_hidden' => false]);
+    $ruleGuess = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $transaction = provenanceTransaction($this->user, $this->account, [
         'category_id' => $ruleGuess->id,
@@ -245,8 +245,8 @@ it('keeps a rule stamp when a child is created with the same category', function
 });
 
 it('leaves manual rows and credits alone when a recurring suggestion recategorises a merchant with no payee', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
-    $earlier = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $earlier = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $matched = provenanceTransaction($this->user, $this->account, ['merchant_name' => 'NETFLIX']);
     $key = $matched->fresh()->merchant_key;
 

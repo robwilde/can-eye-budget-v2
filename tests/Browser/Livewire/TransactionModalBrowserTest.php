@@ -35,8 +35,8 @@ test('transaction modal renders the type dropdown and the enter/plan toggle', fu
 test('transaction modal renders the category combobox', function () use ($openModal) {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
-    Category::factory()->create(['name' => 'Groceries', 'icon' => 'shopping-cart']);
-    Category::factory()->create(['name' => 'Utilities', 'icon' => null]);
+    Category::factory()->for($user)->create(['name' => 'Groceries', 'icon' => 'shopping-cart']);
+    Category::factory()->for($user)->create(['name' => 'Utilities', 'icon' => null]);
 
     $this->actingAs($user);
 

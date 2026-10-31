@@ -11,18 +11,20 @@ use App\Models\User;
 use App\Models\UserCategoryBudgetTag;
 use Livewire\Livewire;
 
-function budgetRoot(string $name, ?BudgetTag $tag): Category
+function budgetRoot(User $user, string $name, ?BudgetTag $tag): Category
 {
-    return Category::factory()->create(['name' => $name, 'budget_tag' => $tag]);
+    return Category::factory()->for($user)->create(['name' => $name, 'budget_tag' => $tag]);
 }
 
 test('tagged roots are listed under their default tag and untagged roots are left out', function () {
-    budgetRoot('Groceries', BudgetTag::Needs);
-    budgetRoot('Eating Out', BudgetTag::Wants);
-    budgetRoot('Loans & Debt Repayment', BudgetTag::Savings);
-    budgetRoot('Income', null);
+    $user = User::factory()->create();
 
-    Livewire::actingAs(User::factory()->create())
+    budgetRoot($user, 'Groceries', BudgetTag::Needs);
+    budgetRoot($user, 'Eating Out', BudgetTag::Wants);
+    budgetRoot($user, 'Loans & Debt Repayment', BudgetTag::Savings);
+    budgetRoot($user, 'Income', null);
+
+    Livewire::actingAs($user)
         ->test(ConfirmBudgetTags::class)
         ->assertSeeInOrder(['Needs', 'Groceries', 'Wants', 'Eating Out', 'Savings', 'Loans & Debt Repayment'])
         ->assertDontSee('Income');
@@ -31,7 +33,7 @@ test('tagged roots are listed under their default tag and untagged roots are lef
 test('moving a category writes an override for this user only', function () {
     $user = User::factory()->create();
     $other = User::factory()->create();
-    $root = budgetRoot('Groceries', BudgetTag::Needs);
+    $root = budgetRoot($user, 'Groceries', BudgetTag::Needs);
 
     Livewire::actingAs($user)
         ->test(ConfirmBudgetTags::class)
@@ -43,7 +45,7 @@ test('moving a category writes an override for this user only', function () {
 
 test('a moved category is listed under its new tag', function () {
     $user = User::factory()->create();
-    $root = budgetRoot('Groceries', BudgetTag::Needs);
+    $root = budgetRoot($user, 'Groceries', BudgetTag::Needs);
 
     Livewire::actingAs($user)
         ->test(ConfirmBudgetTags::class)
@@ -53,7 +55,7 @@ test('a moved category is listed under its new tag', function () {
 
 test('setting a category back to its default removes the override', function () {
     $user = User::factory()->create();
-    $root = budgetRoot('Groceries', BudgetTag::Needs);
+    $root = budgetRoot($user, 'Groceries', BudgetTag::Needs);
 
     Livewire::actingAs($user)
         ->test(ConfirmBudgetTags::class)
@@ -65,7 +67,7 @@ test('setting a category back to its default removes the override', function () 
 
 test('moving a category twice keeps a single override row', function () {
     $user = User::factory()->create();
-    $root = budgetRoot('Groceries', BudgetTag::Needs);
+    $root = budgetRoot($user, 'Groceries', BudgetTag::Needs);
 
     Livewire::actingAs($user)
         ->test(ConfirmBudgetTags::class)
@@ -77,9 +79,9 @@ test('moving a category twice keeps a single override row', function () {
 
 test('child categories, untagged roots and unknown tags are ignored', function () {
     $user = User::factory()->create();
-    $root = budgetRoot('Groceries', BudgetTag::Needs);
+    $root = budgetRoot($user, 'Groceries', BudgetTag::Needs);
     $child = Category::factory()->withParent($root)->create(['name' => 'Fruit']);
-    $income = budgetRoot('Income', null);
+    $income = budgetRoot($user, 'Income', null);
 
     Livewire::actingAs($user)
         ->test(ConfirmBudgetTags::class)
@@ -93,7 +95,7 @@ test('child categories, untagged roots and unknown tags are ignored', function (
 test('another user override does not change what this user sees', function () {
     $user = User::factory()->create();
     $other = User::factory()->create();
-    $root = budgetRoot('Groceries', BudgetTag::Needs);
+    $root = budgetRoot($user, 'Groceries', BudgetTag::Needs);
     UserCategoryBudgetTag::query()->create(['user_id' => $other->id, 'category_id' => $root->id, 'budget_tag' => BudgetTag::Savings]);
 
     $groups = Livewire::actingAs($user)->test(ConfirmBudgetTags::class)->instance()->groups();
@@ -104,7 +106,7 @@ test('another user override does not change what this user sees', function () {
 
 test('confirming and skipping both announce the step is done and keep defaults', function (string $method) {
     $user = User::factory()->create();
-    budgetRoot('Groceries', BudgetTag::Needs);
+    budgetRoot($user, 'Groceries', BudgetTag::Needs);
 
     Livewire::actingAs($user)
         ->test(ConfirmBudgetTags::class)
@@ -113,3 +115,14 @@ test('confirming and skipping both announce the step is done and keep defaults',
 
     expect(UserCategoryBudgetTag::query()->count())->toBe(0);
 })->with(['confirm', 'skip']);
+
+test("another user's category cannot be re-tagged", function () {
+    $user = User::factory()->create();
+    $theirs = budgetRoot(User::factory()->create(), 'Groceries', BudgetTag::Needs);
+
+    Livewire::actingAs($user)
+        ->test(ConfirmBudgetTags::class)
+        ->call('setTag', $theirs->id, BudgetTag::Wants->value);
+
+    expect(UserCategoryBudgetTag::query()->count())->toBe(0);
+});

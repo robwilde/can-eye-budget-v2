@@ -148,7 +148,7 @@ test('renders pay cycle calendar widget in place of recent activity', function (
 test('budgets this cycle section renders when budgets exist', function () {
     $user = User::factory()->withPayCycle()->create();
     Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     Budget::factory()->for($user)->create([
         'category_id' => $category->id,
         'name' => 'Groceries',
@@ -166,7 +166,7 @@ test('budgets this cycle reports zero spent for an uncategorised budget instead 
         'next_pay_date' => now()->addDays(7),
     ]);
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     Transaction::factory()->debit()->for($user)->for($account)->create([
         'amount' => 447468,
@@ -517,7 +517,7 @@ test('needed until payday counts a planned transfer to an untracked account but 
 test('spend last 7 days excludes transactions categorised at the parent Transfer level', function () {
     $user = User::factory()->withPayCycle()->create();
     $account = Account::factory()->for($user)->create();
-    $transferParent = Category::factory()->create(['name' => 'Transfer']);
+    $transferParent = Category::factory()->for($user)->create(['name' => 'Transfer']);
 
     Transaction::factory()->debit()->for($user)->for($account)->create([
         'amount' => 250000,

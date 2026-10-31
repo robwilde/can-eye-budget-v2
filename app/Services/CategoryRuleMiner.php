@@ -42,7 +42,7 @@ final class CategoryRuleMiner
     public function mine(User $user, array $accountIds = [], array $extraSeeds = [], ?Closure $isRelevant = null): array
     {
         $activeRules = $this->activeRules($user);
-        $categoryNames = Category::query()->pluck('name', 'id');
+        $categoryNames = Category::query()->where('user_id', $user->id)->pluck('name', 'id');
 
         $candidates = [];
         $ambiguous = [];
@@ -83,7 +83,7 @@ final class CategoryRuleMiner
             $motivatingRows[$key] = $group['rows'];
         }
 
-        $seedResult = $this->seedRules->resolve();
+        $seedResult = $this->seedRules->resolve($user->id);
         $seeds = $seedResult['resolved'];
         $skippedSeeds = $seedResult['skipped'];
 

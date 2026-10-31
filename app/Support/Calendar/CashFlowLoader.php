@@ -45,9 +45,9 @@ final readonly class CashFlowLoader
             return [];
         }
 
-        $map = CategoryGroupMap::load();
-        $groups = CategoryGroup::query()->get()->keyBy('id');
-        $colours = Category::query()->whereNotNull('color')->pluck('color', 'id');
+        $map = CategoryGroupMap::load($user->id);
+        $groups = CategoryGroup::query()->where('user_id', $user->id)->get()->keyBy('id');
+        $colours = Category::query()->where('user_id', $user->id)->whereNotNull('color')->pluck('color', 'id');
 
         /** @var array<string, array{name: string, color: string, groupId: int|null, own: int, children: array<string, array{name: string, color: string, net: int}>}> $tree */
         $tree = [];

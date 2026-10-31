@@ -36,7 +36,7 @@ final class BudgetFactory extends Factory
     public function withCategory(?Category $category = null): self
     {
         return $this->state(fn (array $attributes) => [
-            'category_id' => $category->id ?? Category::factory(),
+            'category_id' => $category->id ?? fn (array $attributes): Factory => Category::factory(['user_id' => $attributes['user_id']]),
         ]);
     }
 

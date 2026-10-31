@@ -58,7 +58,7 @@ final class PayeeReview extends Component
         }
 
         $current = $this->categoryChoices[$payeeId] ?? null;
-        $options = $this->categoriesWithinRoots($allowed);
+        $options = $this->categoriesWithinRoots($allowed, Category::visibleSortedByFullPath($this->authenticatedUser()->id));
 
         if ($current !== null && $current !== '' && $options->contains('id', (int) $current)) {
             return;
@@ -82,7 +82,7 @@ final class PayeeReview extends Component
         $rawCategory = $this->categoryChoices[$payeeId] ?? $payee->suggested_category_id;
         $categoryId = $rawCategory !== null && $rawCategory !== '' ? (int) $rawCategory : null;
 
-        if ($categoryId === null || ! Category::visible()->whereKey($categoryId)->exists()) {
+        if ($categoryId === null || ! Category::visible()->where('user_id', $user->id)->whereKey($categoryId)->exists()) {
             Flux::toast(text: 'Pick a category first', variant: 'warning');
 
             return;
@@ -136,7 +136,7 @@ final class PayeeReview extends Component
     {
         $user = $this->authenticatedUser();
         $items = $queue->pending($user);
-        $categories = Category::visibleSortedByFullPath();
+        $categories = Category::visibleSortedByFullPath($user->id);
         $byId = $categories->keyBy('id');
 
         $rows = $items->map(function (PayeeReviewItem $item) use ($categories, $byId, $resolver, $user): array {
@@ -197,12 +197,12 @@ final class PayeeReview extends Component
 
     /**
      * @param  list<string>  $roots
-     * @param  Collection<int, Category>|null  $categories
+     * @param  Collection<int, Category>  $categories
      * @return Collection<int, Category>
      */
-    private function categoriesWithinRoots(array $roots, ?Collection $categories = null): Collection
+    private function categoriesWithinRoots(array $roots, Collection $categories): Collection
     {
-        return ($categories ?? Category::visibleSortedByFullPath())
+        return $categories
             ->filter(fn (Category $category): bool => in_array(explode(' / ', $category->fullPath())[0], $roots, true))
             ->values();
     }

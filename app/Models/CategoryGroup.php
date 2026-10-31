@@ -8,10 +8,12 @@ use Carbon\CarbonImmutable;
 use Database\Factories\CategoryGroupFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property int $id
+ * @property int $user_id
  * @property string $name
  * @property string $color
  * @property string $icon
@@ -53,11 +55,18 @@ final class CategoryGroup extends Model
      * @var list<string>
      */
     protected $fillable = [
+        'user_id',
         'name',
         'color',
         'icon',
         'sort_order',
     ];
+
+    /** @return BelongsTo<User, $this> */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
 
     /** @return HasMany<Category, $this> */
     public function categories(): HasMany

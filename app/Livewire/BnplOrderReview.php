@@ -133,7 +133,7 @@ final class BnplOrderReview extends Component
         return view('livewire.bnpl-order-review', [
             'enabled' => $enabled,
             'formatMoney' => MoneyCast::format(...),
-            'categoryOptions' => $enabled ? Category::visibleSortedByFullPath() : [],
+            'categoryOptions' => $enabled ? Category::visibleSortedByFullPath((int) Auth::id()) : [],
         ]);
     }
 
@@ -156,7 +156,7 @@ final class BnplOrderReview extends Component
     {
         $categoryId = $this->categories[$orderId] ?? null;
 
-        if ($categoryId === null || $categoryId === '' || ! Category::visible()->whereKey($categoryId)->exists()) {
+        if ($categoryId === null || $categoryId === '' || ! Category::visible()->where('user_id', Auth::id())->whereKey($categoryId)->exists()) {
             $this->addError("categories.$orderId", __('Pick a category first.'));
 
             return null;

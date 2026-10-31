@@ -24,7 +24,7 @@ test('user -> accounts -> transactions chain traversal', function () {
 test('user -> transactions -> category chain traversal', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     Transaction::factory()->for($user)->for($account)->create(['category_id' => $category->id]);
 
     $transaction = $user->transactions->first();
@@ -36,7 +36,7 @@ test('user -> transactions -> category chain traversal', function () {
 
 test('user -> budgets -> category chain traversal', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     Budget::factory()->for($user)->create(['category_id' => $category->id]);
 
     $budget = $user->budgets->first();
@@ -49,7 +49,7 @@ test('user -> budgets -> category chain traversal', function () {
 test('account -> transactions -> category chain traversal', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     Transaction::factory()->for($user)->for($account)->create(['category_id' => $category->id]);
 
     $transaction = $account->transactions->first();
@@ -60,9 +60,9 @@ test('account -> transactions -> category chain traversal', function () {
 });
 
 test('category -> children -> transactions hierarchical traversal', function () {
-    $parent = Category::factory()->create();
-    $child = Category::factory()->withParent($parent)->create();
     $user = User::factory()->create();
+    $parent = Category::factory()->for($user)->create();
+    $child = Category::factory()->withParent($parent)->create();
     $account = Account::factory()->for($user)->create();
     Transaction::factory()->count(2)->for($user)->for($account)->create(['category_id' => $child->id]);
 
@@ -76,7 +76,7 @@ test('category -> children -> transactions hierarchical traversal', function () 
 
 test('budget -> category -> transactions traversal via shared category', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     $account = Account::factory()->for($user)->create();
     $budget = Budget::factory()->for($user)->create(['category_id' => $category->id]);
     Transaction::factory()->count(2)->for($user)->for($account)->create(['category_id' => $category->id]);
@@ -90,7 +90,7 @@ test('budget -> category -> transactions traversal via shared category', functio
 test('Transaction::withRelations eager loads account and category', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     Transaction::factory()->for($user)->for($account)->create(['category_id' => $category->id]);
 
     $transaction = Transaction::query()->withRelations()->first();
@@ -112,7 +112,7 @@ test('Account::withRelations eager loads user and transactions', function () {
 
 test('Budget::withRelations eager loads user and category', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     Budget::factory()->for($user)->create(['category_id' => $category->id]);
 
     $budget = Budget::query()->withRelations()->first();

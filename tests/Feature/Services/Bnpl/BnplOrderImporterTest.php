@@ -96,8 +96,8 @@ test('the same message under another loan reference creates nothing', function (
 });
 
 test('a seller with a remembered category is auto-approved and its plan inherits the category', function () {
-    $older = Category::factory()->create();
-    $latest = Category::factory()->create();
+    $older = Category::factory()->for($this->user)->create();
+    $latest = Category::factory()->for($this->user)->create();
     BnplOrder::factory()->for($this->user)->settled()->create([
         'provider' => BnplProvider::Paypal, 'retailer' => 'Umart Online', 'category_id' => $older->id, 'reviewed_at' => now()->subMonths(2),
     ]);
@@ -196,7 +196,7 @@ test('a later PayPal credit does not move plans off the account instalments are 
 });
 
 test('setting the plan category approves the order and seeds the next order for that seller', function () {
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($this->user)->create();
     $order = importReceipt($this->user, payPalReceiptEmail());
 
     $order->plannedTransaction->update(['category_id' => $category->id]);
@@ -220,7 +220,7 @@ test('setting the plan category approves the order and seeds the next order for 
 });
 
 test('clearing the category of an approved plan sends its order back to review', function () {
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($this->user)->create();
     $order = importReceipt($this->user, payPalReceiptEmail());
     $order->plannedTransaction->update(['category_id' => $category->id]);
 
@@ -240,7 +240,7 @@ test('changing the category of an unrelated plan leaves BNPL orders alone', func
     $order = importReceipt($this->user, payPalReceiptEmail());
     $other = PlannedTransaction::factory()->for($this->user)->for($this->account)->create();
 
-    $other->update(['category_id' => Category::factory()->create()->id]);
+    $other->update(['category_id' => Category::factory()->for($this->user)->create()->id]);
 
     expect($order->fresh()->category_id)->toBeNull()
         ->and($order->events()->count())->toBe(3);

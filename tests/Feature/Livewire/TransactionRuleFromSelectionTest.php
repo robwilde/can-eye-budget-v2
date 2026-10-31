@@ -24,7 +24,7 @@ beforeEach(function (): void {
     $this->travelTo(CarbonImmutable::parse('2026-06-15'));
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
-    $this->category = Category::factory()->create(['is_hidden' => false]);
+    $this->category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 });
 
 function ruleTxn(User $user, Account $account, string $description, array $overrides = []): Transaction
@@ -115,7 +115,7 @@ it('counts a feed-sourced row already in the target category as changed', functi
 });
 
 it('reports rows protected by a manual category and leaves them untouched', function () {
-    $otherCategory = Category::factory()->create(['is_hidden' => false]);
+    $otherCategory = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $selected = ruleTxn($this->user, $this->account, 'NETFLIX.COM');
     $manual = ruleTxn($this->user, $this->account, 'NETFLIX.COM', [
@@ -150,10 +150,10 @@ it('separates matches inside the selection from those beyond it', function () {
 });
 
 it('lists the categories that matching rows outside the selection already hold', function () {
-    $other = Category::factory()->create(['is_hidden' => false, 'name' => 'Streaming']);
+    $other = Category::factory()->for($this->user)->create(['is_hidden' => false, 'name' => 'Streaming']);
 
     $selected = ruleTxn($this->user, $this->account, 'NETFLIX.COM', [
-        'category_id' => Category::factory()->create(['is_hidden' => false, 'name' => 'Selected'])->id,
+        'category_id' => Category::factory()->for($this->user)->create(['is_hidden' => false, 'name' => 'Selected'])->id,
         'category_source' => CategorySource::Rule,
     ]);
     ruleTxn($this->user, $this->account, 'NETFLIX.COM', [
@@ -308,7 +308,7 @@ it('closes the panel when a tick changes the selection it previewed', function (
 });
 
 it('leaves a planned sibling the rule does not match untouched', function () {
-    $other = Category::factory()->create(['is_hidden' => false]);
+    $other = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $planned = PlannedTransaction::factory()->for($this->user)->for($this->account)->create();
 
     $selected = ruleTxn($this->user, $this->account, 'NETFLIX.COM', ['planned_transaction_id' => $planned->id]);
@@ -367,10 +367,10 @@ it('updates the preview when the match value or category changes', function () {
 });
 
 it('keeps same-named categories in different branches apart', function () {
-    $office = Category::factory()->create(['is_hidden' => false, 'name' => 'Office']);
-    $personal = Category::factory()->create(['is_hidden' => false, 'name' => 'Personal']);
-    $officeSub = Category::factory()->create(['is_hidden' => false, 'name' => 'Subscription', 'parent_id' => $office->id]);
-    $personalSub = Category::factory()->create(['is_hidden' => false, 'name' => 'Subscription', 'parent_id' => $personal->id]);
+    $office = Category::factory()->for($this->user)->create(['is_hidden' => false, 'name' => 'Office']);
+    $personal = Category::factory()->for($this->user)->create(['is_hidden' => false, 'name' => 'Personal']);
+    $officeSub = Category::factory()->for($this->user)->create(['is_hidden' => false, 'name' => 'Subscription', 'parent_id' => $office->id]);
+    $personalSub = Category::factory()->for($this->user)->create(['is_hidden' => false, 'name' => 'Subscription', 'parent_id' => $personal->id]);
 
     $selected = ruleTxn($this->user, $this->account, 'NETFLIX.COM');
     ruleTxn($this->user, $this->account, 'NETFLIX.COM', ['category_id' => $officeSub->id, 'category_source' => CategorySource::Rule]);
@@ -386,7 +386,7 @@ it('keeps same-named categories in different branches apart', function () {
 });
 
 it('treats a categorised row with no recorded source as manual, as the sweep does', function () {
-    $other = Category::factory()->create(['is_hidden' => false]);
+    $other = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $selected = ruleTxn($this->user, $this->account, 'NETFLIX.COM');
     $legacy = ruleTxn($this->user, $this->account, 'NETFLIX.COM', ['category_id' => $other->id]);
 
@@ -473,7 +473,7 @@ it('surfaces the live preview in the panel view data', function () {
 });
 
 it('splits manual rows that agree with the rule from those it contradicts', function () {
-    $other = Category::factory()->create(['is_hidden' => false]);
+    $other = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $selected = ruleTxn($this->user, $this->account, 'NETFLIX.COM');
     ruleTxn($this->user, $this->account, 'NETFLIX.COM', [
         'category_id' => $this->category->id,
@@ -497,7 +497,7 @@ it('splits manual rows that agree with the rule from those it contradicts', func
 });
 
 it('warns in the panel when the rule contradicts manual categorisations', function () {
-    $other = Category::factory()->create(['is_hidden' => false]);
+    $other = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $selected = ruleTxn($this->user, $this->account, 'NETFLIX.COM');
     ruleTxn($this->user, $this->account, 'NETFLIX.COM', [
         'category_id' => $other->id,
@@ -514,4 +514,19 @@ it('warns in the panel when the rule contradicts manual categorisations', functi
         ->assertSee($other->fullPath())
         ->call('createRuleFromSelection')
         ->assertSet('bulkNotice', 'Rule created. 1 transaction categorised, 1 left alone because you set them yourself (1 of them you filed under a different category).');
+});
+
+it("creates no rule from another user's category", function () {
+    $theirs = Category::factory()->create(['is_hidden' => false]);
+    $txn = ruleTxn($this->user, $this->account, 'NETFLIX.COM');
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('selected', [$txn->id => true])
+        ->set('bulkCategoryId', (string) $theirs->id)
+        ->set('ruleMatchValue', 'NETFLIX')
+        ->call('createRuleFromSelection');
+
+    expect(UserRule::query()->where('user_id', $this->user->id)->count())->toBe(0)
+        ->and($txn->fresh()->category_id)->toBeNull();
 });

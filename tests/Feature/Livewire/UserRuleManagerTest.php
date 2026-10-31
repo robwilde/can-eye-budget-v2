@@ -125,7 +125,7 @@ test('cannot access another user groups', function () {
 
 test('can create a new rule with triggers and actions', function () {
     $group = UserRuleGroup::factory()->for($this->user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($this->user)->create();
 
     Livewire::actingAs($this->user)
         ->test(UserRuleManager::class)
@@ -287,7 +287,7 @@ test('runRules queues the analysis job with the manual trigger', function () {
 });
 
 test('applyRule categorises every matching transaction for a manual rule', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $group = UserRuleGroup::factory()->for($this->user)->create();
     $rule = UserRule::factory()->for($this->user)->for($group, 'group')->create([
         'is_auto_apply' => false,
@@ -340,8 +340,8 @@ test('applyRule renames every matching transaction, replacing an existing clean 
 });
 
 test('applyRule ignores another user\'s rule and an inactive rule', function (bool $foreign) {
-    $category = Category::factory()->create(['is_hidden' => false]);
     $owner = $foreign ? User::factory()->create() : $this->user;
+    $category = Category::factory()->for($owner)->create(['is_hidden' => false]);
     $group = UserRuleGroup::factory()->for($owner)->create();
     $rule = UserRule::factory()->for($owner)->for($group, 'group')->create([
         'is_active' => $foreign,
@@ -706,7 +706,7 @@ function openedDraft(User $user, Category $category, string $match = 'NETFLIX'):
 }
 
 test('test lists what an unsaved rule matches and creates nothing', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     testRuleSeed($this->user);
     testRuleSeed($this->user, ['description' => 'SPOTIFY']);
 
@@ -721,7 +721,7 @@ test('test lists what an unsaved rule matches and creates nothing', function () 
 });
 
 test('test runs without a rule name', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     testRuleSeed($this->user);
 
     openedDraft($this->user, $category)
@@ -731,7 +731,7 @@ test('test runs without a rule name', function () {
 });
 
 test('test reflects the unsaved edits of an existing rule, not the saved triggers', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $group = UserRuleGroup::factory()->for($this->user)->create();
     $rule = UserRule::factory()->for($this->user)->for($group, 'group')->create([
         'triggers' => [['field' => RuleTriggerField::Description->value, 'operator' => RuleTriggerOperator::Contains->value, 'value' => 'NETFLIX']],
@@ -752,8 +752,8 @@ test('test reflects the unsaved edits of an existing rule, not the saved trigger
 });
 
 test('test shows the three sections, their counts and the hand-categorised marker', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
-    $other = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $other = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     testRuleSeed($this->user, ['description' => 'NETFLIX NEW']);
     testRuleSeed($this->user, ['description' => 'NETFLIX DONE', 'category_id' => $category->id, 'category_source' => CategorySource::Rule]);
     testRuleSeed($this->user, ['description' => 'NETFLIX HAND', 'category_id' => $other->id, 'category_source' => CategorySource::Manual]);
@@ -771,7 +771,7 @@ test('test shows the three sections, their counts and the hand-categorised marke
 });
 
 test('an incomplete trigger shows validation errors instead of running', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     testRuleSeed($this->user);
 
     openedDraft($this->user, $category)
@@ -782,7 +782,7 @@ test('an incomplete trigger shows validation errors instead of running', functio
 });
 
 test('a missing action shows validation errors instead of running', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     openedDraft($this->user, $category)
         ->set('actions.0.type', '')
@@ -792,7 +792,7 @@ test('a missing action shows validation errors instead of running', function () 
 });
 
 test('a failed test clears the previous result', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     testRuleSeed($this->user);
 
     $component = openedDraft($this->user, $category)->call('testRule');
@@ -803,7 +803,7 @@ test('a failed test clears the previous result', function () {
 });
 
 test('the result is cleared when the draft or the modal changes', function (Closure $change) {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $group = UserRuleGroup::factory()->for($this->user)->create();
     $saved = UserRule::factory()->for($this->user)->for($group, 'group')->create();
     testRuleSeed($this->user);
@@ -829,7 +829,7 @@ test('the result is cleared when the draft or the modal changes', function (Clos
 ]);
 
 test('the result survives edits that do not change what the rule matches', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     testRuleSeed($this->user);
 
     $component = openedDraft($this->user, $category)
@@ -842,7 +842,7 @@ test('the result survives edits that do not change what the rule matches', funct
 });
 
 test('test writes nothing and is not audited', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $row = testRuleSeed($this->user);
     $before = $row->fresh()->getAttributes();
     $draft = openedDraft($this->user, $category);
@@ -856,7 +856,7 @@ test('test writes nothing and is not audited', function () {
 });
 
 test('test only sees the signed-in user\'s transactions', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     testRuleSeed(User::factory()->create());
 
     $component = openedDraft($this->user, $category)->call('testRule');
@@ -868,7 +868,7 @@ test('test only sees the signed-in user\'s transactions', function () {
 // ─── Trigger value validation ─────────────────────────────
 
 test('saving a value operator with a blank trigger value fails validation', function (string $blank) {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $component = openedDraft($this->user, $category, $blank)
         ->set('ruleName', 'Blank trigger')
@@ -880,7 +880,7 @@ test('saving a value operator with a blank trigger value fails validation', func
 })->with(['empty' => [''], 'spaces' => ['   ']]);
 
 test('saving a valueless operator with a blank trigger value succeeds', function (RuleTriggerOperator $operator) {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     openedDraft($this->user, $category, '')
         ->set('triggers.0.operator', $operator->value)
@@ -895,7 +895,7 @@ test('saving a valueless operator with a blank trigger value succeeds', function
 ]);
 
 test('testing a value operator with a blank trigger value shows an error instead of running', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     testRuleSeed($this->user);
 
     openedDraft($this->user, $category, '')
@@ -905,7 +905,7 @@ test('testing a value operator with a blank trigger value shows an error instead
 });
 
 test('saving a trigger with a non-string operator fails validation instead of erroring', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     openedDraft($this->user, $category)
         ->set('triggers.0.operator', 1)

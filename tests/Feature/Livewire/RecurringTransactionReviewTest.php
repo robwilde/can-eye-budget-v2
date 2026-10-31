@@ -168,7 +168,7 @@ test('accept with a category re-categorises every transaction of the merchant, n
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $user->update(['primary_account_id' => $account->id]);
-    $category = Category::factory()->create(['name' => 'Entertainment']);
+    $category = Category::factory()->for($user)->create(['name' => 'Entertainment']);
 
     createRecurringReviewMonthlyGroup($user, $account, 'Netflix', 1699, 3);
     $unmatched = createRecurringReviewTransaction($user, Account::factory()->for($user)->create(), [
@@ -210,7 +210,7 @@ test('accept confirms the merchants payee so its rule and tag exist', function (
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $user->update(['primary_account_id' => $account->id]);
-    $category = Category::factory()->create(['name' => 'Entertainment']);
+    $category = Category::factory()->for($user)->create(['name' => 'Entertainment']);
 
     $transactions = createRecurringReviewMonthlyGroup($user, $account, 'Netflix', 1699, 3);
     $payee = Payee::factory()->create([

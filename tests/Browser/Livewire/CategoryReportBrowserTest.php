@@ -15,8 +15,8 @@ use App\Models\User;
 test('reports page renders the chart, both sections and mode tabs without JavaScript errors', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $spend = Category::factory()->create(['name' => 'Dining']);
-    $earn = Category::factory()->create(['name' => 'Salary']);
+    $spend = Category::factory()->for($user)->create(['name' => 'Dining']);
+    $earn = Category::factory()->for($user)->create(['name' => 'Salary']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -50,7 +50,7 @@ test('reports page renders the chart, both sections and mode tabs without JavaSc
 test('switching to the plan tab surfaces planned-only categories', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $rent = Category::factory()->create(['name' => 'Rent']);
+    $rent = Category::factory()->for($user)->create(['name' => 'Rent']);
 
     PlannedTransaction::factory()->for($user)->create([
         'account_id' => $account->id,
@@ -75,7 +75,7 @@ test('switching to the plan tab surfaces planned-only categories', function () {
 test('expanding a category row reveals its full-path subcategory inline', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $office = Category::factory()->create(['name' => 'Office']);
+    $office = Category::factory()->for($user)->create(['name' => 'Office']);
     $software = Category::factory()->withParent($office)->create(['name' => 'Software']);
 
     Transaction::factory()->for($user)->debit()->create([
@@ -99,7 +99,7 @@ test('expanding a category row reveals its full-path subcategory inline', functi
 test('a leaf category links through to the filtered transaction list', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Utilities']);
+    $category = Category::factory()->for($user)->create(['name' => 'Utilities']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,

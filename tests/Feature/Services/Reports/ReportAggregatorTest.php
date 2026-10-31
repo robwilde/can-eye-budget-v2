@@ -21,7 +21,7 @@ beforeEach(function (): void {
 test('actual atoms group by month, direction and category using absolute amounts', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,
@@ -61,7 +61,7 @@ test('actual atoms group by month, direction and category using absolute amounts
 test('a monthly plan is expanded into one occurrence per month in range', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $rent = Category::factory()->create(['name' => 'Rent']);
+    $rent = Category::factory()->for($user)->create(['name' => 'Rent']);
 
     PlannedTransaction::factory()->for($user)->create([
         'account_id' => $account->id,
@@ -88,7 +88,7 @@ test('a monthly plan is expanded into one occurrence per month in range', functi
 test('an old high-frequency plan is not truncated before the selected window', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $coffee = Category::factory()->create(['name' => 'Coffee']);
+    $coffee = Category::factory()->for($user)->create(['name' => 'Coffee']);
 
     PlannedTransaction::factory()->for($user)->create([
         'account_id' => $account->id,
@@ -116,7 +116,7 @@ test('an old high-frequency plan is not truncated before the selected window', f
 test('plan occurrences honour the exact selected window rather than whole months', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $subscription = Category::factory()->create(['name' => 'Subscription']);
+    $subscription = Category::factory()->for($user)->create(['name' => 'Subscription']);
 
     PlannedTransaction::factory()->for($user)->create([
         'account_id' => $account->id,
@@ -142,7 +142,7 @@ test('plan occurrences honour the exact selected window rather than whole months
 test('inactive plans and plan transfers are excluded', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $bills = Category::factory()->create(['name' => 'Bills']);
+    $bills = Category::factory()->for($user)->create(['name' => 'Bills']);
 
     PlannedTransaction::factory()->for($user)->inactive()->create([
         'account_id' => $account->id,
@@ -201,7 +201,7 @@ test('open real bounds span the earliest activity to the current month', functio
 test('a long daily plan range is expanded without truncation', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Daily']);
+    $category = Category::factory()->for($user)->create(['name' => 'Daily']);
 
     PlannedTransaction::factory()->for($user)->create([
         'account_id' => $account->id,
@@ -306,7 +306,7 @@ test('actual atoms drop the untracked-paired leg of a transfer when transfers ar
     $user = User::factory()->create();
     $tracked = Account::factory()->for($user)->create();
     $hidden = Account::factory()->for($user)->untracked()->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     Transaction::factory()->for($user)->debit()->create(['account_id' => $tracked->id, 'category_id' => $groceries->id, 'amount' => 1500, 'post_date' => '2026-07-04']);
 

@@ -209,7 +209,7 @@ test('a later sync does not overwrite an adopted row with the feed narration', f
 test('an adopted transaction keeps the category the user set', function () {
     [$feed, , $account] = linkedRedbarkFeed();
 
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($feed->user)->create();
 
     $csv = Transaction::factory()->create([
         'user_id' => $feed->user_id,

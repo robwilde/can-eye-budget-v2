@@ -131,7 +131,9 @@ test('saves the pay columns but skips the income planned transaction when there 
 });
 
 test('links the income to the seeded Income then Salary category when it exists', function () {
-    $income = Category::factory()->create(['name' => 'Income']);
+    $otherIncome = Category::factory()->create(['name' => 'Income']);
+    Category::factory()->withParent($otherIncome)->create(['name' => 'Salary']);
+    $income = Category::factory()->for($this->user)->create(['name' => 'Income']);
     $salary = Category::factory()->withParent($income)->create(['name' => 'Salary']);
 
     $this->configurator->apply(
@@ -142,6 +144,20 @@ test('links the income to the seeded Income then Salary category when it exists'
     );
 
     expect(incomePlannedTransactions($this->user)->first()->category_id)->toBe($salary->id);
+});
+
+test('leaves the income uncategorised when only another user has the category tree', function () {
+    $otherIncome = Category::factory()->create(['name' => 'Income']);
+    Category::factory()->withParent($otherIncome)->create(['name' => 'Salary']);
+
+    $this->configurator->apply(
+        $this->user,
+        300_000,
+        PayFrequency::Fortnightly,
+        CarbonImmutable::today()->addDays(7)->format('Y-m-d'),
+    );
+
+    expect(incomePlannedTransactions($this->user)->first()->category_id)->toBeNull();
 });
 
 test('leaves the income uncategorised when the category tree is not seeded', function () {

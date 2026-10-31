@@ -304,9 +304,9 @@ test('totalNeededUntilPayday excludes planned transfers', function () {
         'next_pay_date' => now()->addDays(7),
     ]);
     $account = Account::factory()->for($user)->create();
-    $transferParent = Category::factory()->create(['name' => 'Transfer']);
-    $transferChild = Category::factory()->create(['parent_id' => $transferParent->id, 'name' => 'Optimus to CC']);
-    $billCategory = Category::factory()->create(['name' => 'Insurance']);
+    $transferParent = Category::factory()->for($user)->create(['name' => 'Transfer']);
+    $transferChild = Category::factory()->for($user)->create(['parent_id' => $transferParent->id, 'name' => 'Optimus to CC']);
+    $billCategory = Category::factory()->for($user)->create(['name' => 'Insurance']);
 
     PlannedTransaction::factory()->for($user)->for($account)->create([
         'direction' => TransactionDirection::Debit,
@@ -333,8 +333,8 @@ test('totalNeededUntilPayday excludes planned transfers categorised at the paren
         'next_pay_date' => now()->addDays(7),
     ]);
     $account = Account::factory()->for($user)->create();
-    $transferParent = Category::factory()->create(['name' => 'Transfer']);
-    $billCategory = Category::factory()->create(['name' => 'Insurance']);
+    $transferParent = Category::factory()->for($user)->create(['name' => 'Transfer']);
+    $billCategory = Category::factory()->for($user)->create(['name' => 'Insurance']);
 
     PlannedTransaction::factory()->for($user)->for($account)->create([
         'direction' => TransactionDirection::Debit,

@@ -42,7 +42,7 @@ final class PayeeConfirmer
             $locked = $this->owned($user, $payee);
 
             throw_unless(
-                Category::visibleSortedByFullPath()->contains('id', $categoryId),
+                Category::visibleSortedByFullPath($user->id)->contains('id', $categoryId),
                 InvalidArgumentException::class,
                 'The category is not available.',
             );

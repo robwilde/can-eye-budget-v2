@@ -9,7 +9,7 @@ use App\Models\Category;
 use App\Models\CategoryGroup;
 use App\Models\Transaction;
 use App\Models\User;
-use App\Services\CategoryGroupProvisioner;
+use App\Services\UserCategoryProvisioner;
 use App\Support\Calendar\CashFlow;
 use App\Support\Calendar\CashFlowLoader;
 use App\Support\Calendar\FlowParent;
@@ -86,11 +86,11 @@ test('a user with no activity in the month has an empty cash flow', function () 
 });
 
 test('categories roll up into their group and a child of an anchor rolls into the anchor', function () {
-    $food = CategoryGroup::factory()->create(['name' => 'Food']);
-    $groceries = Category::factory()->create(['name' => 'Groceries', 'group_id' => $food->id]);
+    $food = CategoryGroup::factory()->for($this->user)->create(['name' => 'Food']);
+    $groceries = Category::factory()->for($this->user)->create(['name' => 'Groceries', 'group_id' => $food->id]);
     $fruit = Category::factory()->withParent($groceries)->create(['name' => 'Fruit']);
     $apples = Category::factory()->withParent($fruit)->create(['name' => 'Apples']);
-    $eatingOut = Category::factory()->create(['name' => 'Eating Out', 'group_id' => $food->id]);
+    $eatingOut = Category::factory()->for($this->user)->create(['name' => 'Eating Out', 'group_id' => $food->id]);
 
     flowDebit($this->user, $this->account, $groceries, 1000);
     flowDebit($this->user, $this->account, $fruit, 2000);
@@ -115,9 +115,9 @@ test('categories roll up into their group and a child of an anchor rolls into th
 });
 
 test('a child with a group of its own lands in that group rather than its parent group', function () {
-    $banking = CategoryGroup::factory()->create(['name' => 'Banking']);
-    $savings = CategoryGroup::factory()->create(['name' => 'Savings']);
-    $root = Category::factory()->create(['name' => 'Banking', 'group_id' => $banking->id]);
+    $banking = CategoryGroup::factory()->for($this->user)->create(['name' => 'Banking']);
+    $savings = CategoryGroup::factory()->for($this->user)->create(['name' => 'Savings']);
+    $root = Category::factory()->for($this->user)->create(['name' => 'Banking', 'group_id' => $banking->id]);
     $plain = Category::factory()->withParent($root)->create(['name' => 'Optimus to Cash']);
     $override = Category::factory()->withParent($root)->create(['name' => 'Optimus to Spaceship', 'group_id' => $savings->id]);
 
@@ -134,7 +134,7 @@ test('a child with a group of its own lands in that group rather than its parent
 });
 
 test('a refund inside a category nets against its spending rather than counting as income', function () {
-    $shopping = Category::factory()->create(['name' => 'Shopping']);
+    $shopping = Category::factory()->for($this->user)->create(['name' => 'Shopping']);
 
     flowDebit($this->user, $this->account, $shopping, 10000);
     flowCredit($this->user, $this->account, $shopping, 3000);
@@ -148,7 +148,7 @@ test('a refund inside a category nets against its spending rather than counting 
 });
 
 test('a category refunded beyond its spending shows as income, not negative spending', function () {
-    $shopping = Category::factory()->create(['name' => 'Shopping']);
+    $shopping = Category::factory()->for($this->user)->create(['name' => 'Shopping']);
 
     flowDebit($this->user, $this->account, $shopping, 3000);
     flowCredit($this->user, $this->account, $shopping, 10000);
@@ -161,7 +161,7 @@ test('a category refunded beyond its spending shows as income, not negative spen
 });
 
 test('a category with no group falls under Ungrouped', function () {
-    $loose = Category::factory()->create(['name' => 'Loose']);
+    $loose = Category::factory()->for($this->user)->create(['name' => 'Loose']);
 
     flowDebit($this->user, $this->account, $loose, 2500);
 
@@ -189,9 +189,9 @@ test('a transaction with no category sits under Uncategorised and cannot be dril
 });
 
 test('a transfer out to an untracked account counts as Savings and Investments spend', function () {
-    (new CategoryGroupProvisioner)->provision();
-    $transfer = Category::factory()->create(['name' => 'Transfer']);
-    $savingsGroup = CategoryGroup::query()->where('name', CategoryGroupProvisioner::SAVINGS_GROUP)->firstOrFail();
+    app(UserCategoryProvisioner::class)->provision($this->user);
+    $transfer = Category::query()->whereBelongsTo($this->user)->whereNull('parent_id')->where('name', 'Transfer')->firstOrFail();
+    $savingsGroup = CategoryGroup::query()->whereBelongsTo($this->user)->where('name', UserCategoryProvisioner::SAVINGS_GROUP)->firstOrFail();
     $spaceship = Category::factory()->withParent($transfer)->create(['name' => 'Optimus to Spaceship', 'group_id' => $savingsGroup->id]);
     $hidden = Account::factory()->for($this->user)->untracked()->create();
 
@@ -202,7 +202,7 @@ test('a transfer out to an untracked account counts as Savings and Investments s
     expect($flow->spending)->toBe(25000)
         ->and($flow->income)->toBe(0)
         ->and($flow->outflows)->toHaveCount(1)
-        ->and($flow->outflows[0]['name'])->toBe(CategoryGroupProvisioner::SAVINGS_GROUP)
+        ->and($flow->outflows[0]['name'])->toBe(UserCategoryProvisioner::SAVINGS_GROUP)
         ->and($flow->outflows[0]['groupId'])->toBe($savingsGroup->id)
         ->and($flow->outflows[0]['amount'])->toBe(25000);
 });
@@ -220,7 +220,7 @@ test('a transfer in from an untracked account counts as income', function () {
 
 test('a transfer between two tracked accounts is excluded', function () {
     $other = Account::factory()->for($this->user)->create();
-    $transfer = Category::factory()->create(['name' => 'Transfer']);
+    $transfer = Category::factory()->for($this->user)->create(['name' => 'Transfer']);
 
     flowTransfer($this->user, $this->account, $other, $transfer, 9999);
     flowTransfer($this->user, $this->account, $other, null, 8888);
@@ -230,7 +230,7 @@ test('a transfer between two tracked accounts is excluded', function () {
 
 test('parents without transfers drop the untracked transfer but keep ordinary spend', function () {
     $hidden = Account::factory()->for($this->user)->untracked()->create();
-    $shopping = Category::factory()->create(['name' => 'Shopping']);
+    $shopping = Category::factory()->for($this->user)->create(['name' => 'Shopping']);
 
     flowTransfer($this->user, $this->account, $hidden, null, 25000);
     flowDebit($this->user, $this->account, $shopping, 1500);
@@ -246,11 +246,12 @@ test('parents without transfers drop the untracked transfer but keep ordinary sp
 test("another user's transactions never appear", function () {
     $stranger = User::factory()->create();
     $strangerAccount = Account::factory()->for($stranger)->create();
-    $shopping = Category::factory()->create(['name' => 'Shopping']);
+    $theirShopping = Category::factory()->for($stranger)->create(['name' => 'Shopping']);
+    $myShopping = Category::factory()->for($this->user)->create(['name' => 'Shopping']);
 
-    flowDebit($stranger, $strangerAccount, $shopping, 99999);
+    flowDebit($stranger, $strangerAccount, $theirShopping, 99999);
     flowCredit($stranger, $strangerAccount, null, 88888);
-    flowDebit($this->user, $this->account, $shopping, 1200);
+    flowDebit($this->user, $this->account, $myShopping, 1200);
 
     $mine = loadCashFlow($this->user);
     $theirs = loadCashFlow($stranger);
@@ -262,7 +263,7 @@ test("another user's transactions never appear", function () {
 });
 
 test('only the viewed month is counted, including its first and last day', function () {
-    $shopping = Category::factory()->create(['name' => 'Shopping']);
+    $shopping = Category::factory()->for($this->user)->create(['name' => 'Shopping']);
 
     flowDebit($this->user, $this->account, $shopping, 111, '2026-06-30');
     flowDebit($this->user, $this->account, $shopping, 100, '2026-07-01');
@@ -276,10 +277,10 @@ test('only the viewed month is counted, including its first and last day', funct
 });
 
 test('outflows total the spending and the overview balances around the hub', function () {
-    $food = CategoryGroup::factory()->create(['name' => 'Food']);
-    $groceries = Category::factory()->create(['name' => 'Groceries', 'group_id' => $food->id]);
-    $loose = Category::factory()->create(['name' => 'Loose']);
-    $salary = Category::factory()->create(['name' => 'Salary']);
+    $food = CategoryGroup::factory()->for($this->user)->create(['name' => 'Food']);
+    $groceries = Category::factory()->for($this->user)->create(['name' => 'Groceries', 'group_id' => $food->id]);
+    $loose = Category::factory()->for($this->user)->create(['name' => 'Loose']);
+    $salary = Category::factory()->for($this->user)->create(['name' => 'Salary']);
 
     flowCredit($this->user, $this->account, $salary, 500000);
     flowDebit($this->user, $this->account, $groceries, 12000);

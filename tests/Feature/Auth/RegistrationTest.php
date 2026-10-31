@@ -6,10 +6,14 @@
 
 declare(strict_types=1);
 
+use App\Actions\Fortify\CreateNewUser;
 use App\Models\Category;
+use App\Models\CategoryGroup;
 use App\Models\User;
 use App\Models\UserRule;
 use App\Services\MonthEndBalanceRuleProvisioner;
+use App\Services\UserCategoryProvisioner;
+use Illuminate\Support\Facades\Event;
 
 test('registration screen can be rendered', function () {
     $response = $this->get(route('register'));
@@ -46,13 +50,7 @@ test('registering over JSON returns 201 without a redirect', function () {
     ])->assertCreated();
 });
 
-test('a newly registered user is provisioned with the month-end balance rule', function () {
-    Category::create([
-        'name' => MonthEndBalanceRuleProvisioner::CATEGORY_NAME,
-        'icon' => 'building-library',
-        'is_hidden' => false,
-    ]);
-
+it('provisions a category tree for a new user', function () {
     $this->post(route('register.store'), [
         'name' => 'Jane Doe',
         'email' => 'jane@example.com',
@@ -61,6 +59,33 @@ test('a newly registered user is provisioned with the month-end balance rule', f
     ])->assertSessionHasNoErrors();
 
     $user = User::query()->where('email', 'jane@example.com')->sole();
+    $balance = Category::query()->where('user_id', $user->id)->whereNull('parent_id')->where('name', MonthEndBalanceRuleProvisioner::CATEGORY_NAME)->sole();
+    $rule = UserRule::query()->where('user_id', $user->id)->sole();
 
-    expect(UserRule::query()->where('user_id', $user->id)->count())->toBe(1);
+    expect(Category::query()->where('user_id', $user->id)->count())->toBeGreaterThan(80)
+        ->and(Category::query()->whereNull('user_id')->orWhere('user_id', '!=', $user->id)->count())->toBe(0)
+        ->and(CategoryGroup::query()->where('user_id', $user->id)->count())->toBe(count(UserCategoryProvisioner::GROUPS))
+        ->and($balance->is_hidden)->toBeFalse()
+        ->and($rule->actions[0]['value'])->toBe((string) $balance->id);
+
+    Event::listen('eloquent.creating: '.Category::class, static function (Category $category): void {
+        if ($category->name === MonthEndBalanceRuleProvisioner::CATEGORY_NAME) {
+            throw new RuntimeException('Provisioning failed');
+        }
+    });
+
+    try {
+        expect(fn () => app(CreateNewUser::class)->create([
+            'name' => 'John Doe',
+            'email' => 'john@example.com',
+            'password' => 'password',
+            'password_confirmation' => 'password',
+        ]))->toThrow(RuntimeException::class);
+    } finally {
+        Event::forget('eloquent.creating: '.Category::class);
+    }
+
+    expect(User::query()->where('email', 'john@example.com')->exists())->toBeFalse()
+        ->and(Category::query()->where('user_id', '!=', $user->id)->count())->toBe(0)
+        ->and(CategoryGroup::query()->where('user_id', '!=', $user->id)->count())->toBe(0);
 });

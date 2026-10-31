@@ -21,7 +21,7 @@ beforeEach(function (): void {
     $this->travelTo(CarbonImmutable::parse('2026-06-15'));
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
-    $this->category = Category::factory()->create(['is_hidden' => false]);
+    $this->category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 });
 
 function provenanceRow(User $user, Account $account, array $overrides = []): Transaction
@@ -165,7 +165,7 @@ it('falls back to any-source for an unknown source filter', function () {
 });
 
 it('leaves unselected planned siblings and the plan alone when reverting', function () {
-    $manualCategory = Category::factory()->create(['is_hidden' => false]);
+    $manualCategory = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $planned = PlannedTransaction::factory()->for($this->user)->for($this->account)->create([
         'category_id' => $manualCategory->id,
     ]);

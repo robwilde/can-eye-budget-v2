@@ -30,14 +30,8 @@ final readonly class MonthEndBalanceRuleProvisioner
 
     public function provisionAllUsers(): void
     {
-        $category = $this->balanceCategory();
-
-        if ($category === null) {
-            return;
-        }
-
-        User::query()->eachById(function (User $user) use ($category): void {
-            $this->provision($user->id, $category->id);
+        User::query()->eachById(function (User $user): void {
+            $this->provisionForUser($user->id);
         });
     }
 
@@ -98,7 +92,7 @@ final readonly class MonthEndBalanceRuleProvisioner
 
     public function provisionForUser(int $userId): ?UserRule
     {
-        $category = $this->balanceCategory();
+        $category = $this->balanceCategory($userId);
 
         if ($category === null) {
             return null;
@@ -107,9 +101,10 @@ final readonly class MonthEndBalanceRuleProvisioner
         return $this->provision($userId, $category->id);
     }
 
-    private function balanceCategory(): ?Category
+    private function balanceCategory(int $userId): ?Category
     {
         $category = Category::query()
+            ->where('user_id', $userId)
             ->whereNull('parent_id')
             ->where('name', self::CATEGORY_NAME)
             ->first();

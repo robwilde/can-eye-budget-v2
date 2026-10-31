@@ -91,7 +91,7 @@ final readonly class DayActivityLoader
         $transferPlannedIds = array_flip($transferPlanned->modelKeys());
         $plannedTransactions = $ordinaryPlanned->concat($transferPlanned);
 
-        $linkedCategories = Category::allWithLinkedParents()->keyBy('id');
+        $linkedCategories = Category::allWithLinkedParents($userId)->keyBy('id');
         $linked = static fn (?Category $category): ?Category => $category === null
             ? null
             : ($linkedCategories[$category->id] ?? $category);

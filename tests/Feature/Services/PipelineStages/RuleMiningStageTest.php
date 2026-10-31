@@ -20,9 +20,9 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
-function firstImportCategory(string $parent, string $child): Category
+function firstImportCategory(User $user, string $parent, string $child): Category
 {
-    $parentCategory = Category::query()->firstOrCreate(['name' => $parent], ['is_hidden' => false]);
+    $parentCategory = Category::query()->firstOrCreate(['user_id' => $user->id, 'name' => $parent], ['is_hidden' => false]);
 
     return Category::factory()->withParent($parentCategory)->create(['name' => $child]);
 }
@@ -64,9 +64,9 @@ function seedFirstImportFixture(User $user, Account $account): void
 beforeEach(function () {
     $this->user = User::factory()->create(['primary_account_id' => null, 'pay_amount' => null, 'pay_frequency' => null, 'next_pay_date' => null]);
     $this->account = Account::factory()->for($this->user)->create();
-    $this->groceries = Category::query()->firstOrCreate(['name' => 'Groceries', 'parent_id' => null], ['is_hidden' => false]);
-    $this->streaming = firstImportCategory('Entertainment', 'Streaming');
-    $this->salary = firstImportCategory('Income', 'Salary');
+    $this->groceries = Category::query()->firstOrCreate(['user_id' => $this->user->id, 'name' => 'Groceries', 'parent_id' => null], ['is_hidden' => false]);
+    $this->streaming = firstImportCategory($this->user, 'Entertainment', 'Streaming');
+    $this->salary = firstImportCategory($this->user, 'Income', 'Salary');
 });
 
 test('generates rules from the first import and categorises most transactions without user action', function () {
@@ -96,7 +96,7 @@ test('never overrides a manually categorised transaction when a generated rule m
     $pipeline = app(TransactionAnalysisPipeline::class);
     $pipeline->run($this->user, PipelineTrigger::Sync);
 
-    $other = Category::factory()->create(['name' => 'Household']);
+    $other = Category::factory()->for($this->user)->create(['name' => 'Household']);
     $manual = firstImportRow($this->user, $this->account, 'WOOLWORTHS 5678 TOOWONG', 0, 120_000, TransactionDirection::Debit, [
         'category_id' => $other->id,
         'category_source' => CategorySource::Manual,
@@ -112,7 +112,7 @@ test('never overrides a manually categorised transaction when a generated rule m
 
 test('skips a generated rule that would contradict a manual categorisation on the first import', function () {
     seedFirstImportFixture($this->user, $this->account);
-    $other = Category::factory()->create(['name' => 'Household']);
+    $other = Category::factory()->for($this->user)->create(['name' => 'Household']);
     $manual = firstImportRow($this->user, $this->account, 'WOOLWORTHS 5678 TOOWONG', 4, 120_000, TransactionDirection::Debit, [
         'category_id' => $other->id,
         'category_source' => CategorySource::Manual,

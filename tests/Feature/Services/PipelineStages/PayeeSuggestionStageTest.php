@@ -27,8 +27,8 @@ beforeEach(function () {
 
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
-    $this->groceries = Category::factory()->create(['name' => 'Groceries', 'parent_id' => null, 'budget_tag' => BudgetTag::Needs]);
-    $this->transport = Category::factory()->create(['name' => 'Transport', 'parent_id' => null, 'budget_tag' => BudgetTag::Needs]);
+    $this->groceries = Category::factory()->for($this->user)->create(['name' => 'Groceries', 'parent_id' => null, 'budget_tag' => BudgetTag::Needs]);
+    $this->transport = Category::factory()->for($this->user)->create(['name' => 'Transport', 'parent_id' => null, 'budget_tag' => BudgetTag::Needs]);
 });
 
 function stageRow(User $user, Account $account, string $merchant): Transaction

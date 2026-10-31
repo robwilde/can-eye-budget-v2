@@ -21,7 +21,16 @@ test('split belongs to a transaction and a category', function () {
     $split = TransactionSplit::factory()->create();
 
     expect($split->transaction)->toBeInstanceOf(Transaction::class)
-        ->and($split->category)->toBeInstanceOf(Category::class);
+        ->and($split->category)->toBeInstanceOf(Category::class)
+        ->and($split->category->user_id)->toBe($split->transaction->user_id);
+});
+
+test('factory gives a split on a soft-deleted transaction a category of the same user', function () {
+    $transaction = Transaction::factory()->softDeleted()->create();
+
+    $split = TransactionSplit::factory()->create(['transaction_id' => $transaction->id]);
+
+    expect($split->category->user_id)->toBe($transaction->user_id);
 });
 
 test('amount is cast to integer cents', function () {
@@ -34,9 +43,9 @@ test('transaction has many splits ordered by position', function () {
     $user = User::factory()->create();
     $transaction = Transaction::factory()->for($user)->for(Account::factory()->for($user))->create();
 
-    $transaction->splits()->create(['category_id' => Category::factory()->create()->id, 'amount' => 100, 'position' => 2]);
-    $transaction->splits()->create(['category_id' => Category::factory()->create()->id, 'amount' => 200, 'position' => 0]);
-    $transaction->splits()->create(['category_id' => Category::factory()->create()->id, 'amount' => 300, 'position' => 1]);
+    $transaction->splits()->create(['category_id' => Category::factory()->for($user)->create()->id, 'amount' => 100, 'position' => 2]);
+    $transaction->splits()->create(['category_id' => Category::factory()->for($user)->create()->id, 'amount' => 200, 'position' => 0]);
+    $transaction->splits()->create(['category_id' => Category::factory()->for($user)->create()->id, 'amount' => 300, 'position' => 1]);
 
     expect($transaction->splits()->pluck('amount')->all())->toBe([200, 300, 100]);
 });
@@ -47,7 +56,7 @@ test('isSplit reflects presence of splits', function () {
 
     expect($transaction->isSplit())->toBeFalse();
 
-    $transaction->splits()->create(['category_id' => Category::factory()->create()->id, 'amount' => 100, 'position' => 0]);
+    $transaction->splits()->create(['category_id' => Category::factory()->for($user)->create()->id, 'amount' => 100, 'position' => 0]);
 
     expect($transaction->fresh()->isSplit())->toBeTrue();
 });
@@ -56,12 +65,12 @@ test('splitRemainder returns the uncovered amount', function () {
     $user = User::factory()->create();
     $transaction = Transaction::factory()->for($user)->for(Account::factory()->for($user))->create(['amount' => 10000]);
 
-    $transaction->splits()->create(['category_id' => Category::factory()->create()->id, 'amount' => 6000, 'position' => 0]);
+    $transaction->splits()->create(['category_id' => Category::factory()->for($user)->create()->id, 'amount' => 6000, 'position' => 0]);
 
     expect($transaction->fresh()->splitTotal())->toBe(6000)
         ->and($transaction->fresh()->splitRemainder())->toBe(4000);
 
-    $transaction->splits()->create(['category_id' => Category::factory()->create()->id, 'amount' => 4000, 'position' => 1]);
+    $transaction->splits()->create(['category_id' => Category::factory()->for($user)->create()->id, 'amount' => 4000, 'position' => 1]);
 
     expect($transaction->fresh()->splitRemainder())->toBe(0);
 });
@@ -69,7 +78,7 @@ test('splitRemainder returns the uncovered amount', function () {
 test('deleting a transaction cascades to its splits', function () {
     $user = User::factory()->create();
     $transaction = Transaction::factory()->for($user)->for(Account::factory()->for($user))->create();
-    $split = $transaction->splits()->create(['category_id' => Category::factory()->create()->id, 'amount' => 100, 'position' => 0]);
+    $split = $transaction->splits()->create(['category_id' => Category::factory()->for($user)->create()->id, 'amount' => 100, 'position' => 0]);
 
     $transaction->forceDelete();
 
@@ -79,7 +88,7 @@ test('deleting a transaction cascades to its splits', function () {
 test('deleting a category nullifies split category_id', function () {
     $user = User::factory()->create();
     $transaction = Transaction::factory()->for($user)->for(Account::factory()->for($user))->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     $split = $transaction->splits()->create(['category_id' => $category->id, 'amount' => 100, 'position' => 0]);
 
     $category->delete();

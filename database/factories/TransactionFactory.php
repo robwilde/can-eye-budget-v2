@@ -60,7 +60,7 @@ final class TransactionFactory extends Factory
     public function withCategory(): self
     {
         return $this->state(fn (array $attributes) => [
-            'category_id' => Category::factory(),
+            'category_id' => fn (array $attributes): Factory => Category::factory(['user_id' => $attributes['user_id']]),
         ]);
     }
 

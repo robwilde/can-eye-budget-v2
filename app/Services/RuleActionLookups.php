@@ -15,15 +15,15 @@ use App\Models\PlannedTransaction;
  */
 final class RuleActionLookups
 {
-    /** @var array<int, bool> */
+    /** @var array<string, bool> */
     private array $visibleCategories = [];
 
     /** @var array<string, bool> */
     private array $ownedPlans = [];
 
-    public function categoryIsVisible(int $categoryId): bool
+    public function categoryIsVisible(int $categoryId, int $userId): bool
     {
-        return $this->visibleCategories[$categoryId] ??= Category::visible()->where('id', $categoryId)->exists();
+        return $this->visibleCategories["{$categoryId}:{$userId}"] ??= Category::visible()->where('user_id', $userId)->where('id', $categoryId)->exists();
     }
 
     public function planIsOwnedBy(int $plannedId, int $userId): bool

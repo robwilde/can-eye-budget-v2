@@ -174,7 +174,7 @@ test('re-importing restores a soft-deleted transaction and preserves its categor
         ->whereNotNull('csv_hash')
         ->first();
 
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($bankImport->user)->create();
     $target->update(['category_id' => $category->id]);
     $targetId = $target->id;
     $targetHash = $target->csv_hash;

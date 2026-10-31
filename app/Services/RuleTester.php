@@ -38,7 +38,7 @@ final readonly class RuleTester
             'actions' => $actions,
         ]);
 
-        $target = $this->executor->targetCategory($actions);
+        $target = $this->executor->targetCategory($actions, $userId);
         $lookups = new RuleActionLookups;
         $folds = $this->hasAction($actions, RuleActionType::FoldIntoParent);
         $notYetApplied = [];

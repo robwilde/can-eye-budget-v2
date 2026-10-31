@@ -576,7 +576,7 @@ test('a transfer-categorised plan without a destination is shown but not counted
         'next_pay_date' => $nextPay,
     ]);
     $account = Account::factory()->for($user)->create();
-    $transferCategory = Category::factory()->create(['name' => 'Transfer']);
+    $transferCategory = Category::factory()->for($user)->create(['name' => 'Transfer']);
 
     $start = $nextPay->subWeeks(2);
 

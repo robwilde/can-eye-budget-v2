@@ -21,9 +21,9 @@ beforeEach(function (): void {
     $this->travelTo(CarbonImmutable::parse('2026-06-15'));
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
-    $this->groceries = Category::factory()->create(['name' => 'Groceries', 'budget_tag' => BudgetTag::Needs]);
-    $this->software = Category::factory()->create(['name' => 'Software & Online Services', 'budget_tag' => BudgetTag::Needs]);
-    $this->personal = Category::factory()->create(['name' => 'Personal & Shopping', 'budget_tag' => BudgetTag::Wants]);
+    $this->groceries = Category::factory()->for($this->user)->create(['name' => 'Groceries', 'budget_tag' => BudgetTag::Needs]);
+    $this->software = Category::factory()->for($this->user)->create(['name' => 'Software & Online Services', 'budget_tag' => BudgetTag::Needs]);
+    $this->personal = Category::factory()->for($this->user)->create(['name' => 'Personal & Shopping', 'budget_tag' => BudgetTag::Wants]);
 });
 
 function clusterRows(User $user, Account $account, string $description, int $count): void

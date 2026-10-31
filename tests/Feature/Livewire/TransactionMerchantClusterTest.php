@@ -144,7 +144,7 @@ it('never clusters another users transactions', function () {
 });
 
 it('excludes categorised rows from clusters when filtering uncategorised', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     clusterTxn($this->user, $this->account, 'NETFLIX.COM');
     clusterTxn($this->user, $this->account, 'ALREADY DONE', ['category_id' => $category->id]);

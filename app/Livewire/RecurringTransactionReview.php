@@ -102,7 +102,7 @@ final class RecurringTransactionReview extends Component
         $rawCategory = $this->recurringCategories[$suggestionId] ?? $suggestion->payload['category_id'] ?? null;
         $categoryId = $rawCategory !== '' && $rawCategory !== null ? (int) $rawCategory : null;
 
-        if ($categoryId !== null && ! Category::visible()->where('id', $categoryId)->exists()) {
+        if ($categoryId !== null && ! Category::visible()->where('user_id', auth()->id())->where('id', $categoryId)->exists()) {
             $categoryId = null;
         }
 
@@ -148,7 +148,7 @@ final class RecurringTransactionReview extends Component
         return view('livewire.recurring-transaction-review', [
             'accounts' => $accounts,
             'suggestions' => $suggestions,
-            'categories' => Category::visibleSortedByFullPath(),
+            'categories' => Category::visibleSortedByFullPath($this->authenticatedUser()->id),
         ]);
     }
 

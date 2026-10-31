@@ -89,7 +89,7 @@ final class AnalysisSuggestions extends Component
         $rawCategory = $this->recurringCategories[$suggestionId] ?? $suggestion->payload['category_id'] ?? null;
         $categoryId = $rawCategory !== '' && $rawCategory !== null ? (int) $rawCategory : null;
 
-        if ($categoryId !== null && ! Category::visible()->where('id', $categoryId)->exists()) {
+        if ($categoryId !== null && ! Category::visible()->where('user_id', auth()->id())->where('id', $categoryId)->exists()) {
             $categoryId = null;
         }
 
@@ -215,7 +215,7 @@ final class AnalysisSuggestions extends Component
 
         return view('livewire.analysis-suggestions', [
             'suggestions' => $suggestions,
-            'categories' => Category::visibleSortedByFullPath(),
+            'categories' => Category::visibleSortedByFullPath((int) auth()->id()),
             'ruleTransactionDescriptions' => $ruleTransactionDescriptions,
         ]);
     }

@@ -121,8 +121,9 @@ test('deleting an account cascades to transactions', function () {
 });
 
 test('deleting a category nullifies transaction category_id', function () {
-    $category = Category::factory()->create();
-    $transaction = Transaction::factory()->create(['category_id' => $category->id]);
+    $user = User::factory()->create();
+    $category = Category::factory()->for($user)->create();
+    $transaction = Transaction::factory()->for($user)->for(Account::factory()->for($user))->create(['category_id' => $category->id]);
 
     $category->delete();
 

@@ -17,7 +17,7 @@ use App\Services\CategoryRuleGenerator;
 test('it creates an auto-apply set_category rule and categorises existing matches', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->manual()->create([
         'merchant_name' => 'Netflix',
@@ -56,7 +56,7 @@ test('it creates an auto-apply set_category rule and categorises existing matche
 test('it falls back to a description token trigger when there is no merchant name', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->manual()->create([
         'merchant_name' => null,
@@ -86,7 +86,7 @@ test('it falls back to a description token trigger when there is no merchant nam
 test('it skips a leading payment-network token and keys the rule on the merchant', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->manual()->create([
         'merchant_name' => null,
@@ -124,7 +124,7 @@ test('it skips a leading payment-network token and keys the rule on the merchant
 test('it reuses a single auto-categorisation group across generated rules', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $netflix = Transaction::factory()->for($user)->for($account)->manual()->create([
         'merchant_name' => 'Netflix',
@@ -145,7 +145,7 @@ test('it reuses a single auto-categorisation group across generated rules', func
 test('an explicit match value builds a description-contains rule and categorises only those matches', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $wooliesCashout = Transaction::factory()->for($user)->for($account)->manual()->create([
         'merchant_name' => null,
@@ -186,8 +186,8 @@ test('an explicit match value builds a description-contains rule and categorises
 test('a clean description renames every match, including rows filed by hand, and keeps their raw descriptions', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
-    $other = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
+    $other = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'merchant_name' => null,
@@ -238,7 +238,7 @@ test('a clean description renames every match, including rows filed by hand, and
 test('a blank clean description leaves the rule with only set_category and existing names untouched', function (string $cleanDescription) {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $source = Transaction::factory()->for($user)->for($account)->fromRedbark()->create([
         'merchant_name' => 'Netflix',
@@ -294,7 +294,7 @@ test('it suggests the distinctive payee token for an external transfer descripti
 test('a brand or derived name never becomes the rule trigger for the row it names', function (CleanDescriptionSource $source) {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
     $generator = app(CategoryRuleGenerator::class);
 
     $named = Transaction::factory()->for($user)->for($account)->create([
