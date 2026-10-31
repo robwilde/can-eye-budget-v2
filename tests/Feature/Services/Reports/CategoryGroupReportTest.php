@@ -40,9 +40,9 @@ beforeEach(function (): void {
 });
 
 test('a group total equals the sum of its roots and a depth-3 row counts once', function () {
-    $food = CategoryGroup::factory()->create(['name' => 'Food']);
-    $groceries = Category::factory()->create(['name' => 'Groceries', 'group_id' => $food->id]);
-    $eatingOut = Category::factory()->create(['name' => 'Eating Out', 'group_id' => $food->id]);
+    $food = CategoryGroup::factory()->for($this->user)->create(['name' => 'Food']);
+    $groceries = Category::factory()->for($this->user)->create(['name' => 'Groceries', 'group_id' => $food->id]);
+    $eatingOut = Category::factory()->for($this->user)->create(['name' => 'Eating Out', 'group_id' => $food->id]);
     $fruit = Category::factory()->withParent($groceries)->create(['name' => 'Fruit']);
     $apples = Category::factory()->withParent($fruit)->create(['name' => 'Apples']);
 
@@ -65,9 +65,9 @@ test('a group total equals the sum of its roots and a depth-3 row counts once', 
 });
 
 test('a child with its own group moves its totals out of the root group', function () {
-    $transfer = CategoryGroup::factory()->create(['name' => 'Banking']);
-    $savings = CategoryGroup::factory()->create(['name' => 'Savings']);
-    $root = Category::factory()->create(['name' => 'Banking', 'group_id' => $transfer->id]);
+    $transfer = CategoryGroup::factory()->for($this->user)->create(['name' => 'Banking']);
+    $savings = CategoryGroup::factory()->for($this->user)->create(['name' => 'Savings']);
+    $root = Category::factory()->for($this->user)->create(['name' => 'Banking', 'group_id' => $transfer->id]);
     $plain = Category::factory()->withParent($root)->create(['name' => 'Optimus to Cash']);
     $override = Category::factory()->withParent($root)->create(['name' => 'Optimus to Spaceship', 'group_id' => $savings->id]);
 
@@ -82,8 +82,8 @@ test('a child with its own group moves its totals out of the root group', functi
 });
 
 test('a child explicitly set to its parent group stays nested under the parent', function () {
-    $food = CategoryGroup::factory()->create(['name' => 'Food']);
-    $groceries = Category::factory()->create(['name' => 'Groceries', 'group_id' => $food->id]);
+    $food = CategoryGroup::factory()->for($this->user)->create(['name' => 'Food']);
+    $groceries = Category::factory()->for($this->user)->create(['name' => 'Groceries', 'group_id' => $food->id]);
     $fruit = Category::factory()->withParent($groceries)->create(['name' => 'Fruit', 'group_id' => $food->id]);
     $apples = Category::factory()->withParent($fruit)->create(['name' => 'Apples']);
 
@@ -103,9 +103,9 @@ test('a child explicitly set to its parent group stays nested under the parent',
 });
 
 test('transfers to an untracked account show under Savings while tracked to tracked never appear', function () {
-    $transfer = CategoryGroup::factory()->create(['name' => 'Transfer']);
-    $savings = CategoryGroup::factory()->create(['name' => 'Savings']);
-    $root = Category::factory()->create(['name' => 'Transfer', 'group_id' => $transfer->id]);
+    $transfer = CategoryGroup::factory()->for($this->user)->create(['name' => 'Transfer']);
+    $savings = CategoryGroup::factory()->for($this->user)->create(['name' => 'Savings']);
+    $root = Category::factory()->for($this->user)->create(['name' => 'Transfer', 'group_id' => $transfer->id]);
     $toSpaceship = Category::factory()->withParent($root)->create(['name' => 'Optimus to Spaceship', 'group_id' => $savings->id]);
     $toCard = Category::factory()->withParent($root)->create(['name' => 'Optimus to CC']);
     $hidden = Account::factory()->for($this->user)->untracked()->create();
@@ -129,9 +129,9 @@ test('transfers to an untracked account show under Savings while tracked to trac
 });
 
 test('categories without a group are left out and uncategorised stays its own entry', function () {
-    $food = CategoryGroup::factory()->create(['name' => 'Food']);
-    $groceries = Category::factory()->create(['name' => 'Groceries', 'group_id' => $food->id]);
-    $balance = Category::factory()->create(['name' => 'Balance']);
+    $food = CategoryGroup::factory()->for($this->user)->create(['name' => 'Food']);
+    $groceries = Category::factory()->for($this->user)->create(['name' => 'Groceries', 'group_id' => $food->id]);
+    $balance = Category::factory()->for($this->user)->create(['name' => 'Balance']);
 
     spend($this->user, $this->account, $groceries, 3000);
     spend($this->user, $this->account, $balance, 9000);
@@ -145,8 +145,8 @@ test('categories without a group are left out and uncategorised stays its own en
 });
 
 test('only the requested direction is reported', function () {
-    $income = CategoryGroup::factory()->create(['name' => 'Income']);
-    $salary = Category::factory()->create(['name' => 'Salary', 'group_id' => $income->id]);
+    $income = CategoryGroup::factory()->for($this->user)->create(['name' => 'Income']);
+    $salary = Category::factory()->for($this->user)->create(['name' => 'Salary', 'group_id' => $income->id]);
     Transaction::factory()->for($this->user)->credit()->create([
         'account_id' => $this->account->id, 'category_id' => $salary->id, 'amount' => 20000, 'post_date' => '2026-07-05',
     ]);
@@ -157,8 +157,8 @@ test('only the requested direction is reported', function () {
 });
 
 test('totals only include the requesting user', function () {
-    $food = CategoryGroup::factory()->create(['name' => 'Food']);
-    $groceries = Category::factory()->create(['group_id' => $food->id]);
+    $food = CategoryGroup::factory()->for($this->user)->create(['name' => 'Food']);
+    $groceries = Category::factory()->for($this->user)->create(['group_id' => $food->id]);
     $other = User::factory()->create();
 
     spend($other, Account::factory()->for($other)->create(), $groceries, 5000);

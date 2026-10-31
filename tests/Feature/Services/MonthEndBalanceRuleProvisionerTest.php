@@ -15,16 +15,16 @@ use App\Models\UserRuleGroup;
 use App\Services\MonthEndBalanceRuleProvisioner;
 use App\Services\TransactionAnalysisPipeline;
 
-function balanceCategory(): Category
+function balanceCategory(User $user): Category
 {
-    return Category::factory()->create([
+    return Category::factory()->for($user)->create([
         'name' => MonthEndBalanceRuleProvisioner::CATEGORY_NAME,
     ]);
 }
 
 test('provision creates an active auto-apply month-end balance rule', function () {
     $user = User::factory()->create();
-    $balance = balanceCategory();
+    $balance = balanceCategory($user);
 
     $rule = app(MonthEndBalanceRuleProvisioner::class)->provision($user->id, $balance->id);
 
@@ -42,7 +42,7 @@ test('provision creates an active auto-apply month-end balance rule', function (
 
 test('provision is idempotent per user', function () {
     $user = User::factory()->create();
-    $balance = balanceCategory();
+    $balance = balanceCategory($user);
 
     $provisioner = app(MonthEndBalanceRuleProvisioner::class);
     $provisioner->provision($user->id, $balance->id);
@@ -54,7 +54,7 @@ test('provision is idempotent per user', function () {
 test('provision back-fills an already-imported month-end balance transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $balance = balanceCategory();
+    $balance = balanceCategory($user);
 
     $transaction = Transaction::factory()->for($user)->for($account)->fromCsv()->create([
         'description' => 'Purchases - Month End Balance',
@@ -72,7 +72,7 @@ test('provision back-fills an already-imported month-end balance transaction', f
 test('a zero-amount month-end balance row is auto-filed to Balance on analysis', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $balance = balanceCategory();
+    $balance = balanceCategory($user);
 
     app(MonthEndBalanceRuleProvisioner::class)->provision($user->id, $balance->id);
 
@@ -97,20 +97,23 @@ test('provisionAllUsers is a no-op when the Balance category is absent', functio
     expect(UserRule::query()->where('user_id', $user->id)->count())->toBe(0);
 });
 
-test('provisionAllUsers creates one rule per user', function () {
+test('provisionAllUsers creates one rule per user pointing at that user\'s own Balance', function () {
     $users = User::factory()->count(3)->create();
-    balanceCategory();
+    $balances = $users->mapWithKeys(fn (User $user): array => [$user->id => balanceCategory($user)]);
+    $withoutBalance = User::factory()->create();
 
     app(MonthEndBalanceRuleProvisioner::class)->provisionAllUsers();
 
     foreach ($users as $user) {
-        expect(UserRule::query()->where('user_id', $user->id)->count())->toBe(1);
+        expect(UserRule::query()->where('user_id', $user->id)->sole()->actions[0]['value'])->toBe((string) $balances[$user->id]->id);
     }
+
+    expect(UserRule::query()->where('user_id', $withoutBalance->id)->exists())->toBeFalse();
 });
 
 test('provision reuses an existing Auto-categorisation group', function () {
     $user = User::factory()->create();
-    $balance = balanceCategory();
+    $balance = balanceCategory($user);
     $group = UserRuleGroup::factory()->for($user)->create(['name' => 'Auto-categorisation']);
 
     app(MonthEndBalanceRuleProvisioner::class)->provision($user->id, $balance->id);
@@ -122,7 +125,7 @@ test('provision reuses an existing Auto-categorisation group', function () {
 test('provision does not back-fill when the Auto-categorisation group is inactive', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $balance = balanceCategory();
+    $balance = balanceCategory($user);
     UserRuleGroup::factory()->for($user)->create(['name' => 'Auto-categorisation', 'is_active' => false]);
 
     $transaction = Transaction::factory()->for($user)->for($account)->fromCsv()->create([
@@ -141,7 +144,7 @@ test('provision does not back-fill when the Auto-categorisation group is inactiv
 test('provisionAllUsers unhides a hidden Balance category and still categorises', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $balance = Category::factory()->hidden()->create([
+    $balance = Category::factory()->for($user)->hidden()->create([
         'name' => MonthEndBalanceRuleProvisioner::CATEGORY_NAME,
     ]);
 
@@ -162,8 +165,8 @@ test('provisionAllUsers unhides a hidden Balance category and still categorises'
 test('provision does not overwrite an already-categorised month-end balance transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $balance = balanceCategory();
-    $other = Category::factory()->create(['name' => 'Groceries']);
+    $balance = balanceCategory($user);
+    $other = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     $transaction = Transaction::factory()->for($user)->for($account)->fromCsv()->create([
         'description' => 'Purchases - Month End Balance',
@@ -180,7 +183,7 @@ test('provision does not overwrite an already-categorised month-end balance tran
 
 test('provision upgrades an existing description-only rule to the tightened trigger set', function () {
     $user = User::factory()->create();
-    $balance = balanceCategory();
+    $balance = balanceCategory($user);
     $group = UserRuleGroup::factory()->for($user)->create(['name' => 'Auto-categorisation']);
 
     $rule = UserRule::factory()->for($user)->create([

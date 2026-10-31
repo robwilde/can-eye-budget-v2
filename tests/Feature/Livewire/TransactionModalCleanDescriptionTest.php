@@ -269,7 +269,7 @@ function enrichedWhileOpen(Authenticatable $user, Account $account): array
 
 test('categorise-matching leaves an import name out of the rule when the field was left alone', function () {
     [$transaction, $component] = enrichedWhileOpen($this->user, $this->account);
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $component->set('categoryId', $category->id)->set('categoriseMatching', true)->call('save')->assertHasNoErrors();
 
@@ -287,7 +287,7 @@ test('categorise-matching carries a name the person set when the field was left 
         'clean_description_source' => CleanDescriptionSource::Manual,
         'category_id' => null,
     ]);
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     Livewire::actingAs($this->user)
         ->test(TransactionModal::class)
@@ -304,7 +304,7 @@ test('categorise-matching carries a name the person set when the field was left 
 
 test('categorise-matching keeps the name the person typed in the rule', function () {
     [$transaction, $component] = enrichedWhileOpen($this->user, $this->account);
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $component->set('cleanDescription', 'Weekly groceries')
         ->set('categoryId', $category->id)
@@ -503,7 +503,7 @@ test('a veto landing after the modal read a transfer converted back never reache
 });
 
 test('the categorise-matching copy names a rename only when the rule will carry one', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $imported = Transaction::factory()->for($this->user)->for($this->account)->fromRedbark()->create([
         'clean_description' => 'Woolworths',
         'clean_description_source' => CleanDescriptionSource::Feed,

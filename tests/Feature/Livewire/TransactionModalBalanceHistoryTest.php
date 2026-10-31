@@ -105,7 +105,7 @@ test('rebuilds both accounts when a transaction moves between them', function ()
 test('does not rebuild history for a category or notes edit', function () {
     $account = modalHistoryAccount($this->user);
     $transaction = modalHistoryExpense($this->user, $account, '2026-05-09', 2000);
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     modalHistoryPlantSentinel($account);
 
     Livewire::actingAs($this->user)

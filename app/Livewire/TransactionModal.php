@@ -611,7 +611,7 @@ final class TransactionModal extends Component
             ->orderBy('name')
             ->get();
 
-        $categories = Category::visibleSortedByFullPath();
+        $categories = Category::visibleSortedByFullPath((int) auth()->id());
 
         $parsed = $this->descriptionInput !== '' ? AmountParser::parse($this->descriptionInput) : null;
 
@@ -2077,7 +2077,7 @@ final class TransactionModal extends Component
             ],
             'categoryId' => [
                 'nullable',
-                Rule::exists('categories', 'id')->where('is_hidden', 0),
+                Rule::exists('categories', 'id')->where('user_id', auth()->id())->where('is_hidden', 0),
             ],
             'date' => $this->mode === 'plan' && $this->editingPlannedTransactionId === null
                 ? ['required', 'date_format:Y-m-d', 'after:today']

@@ -133,7 +133,7 @@ final class ReportAggregator
     private function actualAtoms(User $user, ?CarbonInterface $start, ?CarbonInterface $end, bool $includeTransfers): array
     {
         $monthExpr = $this->monthExpression();
-        $transferCategoryIds = $this->transferCategoryIds();
+        $transferCategoryIds = $this->transferCategoryIds($user->id);
 
         $rows = CategoryAttribution::query($user->id, forMoney: true)
             ->where(fn ($counted) => $counted
@@ -172,21 +172,22 @@ final class ReportAggregator
     }
 
     /**
-     * Category ids treated as internal transfers: any category named "Transfer"
+     * Category ids treated as internal transfers: the user's categories named "Transfer"
      * and its direct children. Mirrors Transaction::scopeExcludingTransfers so
      * attributed atoms exclude the same rows the Eloquent scope would.
      *
      * @return list<int>
      */
-    private function transferCategoryIds(): array
+    private function transferCategoryIds(int $userId): array
     {
-        $direct = Category::query()->where('name', 'Transfer')->pluck('id');
+        $direct = Category::query()->where('user_id', $userId)->where('name', 'Transfer')->pluck('id');
 
         if ($direct->isEmpty()) {
             return [];
         }
 
         return Category::query()
+            ->where('user_id', $userId)
             ->whereIn('parent_id', $direct->all())
             ->pluck('id')
             ->merge($direct)

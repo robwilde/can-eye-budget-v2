@@ -63,7 +63,7 @@ function fanoutDebit(Account $account, int $amount, string $postDate, string $de
 }
 
 test('three instalments due on one day are split out of one combined debit', function () {
-    $categories = Category::factory()->count(3)->create();
+    $categories = Category::factory()->count(3)->for($this->user)->create();
     $plans = $categories->map(fn (Category $category): PlannedTransaction => fanoutPlan($this->user, $this->account, $category, 1861));
 
     $debit = $this->ingestor->ingest(fanoutDebit($this->account, 5583, '2026-09-04'));
@@ -93,7 +93,7 @@ test('three instalments due on one day are split out of one combined debit', fun
 
 test('the final instalments carry the extra cent on the last child', function () {
     foreach (range(1, 3) as $ignored) {
-        fanoutPlan($this->user, $this->account, Category::factory()->create(), 1861);
+        fanoutPlan($this->user, $this->account, Category::factory()->for($this->user)->create(), 1861);
     }
 
     $debit = $this->ingestor->ingest(fanoutDebit($this->account, 5584, '2026-09-18'));
@@ -106,7 +106,7 @@ test('the final instalments carry the extra cent on the last child', function ()
 
 test('a debit matching no subset is left alone', function () {
     foreach (range(1, 3) as $ignored) {
-        fanoutPlan($this->user, $this->account, Category::factory()->create(), 1861);
+        fanoutPlan($this->user, $this->account, Category::factory()->for($this->user)->create(), 1861);
     }
 
     $debit = $this->ingestor->ingest(fanoutDebit($this->account, 4000, '2026-09-04'));
@@ -120,7 +120,7 @@ test('two tolerant subsets with no exact one are left alone', function () {
     Log::spy();
 
     foreach ([1000, 1001, 2000] as $amount) {
-        fanoutPlan($this->user, $this->account, Category::factory()->create(), $amount);
+        fanoutPlan($this->user, $this->account, Category::factory()->for($this->user)->create(), $amount);
     }
 
     $debit = $this->ingestor->ingest(fanoutDebit($this->account, 3002, '2026-09-18'));
@@ -132,7 +132,7 @@ test('two tolerant subsets with no exact one are left alone', function () {
 
 test('more than eight candidate instalments are left alone', function () {
     foreach (range(1, 9) as $ignored) {
-        fanoutPlan($this->user, $this->account, Category::factory()->create(), 1861);
+        fanoutPlan($this->user, $this->account, Category::factory()->for($this->user)->create(), 1861);
     }
 
     $debit = $this->ingestor->ingest(fanoutDebit($this->account, 16749, '2026-09-18'));
@@ -142,7 +142,7 @@ test('more than eight candidate instalments are left alone', function () {
 });
 
 test('an occurrence already reconciled by another posting is not offered', function () {
-    $plans = collect(range(1, 3))->map(fn (): PlannedTransaction => fanoutPlan($this->user, $this->account, Category::factory()->create(), 1861));
+    $plans = collect(range(1, 3))->map(fn (): PlannedTransaction => fanoutPlan($this->user, $this->account, Category::factory()->for($this->user)->create(), 1861));
 
     Transaction::factory()->for($this->user)->for($this->account)->debit()->create([
         'amount' => -1861,
@@ -158,7 +158,7 @@ test('an occurrence already reconciled by another posting is not offered', funct
 
 test('a non-BNPL narration never fans out', function () {
     foreach (range(1, 3) as $ignored) {
-        fanoutPlan($this->user, $this->account, Category::factory()->create(), 1861);
+        fanoutPlan($this->user, $this->account, Category::factory()->for($this->user)->create(), 1861);
     }
 
     $debit = $this->ingestor->ingest(fanoutDebit($this->account, 5583, '2026-09-04', 'WOOLWORTHS 1234'));
@@ -167,9 +167,9 @@ test('a non-BNPL narration never fans out', function () {
 });
 
 test("a rejected order's plan is not a candidate", function () {
-    $first = fanoutPlan($this->user, $this->account, Category::factory()->create(), 1861);
-    $second = fanoutPlan($this->user, $this->account, Category::factory()->create(), 1861);
-    fanoutPlan($this->user, $this->account, Category::factory()->create(), 1861, active: false);
+    $first = fanoutPlan($this->user, $this->account, Category::factory()->for($this->user)->create(), 1861);
+    $second = fanoutPlan($this->user, $this->account, Category::factory()->for($this->user)->create(), 1861);
+    fanoutPlan($this->user, $this->account, Category::factory()->for($this->user)->create(), 1861, active: false);
 
     $untouched = $this->ingestor->ingest(fanoutDebit($this->account, 5583, '2026-09-18'));
 
@@ -182,7 +182,7 @@ test("a rejected order's plan is not a candidate", function () {
 });
 
 test('a single instalment still reconciles by tolerance without fanning out', function () {
-    $plan = fanoutPlan($this->user, $this->account, Category::factory()->create(), 1861);
+    $plan = fanoutPlan($this->user, $this->account, Category::factory()->for($this->user)->create(), 1861);
 
     $debit = $this->ingestor->ingest(fanoutDebit($this->account, 1861, '2026-09-04'));
 

@@ -25,9 +25,9 @@ beforeEach(function () {
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
 
-    $this->eatingOut = Category::factory()->create(['name' => 'Eating Out', 'parent_id' => null, 'budget_tag' => BudgetTag::Wants]);
-    $this->groceries = Category::factory()->create(['name' => 'Groceries', 'parent_id' => null, 'budget_tag' => BudgetTag::Needs]);
-    $this->hidden = Category::factory()->create(['name' => 'Hidden', 'parent_id' => null, 'is_hidden' => true]);
+    $this->eatingOut = Category::factory()->for($this->user)->create(['name' => 'Eating Out', 'parent_id' => null, 'budget_tag' => BudgetTag::Wants]);
+    $this->groceries = Category::factory()->for($this->user)->create(['name' => 'Groceries', 'parent_id' => null, 'budget_tag' => BudgetTag::Needs]);
+    $this->hidden = Category::factory()->for($this->user)->create(['name' => 'Hidden', 'parent_id' => null, 'is_hidden' => true]);
 
     $this->payee = Payee::factory()->create([
         'user_id' => $this->user->id,
@@ -183,6 +183,17 @@ test('a hidden category is refused and nothing changes', function () {
     $row = confirmerRow($this);
 
     expect(fn () => app(PayeeConfirmer::class)->confirm($this->user, $this->payee, $this->hidden->id))
+        ->toThrow(InvalidArgumentException::class)
+        ->and($this->payee->fresh()->status)->toBe(PayeeStatus::Pending)
+        ->and($row->fresh()->category_id)->toBeNull()
+        ->and(UserRule::query()->count())->toBe(0);
+});
+
+test("another user's category is refused and nothing changes", function () {
+    $row = confirmerRow($this);
+    $foreign = Category::factory()->create(['name' => 'Eating Out', 'parent_id' => null]);
+
+    expect(fn () => app(PayeeConfirmer::class)->confirm($this->user, $this->payee, $foreign->id))
         ->toThrow(InvalidArgumentException::class)
         ->and($this->payee->fresh()->status)->toBe(PayeeStatus::Pending)
         ->and($row->fresh()->category_id)->toBeNull()

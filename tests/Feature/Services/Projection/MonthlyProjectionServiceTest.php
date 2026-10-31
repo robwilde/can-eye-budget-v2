@@ -142,7 +142,7 @@ test('transfer-categorised planned transactions are excluded via the excludingTr
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create(['balance' => 100000]);
     $user->update(['primary_account_id' => $account->id]);
-    $transferCategory = Category::factory()->create(['name' => 'Transfer']);
+    $transferCategory = Category::factory()->for($user)->create(['name' => 'Transfer']);
 
     PlannedTransaction::factory()->for($user)->for($account)->create([
         'category_id' => $transferCategory->id,

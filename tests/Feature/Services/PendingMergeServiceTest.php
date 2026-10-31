@@ -47,7 +47,7 @@ function mergeAttachments(Transaction $transaction, int $count): void
 }
 
 test('merges a pending transaction into its posted match', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $pending = mergeRow($this->user, $this->account, 5000, '2026-09-10', 'Corner Cafe Main', TransactionStatus::Pending, ['category_id' => $category->id]);
     $posted = mergeRow($this->user, $this->account, 6000, '2026-09-12', 'Corner Cafe Main St', TransactionStatus::Posted, ['merchant_name' => 'Corner Cafe']);
 
@@ -66,7 +66,7 @@ test('merges a pending transaction into its posted match', function () {
 });
 
 test('keeps the posted category when the pending row has none', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $pending = mergeRow($this->user, $this->account, 5000, '2026-09-10', 'Corner Cafe Main', TransactionStatus::Pending);
     $posted = mergeRow($this->user, $this->account, 5000, '2026-09-11', 'Corner Cafe Main', TransactionStatus::Posted, ['category_id' => $category->id]);
 

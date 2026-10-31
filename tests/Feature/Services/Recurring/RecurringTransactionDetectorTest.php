@@ -55,7 +55,7 @@ function createDetectorDatedGroup(
 }
 
 test('detects monthly recurring transactions as candidates with payload-compatible fields', function () {
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($this->user)->create();
     $transactions = createDetectorDatedGroup($this->user, $this->account, 'Netflix', 1699, [
         '2026-01-15',
         '2026-02-15',

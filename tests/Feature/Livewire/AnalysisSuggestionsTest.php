@@ -437,7 +437,7 @@ test('accept pay cycle validates required fields and rejects invalid input', fun
 // ─── Accept Recurring Transaction ────────────────────────
 
 test('accept recurring transaction creates planned transaction with correct attributes', function () {
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($this->user)->create();
 
     $suggestion = createSuggestion($this, 'recurring', recurringPayload($this->account->id, [
         'category_id' => $category->id,
@@ -481,7 +481,7 @@ test('accept recurring transaction links matched transactions via planned_transa
 });
 
 test('accept recurring transaction applies selected category to planned and linked transactions', function () {
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($this->user)->create();
     $tx1 = Transaction::factory()->create([
         'user_id' => $this->user->id,
         'account_id' => $this->account->id,
@@ -508,7 +508,7 @@ test('accept recurring transaction applies selected category to planned and link
 });
 
 test('accept recurring transaction falls back to null for hidden category', function () {
-    $hiddenCategory = Category::factory()->hidden()->create();
+    $hiddenCategory = Category::factory()->for($this->user)->hidden()->create();
 
     $suggestion = createSuggestion($this, 'recurring', recurringPayload($this->account->id));
 
@@ -577,7 +577,7 @@ test('displays user rule suggestion with rule name and actions summary', functio
 });
 
 test('accept user rule executes actions on transaction and marks accepted', function () {
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($this->user)->create();
     $group = UserRuleGroup::factory()->for($this->user)->create();
     $rule = UserRule::factory()->for($this->user)->for($group, 'group')->create([
         'name' => 'Auto-categorise',

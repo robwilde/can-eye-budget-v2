@@ -528,7 +528,7 @@ final class UserRuleManager extends Component
                 ->when($matchesSearch !== null, fn (Builder $q) => $q->whereHas('rules', $matchesSearch))
                 ->with(['rules' => fn ($q) => $q->when($matchesSearch !== null, $matchesSearch)->ordered()])
                 ->get(),
-            'categories' => Category::visibleSortedByFullPath(),
+            'categories' => Category::visibleSortedByFullPath((int) auth()->id()),
             'plannedTransactions' => PlannedTransaction::where('user_id', auth()->id())
                 ->where('is_active', true)
                 ->orderBy('description')

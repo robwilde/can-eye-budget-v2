@@ -105,7 +105,7 @@ test('empty transactions returns success with empty suggestions', function () {
 // ─── Auto-Apply ────────────────────────────────────────────────────────
 
 test('auto-apply rule directly updates transaction', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $transaction = createStageTransaction($this->user, $this->account);
 
     createRuleWithGroup($this->user, [
@@ -123,7 +123,7 @@ test('auto-apply rule directly updates transaction', function () {
 });
 
 test('auto-apply creates audit entry', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     createStageTransaction($this->user, $this->account);
 
     createRuleWithGroup($this->user, [
@@ -172,7 +172,7 @@ test('auto-apply skips previously applied rule+transaction combination', functio
 });
 
 test('auto-apply names a new import but keeps a clean description a person gave a later version', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $imported = createStageTransaction($this->user, $this->account, [
         'description' => 'ACME SOFTWARE PTY LTD 1833',
         'clean_description' => null,
@@ -199,8 +199,8 @@ test('auto-apply names a new import but keeps a clean description a person gave 
 });
 
 test('auto-apply names a split row and keeps the rule working on it once un-split', function (bool $filedByHand) {
-    $category = Category::factory()->create(['is_hidden' => false]);
-    $mine = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $mine = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $split = createStageTransaction($this->user, $this->account, [
         'description' => 'ACME SOFTWARE PTY LTD 1833',
         'clean_description' => null,
@@ -284,8 +284,8 @@ test('suggestion creates audit entry', function () {
 // ─── Group Ordering ────────────────────────────────────────────────────
 
 test('groups are processed in order', function () {
-    $category1 = Category::factory()->create(['is_hidden' => false]);
-    $category2 = Category::factory()->create(['is_hidden' => false]);
+    $category1 = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $category2 = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $transaction = createStageTransaction($this->user, $this->account);
 
     createRuleWithGroup($this->user, [
@@ -308,8 +308,8 @@ test('groups are processed in order', function () {
 // ─── Stop Processing ───────────────────────────────────────────────────
 
 test('stop_processing prevents subsequent groups for matched transaction', function () {
-    $category1 = Category::factory()->create(['is_hidden' => false]);
-    $category2 = Category::factory()->create(['is_hidden' => false]);
+    $category1 = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $category2 = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $transaction = createStageTransaction($this->user, $this->account);
 
     createRuleWithGroup($this->user, [

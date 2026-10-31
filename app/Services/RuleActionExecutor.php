@@ -64,7 +64,7 @@ final readonly class RuleActionExecutor
      */
     public function categoryItWouldSet(Transaction $transaction, array $actions): ?int
     {
-        return $this->maySetCategory($transaction) ? $this->targetCategory($actions) : null;
+        return $this->maySetCategory($transaction) ? $this->targetCategory($actions, $transaction->user_id) : null;
     }
 
     /**
@@ -73,7 +73,7 @@ final readonly class RuleActionExecutor
      *
      * @param  array<int, array<string, string>>  $actions
      */
-    public function targetCategory(array $actions): ?int
+    public function targetCategory(array $actions, int $userId): ?int
     {
         $categoryIds = [];
 
@@ -88,7 +88,7 @@ final readonly class RuleActionExecutor
         }
 
         // Cast: some drivers return ids as strings, and the match is strict.
-        $visible = array_map(intval(...), Category::visible()->whereIn('id', $categoryIds)->pluck('id')->all());
+        $visible = array_map(intval(...), Category::visible()->where('user_id', $userId)->whereIn('id', $categoryIds)->pluck('id')->all());
 
         foreach (array_reverse($categoryIds) as $categoryId) {
             if (in_array($categoryId, $visible, true)) {
@@ -260,7 +260,7 @@ final readonly class RuleActionExecutor
 
         $categoryId = (int) $value;
 
-        if ($lookups?->categoryIsVisible($categoryId) ?? Category::visible()->where('id', $categoryId)->exists()) {
+        if ($lookups?->categoryIsVisible($categoryId, $transaction->user_id) ?? Category::visible()->where('user_id', $transaction->user_id)->where('id', $categoryId)->exists()) {
             $transaction->category_id = $categoryId;
             $transaction->category_source = CategorySource::Rule;
         }

@@ -59,7 +59,7 @@ final class BnplOrderFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'status' => BnplOrderStatus::AutoApproved,
-            'category_id' => Category::factory(),
+            'category_id' => fn (array $attributes): Factory => Category::factory(['user_id' => $attributes['user_id']]),
             'reviewed_at' => CarbonImmutable::now(),
         ]);
     }
@@ -68,7 +68,7 @@ final class BnplOrderFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'status' => BnplOrderStatus::Approved,
-            'category_id' => Category::factory(),
+            'category_id' => fn (array $attributes): Factory => Category::factory(['user_id' => $attributes['user_id']]),
             'reviewed_at' => CarbonImmutable::now(),
         ]);
     }

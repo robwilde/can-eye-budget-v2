@@ -13,6 +13,7 @@ use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\RuleActionExecutor;
+use App\Services\RuleActionLookups;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
 
@@ -40,7 +41,7 @@ function createActionTransaction(User $user, Account $account, array $overrides 
 // ─── Set Category ──────────────────────────────────────────────────────
 
 test('set_category updates category_id with valid visible category', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $transaction = createActionTransaction($this->user, $this->account);
 
     $this->executor->execute($transaction, [
@@ -51,7 +52,7 @@ test('set_category updates category_id with valid visible category', function ()
 });
 
 test('set_category ignores hidden category', function () {
-    $category = Category::factory()->create(['is_hidden' => true]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => true]);
     $transaction = createActionTransaction($this->user, $this->account);
 
     $this->executor->execute($transaction, [
@@ -59,6 +60,30 @@ test('set_category ignores hidden category', function () {
     ]);
 
     expect($transaction->fresh()->category_id)->toBeNull();
+});
+
+test("set_category ignores another user's category", function () {
+    $foreign = Category::factory()->create(['is_hidden' => false]);
+    $transaction = createActionTransaction($this->user, $this->account);
+    $actions = [['type' => 'set_category', 'value' => (string) $foreign->id]];
+
+    $this->executor->execute($transaction, $actions);
+
+    expect($transaction->fresh()->category_id)->toBeNull()
+        ->and($this->executor->targetCategory($actions, $this->user->id))->toBeNull()
+        ->and($this->executor->categoryItWouldSet($transaction->fresh(), $actions))->toBeNull();
+});
+
+test('one lookups cache answers per user for the same category id', function () {
+    $mine = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $stranger = User::factory()->create();
+    $mineForOwner = createActionTransaction($this->user, $this->account);
+    $mineForStranger = createActionTransaction($stranger, Account::factory()->for($stranger)->create());
+    $actions = [['type' => 'set_category', 'value' => (string) $mine->id]];
+    $lookups = new RuleActionLookups;
+
+    expect($this->executor->wouldChange($mineForOwner, $actions, $lookups))->toBeTrue()
+        ->and($this->executor->wouldChange($mineForStranger, $actions, $lookups))->toBeFalse();
 });
 
 // ─── Set Description ───────────────────────────────────────────────────
@@ -219,7 +244,7 @@ test('link_to_planned_transaction ignores planned from different user', function
 // ─── Multiple Actions ──────────────────────────────────────────────────
 
 test('multiple actions applied in order', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $transaction = createActionTransaction($this->user, $this->account);
 
     $this->executor->execute($transaction, [
@@ -235,7 +260,7 @@ test('multiple actions applied in order', function () {
 });
 
 test('transaction is not dirty after execute', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $transaction = createActionTransaction($this->user, $this->account);
 
     $this->executor->execute($transaction, [
@@ -297,7 +322,7 @@ test('fold_into_parent returns false and leaves the fee when no parent matches',
 });
 
 test('effective action types return true', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $transaction = createActionTransaction($this->user, $this->account);
 
     $applied = $this->executor->execute($transaction, [
@@ -308,7 +333,7 @@ test('effective action types return true', function () {
 });
 
 test('a failed fold marks the rule unapplied even when a sibling action takes effect', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $fee = createActionTransaction($this->user, $this->account, [
         'description' => 'Int Tran Fee - JetBrains CZ - 951280',
         'amount' => -42,
@@ -331,8 +356,8 @@ test('a failed fold marks the rule unapplied even when a sibling action takes ef
  */
 function wouldChangeCase(string $case, User $user, Account $account): array
 {
-    $category = Category::factory()->create(['is_hidden' => false]);
-    $other = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
+    $other = Category::factory()->for($user)->create(['is_hidden' => false]);
     $feeAttributes = [
         'description' => 'Int Tran Fee - JetBrains CZ - 951280',
         'amount' => -42,
@@ -356,7 +381,8 @@ function wouldChangeCase(string $case, User $user, Account $account): array
         'category already held but feed sourced' => [createActionTransaction($user, $account, ['category_id' => $category->id, 'category_source' => 'feed']), $setCategory],
         'category already held but suggested' => [createActionTransaction($user, $account, ['category_id' => $other->id, 'category_source' => 'suggested']), $setCategory],
         'category a person chose elsewhere' => [createActionTransaction($user, $account, ['category_id' => $other->id, 'category_source' => 'manual']), $setCategory],
-        'hidden category' => [createActionTransaction($user, $account), [['type' => 'set_category', 'value' => (string) Category::factory()->create(['is_hidden' => true])->id]]],
+        'hidden category' => [createActionTransaction($user, $account), [['type' => 'set_category', 'value' => (string) Category::factory()->for($user)->create(['is_hidden' => true])->id]]],
+        "another user's category" => [createActionTransaction($user, $account), [['type' => 'set_category', 'value' => (string) Category::factory()->create(['is_hidden' => false])->id]]],
         'description that differs' => [createActionTransaction($user, $account), [['type' => 'set_description', 'value' => 'NEW']]],
         'description that is the same' => [createActionTransaction($user, $account), [['type' => 'set_description', 'value' => 'ORIGINAL DESCRIPTION']]],
         'clean description on an unnamed row' => [createActionTransaction($user, $account), [['type' => 'set_clean_description', 'value' => 'Netflix']]],
@@ -424,6 +450,7 @@ test('wouldChange is true exactly when execute changes the row', function (strin
     'category already held but suggested' => ['category already held but suggested', true],
     'category a person chose elsewhere' => ['category a person chose elsewhere', false],
     'hidden category' => ['hidden category', false],
+    "another user's category" => ["another user's category", false],
     'description that differs' => ['description that differs', true],
     'description that is the same' => ['description that is the same', false],
     'clean description on an unnamed row' => ['clean description on an unnamed row', true],
@@ -446,7 +473,7 @@ test('wouldChange is true exactly when execute changes the row', function (strin
 ]);
 
 test('wouldChange leaves the row it was given untouched', function () {
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $transaction = createActionTransaction($this->user, $this->account);
 
     $changes = $this->executor->wouldChange($transaction, [
@@ -461,15 +488,15 @@ test('wouldChange leaves the row it was given untouched', function () {
 });
 
 test('targetCategory is the last visible set_category and null when none can apply', function () {
-    $first = Category::factory()->create(['is_hidden' => false]);
-    $last = Category::factory()->create(['is_hidden' => false]);
-    $hidden = Category::factory()->create(['is_hidden' => true]);
+    $first = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $last = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $hidden = Category::factory()->for($this->user)->create(['is_hidden' => true]);
 
     expect($this->executor->targetCategory([
         ['type' => 'set_category', 'value' => (string) $first->id],
         ['type' => 'set_category', 'value' => (string) $last->id],
         ['type' => 'set_category', 'value' => (string) $hidden->id],
-    ]))->toBe($last->id)
-        ->and($this->executor->targetCategory([['type' => 'set_category', 'value' => (string) $hidden->id]]))->toBeNull()
-        ->and($this->executor->targetCategory([['type' => 'set_notes', 'value' => 'x']]))->toBeNull();
+    ], $this->user->id))->toBe($last->id)
+        ->and($this->executor->targetCategory([['type' => 'set_category', 'value' => (string) $hidden->id]], $this->user->id))->toBeNull()
+        ->and($this->executor->targetCategory([['type' => 'set_notes', 'value' => 'x']], $this->user->id))->toBeNull();
 });

@@ -5,14 +5,16 @@
 declare(strict_types=1);
 
 use App\Models\Category;
+use App\Models\User;
 use Database\Seeders\CategorySeeder;
 
 beforeEach(function () {
+    $this->user = User::factory()->create();
     $this->seed(CategorySeeder::class);
 });
 
 it('assigns a non-null icon to every top-level category', function () {
-    $topLevel = Category::query()->whereNull('parent_id')->get();
+    $topLevel = Category::query()->where('user_id', $this->user->id)->whereNull('parent_id')->get();
 
     expect($topLevel)->not->toBeEmpty();
 
@@ -24,7 +26,7 @@ it('assigns a non-null icon to every top-level category', function () {
 });
 
 it('assigns the expected icon to each top-level category', function (string $name, string $icon) {
-    $category = Category::query()->where('name', $name)->whereNull('parent_id')->first();
+    $category = Category::query()->where('user_id', $this->user->id)->where('name', $name)->whereNull('parent_id')->first();
 
     expect($category)->not->toBeNull("Seeder missing top-level category '{$name}'")
         ->and($category->icon)->toBe($icon);
@@ -50,6 +52,7 @@ it('assigns the expected icon to each top-level category', function (string $nam
 
 it('overrides specific leaf categories with prototype-required icons', function (string $parentName, string $leafName, string $icon) {
     $leaf = Category::query()
+        ->where('user_id', $this->user->id)
         ->where('name', $leafName)
         ->whereHas('parent', fn ($q) => $q->where('name', $parentName))
         ->first();
@@ -62,7 +65,7 @@ it('overrides specific leaf categories with prototype-required icons', function 
 ]);
 
 it('seeds the 14 budget-tagged roots with their default tag and leaves Income, Transfer and Balance untagged', function () {
-    $tags = Category::query()->whereNull('parent_id')->pluck('budget_tag', 'name')
+    $tags = Category::query()->where('user_id', $this->user->id)->whereNull('parent_id')->pluck('budget_tag', 'name')
         ->map(fn ($tag) => $tag?->value)
         ->all();
 
@@ -88,7 +91,7 @@ it('seeds the 14 budget-tagged roots with their default tag and leaves Income, T
 });
 
 it('keeps the old leaves as children of their new root and never tags a child', function () {
-    $paths = Category::allWithLinkedParents()->map(fn (Category $category): string => $category->fullPath());
+    $paths = Category::allWithLinkedParents($this->user->id)->map(fn (Category $category): string => $category->fullPath());
 
     expect($paths)->toContain(
         'Software & Online Services / AI Apps',
@@ -100,7 +103,7 @@ it('keeps the old leaves as children of their new root and never tags a child', 
         'Housing & Utilities / Rent',
         'Income / Salary',
         'Transfer / Optimus to CC',
-    )->and(Category::query()->whereNotNull('parent_id')->whereNotNull('budget_tag')->exists())->toBeFalse();
+    )->and(Category::query()->where('user_id', $this->user->id)->whereNotNull('parent_id')->whereNotNull('budget_tag')->exists())->toBeFalse();
 });
 
 it('only uses icon names that Flux can resolve (Heroicons allow-list or installed Lucide partials)', function () {
@@ -116,6 +119,7 @@ it('only uses icon names that Flux can resolve (Heroicons allow-list or installe
     $allowed = array_merge($heroicons, $lucide);
 
     $usedIcons = Category::query()
+        ->where('user_id', $this->user->id)
         ->whereNotNull('icon')
         ->pluck('icon')
         ->unique()

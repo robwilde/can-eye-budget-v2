@@ -20,8 +20,8 @@ beforeEach(function () {
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
 
-    $this->eatingOut = Category::factory()->create(['name' => 'Eating Out', 'parent_id' => null, 'budget_tag' => BudgetTag::Wants]);
-    $this->quickFoods = Category::factory()->create(['name' => 'Quick Foods', 'parent_id' => $this->eatingOut->id]);
+    $this->eatingOut = Category::factory()->for($this->user)->create(['name' => 'Eating Out', 'parent_id' => null, 'budget_tag' => BudgetTag::Wants]);
+    $this->quickFoods = Category::factory()->for($this->user)->create(['name' => 'Quick Foods', 'parent_id' => $this->eatingOut->id]);
 });
 
 /** A pending payee Jev was unsure about, with its debits. */

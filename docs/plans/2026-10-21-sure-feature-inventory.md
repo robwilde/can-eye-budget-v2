@@ -16,7 +16,7 @@ Behaviour inventory of the user-facing features of Sure, a Rails personal-financ
 ## Can-I-Budget conventions referenced as C1–C8
 
 - **C1** Money is integer cents (bigInteger columns, `App\Casts\MoneyCast`); signed amount plus a direction.
-- **C2** User scoping is by convention, not global scope: every user-owned table has `user_id` and every query filters on it explicitly; child tables are scoped through their parent. `Category` and `CategoryGroup` are global today (no `user_id`); `docs/decisions/0002-categories-are-per-user.md` (#722) makes them per user.
+- **C2** User scoping is by convention, not global scope: every user-owned table has `user_id` and every query filters on it explicitly; child tables are scoped through their parent. `Category` and `CategoryGroup` are per user (`user_id`, not null) as `docs/decisions/0002-categories-are-per-user.md` (#722) decides; #830 added the column and the user filters.
 - **C3** Main pages are `Route::view` wrappers around Livewire components inside the auth+verified group; settings pages use `Route::livewire('settings/…', 'pages::settings.*')` in the settings routes file, and the profile page sits in the `auth` group only. Every public Livewire method is audited automatically by the `AuditComponentCalls` hook unless marked `#[NotAudited]` (polling and dry-run only). Read-only state belongs in `#[Computed]` properties, which are not audited. Server-set state uses `#[Locked]`; writes re-scope to the user and re-check the persisted record.
 - **C4** Write routes are named and pass through `AttributeRequestToUser`. Every queued job carries `AttributeJobToUser` with a user id and an audited flag. The guard test `UserActionInventoryTest` pins three lists: `#[NotAudited]` exemptions, named write routes (POST, PUT, PATCH, DELETE), and every class in `app/Jobs` with its audited flag. A new audited Livewire method needs no test change; a new write route or job does. GET routes are not in the inventory; they inherit `AttributeRequestToUser` from the web group.
 - **C5** Models are `final` classes with `strict_types`, a `@property` docblock and `$fillable`; all but `TransferRule` have a `casts()` method, and all but `AuditEvent`, `TransferRule` and `UserCategoryBudgetTag` use `HasFactory`. The architecture tests enforce final services, string-backed enums in `app/Enums`, and final DTOs in `app/DTOs` extending `Spatie\LaravelData\Dto` (`ParsedTransactionDto` is the one DTO kept beside the CSV import services).
@@ -511,8 +511,8 @@ The remaining features have no ordering constraint beyond the conventions above.
 #### Maps to Can-I-Budget
 - **Status:** Partial
 - **Existing:**
-  - Category is a global tree of unlimited depth. It holds parent, group, icon, colour, is_hidden and budget_tag; a missing icon is taken from the parent.
-  - CategoryGroup holds name, colour, icon and sort order. CategoryGroupProvisioner seeds 13 groups and can be re-run safely.
+  - Category is a per-user tree of unlimited depth. It holds parent, group, icon, colour, is_hidden and budget_tag; a missing icon is taken from the parent.
+  - CategoryGroup holds name, colour, icon and sort order, and is unique by name per user. UserCategoryProvisioner gives each new user the default 13 groups and the default category tree.
   - CategoryEditor can:
     - search, create with an optional parent, and rename;
     - re-parent, with a guard that stops a category moving under itself or a descendant;
@@ -1957,7 +1957,7 @@ The remaining features have no ordering constraint beyond the conventions above.
 #### Maps to Can-I-Budget
 - **Status:** Partial
 - **Existing:**
-  - The shared global Category tree is provisioned by CategorySeeder and migrations. CategoryGroupProvisioner assigns the groups.
+  - Each user's Category tree is provisioned by UserCategoryProvisioner (called from CreateNewUser and CategorySeeder), which also assigns the groups.
   - CategorySource provenance (isOverwritableByRule) keeps automation off Manual categories.
   - Deleting a category leaves its transactions uncategorised (category_id set null on delete).
   - PropagateTransactionCategory copies a category change to sibling transactions of the same PlannedTransaction, and to the plan itself.

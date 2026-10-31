@@ -24,8 +24,6 @@ final class DatabaseSeeder extends Seeder
             'password' => Hash::make('H@rd24G$t'),
         ]);
 
-        $this->call(CategorySeeder::class);
-
         $sandboxUsers = [
             ['name' => 'Max Wentworth-Smith', 'email' => 'maxsmith@micr0soft.com', 'password' => 'whislter'],
             ['name' => 'Whistler Smith', 'email' => 'whistler@h0tmail.com', 'password' => 'ShowBox'],
@@ -45,6 +43,8 @@ final class DatabaseSeeder extends Seeder
                 'email_verified_at' => now(),
             ]);
         }
+
+        $this->call(CategorySeeder::class);
 
         app(MonthEndBalanceRuleProvisioner::class)->provisionAllUsers();
     }

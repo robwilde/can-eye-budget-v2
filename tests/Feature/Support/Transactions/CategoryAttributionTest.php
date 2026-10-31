@@ -20,7 +20,7 @@ function attributionSum(int $userId, int $categoryId): int
 test('unsplit transaction attributes to its own category', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     Transaction::factory()->for($user)->for($account)->create([
         'category_id' => $category->id,
@@ -33,9 +33,9 @@ test('unsplit transaction attributes to its own category', function () {
 test('split transaction attributes to its lines not its own category', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $ownCategory = Category::factory()->create();
-    $groceries = Category::factory()->create();
-    $fuel = Category::factory()->create();
+    $ownCategory = Category::factory()->for($user)->create();
+    $groceries = Category::factory()->for($user)->create();
+    $fuel = Category::factory()->for($user)->create();
 
     $transaction = Transaction::factory()->for($user)->for($account)->create([
         'category_id' => $ownCategory->id,
@@ -55,8 +55,8 @@ test('split transaction attributes to its lines not its own category', function 
 test('split preserves parent total across all categories', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create();
-    $fuel = Category::factory()->create();
+    $groceries = Category::factory()->for($user)->create();
+    $fuel = Category::factory()->for($user)->create();
 
     $transaction = Transaction::factory()->for($user)->for($account)->create([
         'category_id' => null,
@@ -78,7 +78,7 @@ test('split preserves parent total across all categories', function () {
 test('versioned transactions are excluded so splits on stale rows do not count', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     $original = Transaction::factory()->for($user)->for($account)->create([
         'category_id' => $category->id,
@@ -95,7 +95,7 @@ test('versioned transactions are excluded so splits on stale rows do not count',
 test('only the given user is attributed', function () {
     $user = User::factory()->create();
     $other = User::factory()->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     Transaction::factory()->for($user)->for(Account::factory()->for($user))->create([
         'category_id' => $category->id,
@@ -112,7 +112,7 @@ test('only the given user is attributed', function () {
 test('distinct transaction count folds multiple lines in one category', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     $transaction = Transaction::factory()->for($user)->for($account)->create([
         'category_id' => null,

@@ -67,7 +67,7 @@ final class PayCycleConfigurator
                 ['user_id' => $user->id, 'is_pay_cycle_income' => true],
                 [
                     'account_id' => $user->primary_account_id,
-                    'category_id' => $this->salaryCategoryId(),
+                    'category_id' => $this->salaryCategoryId($user),
                     'amount' => $payAmountCents,
                     'direction' => TransactionDirection::Credit,
                     'description' => $description ?? 'Salary',
@@ -107,11 +107,12 @@ final class PayCycleConfigurator
      * when the category tree has not been seeded, leaving the income planned
      * transaction uncategorised (the column is nullable).
      */
-    private function salaryCategoryId(): ?int
+    private function salaryCategoryId(User $user): ?int
     {
         return Category::query()
+            ->where('user_id', $user->id)
             ->where('name', 'Salary')
-            ->whereHas('parent', fn (Builder $query): Builder => $query->where('name', 'Income'))
+            ->whereHas('parent', fn (Builder $query): Builder => $query->where('name', 'Income')->where('user_id', $user->id))
             ->value('id');
     }
 }

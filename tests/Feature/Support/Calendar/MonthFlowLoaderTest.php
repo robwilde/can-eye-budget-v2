@@ -39,7 +39,7 @@ function monthFlowPlan(User $user, Account $account, TransactionDirection $direc
 
 function monthFlowPost(User $user, Account $account, TransactionDirection $direction, int $amount, string $date, array $overrides = []): Transaction
 {
-    $category = Category::query()->firstOrCreate(['name' => $direction === TransactionDirection::Debit ? 'Shopping' : 'Salary']);
+    $category = Category::query()->firstOrCreate(['user_id' => $user->id, 'name' => $direction === TransactionDirection::Debit ? 'Shopping' : 'Salary']);
 
     return Transaction::factory()->for($user)->create([
         'account_id' => $account->id,

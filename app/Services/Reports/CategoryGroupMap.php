@@ -18,11 +18,11 @@ final readonly class CategoryGroupMap
      */
     private function __construct(private array $nodes) {}
 
-    public static function load(): self
+    public static function load(int $userId): self
     {
         $nodes = [];
 
-        foreach (Category::query()->get(['id', 'name', 'parent_id', 'group_id', 'icon']) as $category) {
+        foreach (Category::query()->where('user_id', $userId)->get(['id', 'name', 'parent_id', 'group_id', 'icon']) as $category) {
             $nodes[$category->id] = [
                 'name' => $category->name,
                 'parent_id' => $category->parent_id,

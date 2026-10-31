@@ -19,7 +19,7 @@ JS;
 test('combobox shows the hint until three characters are typed', function () use ($openModal) {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
-    Category::factory()->create(['name' => 'Groceries']);
+    Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     $this->actingAs($user);
 
@@ -36,8 +36,8 @@ test('combobox shows the hint until three characters are typed', function () use
 test('combobox filters case-insensitively at three or more characters', function () use ($openModal) {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
-    Category::factory()->create(['name' => 'Groceries']);
-    Category::factory()->create(['name' => 'Utilities']);
+    Category::factory()->for($user)->create(['name' => 'Groceries']);
+    Category::factory()->for($user)->create(['name' => 'Utilities']);
 
     $this->actingAs($user);
 
@@ -54,7 +54,7 @@ test('combobox filters case-insensitively at three or more characters', function
 test('combobox shows the full parent and child path in results', function () use ($openModal) {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
-    $bills = Category::factory()->create(['name' => 'Bills']);
+    $bills = Category::factory()->for($user)->create(['name' => 'Bills']);
     Category::factory()->withParent($bills)->create(['name' => 'Internet']);
 
     $this->actingAs($user);
@@ -71,7 +71,7 @@ test('combobox shows the full parent and child path in results', function () use
 test('combobox shows the no-results message for a non-matching term', function () use ($openModal) {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
-    Category::factory()->create(['name' => 'Groceries']);
+    Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     $this->actingAs($user);
 
@@ -87,7 +87,7 @@ test('combobox shows the no-results message for a non-matching term', function (
 test('combobox selection is reflected in the input and reveals the clear button', function () use ($openModal) {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
-    Category::factory()->create(['name' => 'Groceries']);
+    Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     $this->actingAs($user);
 
@@ -106,7 +106,7 @@ test('combobox selection is reflected in the input and reveals the clear button'
 test('combobox clear button resets the selection', function () use ($openModal) {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
-    Category::factory()->create(['name' => 'Groceries']);
+    Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     $this->actingAs($user);
 
@@ -126,7 +126,7 @@ test('combobox clear button resets the selection', function () use ($openModal) 
 test('combobox is pre-filled when editing a transaction with a category', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Groceries']);
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
     $transaction = Transaction::factory()->for($user)->for($account)->create([
         'amount' => 4250,
         'direction' => TransactionDirection::Debit,
@@ -148,7 +148,7 @@ test('combobox is pre-filled when editing a transaction with a category', functi
 test('combobox keeps a long category path on one line inside the viewport', function () use ($openModal) {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
-    $transport = Category::factory()->create(['name' => 'Transport']);
+    $transport = Category::factory()->for($user)->create(['name' => 'Transport']);
     Category::factory()->withParent($transport)->create(['name' => 'Motorcycle Fuel Surcharge Rebate Programme']);
 
     $this->actingAs($user);

@@ -14,7 +14,7 @@ test('the category_source migration backfills only rows that actually have a cat
 
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     // Roll back to the pre-migration schema, insert rows the way they would have
     // existed before the column was added, then re-apply the migration.

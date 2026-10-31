@@ -47,7 +47,7 @@ test('pending orders are listed grouped by retailer', function () {
 
 test('approving with a category records the decision on the order and its plan', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     $plan = bnplPlanFor($user, ['category_id' => null]);
     $order = BnplOrder::factory()->create([
         'user_id' => $user->id,
@@ -107,7 +107,7 @@ test('rejecting marks the order rejected and deactivates its plan', function () 
 
 test('recategorising an auto-approved order updates the order and its plan', function () {
     $user = User::factory()->create();
-    $newCategory = Category::factory()->create();
+    $newCategory = Category::factory()->for($user)->create();
     $plan = bnplPlanFor($user);
     $order = BnplOrder::factory()->autoApproved()->create([
         'user_id' => $user->id,
@@ -130,7 +130,7 @@ test('recategorising an auto-approved order updates the order and its plan', fun
 test('an order belonging to another user is not listed and cannot be approved', function () {
     $owner = User::factory()->create();
     $intruder = User::factory()->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($intruder)->create();
     $order = BnplOrder::factory()->create(['user_id' => $owner->id, 'retailer' => 'Owner Only Retailer']);
 
     Livewire::actingAs($intruder)
@@ -145,7 +145,7 @@ test('an order belonging to another user is not listed and cannot be approved', 
 
 test('approving an order that has no plan and is not settled is refused', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     $order = BnplOrder::factory()->create([
         'user_id' => $user->id,
         'planned_transaction_id' => null,
@@ -192,7 +192,7 @@ test('the rules sidebar badge shows the number of orders awaiting review', funct
 
 test('the badge follows the pending count after a review action', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     $plan = bnplPlanFor($user);
     $order = BnplOrder::factory()->create(['user_id' => $user->id, 'planned_transaction_id' => $plan->id]);
 
@@ -207,4 +207,19 @@ test('the badge follows the pending count after a review action', function () {
         ->assertDontSeeHtml('data-testid="bnpl-pending-badge"');
 
     expect($review->instance()->pendingOrders)->toBeEmpty();
+});
+
+test("approving with another user's category is refused and changes nothing", function () {
+    $user = User::factory()->create();
+    $order = BnplOrder::factory()->create(['user_id' => $user->id]);
+    $theirs = Category::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(BnplOrderReview::class)
+        ->set("categories.{$order->id}", $theirs->id)
+        ->call('approve', $order->id)
+        ->assertHasErrors(["categories.{$order->id}"]);
+
+    expect($order->fresh()->status)->toBe(BnplOrderStatus::PendingReview)
+        ->and($order->fresh()->category_id)->not->toBe($theirs->id);
 });

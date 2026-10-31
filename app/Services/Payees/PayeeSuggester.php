@@ -88,7 +88,7 @@ final readonly class PayeeSuggester
             return null;
         }
 
-        return $this->suggestFor($user, $row, $this->taxonomy(), $this->categoryRules($user));
+        return $this->suggestFor($user, $row, $this->taxonomy($user->id), $this->categoryRules($user));
     }
 
     /**
@@ -112,7 +112,7 @@ final readonly class PayeeSuggester
             return 0;
         }
 
-        $taxonomy = $this->taxonomy();
+        $taxonomy = $this->taxonomy($user->id);
         $rules = $this->categoryRules($user);
         $created = 0;
 
@@ -335,9 +335,9 @@ final readonly class PayeeSuggester
      *
      * @return array{categories: Collection<int, Category>, roots: Collection<int, Category>, families: array<int, Collection<int, Category>>}
      */
-    private function taxonomy(): array
+    private function taxonomy(int $userId): array
     {
-        $categories = Category::visibleSortedByFullPath()->keyBy('id');
+        $categories = Category::visibleSortedByFullPath($userId)->keyBy('id');
         $families = [];
 
         foreach ($categories as $category) {

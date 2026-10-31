@@ -12,7 +12,7 @@ use App\Models\User;
 test('accounts page shows categories grouped inline with own-segment names', function () {
     $user = User::factory()->create();
     Account::factory()->for($user)->create();
-    $office = Category::factory()->create(['name' => 'Office']);
+    $office = Category::factory()->for($user)->create(['name' => 'Office']);
     Category::factory()->withParent($office)->create(['name' => 'Software']);
 
     $this->actingAs($user);
@@ -28,7 +28,7 @@ test('accounts page shows categories grouped inline with own-segment names', fun
 test('clicking a category row expands its recent transactions inline', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $office = Category::factory()->create(['name' => 'Office']);
+    $office = Category::factory()->for($user)->create(['name' => 'Office']);
     $software = Category::factory()->withParent($office)->create(['name' => 'Software']);
 
     Transaction::factory()->for($user)->create([

@@ -21,7 +21,9 @@ final class TransactionSplitFactory extends Factory
     {
         return [
             'transaction_id' => Transaction::factory(),
-            'category_id' => Category::factory(),
+            'category_id' => fn (array $attributes): Factory => Category::factory([
+                'user_id' => Transaction::withTrashed()->whereKey($attributes['transaction_id'])->value('user_id'),
+            ]),
             'amount' => fake()->numberBetween(100, 25000),
             'notes' => null,
             'position' => 0,

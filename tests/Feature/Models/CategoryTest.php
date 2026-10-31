@@ -4,8 +4,10 @@
 
 declare(strict_types=1);
 
+use App\Models\Account;
 use App\Models\Category;
 use App\Models\Transaction;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
 test('factory creates a valid category', function () {
@@ -49,8 +51,9 @@ test('deleting parent nullifies children parent_id', function () {
 });
 
 test('category has many transactions', function () {
-    $category = Category::factory()->create();
-    Transaction::factory()->count(3)->create(['category_id' => $category->id]);
+    $user = User::factory()->create();
+    $category = Category::factory()->for($user)->create();
+    Transaction::factory()->count(3)->for($user)->for(Account::factory()->for($user))->create(['category_id' => $category->id]);
 
     expect($category->transactions)
         ->toHaveCount(3)
@@ -185,13 +188,14 @@ test('depth returns 1 for a child and 2 for a grandchild', function () {
 });
 
 test('visibleSortedByFullPath sorts by full path not leaf name', function () {
-    $bills = Category::factory()->create(['name' => 'Bills']);
+    $user = User::factory()->create();
+    $bills = Category::factory()->for($user)->create(['name' => 'Bills']);
     Category::factory()->withParent($bills)->create(['name' => 'Zebra']);
 
-    $entertainment = Category::factory()->create(['name' => 'Entertainment']);
+    $entertainment = Category::factory()->for($user)->create(['name' => 'Entertainment']);
     Category::factory()->withParent($entertainment)->create(['name' => 'Alpha']);
 
-    $result = Category::visibleSortedByFullPath();
+    $result = Category::visibleSortedByFullPath($user->id);
     $paths = $result->map(fn (Category $c) => $c->fullPath())->all();
 
     expect($paths)->toContain('Bills / Zebra', 'Entertainment / Alpha')
@@ -200,10 +204,11 @@ test('visibleSortedByFullPath sorts by full path not leaf name', function () {
 });
 
 test('visibleSortedByFullPath excludes hidden categories', function () {
-    Category::factory()->create(['name' => 'Visible']);
-    Category::factory()->hidden()->create(['name' => 'Hidden']);
+    $user = User::factory()->create();
+    Category::factory()->for($user)->create(['name' => 'Visible']);
+    Category::factory()->for($user)->hidden()->create(['name' => 'Hidden']);
 
-    $result = Category::visibleSortedByFullPath();
+    $result = Category::visibleSortedByFullPath($user->id);
     $names = $result->pluck('name')->all();
 
     expect($names)->toContain('Visible')
@@ -211,9 +216,10 @@ test('visibleSortedByFullPath excludes hidden categories', function () {
 });
 
 test('visibleSortedByFullPath returns values-reset collection', function () {
-    Category::factory()->count(3)->create();
+    $user = User::factory()->create();
+    Category::factory()->count(3)->for($user)->create();
 
-    $result = Category::visibleSortedByFullPath();
+    $result = Category::visibleSortedByFullPath($user->id);
 
     expect($result->keys()->all())->toBe(range(0, $result->count() - 1));
 });
@@ -266,17 +272,29 @@ test('resolveIcon fires no queries when parent.parent is eager-loaded on a grand
 });
 
 test('allWithLinkedParents then fullPath fires a single query on a deep node', function () {
-    $grandparent = Category::factory()->create(['name' => 'Office']);
+    $user = User::factory()->create();
+    $grandparent = Category::factory()->for($user)->create(['name' => 'Office']);
     $parent = Category::factory()->withParent($grandparent)->create(['name' => 'Training']);
     Category::factory()->withParent($parent)->create(['name' => 'Subscription']);
 
     DB::enableQueryLog();
     DB::flushQueryLog();
 
-    $all = Category::allWithLinkedParents();
+    $all = Category::allWithLinkedParents($user->id);
     $deep = $all->firstWhere('name', 'Subscription');
     $path = $deep->fullPath();
 
     expect($path)->toBe('Office / Training / Subscription')
         ->and(DB::getQueryLog())->toHaveCount(1);
+});
+
+test('category lookups only return the given user\'s categories', function () {
+    [$user, $other] = User::factory()->count(2)->create()->all();
+    $mine = Category::factory()->for($user)->create(['name' => 'Mine']);
+    $mineChild = Category::factory()->withParent($mine)->create(['name' => 'Mine child']);
+    $theirs = Category::factory()->for($other)->create(['name' => 'Theirs']);
+
+    expect(Category::allWithLinkedParents($user->id)->pluck('id')->sort()->values()->all())->toBe([$mine->id, $mineChild->id])
+        ->and(Category::visibleSortedByFullPath($user->id)->pluck('id')->sort()->values()->all())->toBe([$mine->id, $mineChild->id])
+        ->and(Category::visibleSortedByFullPath($other->id)->pluck('id')->all())->toBe([$theirs->id]);
 });

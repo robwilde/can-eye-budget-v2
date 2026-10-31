@@ -21,6 +21,12 @@
                             <flux:select.option value="{{ $parent->id }}">{{ $parent->fullPath() }}</flux:select.option>
                         @endforeach
                     </flux:select>
+                    @error('newCategoryName')
+                        <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text>
+                    @enderror
+                    @error('newParentId')
+                        <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text>
+                    @enderror
                     <div class="flex gap-2">
                         <flux:button wire:click="createCategory" variant="primary" size="sm">{{ __('Create') }}</flux:button>
                         <flux:button wire:click="$set('showCreateForm', false)" variant="ghost" size="sm">{{ __('Cancel') }}</flux:button>
@@ -71,6 +77,9 @@
                                 <div class="flex-1">
                                     <label class="cib-label" for="category-name-input">{{ __('Category name') }}</label>
                                     <flux:input id="category-name-input" wire:model="editingName" size="sm"/>
+                                    @error('editingName')
+                                        <flux:text size="sm" class="mt-1 text-red-600">{{ $message }}</flux:text>
+                                    @enderror
                                 </div>
                                 <div class="flex-1">
                                     <label class="cib-label" for="category-parent-select">{{ __('Parent category') }}</label>
@@ -91,6 +100,9 @@
                                 </flux:button>
                                 <flux:button wire:click="confirmDelete({{ $category['id'] }})" variant="ghost" size="sm" icon="trash" class="text-red-500 hover:text-red-600"/>
                             </div>
+                            @error('deletingCategoryId')
+                                <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text>
+                            @enderror
 
                             <div class="flex flex-wrap items-end gap-2">
                                 <div class="flex-1">

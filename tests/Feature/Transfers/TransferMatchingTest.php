@@ -272,7 +272,7 @@ test('records an audit event for a manual transfer link', function () {
 });
 
 test('counts the surviving leg of a deleted transfer as ordinary spend or income', function () {
-    $transfer = Category::factory()->create(['name' => 'Transfer', 'parent_id' => null]);
+    $transfer = Category::factory()->for($this->user)->create(['name' => 'Transfer', 'parent_id' => null]);
     $a = matchingAccount($this->user);
     $b = matchingAccount($this->user);
     $debit = matchingRow($this->user, $a, -5000, '2026-09-10', TransactionSource::Manual);

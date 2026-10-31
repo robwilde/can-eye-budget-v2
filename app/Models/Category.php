@@ -16,6 +16,7 @@ use Illuminate\Support\Collection;
 
 /**
  * @property int $id
+ * @property int $user_id
  * @property string $name
  * @property int|null $parent_id
  * @property int|null $group_id
@@ -39,6 +40,7 @@ final class Category extends Model
      * @var list<string>
      */
     protected $fillable = [
+        'user_id',
         'name',
         'parent_id',
         'budget_tag',
@@ -52,10 +54,10 @@ final class Category extends Model
         'is_hidden',
     ];
 
-    /** @return Collection<int, self> All categories with parent relations linked in memory (no lazy loads at any depth). */
-    public static function allWithLinkedParents(): Collection
+    /** @return Collection<int, self> All of the user's categories with parent relations linked in memory (no lazy loads at any depth). */
+    public static function allWithLinkedParents(int $userId): Collection
     {
-        $all = self::query()->get();
+        $all = self::query()->where('user_id', $userId)->get();
         $byId = $all->keyBy('id');
 
         foreach ($all as $category) {
@@ -66,12 +68,18 @@ final class Category extends Model
     }
 
     /** @return Collection<int, self> */
-    public static function visibleSortedByFullPath(): Collection
+    public static function visibleSortedByFullPath(int $userId): Collection
     {
-        return self::allWithLinkedParents()
+        return self::allWithLinkedParents($userId)
             ->reject(fn (self $category): bool => $category->is_hidden)
             ->sortBy(fn (self $category): string => $category->fullPath())
             ->values();
+    }
+
+    /** @return BelongsTo<User, $this> */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 
     /** @return BelongsTo<self, $this> */

@@ -68,7 +68,7 @@ final readonly class PayeeReviewQueue
             ->filter()
             ->countBy();
 
-        $categories = Category::allWithLinkedParents()->keyBy('id');
+        $categories = Category::allWithLinkedParents($user->id)->keyBy('id');
 
         return $worthAsking
             ->map(function (Payee $payee) use ($user, $rows, $industryByKey, $pendingPerIndustry, $categories): array {

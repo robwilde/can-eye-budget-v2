@@ -102,7 +102,7 @@ final class Budget extends Model
     {
         self::creating(static function (self $budget): void {
             if (blank($budget->name) && $budget->category_id !== null) {
-                $budget->name = (string) Category::query()->whereKey($budget->category_id)->value('name');
+                $budget->name = (string) Category::query()->where('user_id', $budget->user_id)->whereKey($budget->category_id)->value('name');
             }
         });
 

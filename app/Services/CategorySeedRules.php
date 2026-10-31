@@ -119,11 +119,11 @@ final class CategorySeedRules
      *
      * @return array{resolved: list<array{value: string, category_id: int, source: string}>, skipped: list<string>}
      */
-    public function resolve(): array
+    public function resolve(int $userId): array
     {
         $idsByPath = [];
 
-        foreach (Category::allWithLinkedParents() as $category) {
+        foreach (Category::allWithLinkedParents($userId) as $category) {
             $idsByPath[mb_strtolower($category->fullPath())] = (int) $category->id;
         }
 

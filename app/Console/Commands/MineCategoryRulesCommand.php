@@ -56,7 +56,7 @@ final class MineCategoryRulesCommand extends Command
         $result = $miner->mine($user, $accountIds);
         $final = $result['candidates'];
 
-        $categoryNames = Category::query()->pluck('name', 'id');
+        $categoryNames = Category::query()->where('user_id', $user->id)->pluck('name', 'id');
 
         $this->reportCandidates($final, $categoryNames);
         $this->reportAmbiguous($result['ambiguous'], $categoryNames);

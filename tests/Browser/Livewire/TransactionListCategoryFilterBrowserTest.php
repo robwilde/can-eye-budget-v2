@@ -12,8 +12,8 @@ use App\Models\User;
 test('picking a category in the filter narrows the transaction list', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
-    $transport = Category::factory()->create(['name' => 'Transport']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $transport = Category::factory()->for($user)->create(['name' => 'Transport']);
 
     Transaction::factory()->for($user)->debit()->create([
         'account_id' => $account->id,

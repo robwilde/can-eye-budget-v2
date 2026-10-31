@@ -136,7 +136,7 @@ final readonly class RuleMiningStage implements PipelineStageContract
      */
     private function incomeSeeds(PipelineContext $context): array
     {
-        $salaryCategoryId = Category::allWithLinkedParents()
+        $salaryCategoryId = Category::allWithLinkedParents($context->user->id)
             ->first(fn (Category $category): bool => mb_strtolower($category->fullPath()) === mb_strtolower(self::SALARY_CATEGORY_PATH))
             ?->id;
 

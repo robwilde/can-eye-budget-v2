@@ -19,8 +19,8 @@ test('changing category on a linked transaction propagates to siblings', functio
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $planned = PlannedTransaction::factory()->for($user)->for($account)->create();
-    $oldCategory = Category::factory()->create();
-    $newCategory = Category::factory()->create();
+    $oldCategory = Category::factory()->for($user)->create();
+    $newCategory = Category::factory()->for($user)->create();
 
     $sibling1 = Transaction::factory()->for($user)->for($account)->create([
         'planned_transaction_id' => $planned->id,
@@ -44,8 +44,8 @@ test('changing category on a linked transaction propagates to siblings', functio
 test('changing category on a linked transaction propagates to parent PlannedTransaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $oldCategory = Category::factory()->create();
-    $newCategory = Category::factory()->create();
+    $oldCategory = Category::factory()->for($user)->create();
+    $newCategory = Category::factory()->for($user)->create();
     $planned = PlannedTransaction::factory()->for($user)->for($account)->create([
         'category_id' => $oldCategory->id,
     ]);
@@ -63,8 +63,8 @@ test('changing category on a linked transaction propagates to parent PlannedTran
 test('changing category on a PlannedTransaction propagates to all linked transactions', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $oldCategory = Category::factory()->create();
-    $newCategory = Category::factory()->create();
+    $oldCategory = Category::factory()->for($user)->create();
+    $newCategory = Category::factory()->for($user)->create();
     $planned = PlannedTransaction::factory()->for($user)->for($account)->create([
         'category_id' => $oldCategory->id,
     ]);
@@ -87,8 +87,8 @@ test('changing category on a PlannedTransaction propagates to all linked transac
 test('non-linked transactions do not propagate category changes', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $oldCategory = Category::factory()->create();
-    $newCategory = Category::factory()->create();
+    $oldCategory = Category::factory()->for($user)->create();
+    $newCategory = Category::factory()->for($user)->create();
 
     $otherTransaction = Transaction::factory()->for($user)->for($account)->create([
         'category_id' => $oldCategory->id,
@@ -107,8 +107,8 @@ test('non-linked transactions do not propagate category changes', function () {
 test('no infinite loops when propagation updates happen', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $oldCategory = Category::factory()->create();
-    $newCategory = Category::factory()->create();
+    $oldCategory = Category::factory()->for($user)->create();
+    $newCategory = Category::factory()->for($user)->create();
     $planned = PlannedTransaction::factory()->for($user)->for($account)->create([
         'category_id' => $oldCategory->id,
     ]);
@@ -134,7 +134,7 @@ test('no infinite loops when propagation updates happen', function () {
 test('event only fires when category_id actually changed', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     $transaction = Transaction::factory()->for($user)->for($account)->create([
         'category_id' => $category->id,
@@ -150,8 +150,8 @@ test('event only fires when category_id actually changed', function () {
 test('propagation does not affect transactions linked to a different PlannedTransaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $oldCategory = Category::factory()->create();
-    $newCategory = Category::factory()->create();
+    $oldCategory = Category::factory()->for($user)->create();
+    $newCategory = Category::factory()->for($user)->create();
 
     $planned1 = PlannedTransaction::factory()->for($user)->for($account)->create([
         'category_id' => $oldCategory->id,
@@ -179,7 +179,7 @@ test('a rule-set category propagates to siblings as rule, not manual', function 
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $planned = PlannedTransaction::factory()->for($user)->for($account)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     $sibling = Transaction::factory()->for($user)->for($account)->create([
         'planned_transaction_id' => $planned->id,
@@ -202,7 +202,7 @@ test('a user-set category propagates to siblings as manual', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $planned = PlannedTransaction::factory()->for($user)->for($account)->create();
-    $newCategory = Category::factory()->create();
+    $newCategory = Category::factory()->for($user)->create();
 
     $sibling = Transaction::factory()->for($user)->for($account)->create([
         'planned_transaction_id' => $planned->id,
@@ -222,7 +222,7 @@ test('clearing a category clears the siblings source too', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $planned = PlannedTransaction::factory()->for($user)->for($account)->create();
-    $oldCategory = Category::factory()->create();
+    $oldCategory = Category::factory()->for($user)->create();
 
     $sibling = Transaction::factory()->for($user)->for($account)->create([
         'planned_transaction_id' => $planned->id,
@@ -243,7 +243,7 @@ test('a planned transaction category propagates as manual and clears with the ca
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
     $planned = PlannedTransaction::factory()->for($user)->for($account)->create();
-    $newCategory = Category::factory()->create();
+    $newCategory = Category::factory()->for($user)->create();
 
     $transaction = Transaction::factory()->for($user)->for($account)->create([
         'planned_transaction_id' => $planned->id,

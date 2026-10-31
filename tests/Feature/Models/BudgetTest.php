@@ -51,8 +51,9 @@ test('user has many budgets', function () {
 });
 
 test('category has many budgets', function () {
-    $category = Category::factory()->create();
-    Budget::factory()->count(2)->create(['category_id' => $category->id]);
+    $user = User::factory()->create();
+    $category = Category::factory()->for($user)->create();
+    Budget::factory()->count(2)->for($user)->create(['category_id' => $category->id]);
 
     expect($category->budgets)->toHaveCount(2)
         ->each(fn (Pest\Expectation $budget) => $budget->toBeInstanceOf(Budget::class));
@@ -68,8 +69,9 @@ test('deleting a user cascades to budgets', function () {
 });
 
 test('deleting a category nullifies budget category_id', function () {
-    $category = Category::factory()->create();
-    $budget = Budget::factory()->create(['category_id' => $category->id]);
+    $user = User::factory()->create();
+    $category = Category::factory()->for($user)->create();
+    $budget = Budget::factory()->for($user)->create(['category_id' => $category->id]);
 
     $category->delete();
 
@@ -113,7 +115,7 @@ test('remaining calculates correctly with no transactions', function () {
 
 test('remaining calculates correctly with transactions', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     $account = Account::factory()->for($user)->create();
     $budget = Budget::factory()->for($user)->create([
         'category_id' => $category->id,
@@ -135,7 +137,7 @@ test('remaining calculates correctly with transactions', function () {
 test('remaining excludes other users transactions in the same category', function () {
     $user = User::factory()->create();
     $otherUser = User::factory()->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     $account = Account::factory()->for($user)->create();
     $otherAccount = Account::factory()->for($otherUser)->create();
     $budget = Budget::factory()->for($user)->create([

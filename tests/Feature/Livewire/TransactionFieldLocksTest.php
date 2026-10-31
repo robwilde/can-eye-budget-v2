@@ -110,7 +110,7 @@ test('a user edit of a bank row locks the changed field and the sync still updat
 test('records which fields a manual edit locked and carries them to the next version', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
     $row = Transaction::factory()->for($user)->for($account)->manual()->create(['amount' => 4250, 'direction' => TransactionDirection::Debit, 'description' => 'lunch', 'post_date' => '2026-08-10']);
 
     Livewire::actingAs($user)

@@ -8,7 +8,9 @@ use App\Casts\MoneyCast;
 use App\Models\Category;
 use App\Models\CategoryGroup;
 use App\Models\Transaction;
+use App\Models\User;
 use App\Services\Reports\CategoryGroupMap;
+use App\Support\Categories\ProtectedCategories;
 use App\Support\Transactions\CategoryAttribution;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -56,6 +58,8 @@ final class CategoryEditor extends Component
 
     public function selectCategory(int $id): void
     {
+        $this->resetErrorBag();
+
         if ($this->selectedCategoryId === $id) {
             $this->selectedCategoryId = null;
             $this->editingName = '';
@@ -66,7 +70,7 @@ final class CategoryEditor extends Component
             return;
         }
 
-        $category = Category::find($id);
+        $category = Category::query()->where('user_id', $this->authenticatedUser()->id)->find($id);
 
         if (! $category) {
             return;
@@ -85,18 +89,38 @@ final class CategoryEditor extends Component
             return;
         }
 
+        $userId = $this->authenticatedUser()->id;
+
         $this->validate([
             'editingName' => ['required', 'string', 'max:255'],
-            'editingParentId' => ['nullable', 'integer', 'exists:categories,id'],
+            'editingParentId' => ['nullable', 'integer', Rule::exists('categories', 'id')->where('user_id', $userId)],
         ]);
 
-        if ($this->wouldCreateCycle($this->selectedCategoryId, $this->editingParentId)) {
+        $category = Category::allWithLinkedParents($userId)->firstWhere('id', $this->selectedCategoryId);
+
+        if ($category === null) {
+            return;
+        }
+
+        if ($this->wouldCreateCycle($userId, $this->selectedCategoryId, $this->editingParentId)) {
             $this->addError('editingParentId', __('A category cannot be moved under itself or one of its subcategories.'));
 
             return;
         }
 
-        Category::find($this->selectedCategoryId)?->update([
+        if (ProtectedCategories::isProtected($category) && ($this->editingName !== $category->name || $this->editingParentId !== $category->parent_id)) {
+            $this->addError('editingName', __('This category is found by name elsewhere in the app, so it cannot be renamed or moved.'));
+
+            return;
+        }
+
+        if (! ProtectedCategories::isProtected($category) && ProtectedCategories::isProtectedPath($this->resultingPath($userId, $this->editingParentId, $this->editingName))) {
+            $this->addError('editingName', __('That name is used by a category the app finds by name, so it cannot be used here.'));
+
+            return;
+        }
+
+        $category->update([
             'name' => $this->editingName,
             'parent_id' => $this->editingParentId,
         ]);
@@ -108,16 +132,22 @@ final class CategoryEditor extends Component
             return;
         }
 
+        $userId = $this->authenticatedUser()->id;
+
         $this->validate([
-            'editingGroupId' => ['nullable', 'integer', 'exists:category_groups,id'],
+            'editingGroupId' => ['nullable', 'integer', Rule::exists('category_groups', 'id')->where('user_id', $userId)],
         ]);
 
-        Category::find($this->selectedCategoryId)?->update(['group_id' => $this->editingGroupId]);
+        Category::query()
+            ->where('user_id', $userId)
+            ->whereKey($this->selectedCategoryId)
+            ->first()
+            ?->update(['group_id' => $this->editingGroupId]);
     }
 
     public function openGroupForm(?int $groupId = null): void
     {
-        $group = $groupId === null ? null : CategoryGroup::find($groupId);
+        $group = $groupId === null ? null : CategoryGroup::query()->where('user_id', $this->authenticatedUser()->id)->find($groupId);
 
         $this->showGroupForm = true;
         $this->editingGroupRecordId = $group?->id;
@@ -136,8 +166,10 @@ final class CategoryEditor extends Component
 
     public function saveGroup(): void
     {
+        $userId = $this->authenticatedUser()->id;
+
         $this->validate([
-            'groupName' => ['required', 'string', 'max:255', Rule::unique('category_groups', 'name')->ignore($this->editingGroupRecordId)],
+            'groupName' => ['required', 'string', 'max:255', Rule::unique('category_groups', 'name')->where('user_id', $userId)->ignore($this->editingGroupRecordId)],
             'groupColor' => ['required', 'regex:'.CategoryGroup::COLOR_PATTERN],
             'groupIcon' => ['required', Rule::in(CategoryGroup::ICONS)],
         ]);
@@ -145,9 +177,12 @@ final class CategoryEditor extends Component
         $attributes = ['name' => $this->groupName, 'color' => $this->groupColor, 'icon' => $this->groupIcon];
 
         if ($this->editingGroupRecordId === null) {
-            CategoryGroup::create($attributes + ['sort_order' => (int) CategoryGroup::query()->max('sort_order') + 1]);
+            CategoryGroup::create($attributes + [
+                'user_id' => $userId,
+                'sort_order' => (int) CategoryGroup::query()->where('user_id', $userId)->max('sort_order') + 1,
+            ]);
         } else {
-            CategoryGroup::findOrFail($this->editingGroupRecordId)->update($attributes);
+            CategoryGroup::query()->where('user_id', $userId)->findOrFail($this->editingGroupRecordId)->update($attributes);
         }
 
         $this->closeGroupForm();
@@ -155,7 +190,7 @@ final class CategoryEditor extends Component
 
     public function toggleHidden(int $id): void
     {
-        $category = Category::find($id);
+        $category = Category::query()->where('user_id', $this->authenticatedUser()->id)->find($id);
 
         if (! $category) {
             return;
@@ -173,12 +208,21 @@ final class CategoryEditor extends Component
 
     public function createCategory(): void
     {
+        $userId = $this->authenticatedUser()->id;
+
         $this->validate([
             'newCategoryName' => ['required', 'string', 'max:255'],
-            'newParentId' => ['nullable', 'integer', 'exists:categories,id'],
+            'newParentId' => ['nullable', 'integer', Rule::exists('categories', 'id')->where('user_id', $userId)],
         ]);
 
+        if (ProtectedCategories::isProtectedPath($this->resultingPath($userId, $this->newParentId, $this->newCategoryName))) {
+            $this->addError('newCategoryName', __('That name is used by a category the app finds by name, so it cannot be created.'));
+
+            return;
+        }
+
         Category::create([
+            'user_id' => $userId,
             'name' => $this->newCategoryName,
             'parent_id' => $this->newParentId,
         ]);
@@ -190,15 +234,24 @@ final class CategoryEditor extends Component
 
     public function confirmDelete(int $id): void
     {
-        $category = Category::find($id);
+        $this->resetErrorBag();
+
+        $userId = $this->authenticatedUser()->id;
+        $category = Category::allWithLinkedParents($userId)->firstWhere('id', $id);
 
         if (! $category) {
             return;
         }
 
+        if (ProtectedCategories::isProtected($category)) {
+            $this->addError('deletingCategoryId', __('This category is found by name elsewhere in the app, so it cannot be deleted.'));
+
+            return;
+        }
+
         $this->deletingCategoryId = $category->id;
         $this->deletingCategoryName = $category->fullPath();
-        $this->deletingTransactionCount = (int) CategoryAttribution::query(auth()->id())
+        $this->deletingTransactionCount = (int) CategoryAttribution::query($userId)
             ->where('category_id', $category->id)
             ->distinct()
             ->count('transaction_id');
@@ -207,11 +260,22 @@ final class CategoryEditor extends Component
 
     public function deleteCategory(): void
     {
+        $this->resetErrorBag();
+
         if (! $this->deletingCategoryId) {
             return;
         }
 
-        Category::find($this->deletingCategoryId)?->delete();
+        $userId = $this->authenticatedUser()->id;
+        $category = Category::allWithLinkedParents($userId)->firstWhere('id', $this->deletingCategoryId);
+
+        if ($category !== null && ProtectedCategories::isProtected($category)) {
+            $this->addError('deletingCategoryId', __('This category is found by name elsewhere in the app, so it cannot be deleted.'));
+
+            return;
+        }
+
+        $category?->delete();
 
         if ($this->selectedCategoryId === $this->deletingCategoryId) {
             $this->selectedCategoryId = null;
@@ -231,16 +295,18 @@ final class CategoryEditor extends Component
         $isSearching = $search !== '';
         $searchLower = Str::lower($search);
 
-        $counts = CategoryAttribution::query(auth()->id())
+        $userId = $this->authenticatedUser()->id;
+
+        $counts = CategoryAttribution::query($userId)
             ->whereNotNull('category_id')
             ->groupBy('category_id')
             ->select('category_id', DB::raw('COUNT(DISTINCT transaction_id) as aggregate'))
             ->pluck('aggregate', 'category_id');
 
-        $groupMap = CategoryGroupMap::load();
-        $groups = CategoryGroup::query()->orderBy('sort_order')->orderBy('name')->get()->keyBy('id');
+        $groupMap = CategoryGroupMap::load($userId);
+        $groups = CategoryGroup::query()->where('user_id', $userId)->orderBy('sort_order')->orderBy('name')->get()->keyBy('id');
 
-        $categories = Category::allWithLinkedParents()
+        $categories = Category::allWithLinkedParents($userId)
             ->when(! $this->showHidden, fn ($c) => $c->reject(fn (Category $category): bool => $category->is_hidden))
             ->when($isSearching, fn ($c) => $c->filter(
                 fn (Category $category): bool => str_contains(Str::lower($category->fullPath()), $searchLower)
@@ -261,7 +327,7 @@ final class CategoryEditor extends Component
 
         $transactions = $this->selectedCategoryId
             ? Transaction::query()
-                ->where('user_id', auth()->id())
+                ->where('user_id', $userId)
                 ->current()
                 ->where(fn ($q) => $q->where('category_id', $this->selectedCategoryId)
                     ->orWhereHas('splits', fn ($s) => $s->where('category_id', $this->selectedCategoryId)))
@@ -271,7 +337,7 @@ final class CategoryEditor extends Component
                 ->get()
             : collect();
 
-        $parentOptions = Category::visibleSortedByFullPath();
+        $parentOptions = Category::visibleSortedByFullPath($userId);
 
         return view('livewire.category-editor', [
             'categories' => $categories,
@@ -283,7 +349,14 @@ final class CategoryEditor extends Component
         ]);
     }
 
-    private function wouldCreateCycle(int $categoryId, ?int $newParentId): bool
+    private function resultingPath(int $userId, ?int $parentId, string $name): string
+    {
+        $parent = $parentId === null ? null : Category::allWithLinkedParents($userId)->firstWhere('id', $parentId);
+
+        return $parent === null ? $name : $parent->fullPath().' / '.$name;
+    }
+
+    private function wouldCreateCycle(int $userId, int $categoryId, ?int $newParentId): bool
     {
         if ($newParentId === null) {
             return false;
@@ -293,7 +366,7 @@ final class CategoryEditor extends Component
             return true;
         }
 
-        $parents = Category::query()->pluck('parent_id', 'id');
+        $parents = Category::query()->where('user_id', $userId)->pluck('parent_id', 'id');
         $cursor = $newParentId;
         $visited = [];
 
@@ -307,5 +380,13 @@ final class CategoryEditor extends Component
         }
 
         return false;
+    }
+
+    private function authenticatedUser(): User
+    {
+        /** @var User $user */
+        $user = auth()->user();
+
+        return $user;
     }
 }

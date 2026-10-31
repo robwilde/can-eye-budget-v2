@@ -19,7 +19,7 @@ beforeEach(function () {
     $this->primaryAccount = Account::factory()->for($this->user)->create(['name' => 'Primary Account']);
     $this->secondaryAccount = Account::factory()->for($this->user)->create(['name' => 'Secondary Account']);
     $this->user->update(['primary_account_id' => $this->primaryAccount->id]);
-    $this->category = Category::factory()->create();
+    $this->category = Category::factory()->for($this->user)->create();
 });
 
 test('mount defaults account id to the primary account', function () {
@@ -63,7 +63,7 @@ test('matched count equals the number of linked transactions', function () {
 });
 
 test('save updates amount frequency category direction and until date on the plan', function () {
-    $newCategory = Category::factory()->create();
+    $newCategory = Category::factory()->for($this->user)->create();
 
     $plan = PlannedTransaction::factory()->for($this->user)->for($this->primaryAccount)->create([
         'amount' => 1099,
@@ -253,4 +253,17 @@ test('shows an empty state when the account has no plans', function () {
     Livewire::actingAs($this->user)
         ->test(PlannedTransactionManager::class)
         ->assertSee('No planned transactions for this account yet.');
+});
+
+test("a plan never keeps another user's category", function () {
+    $plan = PlannedTransaction::factory()->for($this->user)->for($this->primaryAccount)->create(['category_id' => $this->category->id]);
+    $theirs = Category::factory()->create();
+
+    Livewire::actingAs($this->user)
+        ->test(PlannedTransactionManager::class)
+        ->call('openEdit', $plan->id)
+        ->set('categoryId', (string) $theirs->id)
+        ->call('save');
+
+    expect($plan->fresh()->category_id)->not->toBe($theirs->id);
 });

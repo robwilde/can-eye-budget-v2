@@ -32,6 +32,7 @@ final class ConfirmBudgetTags extends Component
         $resolver = app(BudgetTagResolver::class);
 
         $categories = Category::query()
+            ->where('user_id', $user->id)
             ->visible()
             ->whereNull('parent_id')
             ->whereNotNull('budget_tag')
@@ -54,8 +55,10 @@ final class ConfirmBudgetTags extends Component
     public function setTag(int $categoryId, string $tag): void
     {
         $budgetTag = BudgetTag::tryFrom($tag);
+        $user = $this->user();
 
         $category = Category::query()
+            ->where('user_id', $user->id)
             ->visible()
             ->whereNull('parent_id')
             ->whereNotNull('budget_tag')
@@ -64,8 +67,6 @@ final class ConfirmBudgetTags extends Component
         if ($budgetTag === null || $category === null) {
             return;
         }
-
-        $user = $this->user();
 
         if ($category->budget_tag === $budgetTag) {
             UserCategoryBudgetTag::query()

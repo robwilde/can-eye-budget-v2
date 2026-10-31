@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Database\Factories;
 
 use App\Models\Category;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -18,7 +19,8 @@ final class CategoryFactory extends Factory
     public function definition(): array
     {
         return [
-            'name' => fake()->randomElement(['Groceries', 'Transport', 'Utilities', 'Entertainment', 'Dining', 'Healthcare', 'Shopping', 'Education']),
+            'user_id' => User::factory(),
+            'name' => fake()->randomElement(['Groceries', 'Transport', 'Utilities', 'Recreation', 'Dining', 'Healthcare', 'Shopping', 'Education']),
             'is_hidden' => false,
         ];
     }
@@ -27,6 +29,7 @@ final class CategoryFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'parent_id' => $parent->id,
+            'user_id' => $parent->user_id,
         ]);
     }
 

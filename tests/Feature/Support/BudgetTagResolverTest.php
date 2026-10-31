@@ -14,14 +14,14 @@ use App\Models\User;
 use App\Models\UserCategoryBudgetTag;
 use App\Support\Budget\BudgetTagResolver;
 
-function taggedRoot(?BudgetTag $tag, string $name = 'Groceries'): Category
+function taggedRoot(User $user, ?BudgetTag $tag, string $name = 'Groceries'): Category
 {
-    return Category::factory()->create(['name' => $name, 'budget_tag' => $tag]);
+    return Category::factory()->for($user)->create(['name' => $name, 'budget_tag' => $tag]);
 }
 
 function transferLegs(User $user, Account $from, Account $to, int $amount = 5000): Transaction
 {
-    $transfer = Category::query()->firstOrCreate(['name' => 'Transfer'], ['is_hidden' => false]);
+    $transfer = Category::query()->firstOrCreate(['user_id' => $user->id, 'name' => 'Transfer'], ['is_hidden' => false]);
 
     $outgoing = Transaction::factory()->create([
         'user_id' => $user->id,
@@ -45,7 +45,7 @@ function transferLegs(User $user, Account $from, Account $to, int $amount = 5000
 
 test('a payee override beats the user override, which beats the category default', function () {
     $user = User::factory()->create();
-    $root = taggedRoot(BudgetTag::Needs);
+    $root = taggedRoot($user, BudgetTag::Needs);
     $resolver = new BudgetTagResolver;
 
     expect($resolver->forCategory($user, $root))->toBe(BudgetTag::Needs);
@@ -61,7 +61,7 @@ test('a payee override beats the user override, which beats the category default
 
 test('a payee without an override falls through to the user override', function () {
     $user = User::factory()->create();
-    $root = taggedRoot(BudgetTag::Needs);
+    $root = taggedRoot($user, BudgetTag::Needs);
     UserCategoryBudgetTag::query()->create(['user_id' => $user->id, 'category_id' => $root->id, 'budget_tag' => BudgetTag::Wants]);
     $payee = Payee::factory()->for($user)->create(['budget_tag' => null]);
 
@@ -70,7 +70,7 @@ test('a payee without an override falls through to the user override', function 
 
 test('a child category inherits its root tag and the override on the root', function () {
     $user = User::factory()->create();
-    $root = taggedRoot(BudgetTag::Wants, 'Eating Out');
+    $root = taggedRoot($user, BudgetTag::Wants, 'Eating Out');
     $child = Category::factory()->withParent($root)->create(['name' => 'Restaurant', 'budget_tag' => null]);
     $grandchild = Category::factory()->withParent($child)->create(['name' => 'Fine Dining', 'budget_tag' => null]);
     $resolver = new BudgetTagResolver;
@@ -87,7 +87,7 @@ test('a child category inherits its root tag and the override on the root', func
 test('another user override never leaks', function () {
     $user = User::factory()->create();
     $other = User::factory()->create();
-    $root = taggedRoot(BudgetTag::Needs);
+    $root = taggedRoot($user, BudgetTag::Needs);
     UserCategoryBudgetTag::query()->create(['user_id' => $other->id, 'category_id' => $root->id, 'budget_tag' => BudgetTag::Wants]);
     $resolver = new BudgetTagResolver;
 
@@ -97,7 +97,7 @@ test('another user override never leaks', function () {
 
 test('untagged roots and a missing category resolve to null', function () {
     $user = User::factory()->create();
-    $income = taggedRoot(null, 'Income');
+    $income = taggedRoot($user, null, 'Income');
     $salary = Category::factory()->withParent($income)->create(['name' => 'Salary']);
     $resolver = new BudgetTagResolver;
 
@@ -108,7 +108,7 @@ test('untagged roots and a missing category resolve to null', function () {
 
 test('a plain transaction takes the tag of its category', function () {
     $user = User::factory()->create();
-    $root = taggedRoot(BudgetTag::Needs);
+    $root = taggedRoot($user, BudgetTag::Needs);
     $transaction = Transaction::factory()->create(['user_id' => $user->id, 'category_id' => $root->id]);
 
     expect((new BudgetTagResolver)->forTransaction($user, $transaction))->toBe(BudgetTag::Needs);
@@ -116,7 +116,7 @@ test('a plain transaction takes the tag of its category', function () {
 
 test('an income transaction has no tag', function () {
     $user = User::factory()->create();
-    $income = taggedRoot(null, 'Income');
+    $income = taggedRoot($user, null, 'Income');
     $transaction = Transaction::factory()->credit()->create(['user_id' => $user->id, 'category_id' => $income->id]);
 
     expect((new BudgetTagResolver)->forTransaction($user, $transaction))->toBeNull();

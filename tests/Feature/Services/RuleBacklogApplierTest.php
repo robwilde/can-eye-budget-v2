@@ -27,7 +27,7 @@ beforeEach(function (): void {
     $this->applier = app(RuleBacklogApplier::class);
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create();
-    $this->category = Category::factory()->create(['is_hidden' => false]);
+    $this->category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 });
 
 function backlogRule(User $user, int $categoryId, string $match, bool $autoApply = true): UserRule
@@ -88,7 +88,7 @@ it('categorises a backlog row that an existing rule already matched', function (
 });
 
 it('never touches a row that already has a category', function () {
-    $existing = Category::factory()->create(['is_hidden' => false]);
+    $existing = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     backlogRule($this->user, $this->category->id, 'NETFLIX');
 
     $txn = backlogTxn($this->user, $this->account, [
@@ -157,7 +157,7 @@ it('ignores rules that are not auto-apply', function () {
 it('skips splits and transfers', function () {
     backlogRule($this->user, $this->category->id, 'NETFLIX');
 
-    $splitCategory = Category::factory()->create(['is_hidden' => false]);
+    $splitCategory = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $split = backlogTxn($this->user, $this->account);
     $split->splits()->create([
         'category_id' => $splitCategory->id,
@@ -188,7 +188,7 @@ it('never crosses users', function () {
 });
 
 it('does not fan a backlog category out to a manually categorised planned sibling', function () {
-    $manual = Category::factory()->create(['is_hidden' => false]);
+    $manual = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $planned = PlannedTransaction::factory()->for($this->user)->for($this->account)->create();
     backlogRule($this->user, $this->category->id, 'NETFLIX');
 
@@ -208,7 +208,7 @@ it('does not fan a backlog category out to a manually categorised planned siblin
 });
 
 it('honours stop_processing only when a rule in that group matched', function () {
-    $later = Category::factory()->create(['is_hidden' => false]);
+    $later = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $stopper = backlogRule($this->user, $this->category->id, 'SPOTIFY');
     $stopper->group->update(['stop_processing' => true, 'order' => 1]);
@@ -228,7 +228,7 @@ it('honours stop_processing only when a rule in that group matched', function ()
 });
 
 it('stops at a stop_processing group whose matching rule is not auto-apply', function () {
-    $later = Category::factory()->create(['is_hidden' => false]);
+    $later = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     $stopper = backlogRule($this->user, $this->category->id, 'NETFLIX', autoApply: false);
     $stopper->group->update(['stop_processing' => true, 'order' => 1]);
@@ -244,7 +244,7 @@ it('stops at a stop_processing group whose matching rule is not auto-apply', fun
 });
 
 it('runs only category actions, so repeated sweeps never repeat other writes', function () {
-    $hidden = Category::factory()->create(['is_hidden' => true]);
+    $hidden = Category::factory()->for($this->user)->create(['is_hidden' => true]);
     $rule = backlogRule($this->user, $hidden->id, 'NETFLIX');
     $rule->update(['actions' => [
         ['type' => RuleActionType::AppendNotes->value, 'value' => 'swept'],
@@ -261,8 +261,8 @@ it('runs only category actions, so repeated sweeps never repeat other writes', f
 });
 
 it('predicts the category the write lands when a rule sets several', function () {
-    $hidden = Category::factory()->create(['is_hidden' => true]);
-    $first = Category::factory()->create(['is_hidden' => false]);
+    $hidden = Category::factory()->for($this->user)->create(['is_hidden' => true]);
+    $first = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 
     backlogRule($this->user, $this->category->id, 'NETFLIX')->update(['actions' => [
         ['type' => RuleActionType::SetCategory->value, 'value' => (string) $first->id],

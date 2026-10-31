@@ -17,7 +17,6 @@ use App\Models\RedbarkFeed;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserRule;
-use Database\Seeders\CategorySeeder;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
@@ -58,7 +57,6 @@ function fakeSetupJourneyRedbark(): void
 test('a new user goes from sign-up to a categorised, pay-cycle-aware view with every step audited', function () {
     $this->travelTo('2026-10-15 10:00:00');
     config(['queue.default' => 'sync', 'budget.recurring_detection' => true]);
-    $this->seed(CategorySeeder::class);
     fakeSetupJourneyRedbark();
 
     $this->post(route('register.store'), [

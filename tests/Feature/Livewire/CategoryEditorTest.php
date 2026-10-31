@@ -7,8 +7,11 @@ declare(strict_types=1);
 use App\Livewire\CategoryEditor;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\CategoryGroup;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\UserCategoryProvisioner;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Livewire\Livewire;
 
 test('component renders for authenticated user', function () {
@@ -21,7 +24,7 @@ test('component renders for authenticated user', function () {
 
 test('displays categories with transaction counts', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create(['name' => 'Groceries']);
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
     Transaction::factory()->for($user)->count(5)->create(['category_id' => $category->id]);
 
     Livewire::actingAs($user)
@@ -32,7 +35,7 @@ test('displays categories with transaction counts', function () {
 
 test('displays full path for nested categories when searching', function () {
     $user = User::factory()->create();
-    $parent = Category::factory()->create(['name' => 'Office']);
+    $parent = Category::factory()->for($user)->create(['name' => 'Office']);
     Category::factory()->withParent($parent)->create(['name' => 'Software']);
 
     Livewire::actingAs($user)
@@ -43,7 +46,7 @@ test('displays full path for nested categories when searching', function () {
 
 test('browse mode shows own segment grouped under parent', function () {
     $user = User::factory()->create();
-    $parent = Category::factory()->create(['name' => 'Office']);
+    $parent = Category::factory()->for($user)->create(['name' => 'Office']);
     Category::factory()->withParent($parent)->create(['name' => 'Software']);
 
     Livewire::actingAs($user)
@@ -55,7 +58,7 @@ test('browse mode shows own segment grouped under parent', function () {
 
 test('selecting an already-expanded category collapses it', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create(['name' => 'Groceries']);
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -67,7 +70,7 @@ test('selecting an already-expanded category collapses it', function () {
 
 test('categories render inline without the modal', function () {
     $user = User::factory()->create();
-    Category::factory()->create(['name' => 'Groceries']);
+    Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -78,8 +81,8 @@ test('categories render inline without the modal', function () {
 
 test('search filters categories by full path', function () {
     $user = User::factory()->create();
-    Category::factory()->create(['name' => 'Groceries']);
-    Category::factory()->create(['name' => 'Entertainment']);
+    Category::factory()->for($user)->create(['name' => 'Groceries']);
+    Category::factory()->for($user)->create(['name' => 'Entertainment']);
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -90,7 +93,7 @@ test('search filters categories by full path', function () {
 
 test('search is case insensitive', function () {
     $user = User::factory()->create();
-    Category::factory()->create(['name' => 'Groceries']);
+    Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -100,7 +103,7 @@ test('search is case insensitive', function () {
 
 test('can select a category and see its transactions', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create(['name' => 'Bills']);
+    $category = Category::factory()->for($user)->create(['name' => 'Bills']);
     Transaction::factory()->for($user)->create([
         'category_id' => $category->id,
         'description' => 'Aussie Broadband',
@@ -115,7 +118,7 @@ test('can select a category and see its transactions', function () {
 
 test('can rename a category', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create(['name' => 'Old Name']);
+    $category = Category::factory()->for($user)->create(['name' => 'Old Name']);
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -128,7 +131,7 @@ test('can rename a category', function () {
 
 test('rename validates required name', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -140,7 +143,7 @@ test('rename validates required name', function () {
 
 test('can hide a category', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create(['is_hidden' => false]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -151,7 +154,7 @@ test('can hide a category', function () {
 
 test('can unhide a category', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->hidden()->create();
+    $category = Category::factory()->for($user)->hidden()->create();
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -163,8 +166,8 @@ test('can unhide a category', function () {
 
 test('hidden categories excluded by default', function () {
     $user = User::factory()->create();
-    Category::factory()->create(['name' => 'Visible Category']);
-    Category::factory()->hidden()->create(['name' => 'Secret Stash']);
+    Category::factory()->for($user)->create(['name' => 'Visible Category']);
+    Category::factory()->for($user)->hidden()->create(['name' => 'Secret Stash']);
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -174,7 +177,7 @@ test('hidden categories excluded by default', function () {
 
 test('hidden categories shown when toggled', function () {
     $user = User::factory()->create();
-    Category::factory()->hidden()->create(['name' => 'Hidden Category']);
+    Category::factory()->for($user)->hidden()->create(['name' => 'Hidden Category']);
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -199,7 +202,7 @@ test('can create a new top-level category', function () {
 
 test('can create a subcategory with parent', function () {
     $user = User::factory()->create();
-    $parent = Category::factory()->create(['name' => 'Office']);
+    $parent = Category::factory()->for($user)->create(['name' => 'Office']);
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -227,7 +230,7 @@ test('create validates required name', function () {
 
 test('can delete a category without transactions', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create(['name' => 'Empty']);
+    $category = Category::factory()->for($user)->create(['name' => 'Empty']);
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -241,7 +244,7 @@ test('can delete a category without transactions', function () {
 
 test('delete category nullifies transaction category_id', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
     $transaction = Transaction::factory()->for($user)->create(['category_id' => $category->id]);
 
     Livewire::actingAs($user)
@@ -255,7 +258,7 @@ test('delete category nullifies transaction category_id', function () {
 
 test('deleting selected category clears selection', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -269,7 +272,7 @@ test('deleting selected category clears selection', function () {
 test('transaction counts and list are scoped to authenticated user', function () {
     $user = User::factory()->create();
     $otherUser = User::factory()->create();
-    $category = Category::factory()->create(['name' => 'Groceries']);
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     Transaction::factory()->for($user)->count(3)->create(['category_id' => $category->id]);
     Transaction::factory()->for($otherUser)->count(5)->create([
@@ -290,8 +293,8 @@ test('transaction counts and list are scoped to authenticated user', function ()
 
 test('categories are ordered alphabetically grouped by full path', function () {
     $user = User::factory()->create();
-    Category::factory()->create(['name' => 'Zoo']);
-    $apple = Category::factory()->create(['name' => 'Apple']);
+    Category::factory()->for($user)->create(['name' => 'Zoo']);
+    $apple = Category::factory()->for($user)->create(['name' => 'Apple']);
     Category::factory()->withParent($apple)->create(['name' => 'Banana']);
     Category::factory()->withParent($apple)->create(['name' => 'Ant']);
 
@@ -303,7 +306,7 @@ test('categories are ordered alphabetically grouped by full path', function () {
 
 test('view data carries depth for each category', function () {
     $user = User::factory()->create();
-    $office = Category::factory()->create(['name' => 'Office']);
+    $office = Category::factory()->for($user)->create(['name' => 'Office']);
     $training = Category::factory()->withParent($office)->create(['name' => 'Training']);
     Category::factory()->withParent($training)->create(['name' => 'Course']);
 
@@ -331,8 +334,8 @@ test('isSearching view flag reflects the search term', function () {
 test('cib: category list rows use cat-list-row markup', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
-    $bills = Category::factory()->create(['name' => 'Bills']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $bills = Category::factory()->for($user)->create(['name' => 'Bills']);
     Transaction::factory()->for($user)->for($account)->count(3)->create(['category_id' => $groceries->id]);
     Transaction::factory()->for($user)->for($account)->count(5)->create(['category_id' => $bills->id]);
 
@@ -352,7 +355,7 @@ test('cib: category list rows use cat-list-row markup', function () {
 
 test('cib: rename field label renders as cib-label span', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create(['name' => 'Utilities']);
+    $category = Category::factory()->for($user)->create(['name' => 'Utilities']);
 
     $component = Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -363,7 +366,7 @@ test('cib: rename field label renders as cib-label span', function () {
 
 test('cib: nested rows indent by depth and top-level rows are group headers', function () {
     $user = User::factory()->create();
-    $office = Category::factory()->create(['name' => 'Office']);
+    $office = Category::factory()->for($user)->create(['name' => 'Office']);
     Category::factory()->withParent($office)->create(['name' => 'Software']);
 
     $html = Livewire::actingAs($user)->test(CategoryEditor::class)->html();
@@ -379,7 +382,7 @@ test('cib: nested rows indent by depth and top-level rows are group headers', fu
 
 test('parent dropdown lists nested categories by full path', function () {
     $user = User::factory()->create();
-    $office = Category::factory()->create(['name' => 'Office']);
+    $office = Category::factory()->for($user)->create(['name' => 'Office']);
     $onlineService = Category::factory()->withParent($office)->create(['name' => 'Online Service']);
 
     Livewire::actingAs($user)
@@ -398,7 +401,7 @@ test('parent dropdown lists nested categories by full path', function () {
 
 test('search matches an ancestor three levels up', function () {
     $user = User::factory()->create();
-    $a = Category::factory()->create(['name' => 'Alpha']);
+    $a = Category::factory()->for($user)->create(['name' => 'Alpha']);
     $b = Category::factory()->withParent($a)->create(['name' => 'Bravo']);
     $c = Category::factory()->withParent($b)->create(['name' => 'Charlie']);
     Category::factory()->withParent($c)->create(['name' => 'Delta']);
@@ -411,9 +414,9 @@ test('search matches an ancestor three levels up', function () {
 
 test('can re-parent an existing category under a nested category', function () {
     $user = User::factory()->create();
-    $office = Category::factory()->create(['name' => 'Office']);
+    $office = Category::factory()->for($user)->create(['name' => 'Office']);
     $onlineService = Category::factory()->withParent($office)->create(['name' => 'Online Service']);
-    $training = Category::factory()->create(['name' => 'Training']);
+    $training = Category::factory()->for($user)->create(['name' => 'Training']);
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -430,7 +433,7 @@ test('can re-parent an existing category under a nested category', function () {
 
 test('re-parent rejects moving a category under its own descendant', function () {
     $user = User::factory()->create();
-    $a = Category::factory()->create(['name' => 'Alpha']);
+    $a = Category::factory()->for($user)->create(['name' => 'Alpha']);
     $b = Category::factory()->withParent($a)->create(['name' => 'Bravo']);
     $c = Category::factory()->withParent($b)->create(['name' => 'Charlie']);
 
@@ -446,7 +449,7 @@ test('re-parent rejects moving a category under its own descendant', function ()
 
 test('re-parent rejects moving a category under itself', function () {
     $user = User::factory()->create();
-    $office = Category::factory()->create(['name' => 'Office']);
+    $office = Category::factory()->for($user)->create(['name' => 'Office']);
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
@@ -456,4 +459,161 @@ test('re-parent rejects moving a category under itself', function () {
         ->assertHasErrors('editingParentId');
 
     expect($office->fresh()->parent_id)->toBeNull();
+});
+
+it('keeps category edits within one user', function () {
+    [$ann, $ben] = User::factory()->count(2)->create()->all();
+    app(UserCategoryProvisioner::class)->provision($ann);
+    app(UserCategoryProvisioner::class)->provision($ben);
+    $named = fn (User $user, string $name): Category => Category::query()->where('user_id', $user->id)->whereNull('parent_id')->where('name', $name)->sole();
+
+    $annGroceries = $named($ann, 'Groceries');
+    $annPets = $named($ann, 'Pets');
+    $benPets = $named($ben, 'Pets');
+    $benHealth = $named($ben, 'Health');
+
+    Livewire::actingAs($ann)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $annGroceries->id)
+        ->set('editingName', 'Food shopping')
+        ->call('saveRename')
+        ->call('toggleHidden', $annPets->id)
+        ->call('openGroupForm', $annGroceries->group_id)
+        ->set('groupName', 'Eating in')
+        ->call('saveGroup')
+        ->call('toggleHidden', $benPets->id)
+        ->call('selectCategory', $benHealth->id)
+        ->assertSet('selectedCategoryId', $annGroceries->id);
+
+    expect($named($ann, 'Food shopping')->exists)->toBeTrue()
+        ->and($named($ann, 'Pets')->is_hidden)->toBeTrue()
+        ->and(CategoryGroup::query()->where('user_id', $ann->id)->where('name', 'Eating in')->exists())->toBeTrue()
+        ->and($named($ben, 'Groceries')->exists)->toBeTrue()
+        ->and($named($ben, 'Pets')->is_hidden)->toBeFalse()
+        ->and(CategoryGroup::query()->where('user_id', $ben->id)->where('name', 'Food')->exists())->toBeTrue()
+        ->and(CategoryGroup::query()->where('user_id', $ben->id)->where('name', 'Eating in')->exists())->toBeFalse();
+});
+
+it('refuses to rename or delete a name-matched category', function () {
+    $user = User::factory()->create();
+    app(UserCategoryProvisioner::class)->provision($user);
+    $transfer = Category::query()->where('user_id', $user->id)->whereNull('parent_id')->where('name', 'Transfer')->sole();
+    $salary = Category::query()->where('user_id', $user->id)->where('name', 'Salary')->sole();
+    $groceries = Category::query()->where('user_id', $user->id)->where('name', 'Groceries')->sole();
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $transfer->id)
+        ->set('editingName', 'Moves')
+        ->call('saveRename')
+        ->assertHasErrors('editingName')
+        ->call('selectCategory', $transfer->id)
+        ->call('selectCategory', $salary->id)
+        ->set('editingParentId', $groceries->id)
+        ->call('saveRename')
+        ->assertHasErrors('editingName')
+        ->call('confirmDelete', $transfer->id)
+        ->assertHasErrors('deletingCategoryId')
+        ->assertSet('showDeleteConfirm', false)
+        ->set('deletingCategoryId', $transfer->id)
+        ->call('deleteCategory')
+        ->assertHasErrors('deletingCategoryId');
+
+    expect($transfer->fresh()->name)->toBe('Transfer')
+        ->and($salary->fresh()->parent_id)->not->toBe($groceries->id)
+        ->and(Category::query()->whereKey($transfer->id)->exists())->toBeTrue();
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $groceries->id)
+        ->set('editingName', 'Food shopping')
+        ->call('saveRename')
+        ->assertHasNoErrors();
+
+    expect($groceries->fresh()->name)->toBe('Food shopping');
+});
+
+it('ignores another user\'s category and group ids sent through public properties', function () {
+    [$ann, $ben] = User::factory()->count(2)->create()->all();
+    app(UserCategoryProvisioner::class)->provision($ann);
+    app(UserCategoryProvisioner::class)->provision($ben);
+    $root = fn (User $user, string $name): Category => Category::query()->where('user_id', $user->id)->whereNull('parent_id')->where('name', $name)->sole();
+
+    $annGroceries = $root($ann, 'Groceries');
+    $benPets = $root($ben, 'Pets');
+    $benGroup = CategoryGroup::query()->where('user_id', $ben->id)->firstOrFail();
+    $benGroupName = $benGroup->name;
+
+    $component = Livewire::actingAs($ann)->test(CategoryEditor::class);
+
+    $component->set('deletingCategoryId', $benPets->id)->call('deleteCategory');
+    $component->set('selectedCategoryId', $benPets->id)->set('editingName', 'Hijacked')->call('saveRename');
+    $component->call('selectCategory', $annGroceries->id)->set('editingParentId', $benPets->id)->call('saveRename')->assertHasErrors('editingParentId');
+    $component->set('editingGroupId', $benGroup->id)->call('saveCategoryGroup')->assertHasErrors('editingGroupId');
+    $component->set('newCategoryName', 'Sneaky')->set('newParentId', $benPets->id)->call('createCategory')->assertHasErrors('newParentId');
+
+    expect(Category::query()->whereKey($benPets->id)->value('name'))->toBe('Pets')
+        ->and($annGroceries->fresh()->parent_id)->toBeNull()
+        ->and($annGroceries->fresh()->group_id)->not->toBe($benGroup->id)
+        ->and(Category::query()->where('name', 'Sneaky')->exists())->toBeFalse();
+
+    expect(fn () => Livewire::actingAs($ann)->test(CategoryEditor::class)
+        ->set('editingGroupRecordId', $benGroup->id)
+        ->set('groupName', 'Hijacked group')
+        ->set('groupColor', '#112233')
+        ->set('groupIcon', 'gift')
+        ->call('saveGroup'))->toThrow(ModelNotFoundException::class);
+
+    expect($benGroup->fresh()->name)->toBe($benGroupName);
+});
+
+it('refuses a name or parent that would land on a name-matched path', function () {
+    $user = User::factory()->create();
+    app(UserCategoryProvisioner::class)->provision($user);
+    $root = fn (string $name): Category => Category::query()->where('user_id', $user->id)->whereNull('parent_id')->where('name', $name)->sole();
+    $pets = $root('Pets');
+    $income = $root('Income');
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $pets->id)
+        ->set('editingName', 'balance')
+        ->call('saveRename')
+        ->assertHasErrors('editingName')
+        ->call('openCreateForm')
+        ->set('newCategoryName', 'Transfer')
+        ->set('newParentId', null)
+        ->call('createCategory')
+        ->assertHasErrors('newCategoryName')
+        ->assertSee('cannot be created')
+        ->set('newCategoryName', 'Salary')
+        ->set('newParentId', $income->id)
+        ->call('createCategory')
+        ->assertHasErrors('newCategoryName')
+        ->set('newCategoryName', 'Hobbies')
+        ->set('newParentId', null)
+        ->call('createCategory')
+        ->assertHasNoErrors();
+
+    expect($pets->fresh()->name)->toBe('Pets')
+        ->and(Category::query()->where('user_id', $user->id)->where('name', 'Balance')->count())->toBe(1)
+        ->and(Category::query()->where('user_id', $user->id)->where('name', 'Transfer')->whereNull('parent_id')->count())->toBe(1)
+        ->and(Category::query()->where('user_id', $user->id)->where('name', 'Hobbies')->exists())->toBeTrue();
+});
+
+it('does not carry a refusal message over to the next category', function () {
+    $user = User::factory()->create();
+    app(UserCategoryProvisioner::class)->provision($user);
+    $transfer = Category::query()->where('user_id', $user->id)->whereNull('parent_id')->where('name', 'Transfer')->sole();
+    $groceries = Category::query()->where('user_id', $user->id)->whereNull('parent_id')->where('name', 'Groceries')->sole();
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('confirmDelete', $transfer->id)
+        ->assertHasErrors('deletingCategoryId')
+        ->call('selectCategory', $groceries->id)
+        ->assertHasNoErrors()
+        ->call('confirmDelete', $groceries->id)
+        ->assertHasNoErrors()
+        ->assertSet('showDeleteConfirm', true);
 });

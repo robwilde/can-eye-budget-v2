@@ -27,13 +27,13 @@ it('allows one budget plan per user per period', function () {
 
 it('rejects a second line for the same category in one plan', function () {
     $plan = BudgetPlan::factory()->create();
-    $groceries = Category::factory()->create();
+    $groceries = Category::factory()->for($plan->user)->create();
     Budget::factory()->inPlan($plan)->withCategory($groceries)->create();
 
     expect(fn () => Budget::factory()->inPlan($plan)->withCategory($groceries)->create())
         ->toThrow(QueryException::class);
 
-    Budget::factory()->inPlan(BudgetPlan::factory()->create())->withCategory($groceries)->create();
+    Budget::factory()->inPlan(BudgetPlan::factory()->for($plan->user)->create())->withCategory($groceries)->create();
 
     expect(Budget::query()->where('category_id', $groceries->id)->count())->toBe(2);
 });
@@ -70,7 +70,7 @@ it('scopes budget plans to their owner', function () {
 
 it('names a plan line after its category', function () {
     $plan = BudgetPlan::factory()->create();
-    $category = Category::factory()->create(['name' => 'Groceries']);
+    $category = Category::factory()->for($plan->user)->create(['name' => 'Groceries']);
 
     $line = Budget::query()->create([
         'user_id' => $plan->user_id,
@@ -81,7 +81,7 @@ it('names a plan line after its category', function () {
         'start_date' => $plan->period_start,
     ]);
 
-    $factoryLine = Budget::factory()->inPlan($plan)->withCategory(Category::factory()->create(['name' => 'Transport']))->create();
+    $factoryLine = Budget::factory()->inPlan($plan)->withCategory(Category::factory()->for($plan->user)->create(['name' => 'Transport']))->create();
 
     expect($line->name)->toBe('Groceries')
         ->and($line->fresh()->limit_amount)->toBeNull()

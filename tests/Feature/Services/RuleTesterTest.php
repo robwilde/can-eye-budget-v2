@@ -28,7 +28,7 @@ beforeEach(function (): void {
     $this->tester = app(RuleTester::class);
     $this->user = User::factory()->create();
     $this->account = Account::factory()->for($this->user)->create(['name' => 'Everyday']);
-    $this->category = Category::factory()->create(['is_hidden' => false]);
+    $this->category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
 });
 
 function testerTxn(User $user, Account $account, array $overrides = []): Transaction
@@ -89,7 +89,7 @@ test('an uncategorised match is not yet applied and a row already in the target 
 });
 
 test('a row a person filed elsewhere is skipped and counted apart from the others', function () {
-    $other = Category::factory()->create(['is_hidden' => false]);
+    $other = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $hand = testerTxn($this->user, $this->account, ['category_id' => $other->id, 'category_source' => CategorySource::Manual]);
     testerTxn($this->user, $this->account);
 
@@ -112,7 +112,7 @@ test('a row a person filed under the target category is already applied, not ski
 });
 
 test('a hand-categorised row another action would change is not yet applied with its category kept', function () {
-    $other = Category::factory()->create(['is_hidden' => false]);
+    $other = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $hand = testerTxn($this->user, $this->account, ['category_id' => $other->id, 'category_source' => CategorySource::Manual]);
 
     $result = $this->tester->test($this->user->id, testerTrigger(), true, [
@@ -229,7 +229,7 @@ test('transfers and split parents are left out', function () {
     $partner = testerTxn($this->user, $this->account, ['description' => 'OTHER']);
     testerTxn($this->user, $this->account, ['transfer_pair_id' => $partner->id]);
     $split = testerTxn($this->user, $this->account);
-    $split->splits()->create(['category_id' => Category::factory()->create(['is_hidden' => false])->id, 'amount' => 1899, 'position' => 1]);
+    $split->splits()->create(['category_id' => Category::factory()->for($this->user)->create(['is_hidden' => false])->id, 'amount' => 1899, 'position' => 1]);
 
     $result = $this->tester->test($this->user->id, testerTrigger(), true, testerCategoryAction($this->category->id));
 
@@ -296,7 +296,7 @@ test('testing writes nothing', function () {
 });
 
 test('after Apply now every row that was not yet applied tests as already applied', function () {
-    $other = Category::factory()->create(['is_hidden' => false]);
+    $other = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $fresh = testerTxn($this->user, $this->account);
     $renamed = testerTxn($this->user, $this->account, ['category_id' => $this->category->id, 'category_source' => CategorySource::Rule, 'clean_description' => 'Old', 'clean_description_source' => 'rule']);
     $hand = testerTxn($this->user, $this->account, ['category_id' => $other->id, 'category_source' => CategorySource::Manual]);

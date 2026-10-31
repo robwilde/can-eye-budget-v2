@@ -29,8 +29,8 @@ final readonly class CategoryGroupReport
      */
     public function build(User $user, string $mode, ?CarbonInterface $start, ?CarbonInterface $end, TransactionDirection $direction): array
     {
-        $map = CategoryGroupMap::load();
-        $groups = CategoryGroup::query()->orderBy('sort_order')->orderBy('name')->get()->keyBy('id');
+        $map = CategoryGroupMap::load($user->id);
+        $groups = CategoryGroup::query()->where('user_id', $user->id)->orderBy('sort_order')->orderBy('name')->get()->keyBy('id');
 
         /** @var array<int, array{total: int, count: int, categories: array<int, array{total: int, count: int, children: array<int, array{total: int, count: int}>}>}> $tree */
         $tree = [];

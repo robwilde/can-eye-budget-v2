@@ -14,8 +14,8 @@ use Livewire\Livewire;
 
 test('a user can change a category group and the change is audited', function () {
     $user = User::factory()->create();
-    $group = CategoryGroup::factory()->create();
-    $category = Category::factory()->create();
+    $group = CategoryGroup::factory()->for($user)->create();
+    $category = Category::factory()->for($user)->create();
 
     Livewire::actingAs($user)->test(CategoryEditor::class)
         ->call('selectCategory', $category->id)
@@ -30,11 +30,12 @@ test('a user can change a category group and the change is audited', function ()
 });
 
 test('a child can override its root group and be put back to inherit', function () {
-    $group = CategoryGroup::factory()->create();
-    $root = Category::factory()->create();
+    $user = User::factory()->create();
+    $group = CategoryGroup::factory()->for($user)->create();
+    $root = Category::factory()->for($user)->create();
     $child = Category::factory()->withParent($root)->create(['group_id' => $group->id]);
 
-    Livewire::actingAs(User::factory()->create())->test(CategoryEditor::class)
+    Livewire::actingAs($user)->test(CategoryEditor::class)
         ->call('selectCategory', $child->id)
         ->assertSet('editingGroupId', $group->id)
         ->set('editingGroupId', null)
@@ -44,9 +45,10 @@ test('a child can override its root group and be put back to inherit', function 
 });
 
 test('an unknown group id is rejected', function () {
-    $category = Category::factory()->create();
+    $user = User::factory()->create();
+    $category = Category::factory()->for($user)->create();
 
-    Livewire::actingAs(User::factory()->create())->test(CategoryEditor::class)
+    Livewire::actingAs($user)->test(CategoryEditor::class)
         ->call('selectCategory', $category->id)
         ->set('editingGroupId', 999999)
         ->call('saveCategoryGroup')
@@ -74,9 +76,10 @@ test('a user can create a group and it is audited', function () {
 });
 
 test('a user can rename, recolour and re-icon a group', function () {
-    $group = CategoryGroup::factory()->create(['name' => 'Old', 'color' => '#000000', 'icon' => 'sparkles']);
+    $user = User::factory()->create();
+    $group = CategoryGroup::factory()->for($user)->create(['name' => 'Old', 'color' => '#000000', 'icon' => 'sparkles']);
 
-    Livewire::actingAs(User::factory()->create())->test(CategoryEditor::class)
+    Livewire::actingAs($user)->test(CategoryEditor::class)
         ->call('openGroupForm', $group->id)
         ->assertSet('groupName', 'Old')
         ->set('groupName', 'New')
@@ -89,10 +92,11 @@ test('a user can rename, recolour and re-icon a group', function () {
 });
 
 test('group validation rejects a duplicate name, a bad colour and an unknown icon', function () {
-    CategoryGroup::factory()->create(['name' => 'Taken']);
-    $own = CategoryGroup::factory()->create(['name' => 'Mine']);
+    $user = User::factory()->create();
+    CategoryGroup::factory()->for($user)->create(['name' => 'Taken']);
+    $own = CategoryGroup::factory()->for($user)->create(['name' => 'Mine']);
 
-    Livewire::actingAs(User::factory()->create())->test(CategoryEditor::class)
+    Livewire::actingAs($user)->test(CategoryEditor::class)
         ->call('openGroupForm', $own->id)
         ->set('groupName', 'Taken')
         ->set('groupColor', 'red')
@@ -104,9 +108,10 @@ test('group validation rejects a duplicate name, a bad colour and an unknown ico
 });
 
 test('keeping a group name while editing it is not a duplicate', function () {
-    $group = CategoryGroup::factory()->create(['name' => 'Same']);
+    $user = User::factory()->create();
+    $group = CategoryGroup::factory()->for($user)->create(['name' => 'Same']);
 
-    Livewire::actingAs(User::factory()->create())->test(CategoryEditor::class)
+    Livewire::actingAs($user)->test(CategoryEditor::class)
         ->call('openGroupForm', $group->id)
         ->set('groupColor', '#abcdef')
         ->call('saveGroup')
@@ -116,13 +121,14 @@ test('keeping a group name while editing it is not a duplicate', function () {
 });
 
 test('the list shows the effective group of inheriting and overriding categories', function () {
-    $food = CategoryGroup::factory()->create(['name' => 'Food Group']);
-    $savings = CategoryGroup::factory()->create(['name' => 'Savings Group']);
-    $root = Category::factory()->create(['group_id' => $food->id]);
+    $user = User::factory()->create();
+    $food = CategoryGroup::factory()->for($user)->create(['name' => 'Food Group']);
+    $savings = CategoryGroup::factory()->for($user)->create(['name' => 'Savings Group']);
+    $root = Category::factory()->for($user)->create(['group_id' => $food->id]);
     $child = Category::factory()->withParent($root)->create(['name' => 'Moved', 'group_id' => $savings->id]);
     $inheriting = Category::factory()->withParent($root)->create(['name' => 'Stays']);
 
-    Livewire::actingAs(User::factory()->create())->test(CategoryEditor::class)
+    Livewire::actingAs($user)->test(CategoryEditor::class)
         ->assertViewHas('categories', fn ($rows) => $rows->firstWhere('id', $child->id)['group']->id === $savings->id
             && $rows->firstWhere('id', $inheriting->id)['group']->id === $food->id);
 });

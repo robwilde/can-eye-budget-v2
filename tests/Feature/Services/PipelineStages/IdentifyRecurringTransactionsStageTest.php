@@ -736,7 +736,7 @@ test('higher confidence for regular intervals', function () {
 // ─── Payload ────────────────────────────────────────────────────────────
 
 test('payload contains all required fields with correct types', function () {
-    $category = Category::factory()->create();
+    $category = Category::factory()->for($this->user)->create();
     $start = CarbonImmutable::parse('2026-01-15');
 
     for ($i = 0; $i < 3; $i++) {

@@ -33,7 +33,7 @@ function minerTransaction(User $user, Account $account, string $description, ?in
 it('mines a candidate from categorised history without invoking artisan', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Groceries']);
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     minerTransaction($user, $account, 'ACME COFFEE ROASTERS  BRISBANE', $category->id);
     minerTransaction($user, $account, 'ACME COFFEE ROASTERS  SYDNEY', $category->id);
@@ -53,8 +53,8 @@ it('mines a candidate from categorised history without invoking artisan', functi
 it('reports a merchant spanning two categories as ambiguous instead of a candidate', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $groceries = Category::factory()->create(['name' => 'Groceries']);
-    $dining = Category::factory()->create(['name' => 'Dining']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $dining = Category::factory()->for($user)->create(['name' => 'Dining']);
 
     minerTransaction($user, $account, 'ACME COFFEE ROASTERS  BRISBANE', $groceries->id);
     minerTransaction($user, $account, 'ACME COFFEE ROASTERS  SYDNEY', $dining->id);
@@ -71,7 +71,7 @@ it('reports a merchant spanning two categories as ambiguous instead of a candida
 it('does not re-propose a merchant an active rule already categorises', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Groceries']);
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     $group = UserRuleGroup::factory()->for($user)->create(['is_active' => true]);
     UserRule::factory()->for($user)->for($group, 'group')->create([
@@ -93,8 +93,8 @@ it('does not re-propose a merchant an active rule already categorises', function
 it('flags a merchant an active rule files under a different category as a conflict', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $mined = Category::factory()->create(['name' => 'Groceries']);
-    $ruled = Category::factory()->create(['name' => 'Dining']);
+    $mined = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $ruled = Category::factory()->for($user)->create(['name' => 'Dining']);
 
     $group = UserRuleGroup::factory()->for($user)->create(['is_active' => true]);
     $rule = UserRule::factory()->for($user)->for($group, 'group')->create([
@@ -117,7 +117,7 @@ it('flags a merchant an active rule files under a different category as a confli
 
 it('persists one auto-apply rule per entry in the Auto-categorisation group', function () {
     $user = User::factory()->create();
-    $category = Category::factory()->create(['name' => 'Groceries']);
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     $entries = [
         ['value' => 'ACME COFFEE', 'category_id' => $category->id, 'source' => 'mined'],
@@ -154,7 +154,7 @@ it('does not re-propose entries once their rules exist, so a second mine writes 
     // at the mine() -> createRules() level, the way the command drives it.
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $category = Category::factory()->create(['name' => 'Groceries']);
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
 
     minerTransaction($user, $account, 'ACME COFFEE ROASTERS  BRISBANE', $category->id);
     minerTransaction($user, $account, 'ACME COFFEE ROASTERS  SYDNEY', $category->id);
@@ -191,8 +191,8 @@ it('reports curated seeds whose category path does not exist here as skipped', f
 it('rejects a candidate whose substring also matches a manual row filed elsewhere that no single trigger separates', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $coffee = Category::factory()->create(['name' => 'Groceries']);
-    $cafe = Category::factory()->create(['name' => 'Dining']);
+    $coffee = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $cafe = Category::factory()->for($user)->create(['name' => 'Dining']);
 
     // Same direction, same account, and the cafe amount sits between the
     // coffee amounts: nothing but the description tells them apart.
@@ -216,8 +216,8 @@ it('rejects a candidate whose substring also matches a manual row filed elsewher
 it('narrows a contradicted candidate by direction when that separates the manual rows exactly', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $coffee = Category::factory()->create(['name' => 'Groceries']);
-    $refunds = Category::factory()->create(['name' => 'Shopping']);
+    $coffee = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $refunds = Category::factory()->for($user)->create(['name' => 'Shopping']);
 
     $purchase = minerTransaction($user, $account, 'ACME COFFEE  BRISBANE', $coffee->id);
     $refund = minerTransaction($user, $account, 'ACME COFFEE REFUND  BRISBANE', $refunds->id);
@@ -252,8 +252,8 @@ it('narrows by account when direction does not separate the manual rows', functi
     $user = User::factory()->create();
     $personal = Account::factory()->for($user)->create();
     $business = Account::factory()->for($user)->create();
-    $coffee = Category::factory()->create(['name' => 'Groceries']);
-    $office = Category::factory()->create(['name' => 'Utilities']);
+    $coffee = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $office = Category::factory()->for($user)->create(['name' => 'Utilities']);
 
     minerTransaction($user, $personal, 'ACME COFFEE  BRISBANE', $coffee->id);
     minerTransaction($user, $business, 'ACME COFFEE WHOLESALE  BRISBANE', $office->id);
@@ -266,8 +266,8 @@ it('narrows by account when direction does not separate the manual rows', functi
 it('narrows by an amount threshold at the midpoint of the gap when only amounts separate the rows', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $coffee = Category::factory()->create(['name' => 'Groceries']);
-    $equipment = Category::factory()->create(['name' => 'Shopping']);
+    $coffee = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $equipment = Category::factory()->for($user)->create(['name' => 'Shopping']);
 
     minerTransaction($user, $account, 'ACME COFFEE  BRISBANE', $coffee->id)->update(['amount' => 450]);
     minerTransaction($user, $account, 'ACME COFFEE  SYDNEY', $coffee->id)->update(['amount' => 650]);
@@ -281,8 +281,8 @@ it('narrows by an amount threshold at the midpoint of the gap when only amounts 
 it('floors the amount midpoint so a signed negative gap still excludes the contradicting row', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $coffee = Category::factory()->create(['name' => 'Groceries']);
-    $equipment = Category::factory()->create(['name' => 'Shopping']);
+    $coffee = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $equipment = Category::factory()->for($user)->create(['name' => 'Shopping']);
 
     minerTransaction($user, $account, 'ACME COFFEE  BRISBANE', $coffee->id)->update(['amount' => -150]);
     minerTransaction($user, $account, 'ACME COFFEE  SYDNEY', $coffee->id)->update(['amount' => -101]);
@@ -301,9 +301,9 @@ it('floors the amount midpoint so a signed negative gap still excludes the contr
 it('does not create a seed rule that contradicts a manual categorisation', function () {
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create();
-    $entertainment = Category::factory()->create(['name' => 'Entertainment']);
+    $entertainment = Category::factory()->for($user)->create(['name' => 'Entertainment']);
     Category::factory()->withParent($entertainment)->create(['name' => 'Streaming']);
-    $other = Category::factory()->create(['name' => 'Education']);
+    $other = Category::factory()->for($user)->create(['name' => 'Education']);
 
     Transaction::factory()->for($user)->for($account)->create([
         'description' => 'PRIMEVIDEO  COURSE',
@@ -325,8 +325,8 @@ it('keeps a seed guard when narrowing a contradicted seed', function () {
     $user = User::factory()->create();
     $payroll = Account::factory()->for($user)->create();
     $other = Account::factory()->for($user)->create();
-    $salary = Category::factory()->create(['name' => 'Salary']);
-    $bonus = Category::factory()->create(['name' => 'Shopping']);
+    $salary = Category::factory()->for($user)->create(['name' => 'Salary']);
+    $bonus = Category::factory()->for($user)->create(['name' => 'Shopping']);
 
     minerTransaction($user, $payroll, 'ACME PAYROLL  BRISBANE', $salary->id)
         ->update(['direction' => TransactionDirection::Credit]);
@@ -366,8 +366,8 @@ it('keeps a seed guard when narrowing a contradicted seed', function () {
 
 it('does not let a later unguarded entry shadow an earlier guarded one with the same value', function () {
     $user = User::factory()->create();
-    $salary = Category::factory()->create(['name' => 'Salary']);
-    $hardware = Category::factory()->create(['name' => 'Hardware']);
+    $salary = Category::factory()->for($user)->create(['name' => 'Salary']);
+    $hardware = Category::factory()->for($user)->create(['name' => 'Hardware']);
 
     $guarded = [
         'value' => 'BUNNINGS',
@@ -387,7 +387,7 @@ it('does not let a later unguarded entry shadow an earlier guarded one with the 
 
 it('filters irrelevant entries before subsumption so they cannot erase a kept entry', function () {
     $user = User::factory()->create();
-    $streaming = Category::factory()->create(['name' => 'Streaming']);
+    $streaming = Category::factory()->for($user)->create(['name' => 'Streaming']);
 
     $entries = [
         ['value' => 'NETFLIX', 'category_id' => $streaming->id, 'source' => 'seed'],
