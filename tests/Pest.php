@@ -7,11 +7,15 @@ declare(strict_types=1);
 use App\DTOs\RawEmail;
 use App\Enums\ImportSource;
 use App\Models\Account;
+use App\Models\AccountDailyBalance;
 use App\Models\RedbarkAccount;
 use App\Models\RedbarkFeed;
+use App\Services\Projection\AccountBalanceHistoryBuilder;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Factory;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Assert;
 
 /*
 |--------------------------------------------------------------------------
@@ -282,4 +286,91 @@ function auditLogRecords(): array
     $handler = Illuminate\Support\Facades\Log::channel('audit')->getLogger()->getHandlers()[0];
 
     return $handler->getRecords();
+}
+
+/*
+| Balance history consistency, shared by the tests of every writer that moves a balance (F2).
+*/
+
+/**
+ * Fails unless each account's stored daily balance rows equal a full rebuild, naming the
+ * first date that differs. The rebuild runs inside a transaction that is rolled back, so
+ * the stored rows are left as they were.
+ */
+function expectBalanceHistoryConsistent(Account ...$accounts): void
+{
+    foreach ($accounts as $account) {
+        $stored = balanceHistoryRows($account);
+        $connection = DB::connection();
+        $connection->beginTransaction();
+
+        try {
+            app(AccountBalanceHistoryBuilder::class)->rebuild($account);
+            $rebuilt = balanceHistoryRows($account);
+        } finally {
+            $connection->rollBack();
+        }
+
+        Assert::assertSame($stored, $rebuilt, balanceHistoryDifference($account, $stored, $rebuilt));
+    }
+}
+
+/** @return array<string, array{start_balance: int, end_balance: int, inflows: int, outflows: int, adjustments: int, currency: string}> */
+function balanceHistoryRows(Account $account): array
+{
+    return AccountDailyBalance::query()
+        ->where('account_id', $account->id)
+        ->orderBy('balance_date')
+        ->get()
+        ->mapWithKeys(fn (AccountDailyBalance $row): array => [$row->balance_date->toDateString() => [
+            'start_balance' => $row->start_balance,
+            'end_balance' => $row->end_balance,
+            'inflows' => $row->inflows,
+            'outflows' => $row->outflows,
+            'adjustments' => $row->adjustments,
+            'currency' => $row->currency,
+        ]])
+        ->all();
+}
+
+/**
+ * @param  array<string, array<string, int|string>>  $stored
+ * @param  array<string, array<string, int|string>>  $rebuilt
+ */
+function balanceHistoryDifference(Account $account, array $stored, array $rebuilt): string
+{
+    $dates = array_unique([...array_keys($stored), ...array_keys($rebuilt)]);
+    sort($dates);
+
+    foreach ($dates as $date) {
+        $before = $stored[$date] ?? null;
+        $after = $rebuilt[$date] ?? null;
+
+        if ($before === $after) {
+            continue;
+        }
+
+        $prefix = "Account $account->id balance history differs from a rebuild on $date";
+
+        if ($before === null || $after === null) {
+            return sprintf(
+                '%s: stored %s, rebuilt %s',
+                $prefix,
+                $before === null ? 'no row' : "end_balance {$before['end_balance']}",
+                $after === null ? 'no row' : "end_balance {$after['end_balance']}",
+            );
+        }
+
+        $changes = [];
+
+        foreach ($before as $column => $value) {
+            if ($value !== $after[$column]) {
+                $changes[] = "$column stored $value, rebuilt $after[$column]";
+            }
+        }
+
+        return "$prefix: ".implode('; ', $changes);
+    }
+
+    return '';
 }
