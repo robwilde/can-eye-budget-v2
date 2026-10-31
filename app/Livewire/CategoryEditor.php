@@ -10,6 +10,7 @@ use App\Models\CategoryGroup;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Reports\CategoryGroupMap;
+use App\Support\Categories\ProtectedCategories;
 use App\Support\Transactions\CategoryAttribution;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -57,6 +58,8 @@ final class CategoryEditor extends Component
 
     public function selectCategory(int $id): void
     {
+        $this->resetErrorBag();
+
         if ($this->selectedCategoryId === $id) {
             $this->selectedCategoryId = null;
             $this->editingName = '';
@@ -101,6 +104,18 @@ final class CategoryEditor extends Component
 
         if ($this->wouldCreateCycle($userId, $this->selectedCategoryId, $this->editingParentId)) {
             $this->addError('editingParentId', __('A category cannot be moved under itself or one of its subcategories.'));
+
+            return;
+        }
+
+        if (ProtectedCategories::isProtected($category) && ($this->editingName !== $category->name || $this->editingParentId !== $category->parent_id)) {
+            $this->addError('editingName', __('This category is found by name elsewhere in the app, so it cannot be renamed or moved.'));
+
+            return;
+        }
+
+        if (! ProtectedCategories::isProtected($category) && ProtectedCategories::isProtectedPath($this->resultingPath($userId, $this->editingParentId, $this->editingName))) {
+            $this->addError('editingName', __('That name is used by a category the app finds by name, so it cannot be used here.'));
 
             return;
         }
@@ -200,6 +215,12 @@ final class CategoryEditor extends Component
             'newParentId' => ['nullable', 'integer', Rule::exists('categories', 'id')->where('user_id', $userId)],
         ]);
 
+        if (ProtectedCategories::isProtectedPath($this->resultingPath($userId, $this->newParentId, $this->newCategoryName))) {
+            $this->addError('newCategoryName', __('That name is used by a category the app finds by name, so it cannot be created.'));
+
+            return;
+        }
+
         Category::create([
             'user_id' => $userId,
             'name' => $this->newCategoryName,
@@ -213,10 +234,18 @@ final class CategoryEditor extends Component
 
     public function confirmDelete(int $id): void
     {
+        $this->resetErrorBag();
+
         $userId = $this->authenticatedUser()->id;
         $category = Category::allWithLinkedParents($userId)->firstWhere('id', $id);
 
         if (! $category) {
+            return;
+        }
+
+        if (ProtectedCategories::isProtected($category)) {
+            $this->addError('deletingCategoryId', __('This category is found by name elsewhere in the app, so it cannot be deleted.'));
+
             return;
         }
 
@@ -231,12 +260,20 @@ final class CategoryEditor extends Component
 
     public function deleteCategory(): void
     {
+        $this->resetErrorBag();
+
         if (! $this->deletingCategoryId) {
             return;
         }
 
         $userId = $this->authenticatedUser()->id;
         $category = Category::allWithLinkedParents($userId)->firstWhere('id', $this->deletingCategoryId);
+
+        if ($category !== null && ProtectedCategories::isProtected($category)) {
+            $this->addError('deletingCategoryId', __('This category is found by name elsewhere in the app, so it cannot be deleted.'));
+
+            return;
+        }
 
         $category?->delete();
 
@@ -310,6 +347,13 @@ final class CategoryEditor extends Component
             'isSearching' => $isSearching,
             'formatMoney' => MoneyCast::format(...),
         ]);
+    }
+
+    private function resultingPath(int $userId, ?int $parentId, string $name): string
+    {
+        $parent = $parentId === null ? null : Category::allWithLinkedParents($userId)->firstWhere('id', $parentId);
+
+        return $parent === null ? $name : $parent->fullPath().' / '.$name;
     }
 
     private function wouldCreateCycle(int $userId, int $categoryId, ?int $newParentId): bool

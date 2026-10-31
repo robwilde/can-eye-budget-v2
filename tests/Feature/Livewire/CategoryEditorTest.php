@@ -7,8 +7,11 @@ declare(strict_types=1);
 use App\Livewire\CategoryEditor;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\CategoryGroup;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\UserCategoryProvisioner;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Livewire\Livewire;
 
 test('component renders for authenticated user', function () {
@@ -456,4 +459,161 @@ test('re-parent rejects moving a category under itself', function () {
         ->assertHasErrors('editingParentId');
 
     expect($office->fresh()->parent_id)->toBeNull();
+});
+
+it('keeps category edits within one user', function () {
+    [$ann, $ben] = User::factory()->count(2)->create()->all();
+    app(UserCategoryProvisioner::class)->provision($ann);
+    app(UserCategoryProvisioner::class)->provision($ben);
+    $named = fn (User $user, string $name): Category => Category::query()->where('user_id', $user->id)->whereNull('parent_id')->where('name', $name)->sole();
+
+    $annGroceries = $named($ann, 'Groceries');
+    $annPets = $named($ann, 'Pets');
+    $benPets = $named($ben, 'Pets');
+    $benHealth = $named($ben, 'Health');
+
+    Livewire::actingAs($ann)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $annGroceries->id)
+        ->set('editingName', 'Food shopping')
+        ->call('saveRename')
+        ->call('toggleHidden', $annPets->id)
+        ->call('openGroupForm', $annGroceries->group_id)
+        ->set('groupName', 'Eating in')
+        ->call('saveGroup')
+        ->call('toggleHidden', $benPets->id)
+        ->call('selectCategory', $benHealth->id)
+        ->assertSet('selectedCategoryId', $annGroceries->id);
+
+    expect($named($ann, 'Food shopping')->exists)->toBeTrue()
+        ->and($named($ann, 'Pets')->is_hidden)->toBeTrue()
+        ->and(CategoryGroup::query()->where('user_id', $ann->id)->where('name', 'Eating in')->exists())->toBeTrue()
+        ->and($named($ben, 'Groceries')->exists)->toBeTrue()
+        ->and($named($ben, 'Pets')->is_hidden)->toBeFalse()
+        ->and(CategoryGroup::query()->where('user_id', $ben->id)->where('name', 'Food')->exists())->toBeTrue()
+        ->and(CategoryGroup::query()->where('user_id', $ben->id)->where('name', 'Eating in')->exists())->toBeFalse();
+});
+
+it('refuses to rename or delete a name-matched category', function () {
+    $user = User::factory()->create();
+    app(UserCategoryProvisioner::class)->provision($user);
+    $transfer = Category::query()->where('user_id', $user->id)->whereNull('parent_id')->where('name', 'Transfer')->sole();
+    $salary = Category::query()->where('user_id', $user->id)->where('name', 'Salary')->sole();
+    $groceries = Category::query()->where('user_id', $user->id)->where('name', 'Groceries')->sole();
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $transfer->id)
+        ->set('editingName', 'Moves')
+        ->call('saveRename')
+        ->assertHasErrors('editingName')
+        ->call('selectCategory', $transfer->id)
+        ->call('selectCategory', $salary->id)
+        ->set('editingParentId', $groceries->id)
+        ->call('saveRename')
+        ->assertHasErrors('editingName')
+        ->call('confirmDelete', $transfer->id)
+        ->assertHasErrors('deletingCategoryId')
+        ->assertSet('showDeleteConfirm', false)
+        ->set('deletingCategoryId', $transfer->id)
+        ->call('deleteCategory')
+        ->assertHasErrors('deletingCategoryId');
+
+    expect($transfer->fresh()->name)->toBe('Transfer')
+        ->and($salary->fresh()->parent_id)->not->toBe($groceries->id)
+        ->and(Category::query()->whereKey($transfer->id)->exists())->toBeTrue();
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $groceries->id)
+        ->set('editingName', 'Food shopping')
+        ->call('saveRename')
+        ->assertHasNoErrors();
+
+    expect($groceries->fresh()->name)->toBe('Food shopping');
+});
+
+it('ignores another user\'s category and group ids sent through public properties', function () {
+    [$ann, $ben] = User::factory()->count(2)->create()->all();
+    app(UserCategoryProvisioner::class)->provision($ann);
+    app(UserCategoryProvisioner::class)->provision($ben);
+    $root = fn (User $user, string $name): Category => Category::query()->where('user_id', $user->id)->whereNull('parent_id')->where('name', $name)->sole();
+
+    $annGroceries = $root($ann, 'Groceries');
+    $benPets = $root($ben, 'Pets');
+    $benGroup = CategoryGroup::query()->where('user_id', $ben->id)->firstOrFail();
+    $benGroupName = $benGroup->name;
+
+    $component = Livewire::actingAs($ann)->test(CategoryEditor::class);
+
+    $component->set('deletingCategoryId', $benPets->id)->call('deleteCategory');
+    $component->set('selectedCategoryId', $benPets->id)->set('editingName', 'Hijacked')->call('saveRename');
+    $component->call('selectCategory', $annGroceries->id)->set('editingParentId', $benPets->id)->call('saveRename')->assertHasErrors('editingParentId');
+    $component->set('editingGroupId', $benGroup->id)->call('saveCategoryGroup')->assertHasErrors('editingGroupId');
+    $component->set('newCategoryName', 'Sneaky')->set('newParentId', $benPets->id)->call('createCategory')->assertHasErrors('newParentId');
+
+    expect(Category::query()->whereKey($benPets->id)->value('name'))->toBe('Pets')
+        ->and($annGroceries->fresh()->parent_id)->toBeNull()
+        ->and($annGroceries->fresh()->group_id)->not->toBe($benGroup->id)
+        ->and(Category::query()->where('name', 'Sneaky')->exists())->toBeFalse();
+
+    expect(fn () => Livewire::actingAs($ann)->test(CategoryEditor::class)
+        ->set('editingGroupRecordId', $benGroup->id)
+        ->set('groupName', 'Hijacked group')
+        ->set('groupColor', '#112233')
+        ->set('groupIcon', 'gift')
+        ->call('saveGroup'))->toThrow(ModelNotFoundException::class);
+
+    expect($benGroup->fresh()->name)->toBe($benGroupName);
+});
+
+it('refuses a name or parent that would land on a name-matched path', function () {
+    $user = User::factory()->create();
+    app(UserCategoryProvisioner::class)->provision($user);
+    $root = fn (string $name): Category => Category::query()->where('user_id', $user->id)->whereNull('parent_id')->where('name', $name)->sole();
+    $pets = $root('Pets');
+    $income = $root('Income');
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $pets->id)
+        ->set('editingName', 'balance')
+        ->call('saveRename')
+        ->assertHasErrors('editingName')
+        ->call('openCreateForm')
+        ->set('newCategoryName', 'Transfer')
+        ->set('newParentId', null)
+        ->call('createCategory')
+        ->assertHasErrors('newCategoryName')
+        ->assertSee('cannot be created')
+        ->set('newCategoryName', 'Salary')
+        ->set('newParentId', $income->id)
+        ->call('createCategory')
+        ->assertHasErrors('newCategoryName')
+        ->set('newCategoryName', 'Hobbies')
+        ->set('newParentId', null)
+        ->call('createCategory')
+        ->assertHasNoErrors();
+
+    expect($pets->fresh()->name)->toBe('Pets')
+        ->and(Category::query()->where('user_id', $user->id)->where('name', 'Balance')->count())->toBe(1)
+        ->and(Category::query()->where('user_id', $user->id)->where('name', 'Transfer')->whereNull('parent_id')->count())->toBe(1)
+        ->and(Category::query()->where('user_id', $user->id)->where('name', 'Hobbies')->exists())->toBeTrue();
+});
+
+it('does not carry a refusal message over to the next category', function () {
+    $user = User::factory()->create();
+    app(UserCategoryProvisioner::class)->provision($user);
+    $transfer = Category::query()->where('user_id', $user->id)->whereNull('parent_id')->where('name', 'Transfer')->sole();
+    $groceries = Category::query()->where('user_id', $user->id)->whereNull('parent_id')->where('name', 'Groceries')->sole();
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('confirmDelete', $transfer->id)
+        ->assertHasErrors('deletingCategoryId')
+        ->call('selectCategory', $groceries->id)
+        ->assertHasNoErrors()
+        ->call('confirmDelete', $groceries->id)
+        ->assertHasNoErrors()
+        ->assertSet('showDeleteConfirm', true);
 });
