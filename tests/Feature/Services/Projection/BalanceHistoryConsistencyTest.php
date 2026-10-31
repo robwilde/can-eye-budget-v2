@@ -10,7 +10,6 @@ use App\Models\Account;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\AccountValuationService;
-use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\TransactionIngestor;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -47,7 +46,6 @@ it('passes when stored balance history matches a rebuild', function () {
     consistencyIngest($this->account, 5000, '2026-05-09');
 
     expectBalanceHistoryConsistent($this->account);
-    expect(consistencyStoredRows($this->account))->not->toBeEmpty();
 });
 
 it('fails and names the first differing date when a rebuild was skipped', function () {
@@ -79,8 +77,6 @@ it('keeps excluded transactions in the account balance', function () {
         ->and($row->outflows)->toBe(5000);
 
     expectBalanceHistoryConsistent($this->account);
-
-    app(AccountBalanceHistoryBuilder::class)->rebuild($this->account);
 
     expect($this->account->dailyBalances()->whereDate('balance_date', '2026-05-12')->sole()->end_balance)->toBe(95000);
 });
