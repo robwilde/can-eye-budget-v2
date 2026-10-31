@@ -2506,7 +2506,7 @@ final class TransactionList extends Component
                 // Splits are already excluded upstream by the uncategorised
                 // filter's whereDoesntHave('splits').
                 'SUM(CASE WHEN transfer_pair_id IS NULL THEN 1 ELSE 0 END) as eligible_count',
-                'SUM(amount) as total_amount',
+                'SUM(CASE WHEN excluded = 0 THEN amount ELSE 0 END) as total_amount',
                 // Spread is measured on magnitudes so a cluster holding both a
                 // refund and a purchase reports a real range, not a sign flip.
                 'MIN(ABS(amount)) as min_amount',
