@@ -16,7 +16,7 @@ Behaviour inventory of the user-facing features of Sure, a Rails personal-financ
 ## Can-I-Budget conventions referenced as C1–C8
 
 - **C1** Money is integer cents (bigInteger columns, `App\Casts\MoneyCast`); signed amount plus a direction.
-- **C2** User scoping is by convention, not global scope: every user-owned table has `user_id` and every query filters on it explicitly; child tables are scoped through their parent. `Category` and `CategoryGroup` are global (no `user_id`).
+- **C2** User scoping is by convention, not global scope: every user-owned table has `user_id` and every query filters on it explicitly; child tables are scoped through their parent. `Category` and `CategoryGroup` are global today (no `user_id`); `docs/decisions/0002-categories-are-per-user.md` (#722) makes them per user.
 - **C3** Main pages are `Route::view` wrappers around Livewire components inside the auth+verified group; settings pages use `Route::livewire('settings/…', 'pages::settings.*')` in the settings routes file, and the profile page sits in the `auth` group only. Every public Livewire method is audited automatically by the `AuditComponentCalls` hook unless marked `#[NotAudited]` (polling and dry-run only). Read-only state belongs in `#[Computed]` properties, which are not audited. Server-set state uses `#[Locked]`; writes re-scope to the user and re-check the persisted record.
 - **C4** Write routes are named and pass through `AttributeRequestToUser`. Every queued job carries `AttributeJobToUser` with a user id and an audited flag. The guard test `UserActionInventoryTest` pins three lists: `#[NotAudited]` exemptions, named write routes (POST, PUT, PATCH, DELETE), and every class in `app/Jobs` with its audited flag. A new audited Livewire method needs no test change; a new write route or job does. GET routes are not in the inventory; they inherit `AttributeRequestToUser` from the web group.
 - **C5** Models are `final` classes with `strict_types`, a `@property` docblock and `$fillable`; all but `TransferRule` have a `casts()` method, and all but `AuditEvent`, `TransferRule` and `UserCategoryBudgetTag` use `HasFactory`. The architecture tests enforce final services, string-backed enums in `app/Enums`, and final DTOs in `app/DTOs` extending `Spatie\LaravelData\Dto` (`ParsedTransactionDto` is the one DTO kept beside the CSV import services).
@@ -272,7 +272,7 @@ The remaining features have no ordering constraint beyond the conventions above.
   - AccountManager, ImportBank and UntrackedAccountCreator always create AUD accounts, and transactions carry no currency.
   - There are no exchange rates, no conversion and no cross-currency transfers. User::totalAvailable and User::totalOwed add cents across accounts whatever their currency.
 - **Build it like:**
-  - A new ExchangeRate model as global reference data, like Category: a unique pair-plus-date index and a decimal rate.
+  - A new ExchangeRate model as global reference data with no `user_id`, as ADR 0001 allows (C2): a unique pair-plus-date index and a decimal rate.
   - A fetch service, tested with Http::fake.
   - Allowed currencies in the F44 preference store (the base currency column on User exists already), and a currency on Transaction.
   - Convert in User::totalAvailable, User::totalOwed and Services/Reports, behind a budget-config flag.
@@ -526,8 +526,10 @@ The remaining features have no ordering constraint beyond the conventions above.
   - Missing: replace-on-delete, merge (it exists only inside the taxonomy-remap migration), per-category colour and icon editing, a lock, the "recently used" shortcut, creating a category from the picker, and a filter where a parent includes its subcategories.
   - Rules that set the deleted category keep pointing at its id.
 - **Build it like:**
-  - Add merge and replace-on-delete actions to CategoryEditor, backed by a new final service. It would rewrite Transaction, TransactionSplit, Budget, PlannedTransaction, Payee, UserCategoryBudgetTag, BnplOrder, the category_id and previous_category_id keys in AnalysisSuggestion and BnplOrderEvent payloads, and the category references inside rules in one DB transaction, the way the taxonomy-remap migration's merge step does (C8).
-  - Decide on per-user scoping before adding merge, replace-on-delete or a lock (C2). Categories are global, so a merge or replace-on-delete would otherwise rewrite every user's Transaction, Budget and PlannedTransaction rows, and the lock would have to be an app-wide setting (C6).
+  - Make `Category` and `CategoryGroup` per user first, as decided in `docs/decisions/0002-categories-are-per-user.md` (#722): a `user_id` on both, a migration that gives each existing user their own tree and rewrites their references, and a user filter on every category query (C2, C8).
+  - Add merge and replace-on-delete actions to CategoryEditor, backed by a new final service. Within the acting user's rows only, it would rewrite Transaction, TransactionSplit, Budget (folding lines that clash in one budget plan), PlannedTransaction, Payee (both category columns and the `probabilities` keys), UserCategoryBudgetTag, BnplOrder, the `category_id` key in AnalysisSuggestion payloads and the `set_category` values in their actions, the `category_id` and `previous_category_id` keys in BnplOrderEvent payloads, the category references inside rules, and the user's `recentCategoryIds`, in one DB transaction. A merge into a source's own subtree is refused, and a moved subcategory whose name clashes with a sibling is merged into it. The taxonomy-remap migration's merge step is the starting list (C8).
+  - The category lock is a per-user `categoriesLocked` preference in the F44 store, not a `budget.*` flag. It refuses creates from the form, the picker, the defaults, the assistant and the API; import category mapping still creates categories.
+  - "Recently used" is a per-user `recentCategoryIds` preference of up to four ids. It is written when the user saves a category picked by hand, and a merge replaces source ids with the target.
   - New public methods are audited (C3), with Pest feature tests (C7).
 
 ### F7. Tags
@@ -1435,7 +1437,7 @@ The remaining features have no ordering constraint beyond the conventions above.
 - **Gap:** No UI creates or edits budgets. There is no monthly budget with a total and expected income, no copy-forward, rollover chain, move money, parent/child allocation sync, near-limit or over-allocation states, or shared personal budgets.
 - **Build it like:**
   - New model: a per-user, per-period budget header (pay cycle or month) holding the total and expected income.
-    - Budget stays the per-category allocation line and links to its header. Category is global, so lines key on user and category.
+    - Budget stays the per-category allocation line and links to its header. Lines key on `(budget_plan_id, category_id)`; the category belongs to the line's user (ADR 0002).
     - Reuse Dashboard::budgetsThisCycle and the budget-row component.
   - Actuals come from CategoryAttribution with `excludeUntracked` on, under the Transaction::countable() transfer rule. A transfer between a tracked and an untracked account counts as spend or income; tracked↔tracked and untracked↔untracked never count. Sure's credit-card criterion applies only to the tracked↔tracked case.
   - A Livewire budget page via Route::view.
@@ -1879,7 +1881,7 @@ The remaining features have no ordering constraint beyond the conventions above.
 - **Gap:** UserRuleManager has no way to download or upload rule definitions, and no data export exists anywhere in the app. The closest analogue is CategorySeedRules, a curated list maintained in code, not something users can import or export.
 - **Build it like:**
   - Add export and import actions to UserRuleManager that serialise UserRuleGroup and UserRule, including order, is_active, stop_processing, strict_mode and is_auto_apply. Triggers and actions are validated against RuleTriggerField, RuleTriggerOperator and RuleActionType.
-  - Refer to categories by full path, resolved the way CategorySeedRules does: an unresolvable path is skipped and reported. Do not create missing categories, because Category is global (C2).
+  - Refer to categories by full path, resolved within the importing user's tree the way CategorySeedRules does: an unresolvable path is skipped and reported. A rule import does not create categories.
   - Account triggers (RuleTriggerField::AccountId) and planned-transaction actions (RuleActionType::LinkToPlannedTransaction) are exported by name or description and re-resolved within the importing user's own records (C2). An unresolvable reference skips the rule and reports it.
   - The whole import runs in one DB transaction (C8). Actions are named and audited (C3, C4). Pest tests use fixture files (C7).
 
@@ -1964,9 +1966,9 @@ The remaining features have no ordering constraint beyond the conventions above.
   - MonthEndBalanceRuleProvisioner gives each new user, via CreateNewUser, a ready-made Balance rule.
 - **Gap:** The Redbark/SimpleFIN bank category and merchant category code are stored only in the transaction's enrichment data. They are used as hints by categories:jev-eval and ResolveMerchantBrandJob, but never mapped to a category. CategorySource::Feed has no writer. CSV import has no category column, and user tags do not exist.
 - **Build it like:**
-  - In SyncRedbarkFeedJob::applyRow, when building the values, map the feed category to a Category by full path and aliases, resolved the way CategorySeedRules resolves paths. Write CategorySource::Feed only when `category_id` is empty. This covers the update and settled-pending paths, which do not go through TransactionIngestor.
+  - In SyncRedbarkFeedJob::applyRow, when building the values, map the feed category to a Category by full path and aliases, resolved within the account owner's tree the way CategorySeedRules resolves paths. Write CategorySource::Feed only when `category_id` is empty. This covers the update and settled-pending paths, which do not go through TransactionIngestor.
   - Add a per-account matcher toggle on Account or RedbarkAccount (C5) behind a budget-config flag (C6).
-  - Add a category column to CsvColumnMapper. It must not create global categories (C2).
+  - Add a category column to CsvColumnMapper. Once categories are per user (#830, ADR 0002), mapping a value to "Add as new" creates the category in the importing user's tree, even while that user's category lock is on (C2). Before that, it must not create categories.
   - Migrations must work on MariaDB and SQLite (C8). Pest tests use the Redbark/SimpleFIN fixtures (C7).
 
 ## Statements, imports and provider sync
@@ -2538,7 +2540,7 @@ The remaining features have no ordering constraint beyond the conventions above.
 - **Existing:** none. AccountClass has an Investment case, but it only labels an account type, drives BudgetTagResolver's Savings tag, and counts Investment balances as spendable in the Dashboard total available. A search found no holding, security, trade, cost-basis or price models, migrations or config.
 - **Gap:** There is no record of positions, securities, trades, prices or gains. An investment account holds only a balance and transactions.
 - **Build it like:**
-  - **Models:** a global Security model, scoped like Category (C2), with SecurityPrice children. User-scoped Holding and Trade models are reached through Account (C2, C5).
+  - **Models:** a global Security model with no `user_id`, as ADR 0001 allows for shared reference data (C2), with SecurityPrice children. User-scoped Holding and Trade models are reached through Account (C2, C5).
   - **Storage:** money in integer cents (C1), and quantity in a decimal column that works on both SQLite and MariaDB (C8).
   - **Price sync:** a scheduled command dispatches one queued job per user for the securities that user holds. Each job carries AttributeJobToUser with audited false, upserts the global Security and SecurityPrice rows, and is added to UserActionInventoryTest's job list with its audited flag (C4). The provider is faked with Http::fake in tests (C7).
   - **Feature flag:** the whole feature sits behind a budget-config flag that is off by default (C6).
@@ -2708,7 +2710,7 @@ The remaining features have no ordering constraint beyond the conventions above.
 - **Build it like:**
   - Do not add Household, HouseholdMembership or AccountShare. If a reopen condition fires, the ADR sets the order of work: actor column on `audit_events`, a personal household per user, an accessible-accounts scope, then AccountShare, invitations and roles.
   - Spend, income and transfer classification stays on the account-wide `is_tracked` flag through Transaction::countable(), PlannedTransaction::countedDirection() and CategoryAttribution, whoever is looking.
-  - Scoping is explicit `user_id` filters (C2). Category stays global.
+  - Scoping is explicit `user_id` filters (C2). Category and CategoryGroup are per user (ADR 0002).
   - Instance admin is the admin flag on User from F48, which is the one admin definition for the instance. There are no household roles.
   - Base currency, timezone, month-start day and assistant mode live on User through F44. Default sharing is not stored.
   - Migrations must run on both MariaDB and SQLite (C8).
