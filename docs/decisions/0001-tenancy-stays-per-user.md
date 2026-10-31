@@ -4,6 +4,7 @@
 - **Date:** 2026-10-22
 - **Issue:** #642 (epic #641, plan feature F43, slice `F43-spike`)
 - **Plan:** `docs/plans/2026-10-21-sure-feature-inventory.md`, section F43
+- **Amended by:** ADR 0002 (#722): `Category` and `CategoryGroup` are per user
 
 ## Context
 
@@ -40,7 +41,7 @@ From now on, every new model follows C2 as it is written today:
 - Any index used for the model's per-user lookups starts with `user_id`. Index names stay at or under 64 characters, and migrations run on MariaDB and SQLite (C8).
 - A child table, whose rows only exist under one parent row, does not get its own `user_id`. It is scoped through its parent's foreign key, and every query reaches it through a parent that was itself filtered by `user_id`.
 - Every query filters on the owning user explicitly, through `where('user_id', $user->id)` or through a relation on the user such as `$user->accounts()`. There are no global scopes, and there is no shared "accessible accounts" scope.
-- Reference data shared by all users (`Category`, `CategoryGroup`, and later the F40 `Security`) has no `user_id`. A user-specific change to shared reference data needs its own user-owned table. It never writes to the global row.
+- Reference data shared by all users (`ExchangeRate`, and later the F40 `Security`) has no `user_id`. A user-specific change to shared reference data needs its own user-owned table. It never writes to the global row. `Category` and `CategoryGroup` were shared reference data until ADR 0002 made them per user.
 - `audit_events` keeps its existing nullable `user_id` with `nullOnDelete`, so the audit trail outlives a deleted user. New tables do not copy that pattern unless they also need to outlive their user.
 
 ## Spend, income and transfer classification
