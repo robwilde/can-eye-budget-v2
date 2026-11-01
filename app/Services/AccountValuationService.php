@@ -247,8 +247,9 @@ final class AccountValuationService
     }
 
     /**
-     * Credits minus debits of the account's current, posted, non-deleted transactions
-     * dated after $after (exclusive) up to $until (inclusive).
+     * Credits minus debits of the account's current, posted, non-deleted transactions dated
+     * after $after (exclusive) up to $until (inclusive). Split children are left out: their
+     * parent carries the money.
      */
     private function signedTransactionSum(Account $account, ?CarbonImmutable $after, CarbonImmutable $until): int
     {
@@ -256,6 +257,7 @@ final class AccountValuationService
             ->current()
             ->where('account_id', $account->id)
             ->where('status', TransactionStatus::Posted)
+            ->whereNull('split_parent_id')
             ->when($after !== null, fn ($query) => $query->whereDate('post_date', '>', $after))
             ->whereDate('post_date', '<=', $until)
             ->selectRaw("coalesce(sum(case when direction = 'credit' then amount else -amount end), 0) as total")

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Casts\MoneyCast;
+use App\DTOs\TransactionSplitLine;
 use App\Enums\AccountStatus;
 use App\Enums\CleanDescriptionSource;
 use App\Enums\RecurrenceFrequency;
@@ -13,6 +14,7 @@ use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Enums\TransferLinkSource;
 use App\Exceptions\PendingMergeRefusedException;
+use App\Exceptions\TransactionSplitRefusedException;
 use App\Exceptions\TransferAlreadyLinkedException;
 use App\Exceptions\TransferLinkRefusedException;
 use App\Models\Account;
@@ -27,6 +29,7 @@ use App\Services\PendingMergeService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\TransactionIdempotency;
 use App\Services\Transactions\TransactionDeleter;
+use App\Services\Transactions\TransactionSplitter;
 use App\Services\Transfers\TransferLinker;
 use App\Support\AmountParser;
 use App\Support\AmountParseResult;
@@ -171,6 +174,15 @@ final class TransactionModal extends Component
     /** Explicit choice among several possible opposite legs when linking a bank-feed row. */
     public ?int $selectedCandidateId = null;
 
+    /** @var array<int, array<string, mixed>> */
+    public array $splitLines = [];
+
+    #[Locked]
+    public bool $isSplitParent = false;
+
+    #[Locked]
+    public bool $isSplitChild = false;
+
     /** Per request: this request's own updates changed a list the user had ticked. */
     private bool $categoriseConsentWithdrawn = false;
 
@@ -265,6 +277,8 @@ final class TransactionModal extends Component
         $this->date = $transaction->post_date->format('Y-m-d');
         $this->notes = $transaction->notes ?? '';
         $this->excluded = $transaction->excluded;
+        $this->isSplitParent = $transaction->isSplitParent();
+        $this->isSplitChild = $transaction->isSplitChild();
         $this->fillCurrency($transaction);
         $this->categoriseMatchValue = app(CategoryRuleGenerator::class)->suggestMatchValue($transaction);
         $this->categoriseMatching = $transaction->category_id === null
@@ -460,6 +474,16 @@ final class TransactionModal extends Component
      */
     public function deleteTransaction(): void
     {
+        $target = Transaction::query()
+            ->where('user_id', auth()->id())
+            ->find($this->openedTransactionId ?? $this->editingTransactionId);
+
+        if ($target instanceof Transaction && $target->isSplitChild()) {
+            $this->addError('splitLines', __('A split line is deleted with its parent. Undo the split or delete the parent.'));
+
+            return;
+        }
+
         $deleted = app(TransactionDeleter::class)->delete(
             Transaction::query()
                 ->where('user_id', auth()->id())
@@ -467,6 +491,143 @@ final class TransactionModal extends Component
         );
 
         if ($deleted === 0) {
+            return;
+        }
+
+        $this->showModal = false;
+        $this->resetForm();
+        $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * Opens the split editor for the transaction being edited: its current lines when it is
+     * already split, otherwise two empty ones.
+     */
+    public function startSplit(): void
+    {
+        $this->resetErrorBag('splitLines');
+
+        $transaction = $this->editingOwnedTransaction();
+
+        if (! $transaction instanceof Transaction) {
+            $this->addError('splitLines', __('This transaction could not be found.'));
+
+            return;
+        }
+
+        $splitter = app(TransactionSplitter::class);
+
+        if ($transaction->isSplitParent()) {
+            $this->splitLines = array_map(
+                static fn (TransactionSplitLine $line): array => [
+                    'name' => (string) $line->name,
+                    'amount' => number_format($line->amount / 100, 2, '.', ''),
+                    'category_id' => $line->categoryId,
+                    'notes' => (string) $line->notes,
+                    'excluded' => $line->excluded,
+                ],
+                $splitter->linesOf($transaction),
+            );
+
+            return;
+        }
+
+        $reason = $splitter->refusalFor($transaction);
+
+        if ($reason !== null) {
+            $this->addError('splitLines', $reason);
+
+            return;
+        }
+
+        $this->splitLines = [self::blankSplitLine(), self::blankSplitLine()];
+    }
+
+    public function addSplitLine(): void
+    {
+        if ($this->splitLines !== []) {
+            $this->splitLines[] = self::blankSplitLine();
+        }
+    }
+
+    public function removeSplitLine(int $index): void
+    {
+        if (isset($this->splitLines[$index])) {
+            unset($this->splitLines[$index]);
+            $this->splitLines = array_values($this->splitLines);
+        }
+    }
+
+    public function cancelSplit(): void
+    {
+        $this->splitLines = [];
+        $this->resetErrorBag('splitLines');
+    }
+
+    /**
+     * Splits the transaction being edited into the lines in the editor, or replaces the lines
+     * of a split it already has. Nothing is saved unless the lines add up to its amount.
+     *
+     * @throws Throwable
+     */
+    public function saveSplit(): void
+    {
+        $this->resetErrorBag('splitLines');
+
+        $transaction = $this->editingOwnedTransaction();
+
+        if (! $transaction instanceof Transaction) {
+            $this->addError('splitLines', __('This transaction could not be found.'));
+
+            return;
+        }
+
+        $lines = array_map(
+            static fn (array $line): TransactionSplitLine => new TransactionSplitLine(
+                amount: AmountParser::parse((string) ($line['amount'] ?? ''))->amount,
+                categoryId: is_numeric($line['category_id'] ?? null) ? (int) $line['category_id'] : null,
+                name: is_string($line['name'] ?? null) ? $line['name'] : null,
+                notes: is_string($line['notes'] ?? null) ? $line['notes'] : null,
+                excluded: (bool) ($line['excluded'] ?? false),
+            ),
+            array_values($this->splitLines),
+        );
+
+        try {
+            app(TransactionSplitter::class)->save((int) auth()->id(), $transaction->id, $lines);
+        } catch (TransactionSplitRefusedException $refused) {
+            $this->addError('splitLines', $refused->getMessage());
+
+            return;
+        }
+
+        $this->showModal = false;
+        $this->resetForm();
+        $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * Removes the lines of the split being edited and counts the transaction again.
+     *
+     * @throws Throwable
+     */
+    public function undoSplit(): void
+    {
+        $this->resetErrorBag('splitLines');
+
+        $transaction = $this->editingOwnedTransaction();
+
+        if (! $transaction instanceof Transaction) {
+            $this->addError('splitLines', __('This transaction could not be found.'));
+
+            return;
+        }
+
+        try {
+            app(TransactionSplitter::class)->undo((int) auth()->id(), $transaction->id);
+        } catch (TransactionSplitRefusedException $refused) {
+            $this->addError('splitLines', $refused->getMessage());
+
             return;
         }
 
@@ -593,6 +754,8 @@ final class TransactionModal extends Component
 
         $parsed = $this->descriptionInput !== '' ? AmountParser::parse($this->descriptionInput) : null;
 
+        $editing = $this->editingOwnedTransaction();
+
         return view('livewire.transaction-modal', [
             'accounts' => $accounts,
             // Normal entry only offers tracked accounts; a linked bank-feed row keeps showing
@@ -606,7 +769,17 @@ final class TransactionModal extends Component
             'parsedAmount' => $parsed->amount ?? 0,
             'parsedDescription' => $parsed->description ?? '',
             'attachments' => $this->currentAttachments(),
-            'lockedFields' => $this->lockedFieldLabels($this->editingOwnedTransaction()),
+            'lockedFields' => $this->lockedFieldLabels($editing),
+            'canSplit' => $this->showModal
+                && $editing instanceof Transaction
+                && $this->mode === 'enter'
+                && ! $this->originalWasTransfer
+                && app(TransactionSplitter::class)->refusalFor($editing) === null,
+            'splitParentCents' => $editing instanceof Transaction ? abs($editing->amount) : 0,
+            'splitSumCents' => array_sum(array_map(
+                static fn (array $line): int => AmountParser::parse((string) ($line['amount'] ?? ''))->amount,
+                $this->splitLines,
+            )),
             'mergeSuggestion' => $this->mergeSuggestion(),
             'mergeCandidates' => $this->mergeCandidates(),
             'currencies' => $this->offeredCurrencies(),
@@ -830,6 +1003,12 @@ final class TransactionModal extends Component
         $this->dispatch('transaction-saved');
     }
 
+    /** @return array<string, mixed> */
+    private static function blankSplitLine(): array
+    {
+        return ['name' => '', 'amount' => '', 'category_id' => null, 'notes' => '', 'excluded' => false];
+    }
+
     /**
      * @param  array<string, mixed>  $overrides
      * @return array<string, mixed>
@@ -984,6 +1163,38 @@ final class TransactionModal extends Component
     }
 
     /**
+     * Why the form must not save the split row being edited, or null. A split parent keeps its
+     * amount, date, account and type and stays excluded; a split line keeps them too, because
+     * the lines must keep adding up to the parent. Both are edited through the split.
+     */
+    private function splitRowRefusal(): ?string
+    {
+        $row = $this->editingOwnedTransaction();
+
+        if (! $row instanceof Transaction || ! ($row->isSplitParent() || $row->isSplitChild())) {
+            return null;
+        }
+
+        $isFeed = in_array($row->source, TransactionSource::bankFeed(), true);
+        $type = $row->direction === TransactionDirection::Debit ? 'expense' : 'income';
+
+        $moved = $this->mode === 'plan'
+            || $this->transactionType !== $type
+            || (! $isFeed && AmountParser::parse($this->descriptionInput)->amount !== abs($row->amount))
+            || $this->accountId !== $row->account_id
+            || $this->date !== $row->post_date->format('Y-m-d')
+            || $this->currency !== ($row->currency === $this->accountCurrencyOf($row->account_id) ? '' : $row->currency)
+            || (float) $this->exchangeRate !== (float) $row->exchange_rate;
+
+        return match (true) {
+            $moved && $row->isSplitChild() => __('A split line keeps its amount, date, account and type. Edit the split on its parent to change the amount.'),
+            $moved => __('A split transaction keeps its amount, date, account and type. Undo the split to change them.'),
+            $row->isSplitParent() && ! $this->excluded => __('A split transaction stays excluded until the split is undone.'),
+            default => null,
+        };
+    }
+
+    /**
      * @throws Throwable
      */
     private function saveBankFeedTransaction(): bool
@@ -1129,6 +1340,12 @@ final class TransactionModal extends Component
      */
     private function resolveSave(): bool
     {
+        if ($this->editingTransactionId && ($refusal = $this->splitRowRefusal()) !== null) {
+            $this->addError('descriptionInput', $refusal);
+
+            return false;
+        }
+
         if ($this->editingTransactionId && $this->mode === 'plan') {
             return $this->isBankFeedTransaction
                 ? $this->planFromBankFeedRow()
@@ -1245,6 +1462,46 @@ final class TransactionModal extends Component
      */
     private function updateTransaction(): bool
     {
+        try {
+            return $this->persistTransactionUpdate();
+        } catch (TransactionSplitRefusedException $refused) {
+            $this->addError('descriptionInput', $refused->getMessage());
+
+            return false;
+        }
+    }
+
+    /**
+     * Re-reads the row under the edit's locks: a row that was trashed or versioned since the form
+     * loaded it, or a split that committed after the form's first check, must refuse the edit
+     * instead of inserting a live version of a stale copy.
+     *
+     * @throws TransactionSplitRefusedException
+     */
+    private function assertSplitRowUnchanged(Transaction $transaction): void
+    {
+        $locked = Transaction::withTrashed()
+            ->where('user_id', auth()->id())
+            ->whereKey($transaction->id)
+            ->lockForUpdate()
+            ->first();
+
+        if (! $locked instanceof Transaction || $locked->trashed() || $locked->children()->exists()) {
+            throw new TransactionSplitRefusedException(__('This transaction changed while you were editing it. Reopen it and try again.'));
+        }
+
+        $refusal = $this->splitRowRefusal();
+
+        if ($refusal !== null) {
+            throw new TransactionSplitRefusedException($refusal);
+        }
+    }
+
+    /**
+     * @throws Throwable
+     */
+    private function persistTransactionUpdate(): bool
+    {
         $resolved = $this->resolveTransactionWithParsedAmount(allowZero: true);
 
         if ($resolved === false) {
@@ -1256,6 +1513,7 @@ final class TransactionModal extends Component
         if ($transaction->source->isBankFeed()) {
             $child = DB::transaction(function () use ($transaction): Transaction {
                 app(AccountBalanceHistoryBuilder::class)->lockAccounts($transaction->account_id);
+                $this->assertSplitRowUnchanged($transaction);
                 $this->reloadCleanNamesUnderLock($transaction);
 
                 return $transaction->createChild($this->withLockedFields($transaction, [
@@ -1271,6 +1529,7 @@ final class TransactionModal extends Component
         } else {
             $child = DB::transaction(function () use ($transaction, $parsed): Transaction {
                 app(AccountBalanceHistoryBuilder::class)->lockAccounts($transaction->account_id, $this->accountId);
+                $this->assertSplitRowUnchanged($transaction);
                 $this->reloadCleanNamesUnderLock($transaction);
 
                 $child = $transaction->createChild($this->withLockedFields($transaction, [
@@ -1983,6 +2242,9 @@ final class TransactionModal extends Component
         $this->originalWasTransfer = false;
         $this->openedTransferToAccountId = null;
         $this->selectedCandidateId = null;
+        $this->splitLines = [];
+        $this->isSplitParent = false;
+        $this->isSplitChild = false;
         $this->mode = 'enter';
         $this->frequency = 'every-month';
         $this->untilType = 'always';

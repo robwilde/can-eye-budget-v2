@@ -21,7 +21,8 @@ use Illuminate\Support\Facades\DB;
  * day's end). Without one, it works backwards: from the earliest valuation if there is one,
  * otherwise from the stored accounts.balance as of today. Each day adds its posted, current,
  * non-deleted transactions; a valuation on a day resets that day's end balance and the gap is
- * recorded as the day's adjustment.
+ * recorded as the day's adjustment. A split child is skipped: its parent already carries the
+ * same money.
  */
 final class AccountBalanceHistoryBuilder
 {
@@ -308,6 +309,7 @@ final class AccountBalanceHistoryBuilder
             ->current()
             ->where('account_id', $account->id)
             ->where('status', TransactionStatus::Posted)
+            ->whereNull('split_parent_id')
             ->toBase()
             ->selectRaw('date(post_date) as day')
             ->selectRaw("coalesce(sum(case when direction = 'credit' then abs(amount) else 0 end), 0) as inflows")

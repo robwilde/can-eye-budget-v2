@@ -31,6 +31,7 @@ final readonly class ReconciliationMatcher
             ->where('account_id', $planned->account_id)
             ->where('direction', $planned->direction)
             ->whereNull('planned_transaction_id')
+            ->whereNull('split_parent_id')
             ->whereBetween('post_date', [$dateFrom, $dateTo])
             ->whereRaw('ABS(amount) BETWEEN ? AND ?', [$minAmount, $maxAmount])
             ->with('account:id,name')

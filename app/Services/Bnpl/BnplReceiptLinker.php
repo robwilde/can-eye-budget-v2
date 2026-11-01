@@ -96,6 +96,7 @@ final readonly class BnplReceiptLinker
             ->where('user_id', $order->user_id)
             ->current()
             ->where('status', TransactionStatus::Posted)
+            ->whereNull('split_parent_id')
             ->where('direction', TransactionDirection::Debit)
             ->whereIn('amount', [$payment->amount, -$payment->amount])
             ->where('description', 'like', $pattern)

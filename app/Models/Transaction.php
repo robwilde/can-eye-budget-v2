@@ -56,6 +56,7 @@ use Illuminate\Support\Facades\DB;
  * @property int|null $suggested_pair_id
  * @property int|null $planned_transaction_id
  * @property int|null $parent_transaction_id
+ * @property int|null $split_parent_id
  * @property int|null $folded_into_transaction_id
  * @property string|null $notes
  * @property bool $excluded
@@ -146,6 +147,7 @@ final class Transaction extends Model
         'suggested_pair_id',
         'planned_transaction_id',
         'parent_transaction_id',
+        'split_parent_id',
         'folded_into_transaction_id',
         'notes',
         'excluded',
@@ -277,6 +279,23 @@ final class Transaction extends Model
         return $this->hasMany(self::class, 'parent_transaction_id');
     }
 
+    /** @return BelongsTo<self, $this> */
+    public function splitParent(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'split_parent_id');
+    }
+
+    /**
+     * Every live row split off this one, versions of a child included: use current() for the
+     * lines that count.
+     *
+     * @return HasMany<self, $this>
+     */
+    public function splitChildren(): HasMany
+    {
+        return $this->hasMany(self::class, 'split_parent_id');
+    }
+
     /** @return HasMany<TransactionEmail, $this> */
     public function emails(): HasMany
     {
@@ -345,6 +364,18 @@ final class Transaction extends Model
         return $this->relationLoaded('splits')
             ? $this->splits->isNotEmpty()
             : $this->splits()->exists();
+    }
+
+    public function isSplitParent(): bool
+    {
+        return $this->relationLoaded('splitChildren')
+            ? $this->splitChildren->isNotEmpty()
+            : $this->splitChildren()->exists();
+    }
+
+    public function isSplitChild(): bool
+    {
+        return $this->split_parent_id !== null;
     }
 
     /**
@@ -430,10 +461,24 @@ final class Transaction extends Model
     {
         return $query
             ->whereNull('transfer_pair_id')
+            ->notSplit()
             ->where(fn (Builder $q): Builder => $q
                 ->whereNull('transfer_link_source')
                 ->orWhere('transfer_link_source', '!=', TransferLinkSource::Unlinked->value))
             ->whereHas('account', fn (Builder $a): Builder => $a->where('is_tracked', true));
+    }
+
+    /**
+     * Rows that are neither a split line nor a split parent.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeNotSplit(Builder $query): Builder
+    {
+        return $query
+            ->whereNull('split_parent_id')
+            ->whereDoesntHave('splitChildren');
     }
 
     /**
@@ -557,6 +602,8 @@ final class Transaction extends Model
 
             $this->attachments()->update(['transaction_id' => $child->id]);
 
+            self::query()->where('split_parent_id', $this->id)->update(['split_parent_id' => $child->id]);
+
             return $child;
         });
     }
@@ -658,7 +705,7 @@ final class Transaction extends Model
         self::saving(static function (Transaction $transaction): void {
             $sourcesChanged = $transaction->isDirty(['merchant_name', 'clean_description', 'clean_description_source', 'description']);
 
-            if ($transaction->merchant_key !== null && ! $sourcesChanged) {
+            if ($transaction->merchant_key !== null && (! $sourcesChanged || $transaction->split_parent_id !== null)) {
                 return;
             }
 

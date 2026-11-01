@@ -440,7 +440,63 @@
                     wire:model="excluded"
                     :label="__('Exclude from totals and reports')"
                     data-testid="exclude-toggle"
+                    :disabled="$isSplitParent"
                 />
+            @endif
+
+            @if($editingTransactionId && $mode === 'enter' && $transactionType !== 'transfer' && ! $originalWasTransfer)
+                <hr class="panel-rule">
+
+                <div class="space-y-2" data-testid="split-section">
+                    <span class="cib-label">{{ __('Split into transactions') }}</span>
+
+                    @error('splitLines')<p class="text-sm text-red-700" data-testid="split-error">{{ $message }}</p>@enderror
+
+                    @if($splitLines === [])
+                        @if($isSplitChild)
+                            <p class="text-sm" data-testid="split-child-note">{{ __('This is one line of a split. Edit the split from its parent transaction.') }}</p>
+                        @elseif($isSplitParent)
+                            <p class="text-sm">{{ __('This transaction is split. Its lines are counted instead of the total.') }}</p>
+                            <div class="flex gap-2">
+                                <flux:button type="button" size="sm" wire:click="startSplit" data-testid="edit-split">{{ __('Edit split') }}</flux:button>
+                                <flux:button type="button" size="sm" variant="ghost" wire:click="undoSplit" wire:confirm="{{ __('Remove the split lines and count this transaction as a whole again?') }}" data-testid="undo-split">{{ __('Undo split') }}</flux:button>
+                            </div>
+                        @elseif($canSplit)
+                            <flux:button type="button" size="sm" icon="scissors" wire:click="startSplit" data-testid="start-split">{{ __('Split') }}</flux:button>
+                        @endif
+                    @else
+                        @foreach($splitLines as $index => $line)
+                            <div class="space-y-1 border-l-2 pl-2" wire:key="modal-split-line-{{ $index }}" data-testid="split-line-{{ $index }}">
+                                <div class="grid gap-2 sm:grid-cols-2">
+                                    <flux:input wire:model="splitLines.{{ $index }}.name" size="sm" :placeholder="__('Name')" :aria-label="__('Split name')"/>
+                                    <flux:input wire:model.live.debounce.400ms="splitLines.{{ $index }}.amount" size="sm" inputmode="decimal" placeholder="0.00" :aria-label="__('Split amount')"/>
+                                </div>
+                                <x-category-combobox
+                                    wire:model="splitLines.{{ $index }}.category_id"
+                                    :categories="$categories"
+                                    :placeholder="__('No category')"
+                                    size="sm"
+                                />
+                                <flux:input wire:model.blur="splitLines.{{ $index }}.notes" size="sm" :placeholder="__('Note (optional)')" :aria-label="__('Split note')"/>
+                                <div class="flex items-center justify-between">
+                                    <flux:checkbox wire:model="splitLines.{{ $index }}.excluded" :label="__('Exclude this line')"/>
+                                    <flux:button type="button" size="sm" variant="ghost" icon="x-mark" wire:click="removeSplitLine({{ $index }})" :aria-label="__('Remove line')"/>
+                                </div>
+                            </div>
+                        @endforeach
+
+                        <div class="flex items-center justify-between text-sm" data-testid="split-remainder">
+                            <span>{{ __('Remainder') }}</span>
+                            <span>{{ $formatMoney($splitParentCents - $splitSumCents) }}</span>
+                        </div>
+
+                        <div class="flex gap-2">
+                            <flux:button type="button" size="sm" icon="plus" wire:click="addSplitLine" data-testid="add-split-line">{{ __('Add line') }}</flux:button>
+                            <flux:button type="button" size="sm" variant="primary" wire:click="saveSplit" data-testid="save-split">{{ __('Save split') }}</flux:button>
+                            <flux:button type="button" size="sm" variant="ghost" wire:click="cancelSplit" data-testid="cancel-split">{{ __('Cancel') }}</flux:button>
+                        </div>
+                    @endif
+                </div>
             @endif
 
             @if($editingTransactionId && $mode === 'enter')
@@ -531,7 +587,7 @@
                     >
                         {{ __('Delete') }}
                     </flux:button>
-                @elseif($editingTransactionId && !$isBankFeedTransaction)
+                @elseif($editingTransactionId && !$isBankFeedTransaction && !$isSplitChild)
                     <flux:button
                         variant="danger"
                         wire:click="deleteTransaction"

@@ -67,7 +67,7 @@ final class TransferLinker
             ]);
 
         if ($includeRejected) {
-            $query->whereNull('transfer_pair_id')->onTrackedAccounts();
+            $query->whereNull('transfer_pair_id')->notSplit()->onTrackedAccounts();
         } else {
             $query->linkable();
         }
@@ -116,6 +116,10 @@ final class TransferLinker
             $second = $rows->get($b->id);
 
             if (! $first instanceof Transaction || ! $second instanceof Transaction) {
+                return false;
+            }
+
+            if ($this->isSplitRow($first) || $this->isSplitRow($second)) {
                 return false;
             }
 
@@ -184,7 +188,8 @@ final class TransferLinker
 
             if ($rows->count() !== 2 || $rows->contains(fn (Transaction $t): bool => $t->transfer_pair_id !== null
                 || $t->suggested_pair_id !== null
-                || $this->isRejected($t))) {
+                || $this->isRejected($t)
+                || $this->isSplitRow($t))) {
                 return false;
             }
 
@@ -689,6 +694,16 @@ final class TransferLinker
     private function isRejected(Transaction $transaction): bool
     {
         return $transaction->transfer_link_source === TransferLinkSource::Unlinked;
+    }
+
+    /**
+     * A split parent or one of its lines never takes part in a transfer. Read from the database
+     * inside the caller's locks, not from a loaded relation.
+     */
+    private function isSplitRow(Transaction $transaction): bool
+    {
+        return $transaction->split_parent_id !== null
+            || Transaction::query()->where('split_parent_id', $transaction->id)->exists();
     }
 
     /**

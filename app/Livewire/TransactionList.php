@@ -1049,7 +1049,9 @@ final class TransactionList extends Component
         $toggled = Transaction::query()->getConnection()->transaction(function () use ($transactionId, $excluded): bool {
             $current = Transaction::lockCurrentVersion($transactionId, (int) auth()->id());
 
-            if ($current->excluded === $excluded || ($excluded && $current->transfer_pair_id !== null)) {
+            if ($current->excluded === $excluded
+                || ($excluded && $current->transfer_pair_id !== null)
+                || (! $excluded && $current->isSplitParent())) {
                 return false;
             }
 
@@ -1211,7 +1213,7 @@ final class TransactionList extends Component
             ->with(['splits', 'emails'])
             ->findOrFail($transactionId);
 
-        if ($transaction->transfer_pair_id !== null) {
+        if ($transaction->transfer_pair_id !== null || $transaction->isSplitChild() || $transaction->isSplitParent()) {
             return;
         }
 
@@ -1307,6 +1309,12 @@ final class TransactionList extends Component
             ->where('user_id', auth()->id())
             ->findOrFail($this->splitPanelTxnId);
 
+        if ($transaction->isSplitChild() || $transaction->isSplitParent()) {
+            $this->splitError = 'A transaction split into transactions cannot also have category lines.';
+
+            return;
+        }
+
         if ($transaction->transfer_pair_id !== null) {
             $this->splitError = 'Transfers cannot be split.';
 
@@ -1368,7 +1376,13 @@ final class TransactionList extends Component
             return;
         }
 
-        DB::transaction(static function () use ($transaction, $lines): void {
+        $saved = DB::transaction(static function () use ($transaction, $lines): bool {
+            $locked = Transaction::query()->where('user_id', $transaction->user_id)->whereKey($transaction->id)->lockForUpdate()->first();
+
+            if (! $locked instanceof Transaction || $locked->isSplitChild() || $locked->isSplitParent()) {
+                return false;
+            }
+
             $transaction->splits()->delete();
 
             foreach ($lines as $position => $line) {
@@ -1379,7 +1393,15 @@ final class TransactionList extends Component
                     'position' => $position,
                 ]);
             }
+
+            return true;
         });
+
+        if (! $saved) {
+            $this->splitError = 'A transaction split into transactions cannot also have category lines.';
+
+            return;
+        }
 
         $this->closeSplitPanel();
         $this->dispatch('transaction-saved');
@@ -2017,7 +2039,7 @@ final class TransactionList extends Component
     {
         return $this->queryFor($filters)
             ->withRelations()
-            ->with(['emails', 'splits.category'])
+            ->with(['emails', 'splits.category', 'splitChildren'])
             ->orderBy(
                 in_array($this->sortBy, self::SORTABLE_COLUMNS, true) ? $this->sortBy : 'post_date',
                 in_array($this->sortDir, ['asc', 'desc'], true) ? $this->sortDir : 'desc',
@@ -2754,7 +2776,7 @@ final class TransactionList extends Component
         return $this->queryFor($filters)
             ->where('merchant_key', $this->expandedKey)
             ->withRelations()
-            ->with(['emails', 'splits.category'])
+            ->with(['emails', 'splits.category', 'splitChildren'])
             ->orderByDesc('post_date')
             ->orderByDesc('id')
             ->get();

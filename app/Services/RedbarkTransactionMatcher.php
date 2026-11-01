@@ -75,6 +75,7 @@ final readonly class RedbarkTransactionMatcher
         return Transaction::withTrashed()
             ->where('account_id', $accountId)
             ->whereNull('redbark_id')
+            ->whereNull('split_parent_id')
             ->where('amount', $amountCents)
             ->where(fn (Builder $query): Builder => $query->whereNull('deleted_at')
                 ->orWhereNotNull('folded_into_transaction_id'))

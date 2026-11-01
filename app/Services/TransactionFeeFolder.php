@@ -70,6 +70,8 @@ final readonly class TransactionFeeFolder
             || $fee->folded_into_transaction_id !== null
             || $fee->planned_transaction_id !== null
             || $fee->transfer_pair_id !== null
+            || $fee->isSplitChild()
+            || $fee->isSplitParent()
         ) {
             return null;
         }
@@ -97,6 +99,8 @@ final readonly class TransactionFeeFolder
             ->whereKeyNot($fee->id)
             ->where('description', 'like', "%{$matches[1]} #%")
             ->whereRaw('ABS(amount) > ?', [abs($fee->amount)])
+            ->whereNull('split_parent_id')
+            ->whereDoesntHave('splitChildren')
             ->current()
             ->get();
 

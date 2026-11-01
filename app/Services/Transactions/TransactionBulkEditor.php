@@ -19,10 +19,12 @@ use Throwable;
  * version through createChild, exactly as an edit in the transaction modal does, and the
  * balance history is rebuilt in the same DB transaction as the writes.
  *
- * A split parent is skipped: its amount is divided by its split lines. A bank-feed row keeps
- * the bank's date and description, so a date is not applied to it and a name becomes its
+ * A split parent is skipped: its amount is divided by its split lines or by its child
+ * transactions. A bank-feed row keeps the bank's date and description, so a date is not
+ * applied to it and a name becomes its
  * display name, as in the modal. A date is not applied to a linked transfer leg either: the
  * modal moves both legs together, and one leg alone would leave the pair on different days.
+ * A split child keeps its parent's date for the same reason.
  */
 final readonly class TransactionBulkEditor
 {
@@ -41,8 +43,10 @@ final readonly class TransactionBulkEditor
     {
         return $query
             ->whereDoesntHave('splits')
+            ->whereDoesntHave('splitChildren')
             ->when($edit->changesOnlyDate(), fn (Builder $q): Builder => $q
                 ->whereNull('transfer_pair_id')
+                ->whereNull('split_parent_id')
                 ->whereNotIn(
                     'source',
                     array_map(static fn (TransactionSource $source): string => $source->value, TransactionSource::bankFeed()),
@@ -60,6 +64,7 @@ final readonly class TransactionBulkEditor
     {
         return $editable->where(fn (Builder $q): Builder => $q
             ->whereNotNull('transfer_pair_id')
+            ->orWhereNotNull('split_parent_id')
             ->orWhereIn(
                 'source',
                 array_map(static fn (TransactionSource $source): string => $source->value, TransactionSource::bankFeed()),
@@ -114,7 +119,7 @@ final readonly class TransactionBulkEditor
         $isBankFeed = $transaction->source->isBankFeed();
         $overrides = [];
 
-        if ($edit->date !== null && ! $isBankFeed && $transaction->transfer_pair_id === null) {
+        if ($edit->date !== null && ! $isBankFeed && $transaction->transfer_pair_id === null && ! $transaction->isSplitChild()) {
             $overrides['post_date'] = $edit->date;
         }
 
