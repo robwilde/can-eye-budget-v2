@@ -136,6 +136,10 @@ final readonly class PendingMergeService
             throw new PendingMergeRefusedException(__('Transfers cannot be merged.'));
         }
 
+        if ($posted->isSplitChild() || $posted->isSplitParent()) {
+            throw new PendingMergeRefusedException(__('A split transaction cannot be merged.'));
+        }
+
         $attachments = TransactionAttachment::query()->whereIn('transaction_id', [...$lineage->modelKeys(), $posted->id])->count();
 
         if ($attachments > TransactionAttachment::MAX_PER_TRANSACTION) {

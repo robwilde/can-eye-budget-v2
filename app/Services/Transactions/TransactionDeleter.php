@@ -19,6 +19,9 @@ use Throwable;
  * An original bank-feed row is never deleted: the bank still holds it. A version of one
  * can be, which hands current status back to the row before it. A transfer leg's bank-feed
  * partner is unlinked and survives; any other partner is dissolved by TransferLinker.
+ *
+ * A split child is never deleted on its own: it goes only with its parent, which takes every
+ * child with it.
  */
 final readonly class TransactionDeleter
 {
@@ -35,12 +38,14 @@ final readonly class TransactionDeleter
      */
     public function deletable(Builder $query): Builder
     {
-        return $query->where(fn (Builder $q): Builder => $q
-            ->whereNotNull('parent_transaction_id')
-            ->orWhereNotIn('source', array_map(
-                static fn (TransactionSource $source): string => $source->value,
-                TransactionSource::bankFeed(),
-            )));
+        return $query
+            ->whereNull('split_parent_id')
+            ->where(fn (Builder $q): Builder => $q
+                ->whereNotNull('parent_transaction_id')
+                ->orWhereNotIn('source', array_map(
+                    static fn (TransactionSource $source): string => $source->value,
+                    TransactionSource::bankFeed(),
+                )));
     }
 
     /**
@@ -70,6 +75,7 @@ final readonly class TransactionDeleter
                 }
 
                 $this->releaseTransfer($transaction);
+                $this->deleteSplitChildren($transaction);
                 $transaction->delete();
                 $deleted[] = $transaction;
             }
@@ -80,6 +86,20 @@ final readonly class TransactionDeleter
 
             return count($deleted);
         });
+    }
+
+    private function deleteSplitChildren(Transaction $parent): void
+    {
+        $children = Transaction::query()
+            ->where('user_id', $parent->user_id)
+            ->where('split_parent_id', $parent->id)
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($children as $child) {
+            $child->delete();
+        }
     }
 
     /**

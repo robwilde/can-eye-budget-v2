@@ -52,6 +52,7 @@ final readonly class PlannedTransactionMatcher
             ->current()
             ->excludingTransfers()
             ->whereNull('planned_transaction_id')
+            ->whereNull('split_parent_id')
             ->where('excluded', false)
             ->whereBetween('post_date', [$postDateFrom, $windowEnd])
             ->get(['id', 'account_id', 'direction', 'amount', 'post_date'])
