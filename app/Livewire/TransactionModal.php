@@ -26,6 +26,7 @@ use App\Services\ExchangeRateLookup;
 use App\Services\PendingMergeService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\TransactionIdempotency;
+use App\Services\Transactions\TransactionDeleter;
 use App\Services\Transfers\TransferLinker;
 use App\Support\AmountParser;
 use App\Support\AmountParseResult;
@@ -459,38 +460,15 @@ final class TransactionModal extends Component
      */
     public function deleteTransaction(): void
     {
-        $transaction = Transaction::query()
-            ->where('user_id', auth()->id())
-            ->find($this->openedTransactionId ?? $this->editingTransactionId);
+        $deleted = app(TransactionDeleter::class)->delete(
+            Transaction::query()
+                ->where('user_id', auth()->id())
+                ->whereKey($this->openedTransactionId ?? $this->editingTransactionId),
+        );
 
-        if (! $transaction) {
+        if ($deleted === 0) {
             return;
         }
-
-        if ($transaction->parent_transaction_id === null && $transaction->source->isBankFeed()) {
-            return;
-        }
-
-        DB::transaction(static function () use ($transaction): void {
-            if ($transaction->transfer_pair_id) {
-                $pair = Transaction::query()
-                    ->where('id', $transaction->transfer_pair_id)
-                    ->where('user_id', auth()->id())
-                    ->first();
-
-                if ($pair instanceof Transaction && $pair->source->isBankFeed()) {
-                    app(TransferLinker::class)->unlink($transaction);
-                } elseif ($pair instanceof Transaction) {
-                    app(TransferLinker::class)->dissolve($transaction);
-                }
-
-                app(TransferLinker::class)->releaseRestoredVersion($transaction);
-            }
-
-            $transaction->delete();
-
-            app(AccountBalanceHistoryBuilder::class)->rebuildForTransactions($transaction);
-        });
 
         $this->showModal = false;
         $this->resetForm();
@@ -1377,7 +1355,7 @@ final class TransactionModal extends Component
         if ($transaction->source->isBankFeed()
             || $description === $this->openedDescription
             || $description === ''
-            || ! $this->cleanNameFollowsDescription($transaction)) {
+            || ! $transaction->cleanNameFollowsDescription()) {
             return ['description' => $description];
         }
 
@@ -1386,14 +1364,6 @@ final class TransactionModal extends Component
             'clean_description' => $description,
             'clean_description_source' => CleanDescriptionSource::Manual->value,
         ];
-    }
-
-    private function cleanNameFollowsDescription(Transaction $transaction): bool
-    {
-        $source = $transaction->clean_description_source;
-
-        return $source?->isImportDerived() === true
-            || ($source === CleanDescriptionSource::Manual && $transaction->clean_description === $transaction->description);
     }
 
     /**

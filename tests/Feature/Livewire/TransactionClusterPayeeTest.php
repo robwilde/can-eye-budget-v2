@@ -91,6 +91,34 @@ test('applying the suggestion to the whole cluster confirms the payee and keeps 
         ->and(Transaction::query()->where('merchant_key', $key)->where('category_source', CategorySource::Manual)->count())->toBe(3);
 });
 
+test('unticking a transfer leg in a cluster still confirms the payee for every row that took the category', function () {
+    clusterRows($this->user, $this->account, 'WOOLWORTHS 1234', 3);
+    $key = Transaction::query()->where('user_id', $this->user->id)->value('merchant_key');
+    $payee = clusterPayee($this->user, $key, $this->groceries);
+    $partner = Transaction::query()->where('merchant_key', $key)->orderBy('id')->first();
+    $transfer = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'description' => 'WOOLWORTHS 1234',
+        'category_id' => null,
+        'direction' => TransactionDirection::Debit,
+        'post_date' => '2026-06-09',
+        'transfer_pair_id' => $partner->id,
+    ]);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->set('groupMode', 'merchant')
+        ->call('selectCluster', $key)
+        ->set('expandedKey', $key)
+        ->set('selected.'.$transfer->id, false)
+        ->call('applyCategoryToSelection');
+
+    expect($payee->refresh()->status)->toBe(PayeeStatus::Confirmed)
+        ->and($transfer->fresh()->category_id)->toBeNull();
+});
+
 test('applying to hand-picked rows of a cluster does not confirm the payee', function () {
     clusterRows($this->user, $this->account, 'WOOLWORTHS 1234', 3);
     $key = Transaction::query()->where('user_id', $this->user->id)->value('merchant_key');

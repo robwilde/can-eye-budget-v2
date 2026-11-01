@@ -348,6 +348,18 @@ final class Transaction extends Model
     }
 
     /**
+     * Whether a rename of the description should carry the display name with it: the display
+     * name is import-derived, or a manual name that is just a copy of the description.
+     */
+    public function cleanNameFollowsDescription(): bool
+    {
+        $source = $this->clean_description_source;
+
+        return $source?->isImportDerived() === true
+            || ($source === CleanDescriptionSource::Manual && $this->clean_description === $this->description);
+    }
+
+    /**
      * Whether a rule must leave this row's category alone: a rule fills gaps,
      * it never overrides a person. A categorised row that never declared a
      * source is treated as Manual, which is what saving() would default it to.

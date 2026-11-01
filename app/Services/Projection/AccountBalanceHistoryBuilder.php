@@ -11,6 +11,7 @@ use App\Models\AccountDailyBalance;
 use App\Models\AccountValuation;
 use App\Models\Transaction;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -148,6 +149,36 @@ final class AccountBalanceHistoryBuilder
         sort($ids);
 
         Account::query()->whereIn('id', $ids)->orderBy('id')->lockForUpdate()->get(['id']);
+    }
+
+    /**
+     * Every account a write to these rows can rebuild or touch: the rows' own, their
+     * confirmed and suggested transfer partners', and the accounts of the earlier versions a
+     * delete hands current status back to. Read it before the write's DB transaction opens
+     * and pass it to lockAccounts() as that transaction's first statement: on MariaDB's
+     * REPEATABLE READ the first plain read fixes the snapshot, so reading here inside the
+     * transaction would hide what a writer holding those locks commits while this one waits.
+     *
+     * @param  Builder<Transaction>  $rows
+     * @return list<int>
+     */
+    public function accountIdsOfRows(Builder $rows): array
+    {
+        $own = (clone $rows)->get(['account_id', 'user_id', 'transfer_pair_id', 'suggested_pair_id', 'parent_transaction_id']);
+        $relatedIds = $own->flatMap(fn (Transaction $row): array => [$row->transfer_pair_id, $row->suggested_pair_id, $row->parent_transaction_id])
+            ->filter()
+            ->unique()
+            ->values();
+
+        $related = $relatedIds->isEmpty()
+            ? collect()
+            : Transaction::query()
+                ->withTrashed()
+                ->whereIn('user_id', $own->pluck('user_id')->unique()->values())
+                ->whereIn('id', $relatedIds)
+                ->pluck('account_id');
+
+        return $own->pluck('account_id')->merge($related)->map(static fn ($id): int => (int) $id)->unique()->values()->all();
     }
 
     /**
