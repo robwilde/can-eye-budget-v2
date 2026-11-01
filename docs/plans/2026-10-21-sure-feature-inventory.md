@@ -368,7 +368,8 @@ The remaining features have no ordering constraint beyond the conventions above.
     - search over description, clean description and merchant name;
     - sorting and merchant-cluster mode;
     - a split panel: at least two lines, each greater than zero, summing to the total; transfers cannot be split;
-    - bulk set-category, revert machine categories, and create a rule from the selection.
+    - bulk set-category, revert machine categories, and create a rule from the selection;
+    - bulk delete and bulk edit of date, name and notes: any row can be ticked, transfer legs and splits included. Delete keeps original bank-feed rows and handles transfer partners as a single delete does (TransactionDeleter). Edit changes only the included fields, one new version per row (TransactionBulkEditor), skips split parents and never applies a date to a bank-feed row. Both rebuild balance history in the same DB transaction, and the panel shows how many rows change and how many are skipped.
   - TransactionEmail, linked by TransactionEmailLinker, attaches Gmail receipts.
   - Pending holds: SyncRedbarkFeedJob attaches a settled row to its pending hold within 8 days, and ExpireRedbarkHoldsCommand voids orphaned holds.
   - TransactionIngestor is the ingest path for CSV, statement, feed and manual single entries. Manual transfer legs, conversions, untracked mirrors and some single-row creates bypass it.
@@ -376,7 +377,7 @@ The remaining features have no ordering constraint beyond the conventions above.
   - TransactionFeeFolder folds international fees into their purchase.
 - **Gap:**
   - Missing: tags; file attachments; an excluded flag; per-transaction currency or exchange rate; transaction kinds.
-  - Missing list and bulk features: bulk delete; bulk edit of date, name or notes; amount, status and merchant filters; totals for the filtered list (only per-merchant-cluster totals); server-side idempotency; pending-duplicate merge.
+  - Missing list and bulk features: amount, status and merchant filters; totals for the filtered list (only per-merchant-cluster totals); server-side idempotency; pending-duplicate merge.
   - Splits are category lines, not child transactions.
   - Category and display-name (clean_description) provenance are protected; notes, merchant and other fields are not.
 - **Build it like:**
