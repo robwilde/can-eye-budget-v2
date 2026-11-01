@@ -7,6 +7,7 @@ namespace App\Livewire;
 use App\Casts\MoneyCast;
 use App\Contracts\ContextDevServiceContract;
 use App\Contracts\GmailServiceContract;
+use App\DTOs\BulkTransactionEdit;
 use App\DTOs\CategoryRulePreview;
 use App\DTOs\EmailSearchResult;
 use App\Enums\AccountStatus;
@@ -39,11 +40,14 @@ use App\Services\Payees\PayeeConfirmer;
 use App\Services\Payees\PayeeReviewQueue;
 use App\Services\Reports\CategoryGroupMap;
 use App\Services\TransactionEmailLinker;
+use App\Services\Transactions\TransactionBulkEditor;
+use App\Services\Transactions\TransactionDeleter;
 use App\Services\Transfers\TransferLinker;
 use App\Services\Transfers\TransferReviewQueue;
 use App\Support\AmountParser;
 use App\Support\Budget\BudgetTagResolver;
 use App\Support\Transactions\TransactionTotals;
+use Carbon\CarbonImmutable;
 use ContextDev\Core\Exceptions\ContextDevException;
 use Flux\Flux;
 use Illuminate\Database\Eloquent\Builder;
@@ -54,6 +58,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
@@ -255,6 +260,27 @@ final class TransactionList extends Component
     public ?string $bulkNotice = null;
 
     /**
+     * Which bulk panel is open: 'edit' or 'delete'. Locked so the client cannot open a
+     * panel this class does not render.
+     */
+    #[Locked]
+    public ?string $bulkPanel = null;
+
+    /**
+     * The fields the bulk edit changes: any of 'date', 'name' and 'notes'. A field that is
+     * not listed keeps its value on every row, whatever its input holds.
+     *
+     * @var list<string>
+     */
+    public array $bulkEditInclude = [];
+
+    public string $bulkEditDate = '';
+
+    public string $bulkEditName = '';
+
+    public string $bulkEditNotes = '';
+
+    /**
      * The editable `description contains` value the generated rule will carry.
      * Defaulted from CategoryRuleGenerator::suggestMatchValue(), then the
      * user's to change before anything is created.
@@ -314,7 +340,7 @@ final class TransactionList extends Component
     public ?string $splitError = null;
 
     /**
-     * Per-request memo for matchingEligibleCount(). Private, so Livewire never
+     * Per-request memo for matchingRowCount(). Private, so Livewire never
      * serialises it and it cannot survive into the next request.
      */
     private ?int $matchingCountCache = null;
@@ -547,6 +573,7 @@ final class TransactionList extends Component
         $this->bulkError = null;
         $this->bulkNotice = null;
         $this->closeRulePanel();
+        $this->closeBulkPanel();
     }
 
     /**
@@ -565,9 +592,9 @@ final class TransactionList extends Component
      * what the user ticked, so without the opt-out a bulk apply would rewrite
      * any unselected sibling sharing the plan: ordinary rows the list offered
      * with an enabled checkbox and the user deliberately left alone, and the
-     * transfers and splits eligibleForBulk() renders disabled with a stated
-     * reason. Every other writer, including a single-row edit and
-     * RuleActionExecutor, keeps the grouping behaviour untouched.
+     * transfers and splits eligibleForBulk() leaves out. Every other writer,
+     * including a single-row edit and RuleActionExecutor, keeps the grouping
+     * behaviour untouched.
      *
      * @throws Throwable
      */
@@ -582,7 +609,7 @@ final class TransactionList extends Component
             return;
         }
 
-        $query = $this->selectionQuery();
+        $query = $this->categorisableSelectionQuery();
 
         if ($query === null) {
             $this->bulkError = 'Nothing is selected.';
@@ -591,6 +618,7 @@ final class TransactionList extends Component
         }
 
         $clusterPayee = $this->wholeClusterPayee($query);
+        $skipped = ($this->selectionQuery()?->count() ?? 0) - (clone $query)->count();
 
         // Counted from the database before the write rather than tallied in
         // the loop, so the number shown is the number of rows the write
@@ -650,9 +678,10 @@ final class TransactionList extends Component
         // entirely — and an out-of-range page renders the empty state while
         // rows still match. Go back to page one so the remainder is visible.
         $this->resetPage();
-        $this->bulkNotice = $updated === 1
+        $this->bulkNotice = ($updated === 1
             ? 'Categorised 1 transaction.'
-            : sprintf('Categorised %d transactions.', $updated);
+            : sprintf('Categorised %d transactions.', $updated))
+            .($skipped > 0 ? sprintf(' Skipped %d that are transfers or splits.', $skipped) : '');
 
         $this->dispatch('transaction-saved');
     }
@@ -670,7 +699,7 @@ final class TransactionList extends Component
         $this->bulkError = null;
         $this->bulkNotice = null;
 
-        $query = $this->selectionQuery();
+        $query = $this->categorisableSelectionQuery();
 
         if ($query === null) {
             $this->bulkError = 'Nothing is selected.';
@@ -707,6 +736,86 @@ final class TransactionList extends Component
             : sprintf('Reverted %d rule-set categories.', $reverted);
 
         $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * Open the delete or edit panel over the current selection. Nothing is written until
+     * the panel's own confirm button runs bulkDelete() or bulkEdit().
+     */
+    public function openBulkPanel(string $panel): void
+    {
+        $this->bulkError = null;
+        $this->bulkNotice = null;
+        $this->closeRulePanel();
+        $this->closeBulkPanel();
+
+        if (in_array($panel, ['edit', 'delete'], true)) {
+            $this->bulkPanel = $panel;
+        }
+    }
+
+    public function closeBulkPanel(): void
+    {
+        $this->bulkPanel = null;
+        $this->bulkEditInclude = [];
+        $this->bulkEditDate = '';
+        $this->bulkEditName = '';
+        $this->bulkEditNotes = '';
+        $this->resetErrorBag();
+    }
+
+    /**
+     * Delete the selection. The selection is re-resolved from the database for the signed-in
+     * user, so an id that is not theirs resolves to nothing. Original bank-feed rows are
+     * kept, and a transfer leg is handled as a single delete handles it: a bank-feed partner
+     * is unlinked and stays, any other partner is dissolved.
+     *
+     * @throws Throwable
+     */
+    public function bulkDelete(TransactionDeleter $deleter): void
+    {
+        $this->bulkError = null;
+        $this->bulkNotice = null;
+
+        $query = $this->selectionQuery();
+
+        if ($query === null) {
+            $this->bulkError = 'Nothing is selected.';
+
+            return;
+        }
+
+        $requested = $this->requestedCount($query);
+        $deleted = $deleter->delete($query);
+
+        $this->finishBulkWrite('Deleted', $deleted, $requested - $deleted, 'cannot be deleted');
+    }
+
+    /**
+     * Change the date, name or notes of the selection. Only the fields the user included are
+     * written, and each row gets a new version. The selection is re-resolved for the
+     * signed-in user, and split transactions are skipped.
+     *
+     * @throws Throwable
+     */
+    public function bulkEdit(TransactionBulkEditor $editor): void
+    {
+        $this->bulkError = null;
+        $this->bulkNotice = null;
+
+        $query = $this->selectionQuery();
+
+        if ($query === null) {
+            $this->bulkError = 'Nothing is selected.';
+
+            return;
+        }
+
+        $edit = $this->validatedBulkEdit();
+        $requested = $this->requestedCount($query);
+        $edited = $editor->edit($query, $edit);
+
+        $this->finishBulkWrite('Edited', $edited, $requested - $edited, 'cannot be edited');
     }
 
     /**
@@ -814,29 +923,6 @@ final class TransactionList extends Component
         );
 
         $this->dispatch('transaction-saved');
-    }
-
-    /**
-     * Whether a row may be bulk-categorised. Mirrors eligibleForBulk() for a
-     * single already-loaded model so the view can disable the checkbox and say
-     * why, instead of silently ignoring the tick.
-     */
-    public function isBulkExcluded(Transaction $transaction): bool
-    {
-        return $transaction->transfer_pair_id !== null || $transaction->isSplit();
-    }
-
-    public function bulkExclusionReason(Transaction $transaction): ?string
-    {
-        if ($transaction->transfer_pair_id !== null) {
-            return 'Transfers are not spending, so they are not categorised here.';
-        }
-
-        if ($transaction->isSplit()) {
-            return 'This transaction is split; its category comes from its split lines.';
-        }
-
-        return null;
     }
 
     public function sort(string $column): void
@@ -1511,6 +1597,8 @@ final class TransactionList extends Component
 
         [$merchantBrands, $identifiableIds, $identifiableKeys] = $this->merchantBrandState($visibleRows);
 
+        $selectionCount = $this->selectionCount();
+
         return view('livewire.transaction-list', [
             'transactions' => $transactions,
             'grouped' => $grouped,
@@ -1539,9 +1627,11 @@ final class TransactionList extends Component
             'splitCategories' => Category::visibleSortedByFullPath($this->authenticatedUser()->id),
             'clusterSuggestion' => $this->clusterSuggestion(),
             'bulkCategories' => $this->narrowedByIntent(Category::visibleSortedByFullPath($this->authenticatedUser()->id)),
-            'selectionCount' => $this->selectionCount(),
+            'selectionCount' => $selectionCount,
             'pageEligibleIds' => $pageEligibleIds,
-            'matchingCount' => $this->matchingEligibleCount(),
+            'matchingCount' => $this->matchingRowCount(),
+            'categorisableCount' => $selectionCount > 0 ? ($this->categorisableSelectionQuery()?->count() ?? 0) : 0,
+            'bulkImpact' => $this->bulkImpact(),
             'merchantBrands' => $merchantBrands,
             'identifiableIds' => $identifiableIds,
             'identifiableKeys' => $identifiableKeys,
@@ -1936,6 +2026,9 @@ final class TransactionList extends Component
     }
 
     /**
+     * Every row on screen is selectable: delete and edit take transfers and splits too, and
+     * the category actions leave those out through categorisableSelectionQuery().
+     *
      * Takes the base collection: LengthAwarePaginator::getCollection() is
      * declared as one even though it holds the page's Eloquent models.
      *
@@ -1945,7 +2038,6 @@ final class TransactionList extends Component
     private function eligibleIds(Collection $rows): array
     {
         return $rows
-            ->reject(fn (Transaction $t): bool => $this->isBulkExcluded($t))
             ->pluck('id')
             ->map(static fn ($id): int => (int) $id)
             ->values()
@@ -2012,7 +2104,7 @@ final class TransactionList extends Component
      */
     private function ruleSourceTransaction(): ?Transaction
     {
-        return $this->selectionQuery()?->orderBy('id')->first();
+        return $this->categorisableSelectionQuery()?->orderBy('id')->first();
     }
 
     /**
@@ -2079,7 +2171,7 @@ final class TransactionList extends Component
      */
     private function resolvedSelectionIds(): array
     {
-        return $this->selectionQuery()
+        return $this->categorisableSelectionQuery()
             ?->pluck('id')
             ->map(static fn ($id): int => (int) $id)
             ->values()
@@ -2113,7 +2205,7 @@ final class TransactionList extends Component
                 return null;
             }
 
-            return $this->eligibleForBulk($this->queryFor($filters))
+            return $this->queryFor($filters)
                 ->when($merchantKey !== null, fn (Builder $q): Builder => $q->where('merchant_key', $merchantKey))
                 // Rows the user took back out of the scope. A scope minus its
                 // exclusions is what "everything matching this, except those"
@@ -2127,9 +2219,134 @@ final class TransactionList extends Component
             return null;
         }
 
-        return $this->eligibleForBulk(
-            Transaction::query()->where('user_id', auth()->id())->current(),
-        )->whereIn('id', $ids);
+        return Transaction::query()
+            ->where('user_id', auth()->id())
+            ->current()
+            ->whereIn('id', $ids);
+    }
+
+    /**
+     * The selection narrowed to the rows a category may be written to: a split
+     * transaction's category comes from its split lines, and a transfer is not spending.
+     *
+     * @return Builder<Transaction>|null
+     */
+    private function categorisableSelectionQuery(): ?Builder
+    {
+        $query = $this->selectionQuery();
+
+        return $query === null ? null : $this->eligibleForBulk($query);
+    }
+
+    /**
+     * How many rows the user asked to write: the ticked ids, forged or stale ones included,
+     * or what the held scope resolves to. The gap to what a write changed is what it skipped.
+     *
+     * @param  Builder<Transaction>  $query
+     */
+    private function requestedCount(Builder $query): int
+    {
+        return $this->bulkScope !== null ? (clone $query)->count() : count($this->selectedIds());
+    }
+
+    private function finishBulkWrite(string $verb, int $written, int $skipped, string $skipReason): void
+    {
+        $this->clearSelection();
+        $this->resetPage();
+        $this->bulkNotice = sprintf('%s %d %s.', $verb, $written, $written === 1 ? 'transaction' : 'transactions')
+            .($skipped > 0 ? sprintf(' Skipped %d that %s.', $skipped, $skipReason) : '');
+
+        $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * The fields the user included, validated. A field left out is neither validated nor
+     * written, whatever its input holds.
+     *
+     * @throws ValidationException
+     */
+    private function validatedBulkEdit(): BulkTransactionEdit
+    {
+        $include = array_values(array_intersect(['date', 'name', 'notes'], $this->bulkEditInclude));
+
+        if ($include === []) {
+            throw ValidationException::withMessages(['bulkEditInclude' => 'Choose at least one field to change.']);
+        }
+
+        $rules = [];
+
+        if (in_array('date', $include, true)) {
+            $rules['bulkEditDate'] = ['required', 'date_format:Y-m-d'];
+        }
+
+        if (in_array('name', $include, true)) {
+            $rules['bulkEditName'] = ['required', 'string', 'max:255'];
+        }
+
+        if (in_array('notes', $include, true)) {
+            $rules['bulkEditNotes'] = ['nullable', 'string', 'max:1000'];
+        }
+
+        $this->validate($rules);
+
+        return new BulkTransactionEdit(
+            date: in_array('date', $include, true) ? CarbonImmutable::parse($this->bulkEditDate)->startOfDay() : null,
+            name: in_array('name', $include, true) ? mb_trim($this->bulkEditName) : null,
+            setNotes: in_array('notes', $include, true),
+            notes: in_array('notes', $include, true) && mb_trim($this->bulkEditNotes) !== '' ? $this->bulkEditNotes : null,
+        );
+    }
+
+    /**
+     * What the open panel would do to the selection, for its confirmation text. keepDate counts
+     * the rows an edit changes without applying the date to them.
+     *
+     * @return array{requested: int, changes: int, skipped: int, keepDate: int}|null
+     */
+    private function bulkImpact(): ?array
+    {
+        if ($this->bulkPanel === null) {
+            return null;
+        }
+
+        $query = $this->selectionQuery();
+
+        if ($query === null) {
+            return ['requested' => 0, 'changes' => 0, 'skipped' => 0, 'keepDate' => 0];
+        }
+
+        $requested = $this->requestedCount($query);
+
+        if ($this->bulkPanel === 'delete') {
+            $changes = app(TransactionDeleter::class)->deletable(clone $query)->count();
+
+            return ['requested' => $requested, 'changes' => $changes, 'skipped' => $requested - $changes, 'keepDate' => 0];
+        }
+
+        $preview = $this->bulkEditPreview();
+        $editor = app(TransactionBulkEditor::class);
+        $editable = $preview === null ? null : $editor->editable(clone $query, $preview);
+        $changes = $editable?->count() ?? 0;
+        $keepDate = $preview !== null && $preview->date !== null && ! $preview->changesOnlyDate()
+            ? $editor->dateKept(clone $editable)->count()
+            : 0;
+
+        return ['requested' => $requested, 'changes' => $changes, 'skipped' => $requested - $changes, 'keepDate' => $keepDate];
+    }
+
+    private function bulkEditPreview(): ?BulkTransactionEdit
+    {
+        $include = array_intersect(['date', 'name', 'notes'], $this->bulkEditInclude);
+
+        if ($include === []) {
+            return null;
+        }
+
+        return new BulkTransactionEdit(
+            date: in_array('date', $include, true) ? CarbonImmutable::today() : null,
+            name: in_array('name', $include, true) ? '' : null,
+            setNotes: in_array('notes', $include, true),
+        );
     }
 
     /**
@@ -2149,11 +2366,11 @@ final class TransactionList extends Component
     }
 
     /**
-     * How many rows the current selection would actually write.
+     * How many rows the current selection resolves to.
      *
-     * Always counted from the database, including for hand-picked ids: a row
-     * that was ticked and then split becomes ineligible while its id stays in
-     * $selected, so counting ticks would overstate the reach.
+     * Always counted from the database, including for hand-picked ids: a forged or
+     * superseded id stays in $selected while resolving to no row, so counting ticks would
+     * overstate the reach.
      */
     private function selectionCount(): int
     {
@@ -2165,7 +2382,7 @@ final class TransactionList extends Component
             && $this->bulkExcluded === []
             && ($this->bulkScope['merchantKey'] ?? null) === null
             && ($this->bulkScope['filters'] ?? null) === $this->currentFilters()) {
-            return $this->matchingEligibleCount();
+            return $this->matchingRowCount();
         }
 
         return $this->selectionQuery()?->count() ?? 0;
@@ -2178,11 +2395,9 @@ final class TransactionList extends Component
      * Memoised for the render pass: render() needs it for the affordance and
      * selectionCount() reuses it for a whole-filter scope.
      */
-    private function matchingEligibleCount(): int
+    private function matchingRowCount(): int
     {
-        return $this->matchingCountCache ??= $this->eligibleForBulk(
-            $this->queryFor($this->currentFilters()),
-        )->count();
+        return $this->matchingCountCache ??= $this->queryFor($this->currentFilters())->count();
     }
 
     /**
@@ -2324,8 +2539,7 @@ final class TransactionList extends Component
      * not spending at all. The transfer test is transfer_pair_id (the pairing
      * column); parent_transaction_id is createChild() lineage, a different
      * relationship that would exclude the wrong rows entirely. The split test
-     * is the splits relation, mirrored for an already-loaded model by
-     * isBulkExcluded().
+     * is the splits relation.
      *
      * @param  Builder<Transaction>  $query
      * @return Builder<Transaction>
@@ -2381,7 +2595,7 @@ final class TransactionList extends Component
     {
         $merchantKey = $this->bulkScope['merchantKey'] ?? null;
 
-        if (! is_string($merchantKey) || $this->bulkExcluded !== []) {
+        if (! is_string($merchantKey)) {
             return null;
         }
 
@@ -2457,8 +2671,8 @@ final class TransactionList extends Component
      *
      * Items are Transaction models hydrated with only the aggregate columns,
      * which is what Eloquent returns for a grouped selectRaw. They are read-only
-     * cluster summaries, never saved: `row_count`, `eligible_count`,
-     * `total_amount`, `min_amount`, `max_amount`, `first_date`, `last_date`,
+     * cluster summaries, never saved: `row_count`, `total_amount`,
+     * `min_amount`, `max_amount`, `first_date`, `last_date`,
      * `account_count` and `direction_count` are raw attributes, deliberately
      * named apart from `amount` so the MoneyCast on that column does not apply
      * to them.
@@ -2498,14 +2712,6 @@ final class TransactionList extends Component
             ->selectRaw(implode(', ', [
                 'merchant_key',
                 'COUNT(*) as row_count',
-                // What "select all in this merchant" can actually write.
-                // row_count counts everything in the cluster, but transfers
-                // cluster too (both legs share a description, so they share a
-                // merchant_key) and eligibleForBulk() refuses them, so a button
-                // labelled from row_count would promise rows it cannot touch.
-                // Splits are already excluded upstream by the uncategorised
-                // filter's whereDoesntHave('splits').
-                'SUM(CASE WHEN transfer_pair_id IS NULL THEN 1 ELSE 0 END) as eligible_count',
                 'SUM(CASE WHEN excluded = 0 THEN amount ELSE 0 END) as total_amount',
                 // Spread is measured on magnitudes so a cluster holding both a
                 // refund and a purchase reports a real range, not a sign flip.
