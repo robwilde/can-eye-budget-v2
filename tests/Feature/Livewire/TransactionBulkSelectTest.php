@@ -208,7 +208,7 @@ it('select-all-matching honours the snapshot taken at click time, not later filt
         ->and($outOfScope->fresh()->category_id)->toBeNull();
 });
 
-it('excludes transfers and splits from the select-all-matching count and write', function () {
+it('select-all-matching selects transfers and splits but writes a category only to the rest', function () {
     $plain = bulkTxn($this->user, $this->account);
     $other = bulkTxn($this->user, $this->account);
     $transfer = bulkTxn($this->user, $this->account, ['transfer_pair_id' => $other->id]);
@@ -223,21 +223,19 @@ it('excludes transfers and splits from the select-all-matching count and write',
 
     $component = Livewire::actingAs($this->user)
         ->test(TransactionList::class)
-        // The 'all' categorised filter does not itself exclude splits, so this
-        // leaves eligibleForBulk() as the only thing standing between the split
-        // row and the write.
         ->set('categorised', 'all')
         ->call('selectAllMatching');
 
-    // plain + other are eligible; the transfer and the split row are not.
-    expect($component->viewData('selectionCount'))->toBe(2);
+    expect($component->viewData('selectionCount'))->toBe(4)
+        ->and($component->viewData('categorisableCount'))->toBe(2);
 
     $component->set('bulkCategoryId', (string) $this->category->id)
         ->call('applyCategoryToSelection');
 
     expect($plain->fresh()->category_id)->toBe($this->category->id)
         ->and($transfer->fresh()->category_id)->toBeNull()
-        ->and($split->fresh()->category_id)->toBeNull();
+        ->and($split->fresh()->category_id)->toBeNull()
+        ->and($component->get('bulkNotice'))->toBe('Categorised 2 transactions. Skipped 2 that are transfers or splits.');
 });
 
 it('selects a whole merchant cluster in one action', function () {
@@ -371,15 +369,34 @@ it('toggles every eligible row on screen and back off again', function () {
     expect($component->viewData('selectionCount'))->toBe(0);
 });
 
-it('keeps excluded rows out of the on-screen eligible set', function () {
+it('offers transfer legs and splits as selectable rows', function () {
     $other = bulkTxn($this->user, $this->account);
-    bulkTxn($this->user, $this->account, ['transfer_pair_id' => $other->id]);
+    $transfer = bulkTxn($this->user, $this->account, ['transfer_pair_id' => $other->id]);
+    $split = bulkTxn($this->user, $this->account);
+    $split->splits()->create([
+        'category_id' => Category::factory()->for($this->user)->create(['is_hidden' => false])->id,
+        'amount' => 1899,
+        'position' => 1,
+    ]);
 
     $component = Livewire::actingAs($this->user)
         ->test(TransactionList::class);
 
-    // $other plus the transfer are on screen; only $other is eligible.
-    expect($component->viewData('pageEligibleIds'))->toBe([$other->id]);
+    expect($component->viewData('pageEligibleIds'))->toEqualCanonicalizing([$other->id, $transfer->id, $split->id]);
+});
+
+it('recounts the matching rows after a category write moves them out of the filter', function () {
+    $other = bulkTxn($this->user, $this->account);
+    bulkTxn($this->user, $this->account, ['transfer_pair_id' => $other->id]);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('categorised', 'uncategorised')
+        ->call('selectAllMatching')
+        ->set('bulkCategoryId', (string) $this->category->id)
+        ->call('applyCategoryToSelection');
+
+    expect($component->viewData('matchingCount'))->toBe(0);
 });
 
 it('shows the success notice even when the write empties the filtered list', function () {
@@ -455,11 +472,9 @@ it('keeps rows with no merchant key out of the merchant-mode select-all', functi
     expect($unclustered->fresh()->category_id)->toBeNull();
 });
 
-it('labels a merchant cluster by the rows a bulk write can actually touch', function () {
+it('selects a whole merchant cluster but writes a category only to the rows that can take one', function () {
     $a = bulkTxn($this->user, $this->account, ['description' => 'PAYPAL *STEAM 4829']);
     bulkTxn($this->user, $this->account, ['description' => 'PAYPAL *STEAM 5561']);
-    // Both legs of a transfer share a description, so a transfer clusters here
-    // — but eligibleForBulk() refuses it, so the button must not count it.
     bulkTxn($this->user, $this->account, [
         'description' => 'PAYPAL *STEAM 9903',
         'transfer_pair_id' => $a->id,
@@ -470,12 +485,12 @@ it('labels a merchant cluster by the rows a bulk write can actually touch', func
         ->set('categorised', 'uncategorised')
         ->set('groupMode', 'merchant');
 
-    $component->assertSee('Select all 2 in this merchant')
-        ->assertDontSee('Select all 3 in this merchant');
+    $component->assertSee('Select all 3 in this merchant');
 
     $component->call('selectCluster', 'PAYPAL STEAM');
 
-    expect($component->viewData('selectionCount'))->toBe(2);
+    expect($component->viewData('selectionCount'))->toBe(3)
+        ->and($component->viewData('categorisableCount'))->toBe(2);
 });
 
 it('reports only the rows a re-apply actually changed', function () {
@@ -527,8 +542,8 @@ it('leaves an unselected planned sibling untouched while a single edit still pro
 
     $selected = bulkTxn($this->user, $this->account, ['planned_transaction_id' => $planned->id]);
     $other = bulkTxn($this->user, $this->account);
-    // Shares the planned group with $selected, and is a transfer — the list
-    // renders it with a disabled checkbox and a stated reason.
+    // Shares the planned group with $selected, and is a transfer, which a
+    // category write leaves out.
     $excludedSibling = bulkTxn($this->user, $this->account, [
         'planned_transaction_id' => $planned->id,
         'transfer_pair_id' => $other->id,
@@ -540,7 +555,7 @@ it('leaves an unselected planned sibling untouched while a single edit still pro
         ->set('bulkCategoryId', (string) $this->category->id)
         ->call('applyCategoryToSelection');
 
-    expect($component->get('bulkNotice'))->toBe('Categorised 1 transaction.');
+    expect($component->get('bulkNotice'))->toBe('Categorised 1 transaction. Skipped 1 that are transfers or splits.');
 
     // Exactly the ticked, eligible row. The fan-out across
     // planned_transaction_id is opted out of for bulk, so the row the page
@@ -695,19 +710,6 @@ it('leaves an unselected ordinary planned sibling untouched', function () {
     expect($selected->fresh()->category_id)->toBe($this->category->id)
         ->and($unticked->fresh()->category_id)->toBeNull()
         ->and($planned->fresh()->category_id)->toBeNull();
-});
-
-it('marks an excluded row as disabled with a valid aria value', function () {
-    $other = bulkTxn($this->user, $this->account);
-    $transfer = bulkTxn($this->user, $this->account, ['transfer_pair_id' => $other->id]);
-
-    $html = Livewire::actingAs($this->user)->test(TransactionList::class)->html();
-
-    // Flux folds a static aria-disabled="true" into aria-disabled="aria-disabled",
-    // which is not a valid ARIA value and is silently ignored by assistive tech.
-    expect($html)->toContain('aria-disabled="true"')
-        ->and($html)->not->toContain('aria-disabled="aria-disabled"')
-        ->and($html)->toContain('data-testid="select-excluded-'.$transfer->id.'"');
 });
 
 it('drops an expanded cluster the paginator has moved past out of the page-level selection', function () {
