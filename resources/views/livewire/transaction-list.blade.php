@@ -375,23 +375,15 @@
                             {{-- Selecting a whole cluster is the point of this
                                  view: one click stands in for however many rows
                                  the cluster holds, stored as a scope rather
-                                 than an id list.
-
-                                 Labelled from eligible_count, not row_count:
-                                 transfers cluster here but a bulk write refuses
-                                 them, so row_count would promise rows the click
-                                 cannot touch. A cluster of pure transfers
-                                 offers no control at all rather than a no-op
-                                 one. --}}
-                            @if((int) $cluster->eligible_count > 0)
-                                <div class="px-4 pb-2">
-                                    <flux:button size="sm" variant="ghost"
-                                                 wire:click="selectCluster(@js($cluster->merchant_key))"
-                                                 data-testid="select-cluster-{{ md5($cluster->merchant_key) }}">
-                                        Select all {{ (int) $cluster->eligible_count }} in this merchant
-                                    </flux:button>
-                                </div>
-                            @endif
+                                 than an id list. The category write leaves
+                                 transfers out, and the bar says how many. --}}
+                            <div class="px-4 pb-2">
+                                <flux:button size="sm" variant="ghost"
+                                             wire:click="selectCluster(@js($cluster->merchant_key))"
+                                             data-testid="select-cluster-{{ md5($cluster->merchant_key) }}">
+                                    Select all {{ (int) $cluster->row_count }} in this merchant
+                                </flux:button>
+                            </div>
 
                             @if($isExpanded)
                                 <div id="cluster-rows-{{ md5($cluster->merchant_key) }}" class="day-card" data-testid="cluster-rows">
@@ -498,9 +490,16 @@
                     <flux:button variant="primary" size="sm"
                                  wire:click="applyCategoryToSelection"
                                  wire:loading.attr="disabled" wire:target="applyCategoryToSelection"
+                                 :disabled="$categorisableCount === 0"
                                  data-testid="bulk-apply">
-                        Apply to these {{ $selectionCount }}
+                        Apply to these {{ $categorisableCount }}
                     </flux:button>
+
+                    @if($categorisableCount < $selectionCount)
+                        <span class="text-sm text-zinc-500" data-testid="bulk-category-skipped">
+                            {{ $selectionCount - $categorisableCount }} left out of the category (transfers and splits)
+                        </span>
+                    @endif
 
                     {{-- Shown while reviewing machine-set categories, which
                          is the only context where reverting is the action
@@ -509,6 +508,7 @@
                         <flux:button variant="ghost" size="sm"
                                      wire:click="revertMachineCategories"
                                      wire:loading.attr="disabled" wire:target="revertMachineCategories"
+                                     :disabled="$categorisableCount === 0"
                                      data-testid="bulk-revert">
                             Undo rule-set categories
                         </flux:button>
@@ -524,8 +524,21 @@
                          gets its own button and its own confirmation. --}}
                     <flux:button variant="ghost" size="sm"
                                  wire:click="openRulePanel"
+                                 :disabled="$categorisableCount === 0"
                                  data-testid="rule-open">
                         Create rule…
+                    </flux:button>
+
+                    <flux:button variant="ghost" size="sm"
+                                 wire:click="openBulkPanel('edit')"
+                                 data-testid="bulk-edit-open">
+                        Edit…
+                    </flux:button>
+
+                    <flux:button variant="ghost" size="sm"
+                                 wire:click="openBulkPanel('delete')"
+                                 data-testid="bulk-delete-open">
+                        Delete…
                     </flux:button>
 
                     @if($bulkError)
@@ -601,6 +614,95 @@
                                 Choose a category and a match value to see what this rule would do.
                             </p>
                         @endif
+                    </div>
+                @endif
+
+                {{-- Confirmation for the two writes that are not a category: the
+                     counts come from the same query the confirm button runs, so
+                     what is shown is what will be written. --}}
+                @if($bulkPanel !== null && $bulkImpact !== null)
+                    <div class="mt-3 space-y-3 border-t border-zinc-200 pt-3 dark:border-zinc-700" data-testid="bulk-panel">
+                        @if($bulkPanel === 'edit')
+                            <div class="space-y-3" data-testid="bulk-edit-panel">
+                                <flux:checkbox.group wire:model.live="bulkEditInclude" label="Fields to change">
+                                    <flux:checkbox value="date" label="Date" data-testid="bulk-include-date"/>
+                                    <flux:checkbox value="name" label="Name" data-testid="bulk-include-name"/>
+                                    <flux:checkbox value="notes" label="Notes" data-testid="bulk-include-notes"/>
+                                </flux:checkbox.group>
+                                <flux:error name="bulkEditInclude"/>
+
+                                <div class="flex flex-wrap items-start gap-3">
+                                    @if(in_array('date', $bulkEditInclude, true))
+                                        <flux:field>
+                                            <flux:label>New date</flux:label>
+                                            <flux:input type="date" wire:model="bulkEditDate" size="sm" data-testid="bulk-edit-date"/>
+                                            <flux:error name="bulkEditDate"/>
+                                        </flux:field>
+                                    @endif
+
+                                    @if(in_array('name', $bulkEditInclude, true))
+                                        <flux:field class="min-w-64">
+                                            <flux:label>New name</flux:label>
+                                            <flux:input wire:model="bulkEditName" size="sm" data-testid="bulk-edit-name"/>
+                                            <flux:error name="bulkEditName"/>
+                                        </flux:field>
+                                    @endif
+
+                                    @if(in_array('notes', $bulkEditInclude, true))
+                                        <flux:field class="min-w-64">
+                                            <flux:label>New notes (leave empty to clear)</flux:label>
+                                            <flux:textarea wire:model="bulkEditNotes" rows="2" data-testid="bulk-edit-notes"/>
+                                            <flux:error name="bulkEditNotes"/>
+                                        </flux:field>
+                                    @endif
+                                </div>
+                            </div>
+                        @endif
+
+                        @if($bulkPanel === 'edit' && $bulkEditInclude === [])
+                            <p class="text-sm text-zinc-500" data-testid="bulk-impact-choose">
+                                Choose what to change.
+                            </p>
+                        @else
+                            <p class="text-sm" data-testid="bulk-impact">
+                                <strong data-testid="bulk-impact-changes">{{ $bulkImpact['changes'] }}</strong>
+                                {{ Str::plural('transaction', $bulkImpact['changes']) }}
+                                will be {{ $bulkPanel === 'delete' ? 'deleted' : 'edited' }}@if($bulkImpact['skipped'] > 0),
+                                    <strong data-testid="bulk-impact-skipped">{{ $bulkImpact['skipped'] }}</strong>
+                                    skipped
+                                    ({{ $bulkPanel === 'delete' ? 'bank-feed transactions are kept' : (in_array('date', $bulkEditInclude, true) && count($bulkEditInclude) === 1 ? 'split transactions are left alone, and so are bank-feed rows and linked transfers, which keep their date' : 'split transactions are left alone') }})@endif.
+                                @if($bulkImpact['keepDate'] > 0)
+                                    <span data-testid="bulk-impact-keep-date">
+                                        {{ $bulkImpact['keepDate'] }} bank-feed or linked transfer
+                                        {{ Str::plural('row', $bulkImpact['keepDate']) }} keep their date.
+                                    </span>
+                                @endif
+                            </p>
+                        @endif
+
+                        <div class="flex items-center gap-3">
+                            @if($bulkPanel === 'delete')
+                                <flux:button variant="danger" size="sm"
+                                             wire:click="bulkDelete"
+                                             wire:loading.attr="disabled" wire:target="bulkDelete"
+                                             :disabled="$bulkImpact['changes'] === 0"
+                                             data-testid="bulk-delete-confirm">
+                                    Delete {{ $bulkImpact['changes'] }}
+                                </flux:button>
+                            @else
+                                <flux:button variant="primary" size="sm"
+                                             wire:click="bulkEdit"
+                                             wire:loading.attr="disabled" wire:target="bulkEdit"
+                                             :disabled="$bulkImpact['changes'] === 0"
+                                             data-testid="bulk-edit-confirm">
+                                    Edit {{ $bulkImpact['changes'] }}
+                                </flux:button>
+                            @endif
+
+                            <flux:button variant="ghost" size="sm" wire:click="closeBulkPanel" data-testid="bulk-panel-cancel">
+                                Cancel
+                            </flux:button>
+                        </div>
                     </div>
                 @endif
             </x-cib.card>

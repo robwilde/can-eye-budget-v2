@@ -14,11 +14,10 @@
      $emailPanelTxnId, $emailResults, $emailScanError, $splitPanelTxnId,
      $splitLines, $splitCategories, $splitError.
 
-     Requires the host component itself, not just view data: public
-     isBulkExcluded(Transaction) and bulkExclusionReason(Transaction), and a
-     wire-bindable public array $selected keyed by transaction id, which the
-     checkbox column binds as selected.{id}. This partial is therefore specific
-     to TransactionList rather than includable by anything supplying the
+     Requires the host component itself, not just view data: a wire-bindable
+     public array $selected keyed by transaction id, which the checkbox column
+     binds as selected.{id}. This partial is therefore specific to
+     TransactionList rather than includable by anything supplying the
      variables above. --}}
 @php
     $tone = $transaction->direction === TransactionDirection::Credit ? 'inc' : 'out';
@@ -42,47 +41,17 @@
     $hasDesktopMeta = $metaParts !== [] || $isPlanned || $isPossibleTransfer || $transaction->excluded || $transaction->isSplit() || $transaction->emails->isNotEmpty();
     $hasCleanDescription = filled($transaction->clean_description);
     $displayName = $hasCleanDescription ? $transaction->clean_description : $transaction->description;
-    $bulkExcluded = $this->isBulkExcluded($transaction);
-    $bulkReason = $this->bulkExclusionReason($transaction);
 @endphp
 {{-- Grid, not flex: the checkbox centres on the tx-row's own row only, so an
      open email/split panel (column 2, below) never drags it downward. --}}
 <div wire:key="txn-wrap-{{ $transaction->id }}" class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2">
-    {{-- Distinct wire:key per branch. The wrapper key is the same either way,
-         so without these Livewire would morph one checkbox into the other in
-         place — stripping wire:model.live and adding disabled on a live
-         ui-checkbox — when saveSplit()/unsplit() below flip eligibility. --}}
-    @if($bulkExcluded)
-        {{-- The reason is not left to title alone: a disabled control is out of
-             the tab order and title never fires on touch, so it is also given
-             an accessible name and an sr-only description.
-
-             aria-disabled MUST be bound, not written as a literal. Flux folds a
-             static `aria-disabled="true"` into the valueless-attribute form and
-             emits aria-disabled="aria-disabled", which is not a valid ARIA
-             value, so the state would be silently dropped by assistive tech.
-             ui-checkbox is a role=checkbox custom element that never sets it
-             itself, so this attribute is the only thing conveying the state. --}}
-        <flux:checkbox
-            wire:key="select-{{ $transaction->id }}-off"
-            disabled
-            :aria-disabled="'true'"
-            class="shrink-0"
-            :aria-label="'Cannot select ' . $displayName"
-            aria-describedby="select-reason-{{ $transaction->id }}"
-            :title="$bulkReason"
-            data-testid="select-excluded-{{ $transaction->id }}"
-        />
-        <span id="select-reason-{{ $transaction->id }}" class="sr-only">{{ $bulkReason }}</span>
-    @else
-        <flux:checkbox
-            wire:key="select-{{ $transaction->id }}-on"
-            wire:model.live="selected.{{ $transaction->id }}"
-            class="shrink-0"
-            :aria-label="'Select ' . $displayName"
-            data-testid="select-{{ $transaction->id }}"
-        />
-    @endif
+    <flux:checkbox
+        wire:key="select-{{ $transaction->id }}"
+        wire:model.live="selected.{{ $transaction->id }}"
+        class="shrink-0"
+        :aria-label="'Select ' . $displayName"
+        data-testid="select-{{ $transaction->id }}"
+    />
     <div class="min-w-0">
         <x-cib.tx-row
             wire:key="txn-{{ $transaction->id }}"
