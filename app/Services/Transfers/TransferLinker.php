@@ -7,6 +7,7 @@ namespace App\Services\Transfers;
 use App\DTOs\NewTransfer;
 use App\Enums\CategorySource;
 use App\Enums\TransactionDirection;
+use App\Enums\TransactionKind;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Enums\TransferLinkSource;
@@ -50,6 +51,7 @@ final class TransferLinker
         private TransactionIdempotency $idempotency,
         private TransferFeeCategory $feeCategory,
         private TransferExchange $exchange,
+        private TransferKinds $kinds,
     ) {}
 
     /**
@@ -126,7 +128,7 @@ final class TransferLinker
                 ->whereIn('id', [$a->id, $b->id])
                 ->orderBy('id')
                 ->lockForUpdate()
-                ->with('category.parent')
+                ->with('category.parent', 'account')
                 ->get()
                 ->keyBy('id');
 
@@ -158,12 +160,15 @@ final class TransferLinker
                 ->whereIn('suggested_pair_id', [$first->id, $second->id])
                 ->update(['suggested_pair_id' => null, 'transfer_link_source' => null]);
 
+            $kinds = $this->confirmedKinds($first, $second);
+
             foreach ([[$first, $second], [$second, $first]] as [$leg, $other]) {
                 $leg->forceFill([
                     'transfer_pair_id' => $other->id,
                     'transfer_link_source' => $source,
                     'suggested_pair_id' => null,
-                ] + $this->inheritedTransferCategory($leg, $other));
+                ] + ($kinds[$leg->id] ?? []) + $this->inheritedTransferCategory($leg, $other));
+                $leg->propagateCategoryChange = ! array_key_exists('category_id', $kinds[$leg->id] ?? []);
                 $leg->save();
             }
 
@@ -457,7 +462,7 @@ final class TransferLinker
                 return;
             }
 
-            $partner->forceFill(['transfer_pair_id' => null, 'transfer_link_source' => TransferLinkSource::Unlinked])->save();
+            $partner->forceFill(['transfer_pair_id' => null, 'transfer_link_source' => TransferLinkSource::Unlinked, 'kind' => TransactionKind::Standard])->save();
         });
     }
 
@@ -478,7 +483,7 @@ final class TransferLinker
             ->whereNotNull('transfer_pair_id')
             ->where(fn ($q) => $q->whereKey($deleted->parent_transaction_id)
                 ->orWhere('transfer_pair_id', $deleted->parent_transaction_id))
-            ->update(['transfer_pair_id' => null, 'transfer_link_source' => TransferLinkSource::Unlinked->value]);
+            ->update(['transfer_pair_id' => null, 'transfer_link_source' => TransferLinkSource::Unlinked->value, 'kind' => TransactionKind::Standard->value]);
     }
 
     /**
@@ -569,6 +574,7 @@ final class TransferLinker
             $transaction->refresh()->forceFill([
                 'transfer_pair_id' => null,
                 'transfer_link_source' => TransferLinkSource::Unlinked,
+                'kind' => TransactionKind::Standard,
             ])->save();
 
             $this->removeFees($transaction, $pair);
@@ -583,6 +589,7 @@ final class TransferLinker
             $pair->forceFill([
                 'transfer_pair_id' => null,
                 'transfer_link_source' => TransferLinkSource::Unlinked,
+                'kind' => TransactionKind::Standard,
             ])->save();
         });
     }
@@ -844,14 +851,16 @@ final class TransferLinker
             'notes' => $transfer->notes,
         ];
 
-        $debit = Transaction::query()->create($shared + [
+        $kinds = $this->kinds->attributes($transfer->userId, $accounts->get($transfer->fromAccountId)->type, $accounts->get($transfer->toAccountId)->type, $transfer->categoryId);
+
+        $debit = Transaction::query()->create([...$shared, ...$kinds['outflow']] + [
             'account_id' => $transfer->fromAccountId,
             'direction' => TransactionDirection::Debit,
             'idempotency_key' => $idempotencyKey,
             'idempotency_fingerprint' => $idempotencyKey === null ? null : $transfer->fingerprint(),
         ]);
 
-        $credit = Transaction::query()->create([...$shared, 'amount' => $creditAmount] + [
+        $credit = Transaction::query()->create([...$shared, 'amount' => $creditAmount, ...$kinds['inflow']] + [
             'account_id' => $transfer->toAccountId,
             'direction' => TransactionDirection::Credit,
         ]);
@@ -937,6 +946,25 @@ final class TransferLinker
         }
 
         return $fees;
+    }
+
+    /**
+     * The kind (and, for an uncategorised investment contribution, the category) each leg of a
+     * confirmed link takes, by leg id. Empty when the legs are not one outflow and one inflow.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function confirmedKinds(Transaction $a, Transaction $b): array
+    {
+        if ($a->direction === $b->direction) {
+            return [];
+        }
+
+        [$outflow, $inflow] = $a->direction === TransactionDirection::Debit ? [$a, $b] : [$b, $a];
+
+        $attributes = $this->kinds->attributes($outflow->user_id, $outflow->account->type, $inflow->account->type, $outflow->category_id);
+
+        return [$outflow->id => $attributes['outflow'], $inflow->id => $attributes['inflow']];
     }
 
     /**
