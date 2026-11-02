@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Casts\MoneyCast;
+use App\DTOs\NewTransfer;
 use App\DTOs\TransactionSplitLine;
 use App\Enums\AccountStatus;
 use App\Enums\CleanDescriptionSource;
@@ -13,6 +14,7 @@ use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Enums\TransferLinkSource;
+use App\Exceptions\IdempotencyKeyReusedException;
 use App\Exceptions\PendingMergeRefusedException;
 use App\Exceptions\TransactionSplitRefusedException;
 use App\Exceptions\TransferAlreadyLinkedException;
@@ -55,6 +57,9 @@ final class TransactionModal extends Component
     use WithFileUploads;
 
     private const int RATE_LOOKUP_TTL_SECONDS = 300;
+
+    /** @var list<string> */
+    private const array FEE_RULES = ['nullable', 'numeric', 'min:0', 'lt:100000000', 'decimal:0,2'];
 
     public bool $showModal = false;
 
@@ -111,6 +116,10 @@ final class TransactionModal extends Component
     public bool $openedNameIsDeliberate = false;
 
     public ?int $transferToAccountId = null;
+
+    public string $sourceFee = '';
+
+    public string $destinationFee = '';
 
     public string $mode = 'enter';
 
@@ -377,7 +386,15 @@ final class TransactionModal extends Component
             'date.after' => __('Planned transactions start after today.'),
         ]);
 
-        if (! $this->resolveSave()) {
+        try {
+            $saved = $this->resolveSave();
+        } catch (IdempotencyKeyReusedException $e) {
+            $this->addError('descriptionInput', $e->getMessage());
+
+            return;
+        }
+
+        if (! $saved) {
             return;
         }
 
@@ -785,6 +802,7 @@ final class TransactionModal extends Component
             'currencies' => $this->offeredCurrencies(),
             'accountCurrency' => $accounts->firstWhere('id', $this->accountId)?->currency,
             'currentRate' => $this->currentRate($accounts->firstWhere('id', $this->accountId)),
+            'acceptsTransferFees' => $this->acceptsTransferFees(),
         ]);
     }
 
@@ -1419,7 +1437,7 @@ final class TransactionModal extends Component
             return false;
         }
 
-        DB::transaction(fn () => $this->createTransferPair($parsed));
+        $this->createTransferPair($parsed);
 
         return true;
     }
@@ -1738,6 +1756,7 @@ final class TransactionModal extends Component
         DB::transaction(function () use ($debitSide, $creditSide, $parsed, $direction): void {
             app(AccountBalanceHistoryBuilder::class)->lockAccounts($debitSide->account_id, $creditSide->account_id, $this->accountId);
             $this->reloadCleanNamesUnderLock($debitSide, $creditSide);
+            app(TransferLinker::class)->removeFees($debitSide, $creditSide);
 
             // An imported row is never deleted: unlink it (stamping both legs) and keep it.
             $keepCreditSide = $creditSide->source->isBankFeed();
@@ -2077,38 +2096,24 @@ final class TransactionModal extends Component
         ];
     }
 
-    private function createTransferPair(AmountParseResult $parsed, ?int $plannedTransactionId = null): void
+    /**
+     * @throws Throwable
+     */
+    private function createTransferPair(AmountParseResult $parsed, ?int $plannedTransactionId = null): Transaction
     {
-        $shared = [
-            'planned_transaction_id' => $plannedTransactionId,
-            'user_id' => auth()->id(),
-            'category_id' => $this->categoryId,
-            'amount' => $parsed->amount,
-            'description' => $parsed->description,
-            'post_date' => $this->date,
-            'status' => TransactionStatus::Posted,
-            'source' => TransactionSource::Manual,
-            'notes' => $this->notes !== '' ? $this->notes : null,
-        ];
-
-        app(AccountBalanceHistoryBuilder::class)->lockAccounts($this->accountId, $this->transferToAccountId);
-
-        $debit = Transaction::query()->create($shared + [
-            'account_id' => $this->accountId,
-            'direction' => TransactionDirection::Debit,
-        ]);
-
-        $credit = Transaction::query()->create($shared + [
-            'account_id' => $this->transferToAccountId,
-            'direction' => TransactionDirection::Credit,
-        ]);
-
-        $manual = ['transfer_link_source' => TransferLinkSource::Manual];
-
-        $debit->update(['transfer_pair_id' => $credit->id] + $manual);
-        $credit->update(['transfer_pair_id' => $debit->id] + $manual);
-
-        app(AccountBalanceHistoryBuilder::class)->rebuildForTransactions($debit, $credit);
+        return app(TransferLinker::class)->create(new NewTransfer(
+            userId: (int) auth()->id(),
+            fromAccountId: (int) $this->accountId,
+            toAccountId: (int) $this->transferToAccountId,
+            amount: $parsed->amount,
+            description: $parsed->description,
+            postDate: $this->date,
+            categoryId: $this->categoryId,
+            notes: $this->notes !== '' ? $this->notes : null,
+            plannedTransactionId: $plannedTransactionId,
+            sourceFee: $this->feeCents($this->sourceFee),
+            destinationFee: $this->feeCents($this->destinationFee),
+        ), $this->submissionToken);
     }
 
     /** @return array<string, mixed> */
@@ -2207,6 +2212,20 @@ final class TransactionModal extends Component
         return $this->transactionType === 'transfer';
     }
 
+    /** Fees are entered when a new manual transfer is created, including from a planned one. */
+    private function acceptsTransferFees(): bool
+    {
+        return $this->isTransfer()
+            && ($this->mode === 'enter' || $this->isRealizableOccurrence())
+            && ! $this->isBankFeedTransaction
+            && $this->editingTransactionId === null;
+    }
+
+    private function feeCents(string $dollars): int
+    {
+        return $this->acceptsTransferFees() && $dollars !== '' ? (int) round((float) $dollars * 100) : 0;
+    }
+
     private function resetForm(): void
     {
         $this->mergeCandidateLimit = PendingMergeService::PAGE_SIZE;
@@ -2241,6 +2260,8 @@ final class TransactionModal extends Component
         $this->transferToAccountId = null;
         $this->originalWasTransfer = false;
         $this->openedTransferToAccountId = null;
+        $this->sourceFee = '';
+        $this->destinationFee = '';
         $this->selectedCandidateId = null;
         $this->splitLines = [];
         $this->isSplitParent = false;
@@ -2333,6 +2354,8 @@ final class TransactionModal extends Component
                     Rule::notIn([$this->accountId]),
                 ]
                 : ['nullable'],
+            'sourceFee' => $this->acceptsTransferFees() ? self::FEE_RULES : ['nullable'],
+            'destinationFee' => $this->acceptsTransferFees() ? self::FEE_RULES : ['nullable'],
         ];
 
         if ($this->mode === 'plan') {
