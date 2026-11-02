@@ -12,6 +12,7 @@ use App\Enums\TransactionStatus;
 use App\Enums\TransferLinkSource;
 use App\Exceptions\AccountNotTrackedException;
 use App\Exceptions\AccountNotUntrackedException;
+use App\Exceptions\ExchangeRateUnavailableException;
 use App\Exceptions\IdempotencyKeyReusedException;
 use App\Exceptions\RealOppositeRowExistsException;
 use App\Exceptions\TransferAlreadyLinkedException;
@@ -23,6 +24,8 @@ use App\Models\TransferRule;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\TransactionIdempotency;
 use App\Support\Transfers\TransferSignal;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -46,45 +49,52 @@ final class TransferLinker
         private AccountBalanceHistoryBuilder $history,
         private TransactionIdempotency $idempotency,
         private TransferFeeCategory $feeCategory,
+        private TransferExchange $exchange,
     ) {}
 
     /**
      * Unlinked rows on tracked accounts that could be the opposite leg of $transaction:
-     * same user, opposite direction, same absolute amount, within the date window,
+     * same user, opposite direction, same currency and absolute amount, within the date window,
      * different account, not already linked and not previously rejected. Suggestions use
      * the default window; a manual search passes MANUAL_WINDOW_DAYS. $lockOnAccountId narrows
      * the search to that account and reads it with a locking read in id order, so a write
-     * recheck inside a transaction sees the latest commits.
+     * recheck inside a transaction sees the latest commits. With $crossCurrency the rows in
+     * another currency that are within the tolerance of the converted amount follow the exact ones.
      *
      * @return Collection<int, Transaction>
      */
-    public function candidatesFor(Transaction $transaction, bool $includeRejected = false, int $windowDays = self::WINDOW_DAYS, ?int $lockOnAccountId = null): Collection
+    public function candidatesFor(Transaction $transaction, bool $includeRejected = false, int $windowDays = self::WINDOW_DAYS, ?int $lockOnAccountId = null, bool $crossCurrency = false, ?TransferExchange $exchange = null): Collection
     {
-        $query = Transaction::query()
-            ->where('user_id', $transaction->user_id)
-            ->current()
-            ->where('id', '!=', $transaction->id)
-            ->where('account_id', '!=', $transaction->account_id)
-            ->where('direction', $transaction->direction === TransactionDirection::Debit
-                ? TransactionDirection::Credit
-                : TransactionDirection::Debit)
+        $exact = $this->candidateQuery($transaction, $includeRejected, $windowDays, $lockOnAccountId)
+            ->where('currency', $transaction->currency)
             ->whereRaw('ABS(amount) = ?', [abs($transaction->amount)])
-            ->whereBetween('post_date', [
-                $transaction->post_date->subDays($windowDays)->toDateString(),
-                $transaction->post_date->addDays($windowDays)->toDateString(),
-            ]);
+            ->get();
 
-        if ($includeRejected) {
-            $query->whereNull('transfer_pair_id')->notSplit()->onTrackedAccounts();
-        } else {
-            $query->linkable();
+        if (! $crossCurrency) {
+            return $exact;
         }
 
-        if ($lockOnAccountId !== null) {
-            $query->where('account_id', $lockOnAccountId)->orderBy('id')->lockForUpdate();
-        }
+        return $exact->merge($this->crossCurrencyCandidatesFor($transaction, $includeRejected, $windowDays, $lockOnAccountId, $exchange));
+    }
 
-        return $query->get();
+    /**
+     * Opposite-direction rows in another currency whose amount is within the configured
+     * tolerance of $transaction's once converted. The search is the one candidatesFor() runs,
+     * minus the exact amount; a pair with no known rate is never returned.
+     *
+     * @return Collection<int, Transaction>
+     */
+    public function crossCurrencyCandidatesFor(Transaction $transaction, bool $includeRejected = false, int $windowDays = self::WINDOW_DAYS, ?int $lockOnAccountId = null, ?TransferExchange $exchange = null): Collection
+    {
+        $exchange ??= $this->exchange->memoising();
+
+        return $this->candidateQuery($transaction, $includeRejected, $windowDays, $lockOnAccountId)
+            ->where('currency', '!=', $transaction->currency)
+            ->get()
+            ->filter(fn (Transaction $other): bool => $transaction->direction === TransactionDirection::Debit
+                ? $exchange->qualifies($transaction, $other)
+                : $exchange->qualifies($other, $transaction))
+            ->values();
     }
 
     /**
@@ -214,6 +224,7 @@ final class TransferLinker
      * balance stays whatever the user entered.
      *
      * @throws TransferLinkRefusedException when the row was linked elsewhere meanwhile or a real opposite row exists (nothing is created)
+     * @throws ExchangeRateUnavailableException when the account is in another currency and no rate is known (nothing is created)
      * @throws Throwable
      */
     public function linkToUntrackedAccount(Transaction $transaction, Account $account, TransferLinkSource $source): Transaction
@@ -222,7 +233,10 @@ final class TransferLinker
             throw new InvalidArgumentException('Counterpart must be an account of the same user.');
         }
 
-        return DB::transaction(function () use ($transaction, $account, $source): Transaction {
+        $this->oppositeLegAmount($transaction, $account);
+        $exchange = $this->warmedExchange($transaction, self::WINDOW_DAYS);
+
+        return DB::transaction(function () use ($transaction, $account, $source, $exchange): Transaction {
             // The caller's Account model may be stale: re-read it under lock (trackAccount takes
             // the same lock before releasing mirrors) so no mirror lands on a just-tracked account.
             $lockedAccount = Account::query()->whereKey($account->id)->lockForUpdate()->first();
@@ -239,7 +253,7 @@ final class TransferLinker
 
             // Real rows win: a mirror next to an existing imported opposite leg is the duplicate
             // the whole feature exists to prevent.
-            if ($this->candidatesFor($locked, includeRejected: true)->isNotEmpty()) {
+            if ($this->candidatesFor($locked, includeRejected: true, crossCurrency: true, exchange: $exchange)->isNotEmpty()) {
                 throw new RealOppositeRowExistsException('A matching transaction exists; link to it instead of a hidden account.');
             }
 
@@ -262,6 +276,7 @@ final class TransferLinker
      * "no matching row, create it there" choice, so it is allowed for bank-feed rows too.
      *
      * @throws TransferLinkRefusedException when the row was linked elsewhere meanwhile
+     * @throws ExchangeRateUnavailableException when the account is in another currency and no rate is known (nothing is created)
      * @throws Throwable
      */
     public function createMissingLeg(Transaction $transaction, Account $account, TransferLinkSource $source): Transaction
@@ -270,7 +285,10 @@ final class TransferLinker
             throw new InvalidArgumentException('The missing leg must go on a different account of the same user.');
         }
 
-        return Transaction::query()->getConnection()->transaction(function () use ($transaction, $account, $source): Transaction {
+        $this->oppositeLegAmount($transaction, $account);
+        $exchange = $this->warmedExchange($transaction, self::MANUAL_WINDOW_DAYS);
+
+        return Transaction::query()->getConnection()->transaction(function () use ($transaction, $account, $source, $exchange): Transaction {
             $lockedAccount = Account::query()->whereKey($account->id)->lockForUpdate()->first();
 
             if (! $lockedAccount instanceof Account || ! $lockedAccount->is_tracked) {
@@ -283,7 +301,7 @@ final class TransferLinker
                 throw new TransferAlreadyLinkedException('That row is already linked to another transaction.');
             }
 
-            $realMatch = $this->candidatesFor($locked, includeRejected: true, windowDays: self::MANUAL_WINDOW_DAYS, lockOnAccountId: $account->id)
+            $realMatch = $this->candidatesFor($locked, includeRejected: true, windowDays: self::MANUAL_WINDOW_DAYS, lockOnAccountId: $account->id, crossCurrency: true, exchange: $exchange)
                 ->isNotEmpty();
 
             if ($realMatch) {
@@ -322,6 +340,16 @@ final class TransferLinker
             || $transfer->destinationFee < 0) {
             throw new InvalidArgumentException('A transfer needs two different accounts, a positive amount and non-negative fees.');
         }
+
+        if ($idempotencyKey !== null) {
+            $existing = $this->idempotency->matching($transfer->userId, $idempotencyKey, $transfer->fromAccountId, $transfer->fingerprint());
+
+            if ($existing instanceof Transaction) {
+                return $existing;
+            }
+        }
+
+        $this->assertTransferRateKnown($transfer);
 
         try {
             return DB::transaction(fn (): Transaction => $this->writeTransfer($transfer, $idempotencyKey));
@@ -461,6 +489,9 @@ final class TransferLinker
      */
     public function linkToHiddenAccount(Transaction $transaction, Account $account): Transaction
     {
+        $this->oppositeLegAmount($transaction, $account);
+        $this->warmedExchange($transaction, self::WINDOW_DAYS);
+
         return DB::transaction(function () use ($transaction, $account): Transaction {
             $mirror = $this->linkToUntrackedAccount($transaction, $account, TransferLinkSource::Confirmed);
             $this->rememberRule($transaction, $mirror);
@@ -744,6 +775,35 @@ final class TransferLinker
         });
     }
 
+    /** @return Builder<Transaction> */
+    private function candidateQuery(Transaction $transaction, bool $includeRejected, int $windowDays, ?int $lockOnAccountId): Builder
+    {
+        $query = Transaction::query()
+            ->where('user_id', $transaction->user_id)
+            ->current()
+            ->where('id', '!=', $transaction->id)
+            ->where('account_id', '!=', $transaction->account_id)
+            ->where('direction', $transaction->direction === TransactionDirection::Debit
+                ? TransactionDirection::Credit
+                : TransactionDirection::Debit)
+            ->whereBetween('post_date', [
+                $transaction->post_date->subDays($windowDays)->toDateString(),
+                $transaction->post_date->addDays($windowDays)->toDateString(),
+            ]);
+
+        if ($includeRejected) {
+            $query->whereNull('transfer_pair_id')->notSplit()->onTrackedAccounts();
+        } else {
+            $query->linkable();
+        }
+
+        if ($lockOnAccountId !== null) {
+            $query->where('account_id', $lockOnAccountId)->orderBy('id')->lockForUpdate();
+        }
+
+        return $query;
+    }
+
     private function writeTransfer(NewTransfer $transfer, ?string $idempotencyKey): Transaction
     {
         $this->history->lockAccounts($transfer->fromAccountId, $transfer->toAccountId);
@@ -756,14 +816,17 @@ final class TransferLinker
             }
         }
 
-        $owned = Account::query()
+        $accounts = Account::query()
             ->where('user_id', $transfer->userId)
             ->whereIn('id', [$transfer->fromAccountId, $transfer->toAccountId])
-            ->count();
+            ->get()
+            ->keyBy('id');
 
-        if ($owned !== 2) {
+        if ($accounts->count() !== 2) {
             throw new InvalidArgumentException('A transfer moves money between two accounts of the same user.');
         }
+
+        $creditAmount = $this->incomingAmount($transfer, $accounts->get($transfer->fromAccountId)->currency, $accounts->get($transfer->toAccountId)->currency);
 
         $feeCategoryId = $transfer->sourceFee > 0 || $transfer->destinationFee > 0
             ? $this->feeCategory->forUser($transfer->userId)->id
@@ -788,7 +851,7 @@ final class TransferLinker
             'idempotency_fingerprint' => $idempotencyKey === null ? null : $transfer->fingerprint(),
         ]);
 
-        $credit = Transaction::query()->create($shared + [
+        $credit = Transaction::query()->create([...$shared, 'amount' => $creditAmount] + [
             'account_id' => $transfer->toAccountId,
             'direction' => TransactionDirection::Credit,
         ]);
@@ -803,6 +866,50 @@ final class TransferLinker
         $this->history->rebuildForTransactions($debit, $credit, ...$fees);
 
         return $debit;
+    }
+
+    /**
+     * What the destination account receives: the amount itself for one currency, otherwise the
+     * amount converted at the custom rate or, failing that, the transfer date's rate.
+     *
+     * @throws ExchangeRateUnavailableException when the currencies differ and no rate is known
+     */
+    private function incomingAmount(NewTransfer $transfer, string $fromCurrency, string $toCurrency): int
+    {
+        return $this->exchange->incoming($transfer->userId, $transfer->amount, $fromCurrency, $toCurrency, CarbonImmutable::parse($transfer->postDate), $transfer->exchangeRate)
+            ?? throw new ExchangeRateUnavailableException($transfer->exchangeRate === null
+                ? __('No exchange rate is available for this date. Enter a rate.')
+                : __('The converted amount rounds to zero. Enter a larger amount or a different rate.'));
+    }
+
+    /**
+     * Looks the rate up before any lock is taken: a provider call can take seconds and must not
+     * hold the account rows. The write recomputes the amount under lock and reads the stored rate.
+     *
+     * @throws ExchangeRateUnavailableException when the currencies differ and no rate is known
+     */
+    private function assertTransferRateKnown(NewTransfer $transfer): void
+    {
+        $currencies = Account::query()
+            ->where('user_id', $transfer->userId)
+            ->whereIn('id', [$transfer->fromAccountId, $transfer->toAccountId])
+            ->pluck('currency', 'id');
+
+        if ($currencies->count() === 2) {
+            $this->incomingAmount($transfer, $currencies->get($transfer->fromAccountId), $currencies->get($transfer->toAccountId));
+        }
+    }
+
+    /**
+     * A memoising exchange that has already looked up every rate the cross-currency recheck will
+     * need, so the recheck under lock reads memoised answers instead of calling a provider.
+     */
+    private function warmedExchange(Transaction $transaction, int $windowDays): TransferExchange
+    {
+        $exchange = $this->exchange->memoising();
+        $this->crossCurrencyCandidatesFor($transaction, includeRejected: true, windowDays: $windowDays, exchange: $exchange);
+
+        return $exchange;
     }
 
     /** @return list<Transaction> */
@@ -846,14 +953,22 @@ final class TransferLinker
         return ['category_id' => $other->category_id, 'category_source' => CategorySource::Rule];
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * The opposite leg's attributes. In another currency than the row it carries the row's
+     * amount converted at the user's rate for the row's date, in cents, in the account's currency.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws ExchangeRateUnavailableException when the currencies differ and no rate is known
+     */
     private function oppositeLegAttributes(Transaction $transaction, Account $account): array
     {
         return [
             'user_id' => $transaction->user_id,
             'account_id' => $account->id,
             'category_id' => $transaction->category_id,
-            'amount' => -$transaction->amount,
+            'amount' => $this->oppositeLegAmount($transaction, $account),
+            'currency' => $account->currency,
             'direction' => $transaction->direction === TransactionDirection::Debit
                 ? TransactionDirection::Credit
                 : TransactionDirection::Debit,
@@ -862,6 +977,24 @@ final class TransferLinker
             'source' => TransactionSource::Manual,
             'status' => TransactionStatus::Posted,
         ];
+    }
+
+    /**
+     * The opposite leg's amount: the row's negated amount in one currency, otherwise converted at
+     * the user's rate for the row's date. Called before any lock is taken to find the rate first.
+     *
+     * @throws ExchangeRateUnavailableException when the currencies differ and no rate is known
+     */
+    private function oppositeLegAmount(Transaction $transaction, Account $account): int
+    {
+        if (mb_strtoupper($transaction->currency) === mb_strtoupper($account->currency)) {
+            return -$transaction->amount;
+        }
+
+        $converted = $this->exchange->incoming($transaction->user_id, abs($transaction->amount), $transaction->currency, $account->currency, $transaction->post_date)
+            ?? throw new ExchangeRateUnavailableException(__('No exchange rate is available for this date. Pick an account in the same currency or enter the transfer with a rate.'));
+
+        return $transaction->amount < 0 ? $converted : -$converted;
     }
 
     private function isRejected(Transaction $transaction): bool
