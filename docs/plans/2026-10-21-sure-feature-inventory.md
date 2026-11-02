@@ -379,7 +379,7 @@ The remaining features have no ordering constraint beyond the conventions above.
   - CategorySource keeps a Manual category from being overwritten by rules. CleanDescriptionSource ranks Manual, Rule, Feed, Brand and Derived, so a feed or brand name never overwrites a Manual or Rule display name.
   - TransactionFeeFolder folds international fees into their purchase.
 - **Gap:**
-  - Missing: tags; file attachments; an excluded flag; per-transaction currency or exchange rate; transaction kinds.
+  - Missing: tags; file attachments; an excluded flag; per-transaction currency or exchange rate. (Transaction kinds exist: see F5.)
   - Missing list and bulk features: amount, status and merchant filters; totals for the filtered list (only per-merchant-cluster totals); server-side idempotency; pending-duplicate merge.
   - Splits are category lines, not child transactions.
   - Category and display-name (clean_description) provenance are protected; notes, merchant and other fields are not.
@@ -465,14 +465,15 @@ The remaining features have no ordering constraint beyond the conventions above.
   - TransferRule: remembered on confirm; TransferRuleList lists and deletes rules.
   - TransferLinkSource Unlinked remembers rejections.
   - The Transaction countable scope keeps tracked-to-tracked pairs out of totals.
+  - Transaction kind (#721): `transactions.kind` (TransactionKind, default standard) is carried by createChild and editable in the modal, whose save is audited. Every write that confirms a link (TransferLinker::link, so confirm, manual and rule links and mirror or missing legs, plus TransferLinker::create and the modal's convert and edit paths) sets the outflow kind from the destination AccountClass through TransferKinds (loan or mortgage: loan payment; credit card: credit-card payment; investment: investment contribution, or funds movement from an investment account; otherwise funds movement) and the inflow to funds movement. A suggestion or rejection changes no kind or category. Unlink, deleting a leg, a restored version and converting a transfer to an expense reset the legs left behind to standard. An uncategorised investment contribution is filed under the user's own root category Investment Contributions (found by owner, no parent and name, created in the Savings & Investments group; not under Transfer, whose rows are excluded from totals by name); switching that leg to funds movement in the modal takes that category off and keeps any other. Unlinking leaves a category already assigned. countable() and CategoryAttribution are unchanged.
 - **Gap:**
-  - Missing: payment kinds by destination (credit card, loan, investment contribution), and tags on transfers.
+  - Missing: tags on transfers.
   - Matching needs exact amounts within 3 days; there is no 30-day manual window.
   - Auto-detection covers bank-feed rows only.
   - For bank-feed rows, a missing leg can only be an untracked mirror. Manual and CSV rows already get the missing leg created on any chosen account.
 - **Build it like:**
   - Extend TransferLinker and the TransactionModal transfer form with optional fee amounts that create fee Transaction rows in the same DB transaction (C1, C8).
-  - Add a transfer-kind enum, derived from the destination AccountClass (C5). It is a label only and leaves countable() and CategoryAttribution unchanged, so a payment into a tracked loan, mortgage or investment account still never counts.
+  - Transfer kinds are an enum derived from the destination AccountClass (C5). It is a label only and leaves countable() and CategoryAttribution unchanged, so a payment into a tracked loan, mortgage or investment account still never counts.
   - Keep writes audited and re-scoped to the user (C3).
   - Add Pest feature tests next to the existing TransferReview tests (C7).
 
