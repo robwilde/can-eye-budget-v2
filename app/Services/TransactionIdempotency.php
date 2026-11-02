@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Exceptions\IdempotencyKeyReusedException;
 use App\Models\Transaction;
 use Illuminate\Database\UniqueConstraintViolationException;
 
@@ -25,6 +26,27 @@ final readonly class TransactionIdempotency
             ->where('user_id', $userId)
             ->where('idempotency_key', $key)
             ->first();
+    }
+
+    /**
+     * The first row created under $key when it was submitted for the same source account with
+     * the same details, null when the key is unused.
+     *
+     * @throws IdempotencyKeyReusedException when the key was used for another account or with other details
+     */
+    public function matching(int $userId, string $key, int $accountId, string $fingerprint): ?Transaction
+    {
+        $existing = $this->existing($userId, $key);
+
+        if (! $existing instanceof Transaction) {
+            return null;
+        }
+
+        if ($existing->account_id !== $accountId || $existing->idempotency_fingerprint !== $fingerprint) {
+            throw new IdempotencyKeyReusedException(__('This form was already submitted with different details. Close it and start again.'));
+        }
+
+        return $existing;
     }
 
     public function ingestOnce(Transaction $transaction, string $key): Transaction
