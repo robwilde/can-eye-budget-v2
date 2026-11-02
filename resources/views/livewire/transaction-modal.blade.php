@@ -290,6 +290,28 @@
                         />
                     </div>
                 @endif
+
+                @if($transferFx !== null)
+                    <div class="space-y-2" data-testid="transfer-fx">
+                        <flux:input
+                            wire:model="exchangeRate"
+                            :label="__('Exchange rate: 1 :from = ? :to', ['from' => $transferFx['from'], 'to' => $transferFx['to']])"
+                            type="number"
+                            step="any"
+                            min="0"
+                            data-testid="transfer-exchange-rate"
+                        />
+                        @unless($transferFx['custom'])
+                            <flux:text size="sm" data-testid="transfer-current-rate">
+                                @if($transferFx['rate'] !== null)
+                                    {{ __('Current rate: 1 :from = :rate :to', ['from' => $transferFx['from'], 'rate' => rtrim(rtrim(number_format($transferFx['rate'], 8, '.', ''), '0'), '.'), 'to' => $transferFx['to']]) }}
+                                @else
+                                    {{ __('Rate unavailable for this date. Enter a rate.') }}
+                                @endif
+                            </flux:text>
+                        @endunless
+                    </div>
+                @endif
             @endif
 
             <hr class="panel-rule">
