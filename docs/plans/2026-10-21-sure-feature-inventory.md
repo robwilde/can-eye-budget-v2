@@ -268,9 +268,12 @@ The remaining features have no ordering constraint beyond the conventions above.
   - SyncRedbarkFeedJob and RedbarkAccountSetup copy the bank feed's currency, normalised by RedbarkCurrency, with AUD as the fallback.
   - AccountClass has a "foreign" account type.
   - `users.base_currency` (default AUD) exists, added by #669.
+  - Cross-currency transfers (#716): the modal's transfer form shows an optional rate when the two accounts' currencies differ, with the looked-up rate or "unavailable". TransferLinker::create writes the incoming leg as the outgoing amount converted at the typed rate, else at TransferExchange::rate (ExchangeRateLookup::rateViaBase: when either side is the user's base currency, the stored pair or its inverse; between two other currencies strictly the from-to-base rate times the base-to-to rate, each stored or inverted, so a direct quote between them is ignored), rounded to cents; with no rate nothing is written. A missing leg or untracked mirror created on an account in another currency (createMissingLeg, linkToUntrackedAccount) is converted the same way at the row's date and carries the account's currency; with no rate it is refused with a form error and nothing is written. Each leg carries its own account's currency and, per TransactionCurrency, no exchange_rate (a rate only records how a currency different from the account's converts).
+  - Cross-currency matching (#716): `budget.transfer_fx_tolerance` (BUDGET_TRANSFER_FX_TOLERANCE, default 10 percent, clamped to 0-50 in TransferExchange) bounds how far the incoming amount may differ from the converted outgoing amount. TransferDetector's second pass pairs rows left with no exact candidate, only when both accounts are bank-linked or a TransferRule runs from the debit's account to the credit's, and only as mutual single matches; the rule pass stays exact-amount only, so a cross-currency pair is never auto-linked, only suggested; the modal's manual match list offers them with no such restriction. A pair with no rate is never suggested or offered.
+  - Cross-currency safeguards (#716): the rate is read before any account or row lock is taken, so a provider call never holds them, and a date after today is looked up as today. A typed rate belongs to one From-to-To pair: it is discarded when the accounts are swapped or either changes and when the type changes to or from transfer, and the label names the direction. A row whose currency differs from its account's cannot be converted to a transfer. A converted opposite row counts as a real match for the hidden-account guards and the missing-leg recheck, the dry run skips a hidden counterpart with no rate as the real run does, and a typed rate that rounds to zero cents reports that instead of a missing rate.
 - **Gap:**
   - AccountManager, ImportBank and UntrackedAccountCreator always create AUD accounts, and transactions carry no currency.
-  - There are no exchange rates, no conversion and no cross-currency transfers. User::totalAvailable and User::totalOwed add cents across accounts whatever their currency.
+  - There is no conversion of totals: User::totalAvailable and User::totalOwed add cents across accounts whatever their currency.
 - **Build it like:**
   - A new ExchangeRate model as global reference data with no `user_id`, as ADR 0001 allows (C2): a unique pair-plus-date index and a decimal rate.
   - A fetch service, tested with Http::fake.
@@ -463,7 +466,7 @@ The remaining features have no ordering constraint beyond the conventions above.
   - TransferLinkSource Unlinked remembers rejections.
   - The Transaction countable scope keeps tracked-to-tracked pairs out of totals.
 - **Gap:**
-  - Missing: cross-currency transfers and exchange rates, payment kinds by destination (credit card, loan, investment contribution), and tags on transfers.
+  - Missing: payment kinds by destination (credit card, loan, investment contribution), and tags on transfers.
   - Matching needs exact amounts within 3 days; there is no 30-day manual window.
   - Auto-detection covers bank-feed rows only.
   - For bank-feed rows, a missing leg can only be an untracked mirror. Manual and CSV rows already get the missing leg created on any chosen account.
