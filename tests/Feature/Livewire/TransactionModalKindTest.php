@@ -285,3 +285,69 @@ it('keeps a custom category when an edit moves an investment contribution to a s
 
     expect(Transaction::query()->where('user_id', $this->user->id)->current()->where('direction', TransactionDirection::Debit)->sole()->category_id)->toBe($custom->id);
 });
+
+it('keeps the credit leg category when the kind becomes a plain transfer', function () {
+    $investment = Account::factory()->for($this->user)->create(['type' => AccountClass::Investment]);
+    $custom = Category::factory()->for($this->user)->create(['name' => 'Shares']);
+    $debit = kindModalTransfer($this->user, $this->checking, $investment);
+    Transaction::query()->whereKey($debit->transfer_pair_id)->update(['category_id' => $custom->id]);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->set('kind', TransactionKind::FundsMovement->value)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $current = Transaction::query()->where('user_id', $this->user->id)->current()->get()->keyBy('direction');
+
+    expect($current[TransactionDirection::Debit->value]->category_id)->toBeNull()
+        ->and($current[TransactionDirection::Credit->value]->category_id)->toBe($custom->id);
+});
+
+it('keeps the credit leg category when an edit moves an investment contribution to a savings account', function () {
+    $investment = Account::factory()->for($this->user)->create(['type' => AccountClass::Investment]);
+    $savings = Account::factory()->for($this->user)->create(['type' => AccountClass::Savings]);
+    $custom = Category::factory()->for($this->user)->create(['name' => 'Shares']);
+    $debit = kindModalTransfer($this->user, $this->checking, $investment);
+    Transaction::query()->whereKey($debit->transfer_pair_id)->update(['category_id' => $custom->id]);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->set('transferToAccountId', $savings->id)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $current = Transaction::query()->where('user_id', $this->user->id)->current()->get()->keyBy('direction');
+
+    expect($current[TransactionDirection::Debit->value]->category_id)->toBeNull()
+        ->and($current[TransactionDirection::Credit->value]->category_id)->toBe($custom->id);
+});
+
+it('keeps the credit leg category when a rejected kind change is corrected and saved again', function () {
+    $investment = Account::factory()->for($this->user)->create(['type' => AccountClass::Investment]);
+    $custom = Category::factory()->for($this->user)->create(['name' => 'Shares']);
+    $debit = kindModalTransfer($this->user, $this->checking, $investment);
+    Transaction::query()->whereKey($debit->transfer_pair_id)->update(['category_id' => $custom->id]);
+
+    $component = Livewire::actingAs($this->user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id);
+    $original = $component->get('descriptionInput');
+    $investmentCategoryId = $component->get('categoryId');
+
+    $component->set('kind', TransactionKind::FundsMovement->value)
+        ->set('descriptionInput', '0 move money')
+        ->call('save')
+        ->assertHasErrors(['descriptionInput'])
+        ->assertSet('categoryId', $investmentCategoryId)
+        ->set('descriptionInput', $original)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $current = Transaction::query()->where('user_id', $this->user->id)->current()->get()->keyBy('direction');
+
+    expect($current[TransactionDirection::Debit->value]->category_id)->toBeNull()
+        ->and($current[TransactionDirection::Credit->value]->category_id)->toBe($custom->id);
+});
