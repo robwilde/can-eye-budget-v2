@@ -265,6 +265,31 @@
                         <flux:button type="button" size="sm" variant="ghost" wire:click="unlinkTransfer">{{ __('Unlink transfer') }}</flux:button>
                     </div>
                 @endif
+
+                @if($acceptsTransferFees)
+                    <div class="grid grid-cols-2 gap-3" data-testid="transfer-fees">
+                        <flux:input
+                            wire:model="sourceFee"
+                            :label="__('Fee on From account (optional)')"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            inputmode="decimal"
+                            placeholder="0.00"
+                            data-testid="source-fee"
+                        />
+                        <flux:input
+                            wire:model="destinationFee"
+                            :label="__('Fee on To account (optional)')"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            inputmode="decimal"
+                            placeholder="0.00"
+                            data-testid="destination-fee"
+                        />
+                    </div>
+                @endif
             @endif
 
             <hr class="panel-rule">

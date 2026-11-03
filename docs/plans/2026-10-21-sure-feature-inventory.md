@@ -453,6 +453,8 @@ The remaining features have no ordering constraint beyond the conventions above.
     - link, suggest, confirm, unlink, markNotTransfer, linkToHiddenAccount and releaseMirrors, all under row locks in one DB transaction;
     - an uncategorised leg inherits its partner's Transfer category.
     - dissolve, on deleting a manual leg (#715): a partner on a tracked account survives as an ordinary transaction stamped Unlinked, a mirror partner on an untracked account is deleted with it, and a bank-feed partner is unlinked instead.
+  - Transfer fees (#720): TransferLinker::create writes the two Manual legs and, in the same DB transaction and balance history rebuild, one expense per non-zero fee on that fee's own account (`transfer_fee_for_id` points at the leg it belongs to), booked to the user's own Bank Fees category under Bank Fees & Finance Services, which is created for a user whose tree lacks it. Unlink, deleting a leg and converting a transfer to an expense or income delete the fee rows (removeFees); an edited transfer's fees follow the new leg versions through createChild.
+  - Server-side idempotency (#720): the modal's submissionToken is the key for a new transfer. A repeat under the same key on the same source account with the same details returns the first transfer; any other change under that key is refused (TransactionIdempotency::matching, fingerprint stored on the debit leg).
   - TransferDetector:
     - first applies remembered TransferRules, then suggests mutual single-candidate pairs among bank-feed rows carrying TransferSignal ("transfer" in the description, or the Transfer category);
     - runs from TransferDetectionStage and the transfers:detect command.
@@ -461,7 +463,7 @@ The remaining features have no ordering constraint beyond the conventions above.
   - TransferLinkSource Unlinked remembers rejections.
   - The Transaction countable scope keeps tracked-to-tracked pairs out of totals.
 - **Gap:**
-  - Missing: transfer fees, cross-currency transfers and exchange rates, payment kinds by destination (credit card, loan, investment contribution), tags on transfers, and server-side idempotency.
+  - Missing: cross-currency transfers and exchange rates, payment kinds by destination (credit card, loan, investment contribution), and tags on transfers.
   - Matching needs exact amounts within 3 days; there is no 30-day manual window.
   - Auto-detection covers bank-feed rows only.
   - For bank-feed rows, a missing leg can only be an untracked mirror. Manual and CSV rows already get the missing leg created on any chosen account.

@@ -58,9 +58,11 @@ use Illuminate\Support\Facades\DB;
  * @property int|null $parent_transaction_id
  * @property int|null $split_parent_id
  * @property int|null $folded_into_transaction_id
+ * @property int|null $transfer_fee_for_id
  * @property string|null $notes
  * @property bool $excluded
  * @property string|null $idempotency_key
+ * @property string|null $idempotency_fingerprint
  * @property list<string>|null $locked_fields
  * @property string $currency
  * @property float|null $exchange_rate
@@ -149,9 +151,11 @@ final class Transaction extends Model
         'parent_transaction_id',
         'split_parent_id',
         'folded_into_transaction_id',
+        'transfer_fee_for_id',
         'notes',
         'excluded',
         'idempotency_key',
+        'idempotency_fingerprint',
         'locked_fields',
         'currency',
         'exchange_rate',
@@ -559,7 +563,7 @@ final class Transaction extends Model
      */
     public function createChild(array $overrides = []): self
     {
-        $excluded = ['id', 'created_at', 'updated_at', 'deleted_at', 'parent_transaction_id', 'redbark_id', 'idempotency_key'];
+        $excluded = ['id', 'created_at', 'updated_at', 'deleted_at', 'parent_transaction_id', 'redbark_id', 'idempotency_key', 'idempotency_fingerprint'];
 
         $attributes = collect($this->getAttributes())
             ->except($excluded)
@@ -603,6 +607,7 @@ final class Transaction extends Model
             $this->attachments()->update(['transaction_id' => $child->id]);
 
             self::query()->where('split_parent_id', $this->id)->update(['split_parent_id' => $child->id]);
+            self::query()->where('transfer_fee_for_id', $this->id)->update(['transfer_fee_for_id' => $child->id]);
 
             return $child;
         });

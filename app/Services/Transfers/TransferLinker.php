@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Transfers;
 
+use App\DTOs\NewTransfer;
 use App\Enums\CategorySource;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
@@ -11,6 +12,7 @@ use App\Enums\TransactionStatus;
 use App\Enums\TransferLinkSource;
 use App\Exceptions\AccountNotTrackedException;
 use App\Exceptions\AccountNotUntrackedException;
+use App\Exceptions\IdempotencyKeyReusedException;
 use App\Exceptions\RealOppositeRowExistsException;
 use App\Exceptions\TransferAlreadyLinkedException;
 use App\Exceptions\TransferLegsTooFarApartException;
@@ -19,8 +21,10 @@ use App\Models\Account;
 use App\Models\Transaction;
 use App\Models\TransferRule;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
+use App\Services\TransactionIdempotency;
 use App\Support\Transfers\TransferSignal;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Throwable;
@@ -38,7 +42,11 @@ final class TransferLinker
 
     public const int MANUAL_WINDOW_DAYS = 30;
 
-    public function __construct(private AccountBalanceHistoryBuilder $history) {}
+    public function __construct(
+        private AccountBalanceHistoryBuilder $history,
+        private TransactionIdempotency $idempotency,
+        private TransferFeeCategory $feeCategory,
+    ) {}
 
     /**
      * Unlinked rows on tracked accounts that could be the opposite leg of $transaction:
@@ -295,6 +303,79 @@ final class TransferLinker
     }
 
     /**
+     * Records a manual transfer: the two legs, linked with source Manual, plus one expense
+     * per non-zero fee on that fee's own account, all in one DB transaction with the balance
+     * history rebuild. With an idempotency key a repeat of the same submission returns the
+     * first debit leg and writes nothing; the same key with other details is refused.
+     *
+     * @return Transaction the debit leg, on the source account
+     *
+     * @throws IdempotencyKeyReusedException when the key was already used with other details
+     * @throws InvalidArgumentException when the accounts are not two different accounts of the user, the amount is not positive or a fee is negative
+     * @throws Throwable
+     */
+    public function create(NewTransfer $transfer, ?string $idempotencyKey = null): Transaction
+    {
+        if ($transfer->fromAccountId === $transfer->toAccountId
+            || $transfer->amount <= 0
+            || $transfer->sourceFee < 0
+            || $transfer->destinationFee < 0) {
+            throw new InvalidArgumentException('A transfer needs two different accounts, a positive amount and non-negative fees.');
+        }
+
+        try {
+            return DB::transaction(fn (): Transaction => $this->writeTransfer($transfer, $idempotencyKey));
+        } catch (UniqueConstraintViolationException $e) {
+            $existing = $idempotencyKey === null
+                ? null
+                : $this->idempotency->matching($transfer->userId, $idempotencyKey, $transfer->fromAccountId, $transfer->fingerprint());
+
+            return $existing ?? throw $e;
+        }
+    }
+
+    /**
+     * Deletes the fee expenses booked against these transfer legs, with every version of each
+     * fee and every line a split of a fee made, and rebuilds the history of the accounts they
+     * sat on. Every version goes, so deleting an edited fee does not hand current status back
+     * to an earlier version.
+     *
+     * @throws Throwable
+     */
+    public function removeFees(Transaction ...$legs): void
+    {
+        if ($legs === []) {
+            return;
+        }
+
+        DB::transaction(function () use ($legs): void {
+            $fees = Transaction::query()
+                ->where('user_id', $legs[0]->user_id)
+                ->whereIn('transfer_fee_for_id', array_map(static fn (Transaction $leg): int => $leg->id, $legs))
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
+
+            if ($fees->isEmpty()) {
+                return;
+            }
+
+            $children = Transaction::query()
+                ->where('user_id', $legs[0]->user_id)
+                ->whereIn('split_parent_id', $fees->pluck('id')->all())
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
+
+            foreach ([...$fees, ...$children] as $row) {
+                $row->delete();
+            }
+
+            $this->history->rebuildForTransactions(...$fees->all(), ...$children->all());
+        });
+    }
+
+    /**
      * A manual or CSV row was versioned: a pending suggestion follows the new version, and is
      * dropped on both sides when the edit changed what the pair was matched on.
      *
@@ -334,6 +415,8 @@ final class TransferLinker
     {
         Transaction::query()->getConnection()->transaction(function () use ($deleted): void {
             $partner = $this->lockedPartner($deleted, 'transfer_pair_id');
+
+            $this->removeFees(...array_filter([$deleted, $partner]));
 
             if (! $partner instanceof Transaction) {
                 return;
@@ -456,6 +539,8 @@ final class TransferLinker
                 'transfer_pair_id' => null,
                 'transfer_link_source' => TransferLinkSource::Unlinked,
             ])->save();
+
+            $this->removeFees($transaction, $pair);
 
             if ($this->isMirror($pair)) {
                 $pair->delete();
@@ -657,6 +742,94 @@ final class TransferLinker
 
             return $replaced;
         });
+    }
+
+    private function writeTransfer(NewTransfer $transfer, ?string $idempotencyKey): Transaction
+    {
+        $this->history->lockAccounts($transfer->fromAccountId, $transfer->toAccountId);
+
+        if ($idempotencyKey !== null) {
+            $existing = $this->idempotency->matching($transfer->userId, $idempotencyKey, $transfer->fromAccountId, $transfer->fingerprint());
+
+            if ($existing instanceof Transaction) {
+                return $existing;
+            }
+        }
+
+        $owned = Account::query()
+            ->where('user_id', $transfer->userId)
+            ->whereIn('id', [$transfer->fromAccountId, $transfer->toAccountId])
+            ->count();
+
+        if ($owned !== 2) {
+            throw new InvalidArgumentException('A transfer moves money between two accounts of the same user.');
+        }
+
+        $feeCategoryId = $transfer->sourceFee > 0 || $transfer->destinationFee > 0
+            ? $this->feeCategory->forUser($transfer->userId)->id
+            : null;
+
+        $shared = [
+            'planned_transaction_id' => $transfer->plannedTransactionId,
+            'user_id' => $transfer->userId,
+            'category_id' => $transfer->categoryId,
+            'amount' => $transfer->amount,
+            'description' => $transfer->description,
+            'post_date' => $transfer->postDate,
+            'status' => TransactionStatus::Posted,
+            'source' => TransactionSource::Manual,
+            'notes' => $transfer->notes,
+        ];
+
+        $debit = Transaction::query()->create($shared + [
+            'account_id' => $transfer->fromAccountId,
+            'direction' => TransactionDirection::Debit,
+            'idempotency_key' => $idempotencyKey,
+            'idempotency_fingerprint' => $idempotencyKey === null ? null : $transfer->fingerprint(),
+        ]);
+
+        $credit = Transaction::query()->create($shared + [
+            'account_id' => $transfer->toAccountId,
+            'direction' => TransactionDirection::Credit,
+        ]);
+
+        $manual = ['transfer_link_source' => TransferLinkSource::Manual];
+
+        $debit->update(['transfer_pair_id' => $credit->id] + $manual);
+        $credit->update(['transfer_pair_id' => $debit->id] + $manual);
+
+        $fees = $this->createFees($transfer, $debit, $credit, $feeCategoryId);
+
+        $this->history->rebuildForTransactions($debit, $credit, ...$fees);
+
+        return $debit;
+    }
+
+    /** @return list<Transaction> */
+    private function createFees(NewTransfer $transfer, Transaction $debit, Transaction $credit, ?int $categoryId): array
+    {
+        $fees = [];
+
+        foreach ([[$debit, $transfer->sourceFee], [$credit, $transfer->destinationFee]] as [$leg, $amount]) {
+            if ($amount <= 0) {
+                continue;
+            }
+
+            $fees[] = Transaction::query()->create([
+                'user_id' => $transfer->userId,
+                'account_id' => $leg->account_id,
+                'category_id' => $categoryId,
+                'amount' => $amount,
+                'direction' => TransactionDirection::Debit,
+                'description' => __('Transfer fee'),
+                'post_date' => $transfer->postDate,
+                'status' => TransactionStatus::Posted,
+                'source' => TransactionSource::Manual,
+                'transfer_fee_for_id' => $leg->id,
+            ]);
+        }
+
+        return $fees;
     }
 
     /**
