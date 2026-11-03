@@ -14,6 +14,7 @@ use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Enums\TransferLinkSource;
+use App\Exceptions\ExchangeRateUnavailableException;
 use App\Exceptions\IdempotencyKeyReusedException;
 use App\Exceptions\PendingMergeRefusedException;
 use App\Exceptions\TransactionSplitRefusedException;
@@ -32,6 +33,7 @@ use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\TransactionIdempotency;
 use App\Services\Transactions\TransactionDeleter;
 use App\Services\Transactions\TransactionSplitter;
+use App\Services\Transfers\TransferExchange;
 use App\Services\Transfers\TransferLinker;
 use App\Support\AmountParser;
 use App\Support\AmountParseResult;
@@ -392,6 +394,10 @@ final class TransactionModal extends Component
             $this->addError('descriptionInput', $e->getMessage());
 
             return;
+        } catch (ExchangeRateUnavailableException $e) {
+            $this->addError('exchangeRate', $e->getMessage());
+
+            return;
         }
 
         if (! $saved) {
@@ -457,6 +463,23 @@ final class TransactionModal extends Component
         $this->date = $this->nextPlanStartDate($transaction->post_date->toImmutable());
     }
 
+    public function updatingTransactionType(string $value): void
+    {
+        if (($value === 'transfer') !== ($this->transactionType === 'transfer')) {
+            $this->exchangeRate = '';
+        }
+    }
+
+    public function updatedAccountId(): void
+    {
+        $this->clearTransferRate();
+    }
+
+    public function updatedTransferToAccountId(): void
+    {
+        $this->clearTransferRate();
+    }
+
     public function updatedTransactionType(): void
     {
         if ($this->transactionType !== 'transfer' && ! $this->isBankFeedTransaction) {
@@ -484,6 +507,7 @@ final class TransactionModal extends Component
         }
 
         [$this->accountId, $this->transferToAccountId] = [$this->transferToAccountId, $this->accountId];
+        $this->clearTransferRate();
     }
 
     /**
@@ -751,7 +775,7 @@ final class TransactionModal extends Component
         }
 
         return app(TransferLinker::class)
-            ->candidatesFor($row, includeRejected: true, windowDays: TransferLinker::MANUAL_WINDOW_DAYS)
+            ->candidatesFor($row, includeRejected: true, windowDays: TransferLinker::MANUAL_WINDOW_DAYS, crossCurrency: true)
             ->when($this->transferToAccountId, fn (Collection $c): Collection => $c->where('account_id', $this->transferToAccountId))
             ->load('account')
             ->values();
@@ -803,6 +827,7 @@ final class TransactionModal extends Component
             'accountCurrency' => $accounts->firstWhere('id', $this->accountId)?->currency,
             'currentRate' => $this->currentRate($accounts->firstWhere('id', $this->accountId)),
             'acceptsTransferFees' => $this->acceptsTransferFees(),
+            'transferFx' => $this->transferFx(),
         ]);
     }
 
@@ -1169,7 +1194,7 @@ final class TransactionModal extends Component
 
     private function hasRealOppositeRows(Transaction $row): bool
     {
-        return app(TransferLinker::class)->candidatesFor($row, includeRejected: true, windowDays: TransferLinker::MANUAL_WINDOW_DAYS)->isNotEmpty();
+        return app(TransferLinker::class)->candidatesFor($row, includeRejected: true, windowDays: TransferLinker::MANUAL_WINDOW_DAYS, crossCurrency: true)->isNotEmpty();
     }
 
     /** The row being edited is an imported (bank-feed) row, judged by its stored source, not the client-held flag. */
@@ -1656,7 +1681,21 @@ final class TransactionModal extends Component
 
         [$debitSide, $creditSide, $parsed] = $resolved;
 
-        DB::transaction(function () use ($debitSide, $creditSide, $parsed): void {
+        if ($this->transferNeedsRate() && mb_strtoupper($debitSide->currency) !== mb_strtoupper((string) $this->accountCurrencyOf((int) $this->accountId))) {
+            $this->addError('transactionType', __('A transfer leg in another currency than its account cannot be converted again. Unlink it and enter the transfer afresh.'));
+
+            return false;
+        }
+
+        $incoming = $this->incomingCents($parsed->amount, $debitSide, $creditSide);
+
+        if ($incoming === null) {
+            $this->addError('exchangeRate', $this->unconvertibleMessage());
+
+            return false;
+        }
+
+        DB::transaction(function () use ($debitSide, $creditSide, $parsed, $incoming): void {
             app(AccountBalanceHistoryBuilder::class)->lockAccounts($debitSide->account_id, $creditSide->account_id, $this->accountId, $this->transferToAccountId);
             $this->reloadCleanNamesUnderLock($debitSide, $creditSide);
 
@@ -1669,7 +1708,7 @@ final class TransactionModal extends Component
             ];
 
             $debitChild = $debitSide->createChild($this->renamedDescriptors($debitSide, $parsed->description) + $shared + ['account_id' => $this->accountId]);
-            $creditChild = $creditSide->createChild($this->renamedDescriptors($creditSide, $parsed->description) + $shared + ['account_id' => $this->transferToAccountId]);
+            $creditChild = $creditSide->createChild(['amount' => $incoming] + $this->renamedDescriptors($creditSide, $parsed->description) + $shared + ['account_id' => $this->transferToAccountId]);
 
             $manual = ['transfer_link_source' => TransferLinkSource::Manual];
 
@@ -1695,7 +1734,21 @@ final class TransactionModal extends Component
 
         [$transaction, $parsed] = $resolved;
 
-        DB::transaction(function () use ($transaction, $parsed): void {
+        if (mb_strtoupper($transaction->currency) !== mb_strtoupper((string) $this->accountCurrencyOf($transaction->account_id))) {
+            $this->addError('transactionType', __('A transaction in another currency than its account cannot become a transfer. Set it to the account currency first.'));
+
+            return false;
+        }
+
+        $incoming = $this->incomingCents($parsed->amount);
+
+        if ($incoming === null) {
+            $this->addError('exchangeRate', $this->unconvertibleMessage());
+
+            return false;
+        }
+
+        DB::transaction(function () use ($transaction, $parsed, $incoming): void {
             app(AccountBalanceHistoryBuilder::class)->lockAccounts($transaction->account_id, $this->accountId, $this->transferToAccountId);
             $this->reloadCleanNamesUnderLock($transaction);
 
@@ -1712,7 +1765,7 @@ final class TransactionModal extends Component
                 'direction' => TransactionDirection::Debit,
             ] + $this->renamedDescriptors($transaction, $parsed->description));
 
-            $credit = Transaction::query()->create($shared + [
+            $credit = Transaction::query()->create([...$shared, 'amount' => $incoming] + [
                 'user_id' => auth()->id(),
                 'account_id' => $this->transferToAccountId,
                 'direction' => TransactionDirection::Credit,
@@ -2113,6 +2166,7 @@ final class TransactionModal extends Component
             plannedTransactionId: $plannedTransactionId,
             sourceFee: $this->feeCents($this->sourceFee),
             destinationFee: $this->feeCents($this->destinationFee),
+            exchangeRate: $this->customTransferRate(),
         ), $this->submissionToken);
     }
 
@@ -2224,6 +2278,109 @@ final class TransactionModal extends Component
     private function feeCents(string $dollars): int
     {
         return $this->acceptsTransferFees() && $dollars !== '' ? (int) round((float) $dollars * 100) : 0;
+    }
+
+    /** The rate fields and amounts apply when a manual transfer is written between accounts of different currencies. */
+    private function transferNeedsRate(): bool
+    {
+        if (! $this->isTransfer() || ($this->mode !== 'enter' && ! $this->isRealizableOccurrence()) || $this->isBankFeedTransaction || $this->accountId === null || $this->transferToAccountId === null) {
+            return false;
+        }
+
+        $from = $this->accountCurrencyOf($this->accountId);
+        $to = $this->accountCurrencyOf($this->transferToAccountId);
+
+        return $from !== null && $to !== null && mb_strtoupper($from) !== mb_strtoupper($to);
+    }
+
+    private function customTransferRate(): ?float
+    {
+        return $this->transferNeedsRate() && $this->exchangeRate !== '' ? (float) $this->exchangeRate : null;
+    }
+
+    private function clearTransferRate(): void
+    {
+        if ($this->isTransfer()) {
+            $this->exchangeRate = '';
+        }
+    }
+
+    private function unconvertibleMessage(): string
+    {
+        return $this->customTransferRate() === null
+            ? __('No exchange rate is available for this date. Enter a rate.')
+            : __('The converted amount rounds to zero. Enter a larger amount or a different rate.');
+    }
+
+    /**
+     * What the destination account receives for $debitCents leaving the source: the same amount
+     * for one currency, else converted at the typed rate or the date's rate. An edit that leaves
+     * the amount, accounts and rate alone keeps the credit leg's stored amount. Null when no
+     * rate is available.
+     */
+    private function incomingCents(int $debitCents, ?Transaction $debitSide = null, ?Transaction $creditSide = null): ?int
+    {
+        if (! $this->transferNeedsRate()) {
+            return $debitCents;
+        }
+
+        if ($this->exchangeRate === ''
+            && $debitSide instanceof Transaction
+            && $creditSide instanceof Transaction
+            && abs($debitSide->amount) === $debitCents
+            && $debitSide->account_id === $this->accountId
+            && $creditSide->account_id === $this->transferToAccountId) {
+            return abs($creditSide->amount);
+        }
+
+        return app(TransferExchange::class)->incoming(
+            (int) auth()->id(),
+            $debitCents,
+            (string) $this->accountCurrencyOf((int) $this->accountId),
+            (string) $this->accountCurrencyOf((int) $this->transferToAccountId),
+            CarbonImmutable::parse($this->date),
+            $this->customTransferRate(),
+        );
+    }
+
+    /**
+     * The rate shown beside the form when the two accounts' currencies differ: null when they
+     * do not. The lookup is skipped when the user typed a rate, a malformed date shows no rate,
+     * and a future date is looked up as today. The answer, a miss included, is kept briefly under
+     * a key naming both currencies, the base currency and the day, so re-renders do not ask again.
+     *
+     * @return array{from: string, to: string, rate: float|null, custom: bool}|null
+     */
+    private function transferFx(): ?array
+    {
+        if (! $this->transferNeedsRate()) {
+            return null;
+        }
+
+        $from = (string) $this->accountCurrencyOf((int) $this->accountId);
+        $to = (string) $this->accountCurrencyOf((int) $this->transferToAccountId);
+
+        if ($this->customTransferRate() !== null) {
+            return ['from' => $from, 'to' => $to, 'rate' => null, 'custom' => true];
+        }
+
+        try {
+            $today = CarbonImmutable::today();
+            $date = $this->date !== '' ? CarbonImmutable::parse($this->date) : $today;
+            $date = $date->greaterThan($today) ? $today : $date;
+        } catch (InvalidFormatException) {
+            return ['from' => $from, 'to' => $to, 'rate' => null, 'custom' => false];
+        }
+
+        $base = (string) auth()->user()?->base_currency;
+
+        $found = Cache::remember(
+            sprintf('transaction-modal-transfer-rate:%s:%s:%s:%s', $from, $to, $base, $date->toDateString()),
+            self::RATE_LOOKUP_TTL_SECONDS,
+            fn (): array => ['rate' => app(TransferExchange::class)->rate((int) auth()->id(), $from, $to, $date)],
+        );
+
+        return ['from' => $from, 'to' => $to, 'rate' => $found['rate'], 'custom' => false];
     }
 
     private function resetForm(): void
@@ -2338,7 +2495,7 @@ final class TransactionModal extends Component
             'notes' => ['nullable', 'string', 'max:1000'],
             'cleanDescription' => ['nullable', 'string', 'max:255'],
             'currency' => ['nullable', 'string', Rule::in([...auth()->user()->allowedCurrencies(), $this->openedCurrency])],
-            'exchangeRate' => $this->storesExchangeRate() ? ['nullable', 'numeric', 'min:0.00000001', 'lt:10000000000'] : ['nullable'],
+            'exchangeRate' => $this->storesExchangeRate() || $this->transferNeedsRate() ? ['nullable', 'numeric', 'min:0.00000001', 'lt:10000000000'] : ['nullable'],
             'transferToAccountId' => $this->isTransfer()
                 ? [
                     $this->isBankFeedTransaction && ! $this->originalWasTransfer ? 'nullable' : 'required',

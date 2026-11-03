@@ -8,6 +8,7 @@ use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
 use App\Enums\TransferLinkSource;
 use App\Exceptions\TransferLinkRefusedException;
+use App\Models\Account;
 use App\Models\Transaction;
 use App\Models\TransferRule;
 use App\Models\User;
@@ -18,7 +19,7 @@ use Throwable;
 
 final readonly class TransferDetector
 {
-    public function __construct(private TransferLinker $linker) {}
+    public function __construct(private TransferLinker $linker, private TransferExchange $exchange) {}
 
     /**
      * Rules first (a remembered transfer links automatically), then strict suggestions.
@@ -107,10 +108,14 @@ final readonly class TransferDetector
                     // Real rows win, and the preview must agree with the real run: rows a rule
                     // claimed earlier in this pass are already linked in a real run, so they
                     // are not candidates here either.
-                    $real = $this->linker->candidatesFor($row)
+                    $real = $this->linker->candidatesFor($row, crossCurrency: true)
                         ->reject(fn (Transaction $c): bool => isset($claimed[$c->id]));
 
                     if ($real->isNotEmpty()) {
+                        continue;
+                    }
+
+                    if ($dryRun && $this->exchange->incoming($row->user_id, abs($row->amount), $row->currency, $rule->counterpartAccount->currency, $row->post_date) === null) {
                         continue;
                     }
 
@@ -136,8 +141,7 @@ final readonly class TransferDetector
 
                 // The single-match check spans every tracked account, not just the rule's
                 // counterpart: a second possible match anywhere makes the row ambiguous.
-                $candidates = $this->linker->candidatesFor($row)
-                    ->reject(fn (Transaction $c): bool => isset($claimed[$c->id]));
+                $candidates = $this->exactCandidates($row, $claimed);
 
                 if ($candidates->count() !== 1) {
                     continue;
@@ -152,8 +156,7 @@ final readonly class TransferDetector
 
                 // Mutual: the counterpart row must have exactly one candidate too, this row,
                 // across all tracked accounts.
-                $reverse = $this->linker->candidatesFor($other)
-                    ->reject(fn (Transaction $c): bool => isset($claimed[$c->id]));
+                $reverse = $this->exactCandidates($other, $claimed);
 
                 if ($reverse->count() !== 1 || $reverse->first()->id !== $row->id) {
                     continue;
@@ -196,7 +199,7 @@ final readonly class TransferDetector
             ->filter(TransferSignal::isCandidate(...));
 
         $debits = $rows->where('direction', TransactionDirection::Debit);
-        $creditsByAmount = $rows->where('direction', TransactionDirection::Credit)->groupBy(fn (Transaction $t): int => abs($t->amount));
+        $creditsByAmount = $rows->where('direction', TransactionDirection::Credit)->groupBy(fn (Transaction $t): string => $t->currency.'|'.abs($t->amount));
 
         /** @var array<int, list<Transaction>> $debitsFor credit id => matching debits */
         $debitsFor = [];
@@ -204,7 +207,7 @@ final readonly class TransferDetector
         $creditsFor = [];
 
         foreach ($debits as $debit) {
-            foreach ($creditsByAmount->get(abs($debit->amount), []) as $credit) {
+            foreach ($creditsByAmount->get($debit->currency.'|'.abs($debit->amount), []) as $credit) {
                 if ($credit->account_id === $debit->account_id) {
                     continue;
                 }
@@ -238,7 +241,97 @@ final readonly class TransferDetector
             $pairs[] = $this->pair($debit, $credits[0]);
         }
 
+        return [...$pairs, ...$this->suggestCrossCurrency($user, $debits, $rows->where('direction', TransactionDirection::Credit), $debitsFor, $creditsFor, $dryRun)];
+    }
+
+    /**
+     * The second pass: rows the exact pass left with no candidate at all are paired across
+     * currencies when the converted amounts are within the tolerance, the accounts are both
+     * bank-linked or the user has confirmed a transfer from the debit's account to the
+     * credit's, and each row is the other's single such match. Only rows in different
+     * currencies are compared, and credits are looked up by date within the window rather
+     * than against every debit, so single-currency history costs nothing here.
+     *
+     * @param  Collection<int, Transaction>  $debits
+     * @param  Collection<int, Transaction>  $credits
+     * @param  array<int, list<Transaction>>  $debitsFor  exact matches, by credit id
+     * @param  array<int, list<Transaction>>  $creditsFor  exact matches, by debit id
+     * @return list<array{debit: int, credit: int}>
+     *
+     * @throws Throwable
+     */
+    private function suggestCrossCurrency(User $user, Collection $debits, Collection $credits, array $debitsFor, array $creditsFor, bool $dryRun): array
+    {
+        $debits = $debits->reject(fn (Transaction $t): bool => isset($creditsFor[$t->id]));
+        $credits = $credits->reject(fn (Transaction $t): bool => isset($debitsFor[$t->id]));
+
+        if ($debits->isEmpty() || $credits->isEmpty()
+            || $debits->pluck('currency')->merge($credits->pluck('currency'))->unique()->count() < 2) {
+            return [];
+        }
+
+        $exchange = $this->exchange->memoising();
+        $bankLinked = array_flip(Account::query()->where('user_id', $user->id)->whereHas('redbarkAccount')->pluck('id')->all());
+        $confirmed = TransferRule::query()->where('user_id', $user->id)->get(['account_id', 'counterpart_account_id'])
+            ->mapWithKeys(fn (TransferRule $rule): array => [$rule->account_id.'>'.$rule->counterpart_account_id => true])
+            ->all();
+
+        /** @var array<int, list<Transaction>> $debitsForCredit */
+        $debitsForCredit = [];
+        /** @var array<int, list<Transaction>> $creditsForDebit */
+        $creditsForDebit = [];
+
+        $creditsByDate = $credits->groupBy(fn (Transaction $credit): string => $credit->post_date->toDateString());
+
+        foreach ($debits as $debit) {
+            for ($offset = -TransferLinker::WINDOW_DAYS; $offset <= TransferLinker::WINDOW_DAYS; $offset++) {
+                foreach ($creditsByDate->get($debit->post_date->addDays($offset)->toDateString(), []) as $credit) {
+                    $allowed = (isset($bankLinked[$debit->account_id]) && isset($bankLinked[$credit->account_id]))
+                        || isset($confirmed[$debit->account_id.'>'.$credit->account_id]);
+
+                    if ($credit->currency === $debit->currency
+                        || $credit->account_id === $debit->account_id
+                        || ! $allowed
+                        || ! $exchange->qualifies($debit, $credit)) {
+                        continue;
+                    }
+
+                    $creditsForDebit[$debit->id][] = $credit;
+                    $debitsForCredit[$credit->id][] = $debit;
+                }
+            }
+        }
+
+        $pairs = [];
+
+        foreach ($debits as $debit) {
+            $matches = $creditsForDebit[$debit->id] ?? [];
+
+            if (count($matches) !== 1 || count($debitsForCredit[$matches[0]->id] ?? []) !== 1) {
+                continue;
+            }
+
+            if ($debit->suggested_pair_id !== null || $matches[0]->suggested_pair_id !== null) {
+                continue;
+            }
+
+            if (! $dryRun && ! $this->linker->suggest($debit, $matches[0])) {
+                continue;
+            }
+
+            $pairs[] = $this->pair($debit, $matches[0]);
+        }
+
         return $pairs;
+    }
+
+    /**
+     * @param  array<int, bool>  $claimed
+     * @return Collection<int, Transaction>
+     */
+    private function exactCandidates(Transaction $row, array $claimed): Collection
+    {
+        return $this->linker->candidatesFor($row)->reject(fn (Transaction $c): bool => isset($claimed[$c->id]));
     }
 
     /**

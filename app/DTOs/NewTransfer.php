@@ -8,7 +8,8 @@ use Spatie\LaravelData\Dto;
 
 /**
  * A manual transfer to record: two legs between the user's own accounts plus an optional
- * fee expense on each side. Amounts are positive magnitudes in cents (C1).
+ * fee expense on each side. Amounts are positive magnitudes in cents (C1), in the source
+ * account's currency. A custom rate converts them for a destination in another currency.
  */
 final class NewTransfer extends Dto
 {
@@ -24,6 +25,7 @@ final class NewTransfer extends Dto
         public readonly ?int $plannedTransactionId = null,
         public readonly int $sourceFee = 0,
         public readonly int $destinationFee = 0,
+        public readonly ?float $exchangeRate = null,
     ) {}
 
     /**
@@ -43,6 +45,7 @@ final class NewTransfer extends Dto
             $this->plannedTransactionId,
             $this->sourceFee,
             $this->destinationFee,
+            $this->exchangeRate,
         ], JSON_THROW_ON_ERROR));
     }
 }

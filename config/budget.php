@@ -37,4 +37,18 @@ return [
 
     'bnpl_email_import' => env('BUDGET_BNPL_EMAIL_IMPORT', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Cross-Currency Transfer Tolerance
+    |--------------------------------------------------------------------------
+    |
+    | How far, in percent, the incoming amount of a cross-currency transfer may
+    | differ from the outgoing amount converted at the day's rate and still be
+    | matched as one transfer. Values outside 0 to 50 are clamped in code
+    | (TransferExchange::tolerancePercent).
+    |
+    */
+
+    'transfer_fx_tolerance' => env('BUDGET_TRANSFER_FX_TOLERANCE', 10),
+
 ];

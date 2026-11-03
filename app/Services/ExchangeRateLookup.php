@@ -66,4 +66,44 @@ final readonly class ExchangeRateLookup
             ['rate' => $quote->rate],
         )->rate;
     }
+
+    /**
+     * The rate converting $from into $to on $date for a user whose base currency is $base: 1
+     * for the same currency; when either side is the base, the pair's own rate (or the inverse
+     * of the stored opposite pair); otherwise strictly the product of the from-to-base and
+     * base-to-to rates, each found the same way. A direct quote between two non-base currencies
+     * is never used. Null when any rate it needs is missing.
+     */
+    public function rateViaBase(string $from, string $to, string $base, CarbonInterface $date): ?float
+    {
+        $from = mb_strtoupper($from);
+        $to = mb_strtoupper($to);
+        $base = mb_strtoupper($base);
+
+        if ($from === $to) {
+            return $this->rateFor($from, $to, $date);
+        }
+
+        if ($from === $base || $to === $base) {
+            return $this->pairRate($from, $to, $date);
+        }
+
+        $toBase = $this->pairRate($from, $base, $date);
+        $fromBase = $this->pairRate($base, $to, $date);
+
+        return $toBase === null || $fromBase === null ? null : $toBase * $fromBase;
+    }
+
+    private function pairRate(string $from, string $to, CarbonInterface $date): ?float
+    {
+        $direct = $this->rateFor($from, $to, $date);
+
+        if ($direct !== null) {
+            return $direct;
+        }
+
+        $inverse = $this->rateFor($to, $from, $date);
+
+        return $inverse === null ? null : 1 / $inverse;
+    }
 }
