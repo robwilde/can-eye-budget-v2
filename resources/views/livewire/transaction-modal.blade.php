@@ -470,6 +470,14 @@
                 </div>
             @endif
 
+            @if($editingTransactionId && $mode === 'enter')
+                <flux:select wire:model="kind" :label="__('Kind')" data-testid="transaction-kind">
+                    @foreach($kinds as $option)
+                        <flux:select.option value="{{ $option->value }}">{{ __($option->label()) }}</flux:select.option>
+                    @endforeach
+                </flux:select>
+            @endif
+
             {{-- Transfer / bank-feed notes, plus any existing notes (e.g. folded intl-fee note) --}}
             @if($transactionType === 'transfer' || $isBankFeedTransaction || $notes !== '')
                 <hr class="panel-rule">

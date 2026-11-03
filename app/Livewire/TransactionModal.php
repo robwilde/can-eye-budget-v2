@@ -7,10 +7,12 @@ namespace App\Livewire;
 use App\Casts\MoneyCast;
 use App\DTOs\NewTransfer;
 use App\DTOs\TransactionSplitLine;
+use App\Enums\AccountClass;
 use App\Enums\AccountStatus;
 use App\Enums\CleanDescriptionSource;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Enums\TransactionKind;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Enums\TransferLinkSource;
@@ -34,6 +36,7 @@ use App\Services\TransactionIdempotency;
 use App\Services\Transactions\TransactionDeleter;
 use App\Services\Transactions\TransactionSplitter;
 use App\Services\Transfers\TransferExchange;
+use App\Services\Transfers\TransferKinds;
 use App\Services\Transfers\TransferLinker;
 use App\Support\AmountParser;
 use App\Support\AmountParseResult;
@@ -122,6 +125,11 @@ final class TransactionModal extends Component
     public string $sourceFee = '';
 
     public string $destinationFee = '';
+
+    public string $kind = 'standard';
+
+    #[Locked]
+    public string $openedKind = 'standard';
 
     public string $mode = 'enter';
 
@@ -249,6 +257,8 @@ final class TransactionModal extends Component
         $this->isBankFeedTransaction = $transaction->source->isBankFeed();
         $this->bankFeedTransactionDirection = $this->isBankFeedTransaction ? $transaction->direction->value : null;
         $this->originalWasTransfer = $transaction->transfer_pair_id !== null;
+        $this->kind = $transaction->kind->value;
+        $this->openedKind = $this->kind;
 
         if ($transaction->transfer_pair_id) {
             $this->transactionType = 'transfer';
@@ -387,6 +397,14 @@ final class TransactionModal extends Component
         $this->validate($this->formRules(), [
             'date.after' => __('Planned transactions start after today.'),
         ]);
+
+        if ($this->editingTransactionId !== null && $this->kindChanged() && ! $this->ownsEditedTransaction()) {
+            $this->addError('kind', __('This transaction could not be found.'));
+
+            return;
+        }
+
+        $this->dropInvestmentCategoryOnPlainTransfer();
 
         try {
             $saved = $this->resolveSave();
@@ -828,6 +846,7 @@ final class TransactionModal extends Component
             'currentRate' => $this->currentRate($accounts->firstWhere('id', $this->accountId)),
             'acceptsTransferFees' => $this->acceptsTransferFees(),
             'transferFx' => $this->transferFx(),
+            'kinds' => TransactionKind::cases(),
         ]);
     }
 
@@ -1254,6 +1273,8 @@ final class TransactionModal extends Component
         if ($isLinked && $this->originalWasTransfer && ! $wantsTransfer) {
             // Unlink first so the edit's new version does not inherit the stale pair id.
             app(TransferLinker::class)->unlink($row);
+            $this->kind = TransactionKind::Standard->value;
+            $this->openedKind = TransactionKind::Standard->value;
 
             return ! $this->bankFeedFieldsChanged($row) || $this->updateTransaction();
         }
@@ -1564,6 +1585,7 @@ final class TransactionModal extends Component
                     'notes' => $this->notes !== '' ? $this->notes : null,
                     'excluded' => $this->excluded,
                     ...$this->editedDescriptors($transaction),
+                    ...$this->kindOverride(),
                 ]));
             });
 
@@ -1587,6 +1609,7 @@ final class TransactionModal extends Component
                     'notes' => $this->notes !== '' ? $this->notes : null,
                     'excluded' => $this->excluded,
                     ...$this->currencyAttributes($transaction),
+                    ...$this->kindOverride(),
                 ]));
 
                 app(AccountBalanceHistoryBuilder::class)->rebuildForEdit($transaction, $child);
@@ -1698,6 +1721,7 @@ final class TransactionModal extends Component
         DB::transaction(function () use ($debitSide, $creditSide, $parsed, $incoming): void {
             app(AccountBalanceHistoryBuilder::class)->lockAccounts($debitSide->account_id, $creditSide->account_id, $this->accountId, $this->transferToAccountId);
             $this->reloadCleanNamesUnderLock($debitSide, $creditSide);
+            $kinds = $this->updatedTransferKinds($debitSide, $creditSide);
 
             $shared = [
                 'category_id' => $this->categoryId,
@@ -1707,8 +1731,9 @@ final class TransactionModal extends Component
                 'notes' => $this->notes !== '' ? $this->notes : null,
             ];
 
-            $debitChild = $debitSide->createChild($this->renamedDescriptors($debitSide, $parsed->description) + $shared + ['account_id' => $this->accountId]);
-            $creditChild = $creditSide->createChild(['amount' => $incoming] + $this->renamedDescriptors($creditSide, $parsed->description) + $shared + ['account_id' => $this->transferToAccountId]);
+            $debitChild = $debitSide->createChild($kinds['debit'] + $this->renamedDescriptors($debitSide, $parsed->description) + $shared + ['account_id' => $this->accountId]);
+            $creditCategoryId = $this->categoryId === $debitSide->category_id ? $creditSide->category_id : $this->categoryId;
+            $creditChild = $creditSide->createChild($kinds['credit'] + ['amount' => $incoming, 'category_id' => $creditCategoryId] + $this->renamedDescriptors($creditSide, $parsed->description) + $shared + ['account_id' => $this->transferToAccountId]);
 
             $manual = ['transfer_link_source' => TransferLinkSource::Manual];
 
@@ -1751,6 +1776,7 @@ final class TransactionModal extends Component
         DB::transaction(function () use ($transaction, $parsed, $incoming): void {
             app(AccountBalanceHistoryBuilder::class)->lockAccounts($transaction->account_id, $this->accountId, $this->transferToAccountId);
             $this->reloadCleanNamesUnderLock($transaction);
+            $kinds = $this->derivedTransferKinds();
 
             $shared = [
                 'amount' => $parsed->amount,
@@ -1760,12 +1786,12 @@ final class TransactionModal extends Component
                 'notes' => $this->notes !== '' ? $this->notes : null,
             ];
 
-            $debitChild = $transaction->createChild($shared + [
+            $debitChild = $transaction->createChild($kinds['debit'] + $shared + [
                 'account_id' => $this->accountId,
                 'direction' => TransactionDirection::Debit,
             ] + $this->renamedDescriptors($transaction, $parsed->description));
 
-            $credit = Transaction::query()->create([...$shared, 'amount' => $incoming] + [
+            $credit = Transaction::query()->create([...$shared, 'amount' => $incoming, ...$kinds['credit']] + [
                 'user_id' => auth()->id(),
                 'account_id' => $this->transferToAccountId,
                 'direction' => TransactionDirection::Credit,
@@ -1826,6 +1852,7 @@ final class TransactionModal extends Component
                 'category_id' => $this->categoryId,
                 'notes' => $this->notes !== '' ? $this->notes : null,
                 'transfer_pair_id' => null,
+                'kind' => TransactionKind::Standard,
                 'transfer_link_source' => $keepCreditSide ? TransferLinkSource::Unlinked : null,
                 ...$this->renamedDescriptors($debitSide, $parsed->description),
             ]);
@@ -2266,6 +2293,96 @@ final class TransactionModal extends Component
         return $this->transactionType === 'transfer';
     }
 
+    private function kindChanged(): bool
+    {
+        return $this->kind !== $this->openedKind;
+    }
+
+    /** @return array{kind?: TransactionKind} */
+    private function kindOverride(): array
+    {
+        return $this->kindChanged() ? ['kind' => TransactionKind::from($this->kind)] : [];
+    }
+
+    private function ownsEditedTransaction(): bool
+    {
+        return Transaction::query()->where('user_id', auth()->id())->whereKey($this->editingTransactionId)->exists();
+    }
+
+    /**
+     * Switching a leg from an investment contribution to a plain transfer takes the Investment
+     * Contributions category off it; any other category the user chose stays.
+     */
+    private function dropInvestmentCategoryOnPlainTransfer(): void
+    {
+        if ($this->editingTransactionId === null
+            || $this->openedKind !== TransactionKind::InvestmentContribution->value
+            || $this->kind !== TransactionKind::FundsMovement->value
+            || $this->categoryId === null) {
+            return;
+        }
+
+        if ($this->categoryId === app(TransferKinds::class)->investmentCategoryId((int) auth()->id())) {
+            $this->categoryId = null;
+        }
+    }
+
+    private function accountTypeOf(?int $accountId): ?AccountClass
+    {
+        $type = $accountId === null
+            ? null
+            : Account::query()->where('user_id', auth()->id())->whereKey($accountId)->value('type');
+
+        return $type instanceof AccountClass ? $type : null;
+    }
+
+    /**
+     * The kinds (and category) a transfer between the chosen accounts gives its two legs.
+     *
+     * @return array{debit: array<string, mixed>, credit: array<string, mixed>}
+     */
+    private function derivedTransferKinds(): array
+    {
+        $from = $this->accountTypeOf($this->accountId);
+        $to = $this->accountTypeOf($this->transferToAccountId);
+
+        if (! $from instanceof AccountClass || ! $to instanceof AccountClass) {
+            return ['debit' => [], 'credit' => []];
+        }
+
+        $attributes = app(TransferKinds::class)->attributes((int) auth()->id(), $from, $to, $this->categoryId);
+
+        return ['debit' => $attributes['outflow'], 'credit' => $attributes['inflow']];
+    }
+
+    /**
+     * An edited transfer keeps its legs' kinds, takes the kind the user chose for the edited
+     * leg, or has both derived again when its accounts changed and the kind was left alone.
+     *
+     * @return array{debit: array<string, mixed>, credit: array<string, mixed>}
+     */
+    private function updatedTransferKinds(Transaction $debitSide, Transaction $creditSide): array
+    {
+        if ($this->kindChanged()) {
+            return ['debit' => $this->kindOverride(), 'credit' => []];
+        }
+
+        if ($debitSide->account_id === $this->accountId && $creditSide->account_id === $this->transferToAccountId) {
+            return ['debit' => [], 'credit' => []];
+        }
+
+        $derived = $this->derivedTransferKinds();
+
+        if ($this->openedKind === TransactionKind::InvestmentContribution->value
+            && ($derived['debit']['kind'] ?? null) !== TransactionKind::InvestmentContribution
+            && $this->categoryId !== null
+            && $this->categoryId === app(TransferKinds::class)->investmentCategoryId((int) auth()->id())) {
+            $this->categoryId = null;
+        }
+
+        return $derived;
+    }
+
     /** Fees are entered when a new manual transfer is created, including from a planned one. */
     private function acceptsTransferFees(): bool
     {
@@ -2419,6 +2536,8 @@ final class TransactionModal extends Component
         $this->openedTransferToAccountId = null;
         $this->sourceFee = '';
         $this->destinationFee = '';
+        $this->kind = TransactionKind::Standard->value;
+        $this->openedKind = TransactionKind::Standard->value;
         $this->selectedCandidateId = null;
         $this->splitLines = [];
         $this->isSplitParent = false;
@@ -2513,6 +2632,7 @@ final class TransactionModal extends Component
                 : ['nullable'],
             'sourceFee' => $this->acceptsTransferFees() ? self::FEE_RULES : ['nullable'],
             'destinationFee' => $this->acceptsTransferFees() ? self::FEE_RULES : ['nullable'],
+            'kind' => $this->editingTransactionId !== null ? ['required', Rule::enum(TransactionKind::class)] : ['nullable'],
         ];
 
         if ($this->mode === 'plan') {

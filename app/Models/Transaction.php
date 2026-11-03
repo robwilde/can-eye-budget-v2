@@ -8,6 +8,7 @@ use App\Casts\MoneyCast;
 use App\Enums\CategorySource;
 use App\Enums\CleanDescriptionSource;
 use App\Enums\TransactionDirection;
+use App\Enums\TransactionKind;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Enums\TransferLinkSource;
@@ -65,6 +66,7 @@ use Illuminate\Support\Facades\DB;
  * @property string|null $idempotency_fingerprint
  * @property list<string>|null $locked_fields
  * @property string $currency
+ * @property TransactionKind $kind
  * @property float|null $exchange_rate
  * @property-read Collection<int, TransactionSplit> $splits
  * @property CarbonImmutable $created_at
@@ -122,6 +124,13 @@ final class Transaction extends Model
     public bool $propagateCategoryChange = true;
 
     /**
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'kind' => 'standard',
+    ];
+
+    /**
      * @var list<string>
      */
     protected $fillable = [
@@ -159,6 +168,7 @@ final class Transaction extends Model
         'locked_fields',
         'currency',
         'exchange_rate',
+        'kind',
     ];
 
     /**
@@ -760,6 +770,7 @@ final class Transaction extends Model
             'category_source' => CategorySource::class,
             'clean_description_source' => CleanDescriptionSource::class,
             'transfer_link_source' => TransferLinkSource::class,
+            'kind' => TransactionKind::class,
             'direction' => TransactionDirection::class,
             'status' => TransactionStatus::class,
             'amount' => MoneyCast::class,
