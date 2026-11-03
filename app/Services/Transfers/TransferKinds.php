@@ -12,6 +12,7 @@ use App\Models\Category;
 use App\Models\CategoryGroup;
 use App\Models\User;
 use App\Services\UserCategoryProvisioner;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * The kind each leg of a confirmed transfer takes, and the Investment Contributions category
@@ -22,6 +23,8 @@ use App\Services\UserCategoryProvisioner;
 final class TransferKinds
 {
     public const string INVESTMENT_CATEGORY = 'Investment Contributions';
+
+    public const int TRANSACTION_ATTEMPTS = 3;
 
     public function outflowKind(AccountClass $source, AccountClass $destination): TransactionKind
     {
@@ -56,12 +59,7 @@ final class TransferKinds
 
     public function investmentCategoryId(int $userId): ?int
     {
-        $id = Category::query()
-            ->where('user_id', $userId)
-            ->whereNull('parent_id')
-            ->where('name', self::INVESTMENT_CATEGORY)
-            ->orderBy('id')
-            ->value('id');
+        $id = $this->investmentCategoryQuery($userId)->value('id');
 
         return is_int($id) ? $id : null;
     }
@@ -69,27 +67,38 @@ final class TransferKinds
     /**
      * Finds or creates the user's Investment Contributions category. Call inside the write's DB
      * transaction: the owner's row is locked first, after any account locks, so two first uses
-     * cannot both find nothing and each create one.
+     * cannot both find nothing and each create one. A category the snapshot already shows is
+     * returned without a lock. Only when it shows none is the lookup a locking read: it never
+     * creates a second category, but when a writer committed one after this transaction's
+     * REPEATABLE READ snapshot was fixed, a server with innodb_snapshot_isolation on (MariaDB
+     * 11.6.2 and later) aborts it with error 1020. The outermost transaction of every caller must
+     * therefore be run with TRANSACTION_ATTEMPTS so the retry reads a fresh snapshot.
      */
     public function investmentCategory(int $userId): Category
     {
         User::query()->whereKey($userId)->lockForUpdate()->value('id');
 
-        $existing = $this->investmentCategoryId($userId);
+        return $this->investmentCategoryQuery($userId)->first()
+            ?? $this->investmentCategoryQuery($userId)->lockForUpdate()->first()
+            ?? Category::query()->create([
+                'user_id' => $userId,
+                'name' => self::INVESTMENT_CATEGORY,
+                'icon' => 'chart-bar',
+                'budget_tag' => BudgetTag::Savings,
+                'group_id' => CategoryGroup::query()
+                    ->where('user_id', $userId)
+                    ->where('name', UserCategoryProvisioner::SAVINGS_GROUP)
+                    ->value('id'),
+            ]);
+    }
 
-        if ($existing !== null) {
-            return Category::query()->where('user_id', $userId)->findOrFail($existing);
-        }
-
-        return Category::query()->create([
-            'user_id' => $userId,
-            'name' => self::INVESTMENT_CATEGORY,
-            'icon' => 'chart-bar',
-            'budget_tag' => BudgetTag::Savings,
-            'group_id' => CategoryGroup::query()
-                ->where('user_id', $userId)
-                ->where('name', UserCategoryProvisioner::SAVINGS_GROUP)
-                ->value('id'),
-        ]);
+    /** @return Builder<Category> */
+    private function investmentCategoryQuery(int $userId): Builder
+    {
+        return Category::query()
+            ->where('user_id', $userId)
+            ->whereNull('parent_id')
+            ->where('name', self::INVESTMENT_CATEGORY)
+            ->orderBy('id');
     }
 }
