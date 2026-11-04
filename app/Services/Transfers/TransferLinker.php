@@ -173,7 +173,7 @@ final class TransferLinker
             }
 
             return true;
-        });
+        }, TransferKinds::TRANSACTION_ATTEMPTS);
 
         if ($linked) {
             $a->refresh();
@@ -357,7 +357,7 @@ final class TransferLinker
         $this->assertTransferRateKnown($transfer);
 
         try {
-            return DB::transaction(fn (): Transaction => $this->writeTransfer($transfer, $idempotencyKey));
+            return DB::transaction(fn (): Transaction => $this->writeTransfer($transfer, $idempotencyKey), TransferKinds::TRANSACTION_ATTEMPTS);
         } catch (UniqueConstraintViolationException $e) {
             $existing = $idempotencyKey === null
                 ? null

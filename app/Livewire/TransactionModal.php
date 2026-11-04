@@ -205,6 +205,9 @@ final class TransactionModal extends Component
     /** Per request: this request's own updates changed a list the user had ticked. */
     private bool $categoriseConsentWithdrawn = false;
 
+    /** Per request: a kind change took the Investment Contributions category off the form. */
+    private bool $investmentCategoryDropped = false;
+
     public function mount(): void
     {
         $this->submissionToken = (string) Str::uuid();
@@ -404,21 +407,27 @@ final class TransactionModal extends Component
             return;
         }
 
+        $categoryBeforeCleanup = $this->categoryId;
+
         $this->dropInvestmentCategoryOnPlainTransfer();
 
         try {
             $saved = $this->resolveSave();
         } catch (IdempotencyKeyReusedException $e) {
+            $this->categoryId = $categoryBeforeCleanup;
             $this->addError('descriptionInput', $e->getMessage());
 
             return;
         } catch (ExchangeRateUnavailableException $e) {
+            $this->categoryId = $categoryBeforeCleanup;
             $this->addError('exchangeRate', $e->getMessage());
 
             return;
         }
 
         if (! $saved) {
+            $this->categoryId = $categoryBeforeCleanup;
+
             return;
         }
 
@@ -1369,7 +1378,7 @@ final class TransactionModal extends Component
                 }
 
                 return true;
-            });
+            }, TransferKinds::TRANSACTION_ATTEMPTS);
         } catch (TransferLinkRefusedException $e) {
             $this->addError($untracked instanceof Account || $missingLegAccount instanceof Account ? 'transferToAccountId' : 'selectedCandidateId', $e->getMessage());
 
@@ -1732,7 +1741,7 @@ final class TransactionModal extends Component
             ];
 
             $debitChild = $debitSide->createChild($kinds['debit'] + $this->renamedDescriptors($debitSide, $parsed->description) + $shared + ['account_id' => $this->accountId]);
-            $creditCategoryId = $this->categoryId === $debitSide->category_id ? $creditSide->category_id : $this->categoryId;
+            $creditCategoryId = $this->categoryId === $debitSide->category_id || $this->investmentCategoryDropped ? $creditSide->category_id : $this->categoryId;
             $creditChild = $creditSide->createChild($kinds['credit'] + ['amount' => $incoming, 'category_id' => $creditCategoryId] + $this->renamedDescriptors($creditSide, $parsed->description) + $shared + ['account_id' => $this->transferToAccountId]);
 
             $manual = ['transfer_link_source' => TransferLinkSource::Manual];
@@ -1741,7 +1750,7 @@ final class TransactionModal extends Component
             $creditChild->update(['transfer_pair_id' => $debitChild->id] + $manual);
 
             app(AccountBalanceHistoryBuilder::class)->rebuildForEdits([$debitSide, $debitChild], [$creditSide, $creditChild]);
-        });
+        }, TransferKinds::TRANSACTION_ATTEMPTS);
 
         return true;
     }
@@ -1810,7 +1819,7 @@ final class TransactionModal extends Component
                 ->update(['suggested_pair_id' => null, 'transfer_link_source' => null]);
 
             app(AccountBalanceHistoryBuilder::class)->rebuildForTransactions($transaction, $debitChild, $credit);
-        });
+        }, TransferKinds::TRANSACTION_ATTEMPTS);
 
         return true;
     }
@@ -2324,6 +2333,7 @@ final class TransactionModal extends Component
 
         if ($this->categoryId === app(TransferKinds::class)->investmentCategoryId((int) auth()->id())) {
             $this->categoryId = null;
+            $this->investmentCategoryDropped = true;
         }
     }
 
@@ -2378,6 +2388,7 @@ final class TransactionModal extends Component
             && $this->categoryId !== null
             && $this->categoryId === app(TransferKinds::class)->investmentCategoryId((int) auth()->id())) {
             $this->categoryId = null;
+            $this->investmentCategoryDropped = true;
         }
 
         return $derived;
