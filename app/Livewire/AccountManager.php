@@ -32,6 +32,7 @@ final class AccountManager extends Component
 
     public bool $showDeleteModal = false;
 
+    #[Locked]
     public ?int $editingAccountId = null;
 
     public ?int $deletingAccountId = null;
@@ -208,9 +209,9 @@ final class AccountManager extends Component
                     $account->update($details);
                 }
 
-                $this->saveOpeningBalance($account);
+                $openingAmountChanged = $this->saveOpeningBalance($account);
 
-                if ($balanceChanged) {
+                if ($balanceChanged && ! $openingAmountChanged) {
                     $failedField = 'balance';
                     app(AccountValuationService::class)->setCurrentBalance($account, $cents);
                 }
@@ -642,21 +643,23 @@ final class AccountManager extends Component
         ];
     }
 
-    private function saveOpeningBalance(Account $account): void
+    private function saveOpeningBalance(Account $account): bool
     {
         if ($this->openingBalance === '') {
-            return;
+            return false;
         }
 
         $cents = $this->reconcileCents($this->openingBalance);
         $date = $this->openingBalanceDate !== '' ? $this->openingBalanceDate : null;
 
         if ($cents === $this->openedOpeningBalance && $date === $this->openedOpeningBalanceDate) {
-            return;
+            return false;
         }
 
         $on = $date !== null ? CarbonImmutable::parse($date) : null;
 
         app(AccountValuationService::class)->setOpeningBalance($account, $cents, $on);
+
+        return $cents !== $this->openedOpeningBalance;
     }
 }
