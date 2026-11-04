@@ -12,6 +12,7 @@ use App\Models\Account;
 use App\Models\User;
 use App\Services\Transfers\UntrackedAccountCreator;
 use Illuminate\Http\UploadedFile;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 
@@ -157,22 +158,15 @@ it('defaults a csv import account to the base currency', function () {
     expect(Account::query()->where('user_id', $user->id)->sole()->currency)->toBe('GBP');
 });
 
-it('does not let a forged editing id skip the allowed currency rule', function () {
-    $user = User::factory()->withPreferences(['allowedCurrencies' => ['AUD']])->create();
+it('rejects a client-set editing id on the add form', function () {
+    $user = User::factory()->create();
 
-    Livewire::actingAs($user)
+    $component = Livewire::actingAs($user)
         ->test(AccountManager::class)
-        ->call('openAddModal')
-        ->set('name', 'Forged')
-        ->set('balance', '100')
-        ->set('type', AccountClass::Transaction->value)
-        ->set('group', AccountGroup::DayToDay->value)
-        ->set('editingAccountId', 0)
-        ->set('currency', 'XYZ')
-        ->call('save')
-        ->assertHasErrors(['currency']);
+        ->call('openAddModal');
 
-    expect(Account::query()->where('user_id', $user->id)->count())->toBe(0);
+    expect(fn () => $component->set('editingAccountId', 0))
+        ->toThrow(CannotUpdateLockedPropertyException::class);
 });
 
 it('treats a whitespace currency on a csv import account as the base currency', function () {
