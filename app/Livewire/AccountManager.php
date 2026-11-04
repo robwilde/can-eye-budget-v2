@@ -210,10 +210,11 @@ final class AccountManager extends Component
                 }
 
                 $openingAmountChanged = $this->saveOpeningBalance($account);
+                $valuations = app(AccountValuationService::class);
 
-                if ($balanceChanged && ! $openingAmountChanged) {
+                if ($balanceChanged && ! ($openingAmountChanged && $valuations->shiftsOpeningBalance($account))) {
                     $failedField = 'balance';
-                    app(AccountValuationService::class)->setCurrentBalance($account, $cents);
+                    $valuations->setCurrentBalance($account, $cents);
                 }
             });
         } catch (InvalidValuationException $exception) {
