@@ -21,6 +21,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Services\AccountValuationService;
 use Carbon\CarbonImmutable;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 
 test('component renders for authenticated user', function () {
@@ -666,7 +667,7 @@ test('a foreign reconciliation cannot be edited by pointing the modal at another
     expect($theirs->valuations()->count())->toBe(1);
 });
 
-it('keeps an edited current balance on a manual account with an opening balance', function () {
+it('shifts the opening balance when only the current balance changes', function () {
     $this->travelTo('2026-06-15 10:00:00');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create(['balance_source' => ImportSource::Manual]);
@@ -740,7 +741,7 @@ it('leaves the balance alone when only account details change', function () {
         ->and($account->valuations()->get()->map->only(['id', 'kind', 'valued_on', 'balance', 'difference', 'updated_at']))->toEqual($valuationsBefore);
 });
 
-it('ends on the entered current balance when the opening balance is edited in the same save', function () {
+it('keeps the entered opening balance when both balances change in one save', function () {
     $this->travelTo('2026-06-15 10:00:00');
     $user = User::factory()->create();
     $account = Account::factory()->for($user)->create(['balance_source' => ImportSource::Manual]);
@@ -758,9 +759,73 @@ it('ends on the entered current balance when the opening balance is edited in th
         ->call('save')
         ->assertHasNoErrors();
 
-    expect($account->fresh()->balance)->toBe(150000)
-        ->and($account->valuations()->sole()->balance)->toBe(170000);
+    expect($account->valuations()->sole()->balance)->toBe(200000)
+        ->and($account->fresh()->balance)->toBe(180000);
 });
+
+it('applies the entered current balance when only the opening date changes', function () {
+    $this->travelTo('2026-06-15 10:00:00');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance_source' => ImportSource::Manual]);
+    app(AccountValuationService::class)->setOpeningBalance($account, 100000, CarbonImmutable::parse('2026-01-01'));
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id)
+        ->set('openingBalanceDate', '2026-02-01')
+        ->set('balance', '1500.00')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $opening = $account->valuations()->sole();
+    expect($account->fresh()->balance)->toBe(150000)
+        ->and($opening->balance)->toBe(150000)
+        ->and($opening->valued_on->toDateString())->toBe('2026-02-01');
+});
+
+it('locks the edited account id', function () {
+    $user = User::factory()->create();
+    $mine = Account::factory()->for($user)->create(['name' => 'Mine', 'balance_source' => ImportSource::Manual]);
+    $other = Account::factory()->for($user)->create(['name' => 'Other', 'balance_source' => ImportSource::Manual]);
+
+    $component = Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $mine->id);
+
+    expect(fn () => $component->set('editingAccountId', $other->id))
+        ->toThrow(CannotUpdateLockedPropertyException::class);
+
+    $component->set('name', 'Renamed')->call('save')->assertHasNoErrors();
+
+    expect($mine->fresh()->name)->toBe('Renamed');
+});
+
+it('keeps balance history consistent after a balance edit', function (?string $openingBalance) {
+    $this->travelTo('2026-06-15 10:00:00');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance_source' => ImportSource::Manual]);
+    Transaction::factory()->for($user)->for($account)->create([
+        'amount' => 20000,
+        'direction' => TransactionDirection::Debit,
+        'post_date' => '2026-03-01',
+    ]);
+    app(AccountValuationService::class)->setOpeningBalance($account, 100000, CarbonImmutable::parse('2026-01-01'));
+
+    $component = Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id)
+        ->set('balance', '1500.00');
+
+    if ($openingBalance !== null) {
+        $component->set('openingBalance', $openingBalance);
+    }
+
+    $component->call('save')->assertHasNoErrors();
+
+    expectBalanceHistoryConsistent($account);
+    expect($account->dailyBalances()->whereDate('balance_date', '2026-06-15')->sole()->end_balance)
+        ->toBe($account->fresh()->balance);
+})->with([
+    'both balances change' => ['2000.00'],
+    'only the current balance changes' => [null],
+]);
 
 it('keeps a reconciliation made after the form opened when only account details change', function () {
     $this->travelTo('2026-06-15 10:00:00');
