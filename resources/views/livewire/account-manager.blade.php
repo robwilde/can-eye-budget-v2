@@ -235,6 +235,14 @@
             @endif
             @endunless
 
+            @unless($isUntracked)
+            <flux:field variant="inline">
+                <flux:checkbox wire:model="excludeFromReports" data-test="account-exclude-from-reports"/>
+                <flux:label>{{ __('Exclude from reports') }}</flux:label>
+                <flux:description>{{ __('Leave this account out of dashboard totals and reports. Its transactions are still listed.') }}</flux:description>
+            </flux:field>
+            @endunless
+
             <div>
                 <label class="cib-label" for="account-description">{{ __('Description') }}</label>
                 <flux:textarea

@@ -51,6 +51,8 @@ final class AccountManager extends Component
 
     public string $description = '';
 
+    public bool $excludeFromReports = false;
+
     public string $type = '';
 
     public string $group = '';
@@ -132,6 +134,7 @@ final class AccountManager extends Component
             ? number_format($account->credit_limit / 100, 2, '.', '')
             : '';
         $this->description = $account->description ?? '';
+        $this->excludeFromReports = $account->exclude_from_reports;
         $this->type = $account->type->value;
         $this->group = $account->group->value;
         $this->institution = $account->institution ?? '';
@@ -181,6 +184,7 @@ final class AccountManager extends Component
             'group' => $validated['group'],
             'institution' => $validated['institution'] ?: null,
             'description' => $validated['description'] ?: null,
+            'exclude_from_reports' => $validated['excludeFromReports'],
         ];
 
         if ($this->hasCreditLimit && $validated['credit_limit'] !== null && $validated['credit_limit'] !== '') {
@@ -517,6 +521,7 @@ final class AccountManager extends Component
         $this->hasCreditLimit = false;
         $this->credit_limit = '';
         $this->description = '';
+        $this->excludeFromReports = false;
         $this->type = '';
         $this->group = '';
         $this->institution = '';
@@ -536,6 +541,7 @@ final class AccountManager extends Component
             'balance' => ['required', 'numeric'],
             'credit_limit' => [$this->hasCreditLimit ? 'required' : 'nullable', 'numeric', 'min:0'],
             'description' => ['nullable', 'string', 'max:1000'],
+            'excludeFromReports' => ['boolean'],
             'type' => ['required', Rule::enum(AccountClass::class)],
             'group' => ['required', Rule::enum(AccountGroup::class)],
             'institution' => ['nullable', 'string', 'max:255'],
