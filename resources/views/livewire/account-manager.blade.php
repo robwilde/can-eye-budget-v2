@@ -180,7 +180,7 @@
             </div>
 
             <div>
-                <label class="cib-label" for="account-balance">{{ __('Current Balance') }}</label>
+                <label class="cib-label" for="account-balance">{{ $editingAccountId === null && ! $isUntracked && $selectedType?->amortises() ? __('Amount Owed Today') : __('Current Balance') }}</label>
                 <flux:input
                         id="account-balance"
                         wire:model="balance"
@@ -198,7 +198,7 @@
                 @endif
             </div>
 
-            @unless($isUntracked)
+            @unless($isUntracked || ($editingAccountId === null && $selectedType?->amortises()))
             <div class="grid grid-cols-2 gap-3">
                 <div>
                     <label class="cib-label" for="account-opening-balance">{{ __('Opening Balance') }}</label>
@@ -270,12 +270,76 @@
 
             <div>
                 <label class="cib-label" for="account-type">{{ __('Account Type') }}</label>
-                <flux:select id="account-type" wire:model="type" required>
+                <flux:select id="account-type" wire:model.live="type" required>
                     @foreach($accountTypes as $accountType)
                         <flux:select.option value="{{ $accountType->value }}">{{ $accountType->label() }}</flux:select.option>
                     @endforeach
                 </flux:select>
             </div>
+
+            @if($selectedType?->amortises())
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="cib-label" for="account-original-principal">{{ __('Original Principal') }}</label>
+                        <flux:input id="account-original-principal" wire:model="originalPrincipal" type="number" step="0.01" min="0" placeholder="0.00" data-test="account-loan-principal"/>
+                        @error('originalPrincipal')
+                            <flux:text class="mt-1 text-red-600 dark:text-red-500" data-test="account-loan-principal-error">{{ $message }}</flux:text>
+                        @enderror
+                    </div>
+                    <div>
+                        <label class="cib-label" for="account-start-date">{{ __('Start Date') }}</label>
+                        <flux:input id="account-start-date" wire:model="startDate" type="date" max="{{ now()->toDateString() }}" data-test="account-loan-start-date"/>
+                        @error('startDate')
+                            <flux:text class="mt-1 text-red-600 dark:text-red-500" data-test="account-loan-start-date-error">{{ $message }}</flux:text>
+                        @enderror
+                    </div>
+                    <div>
+                        <label class="cib-label" for="account-rate-type">{{ __('Rate Type') }}</label>
+                        <flux:select id="account-rate-type" wire:model="rateType" data-test="account-loan-rate-type">
+                            <flux:select.option value="">{{ __('Not set') }}</flux:select.option>
+                            @foreach($rateTypes as $rateTypeOption)
+                                <flux:select.option value="{{ $rateTypeOption->value }}">{{ $rateTypeOption->label() }}</flux:select.option>
+                            @endforeach
+                        </flux:select>
+                    </div>
+                    <div>
+                        <label class="cib-label" for="account-rate">{{ __('Rate (% p.a.)') }}</label>
+                        <flux:input id="account-rate" wire:model="rate" type="number" step="0.001" min="0" placeholder="0.000" data-test="account-loan-rate"/>
+                        @error('rate')
+                            <flux:text class="mt-1 text-red-600 dark:text-red-500">{{ $message }}</flux:text>
+                        @enderror
+                    </div>
+                    <div>
+                        <label class="cib-label" for="account-term-months">{{ __('Term (months)') }}</label>
+                        <flux:input id="account-term-months" wire:model="termMonths" type="number" step="1" min="1" data-test="account-loan-term"/>
+                        @error('termMonths')
+                            <flux:text class="mt-1 text-red-600 dark:text-red-500">{{ $message }}</flux:text>
+                        @enderror
+                    </div>
+                    <div>
+                        <label class="cib-label" for="account-down-payment">{{ __('Down Payment') }}</label>
+                        <flux:input id="account-down-payment" wire:model="downPayment" type="number" step="0.01" min="0" placeholder="0.00" data-test="account-loan-down-payment"/>
+                    </div>
+                    <div>
+                        <label class="cib-label" for="account-insurance">{{ __('Insurance') }}</label>
+                        <flux:input id="account-insurance" wire:model="insurance" type="number" step="0.01" min="0" placeholder="0.00" data-test="account-loan-insurance"/>
+                    </div>
+                </div>
+                @if($editingAccountId === null && ! $isUntracked)
+                    <flux:text class="text-xs" data-test="account-loan-help">{{ __('The original principal is recorded as the opening balance on the start date, and the amount owed today as today\'s balance.') }}</flux:text>
+                @endif
+            @elseif($selectedType === \App\Enums\AccountClass::CreditCard)
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="cib-label" for="account-minimum-payment">{{ __('Minimum Payment') }}</label>
+                        <flux:input id="account-minimum-payment" wire:model="minimumPayment" type="number" step="0.01" min="0" placeholder="0.00" data-test="account-card-minimum-payment"/>
+                    </div>
+                    <div>
+                        <label class="cib-label" for="account-annual-fee">{{ __('Annual Fee') }}</label>
+                        <flux:input id="account-annual-fee" wire:model="annualFee" type="number" step="0.01" min="0" placeholder="0.00" data-test="account-card-annual-fee"/>
+                    </div>
+                </div>
+            @endif
 
             @unless($isUntracked)
             <div>

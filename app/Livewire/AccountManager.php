@@ -9,6 +9,7 @@ use App\Enums\AccountClass;
 use App\Enums\AccountGroup;
 use App\Enums\AccountStatus;
 use App\Enums\ImportSource;
+use App\Enums\LoanRateType;
 use App\Enums\ValuationKind;
 use App\Exceptions\InvalidValuationException;
 use App\Models\Account;
@@ -98,6 +99,24 @@ final class AccountManager extends Component
     #[Locked]
     public ?string $openedOpeningBalanceDate = null;
 
+    public string $rateType = '';
+
+    public string $rate = '';
+
+    public string $termMonths = '';
+
+    public string $startDate = '';
+
+    public string $originalPrincipal = '';
+
+    public string $downPayment = '';
+
+    public string $insurance = '';
+
+    public string $minimumPayment = '';
+
+    public string $annualFee = '';
+
     public function openAddModal(): void
     {
         $this->resetForm();
@@ -147,6 +166,17 @@ final class AccountManager extends Component
         $this->openedOpeningBalanceDate = $opening?->valued_on->toDateString();
         $this->isUntracked = ! $account->is_tracked;
         $this->balanceReadOnly = ! $account->isManuallyBalanced();
+
+        $detail = $account->detail;
+        $this->rateType = $detail->rate_type->value ?? '';
+        $this->rate = $detail->rate ?? '';
+        $this->termMonths = $detail?->term_months !== null ? (string) $detail->term_months : '';
+        $this->startDate = $detail?->start_date?->toDateString() ?? '';
+        $this->originalPrincipal = $this->centsToInput($detail?->original_principal);
+        $this->downPayment = $this->centsToInput($detail?->down_payment);
+        $this->insurance = $this->centsToInput($detail?->insurance);
+        $this->minimumPayment = $this->centsToInput($detail?->minimum_payment);
+        $this->annualFee = $this->centsToInput($detail?->annual_fee);
         $this->showFormModal = true;
     }
 
@@ -194,10 +224,27 @@ final class AccountManager extends Component
         }
 
         $cents = $providerFed ? 0 : $this->reconcileCents($validated['balance']);
-        $failedField = 'openingBalanceDate';
+        $type = AccountClass::from($validated['type']);
+        $newLoan = $account === null && $type->amortises();
+        $principal = 0;
+        $start = null;
+
+        if ($newLoan) {
+            $cents = -abs($cents);
+            $principal = $this->reconcileCents($validated['originalPrincipal']);
+            $start = CarbonImmutable::parse($validated['startDate'])->startOfDay();
+
+            if ($start->isToday() && $cents !== -$principal) {
+                $this->addError('balance', __('A loan that starts today owes its original principal.'));
+
+                return;
+            }
+        }
+
+        $failedField = $newLoan ? 'startDate' : 'openingBalanceDate';
 
         try {
-            DB::transaction(function () use ($account, $details, $cents, $providerFed, $validated, &$failedField): void {
+            DB::transaction(function () use ($account, $details, $cents, $providerFed, $validated, $type, $newLoan, $principal, $start, &$failedField): void {
                 $balanceChanged = false;
 
                 if ($account === null) {
@@ -213,8 +260,21 @@ final class AccountManager extends Component
                     $account->update($details);
                 }
 
-                $openingAmountChanged = $this->saveOpeningBalance($account);
+                $this->saveAccountDetail($account, $type, $validated);
                 $valuations = app(AccountValuationService::class);
+
+                if ($newLoan) {
+                    $valuations->setOpeningBalance($account, -$principal, $start);
+
+                    if ($start->lessThan(CarbonImmutable::today())) {
+                        $failedField = 'balance';
+                        $valuations->setCurrentBalance($account, $cents);
+                    }
+
+                    return;
+                }
+
+                $openingAmountChanged = $this->saveOpeningBalance($account);
 
                 if ($balanceChanged && ! ($openingAmountChanged && $valuations->shiftsOpeningBalance($account))) {
                     $failedField = 'balance';
@@ -454,6 +514,8 @@ final class AccountManager extends Component
             'currencies' => $this->authenticatedUser()->allowedCurrencies(),
             'accountGroups' => AccountGroup::cases(),
             'reconciliations' => $this->reconciliations(),
+            'selectedType' => AccountClass::tryFrom($this->type),
+            'rateTypes' => LoanRateType::cases(),
         ]);
     }
 
@@ -465,7 +527,7 @@ final class AccountManager extends Component
             'description' => ['nullable', 'string', 'max:1000'],
             'type' => ['required', Rule::enum(AccountClass::class)],
             'currency' => $this->currencyRules(),
-        ]);
+        ] + $this->detailRules());
 
         $type = AccountClass::from($validated['type']);
         $cents = (int) round((float) $validated['balance'] * 100);
@@ -481,6 +543,7 @@ final class AccountManager extends Component
             try {
                 DB::transaction(function () use ($account, $validated, $type, $description, $cents): void {
                     $account->update(['name' => $validated['name'], 'type' => $type, 'description' => $description]);
+                    $this->saveAccountDetail($account, $type, $validated);
 
                     if ($cents !== $account->balance) {
                         app(AccountValuationService::class)->setCurrentBalance($account, $cents);
@@ -502,6 +565,7 @@ final class AccountManager extends Component
                     $validated['currency'],
                 );
 
+                $this->saveAccountDetail($account, $type, $validated);
                 app(AccountBalanceHistoryBuilder::class)->rebuild($account);
             });
         }
@@ -528,6 +592,15 @@ final class AccountManager extends Component
         $this->currency = '';
         $this->isUntracked = false;
         $this->balanceReadOnly = false;
+        $this->rateType = '';
+        $this->rate = '';
+        $this->termMonths = '';
+        $this->startDate = '';
+        $this->originalPrincipal = '';
+        $this->downPayment = '';
+        $this->insurance = '';
+        $this->minimumPayment = '';
+        $this->annualFee = '';
         $this->openingBalance = '';
         $this->openingBalanceDate = '';
         $this->resetValidation();
@@ -548,7 +621,96 @@ final class AccountManager extends Component
             'currency' => $this->currencyRules(),
             'openingBalance' => ['nullable', 'numeric'],
             'openingBalanceDate' => ['nullable', 'date', 'before_or_equal:today'],
-        ];
+        ] + $this->detailRules();
+    }
+
+    /** @return array<string, mixed> */
+    private function detailRules(): array
+    {
+        $type = AccountClass::tryFrom($this->type);
+
+        if ($type?->amortises()) {
+            $required = $this->editingAccountId === null && ! $this->isUntracked ? 'required' : 'nullable';
+
+            return [
+                'originalPrincipal' => [$required, 'numeric', 'gt:0', 'max:9999999999.99'],
+                'startDate' => [$required, 'date', 'before_or_equal:today'],
+                'rateType' => ['nullable', Rule::enum(LoanRateType::class)],
+                'rate' => ['nullable', 'numeric', 'min:0', 'max:100', 'decimal:0,3'],
+                'termMonths' => ['nullable', 'integer', 'min:1', 'max:600'],
+                'downPayment' => ['nullable', 'numeric', 'min:0'],
+                'insurance' => ['nullable', 'numeric', 'min:0'],
+            ];
+        }
+
+        if ($type === AccountClass::CreditCard) {
+            return [
+                'minimumPayment' => ['nullable', 'numeric', 'min:0'],
+                'annualFee' => ['nullable', 'numeric', 'min:0'],
+            ];
+        }
+
+        return [];
+    }
+
+    /**
+     * Writes the type-specific details through the already user-scoped account. A type with no
+     * details leaves any existing row alone, and an all-empty form never creates an empty row.
+     *
+     * @param  array<string, mixed>  $validated
+     */
+    private function saveAccountDetail(Account $account, AccountClass $type, array $validated): void
+    {
+        if ($type->amortises()) {
+            $attributes = [
+                'rate_type' => $this->nullableString($validated['rateType'] ?? null),
+                'rate' => $this->nullableString($validated['rate'] ?? null),
+                'term_months' => $this->nullableString($validated['termMonths'] ?? null) !== null ? (int) $validated['termMonths'] : null,
+                'start_date' => $this->nullableString($validated['startDate'] ?? null),
+                'original_principal' => $this->nullableCents($validated['originalPrincipal'] ?? null),
+                'down_payment' => $this->nullableCents($validated['downPayment'] ?? null),
+                'insurance' => $this->nullableCents($validated['insurance'] ?? null),
+                'minimum_payment' => null,
+                'annual_fee' => null,
+            ];
+        } elseif ($type === AccountClass::CreditCard) {
+            $attributes = [
+                'rate_type' => null,
+                'rate' => null,
+                'term_months' => null,
+                'start_date' => null,
+                'original_principal' => null,
+                'down_payment' => null,
+                'insurance' => null,
+                'minimum_payment' => $this->nullableCents($validated['minimumPayment'] ?? null),
+                'annual_fee' => $this->nullableCents($validated['annualFee'] ?? null),
+            ];
+        } else {
+            return;
+        }
+
+        if ($account->detail === null && array_filter($attributes, fn (mixed $value): bool => $value !== null) === []) {
+            return;
+        }
+
+        $account->detail()->updateOrCreate([], $attributes);
+    }
+
+    private function nullableString(mixed $value): ?string
+    {
+        return $value === null || $value === '' ? null : (string) $value;
+    }
+
+    private function nullableCents(mixed $value): ?int
+    {
+        $value = $this->nullableString($value);
+
+        return $value === null ? null : $this->reconcileCents($value);
+    }
+
+    private function centsToInput(?int $cents): string
+    {
+        return $cents === null ? '' : number_format($cents / 100, 2, '.', '');
     }
 
     /** @return list<mixed> */
