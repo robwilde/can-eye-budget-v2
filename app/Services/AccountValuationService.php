@@ -181,6 +181,18 @@ final class AccountValuationService
         return $later->balance - $this->signedTransactionSum($account, $date, $later->valued_on);
     }
 
+    /**
+     * Whether a current balance edit moves the opening balance: a cash or credit-card account
+     * with no reconciliation.
+     */
+    public function shiftsOpeningBalance(Account $account): bool
+    {
+        $isCashOrCard = in_array($account->type, [AccountClass::Transaction, AccountClass::CreditCard], true);
+
+        return $isCashOrCard
+            && ! $account->valuations()->where('kind', ValuationKind::Reconciliation)->exists();
+    }
+
     private function lock(Account $account): Account
     {
         return Account::query()->whereKey($account->id)->lockForUpdate()->firstOrFail();
@@ -189,14 +201,6 @@ final class AccountValuationService
     private function openingValuation(Account $account): ?AccountValuation
     {
         return $account->valuations()->where('kind', ValuationKind::OpeningBalance)->first();
-    }
-
-    private function shiftsOpeningBalance(Account $account): bool
-    {
-        $isCashOrCard = in_array($account->type, [AccountClass::Transaction, AccountClass::CreditCard], true);
-
-        return $isCashOrCard
-            && ! $account->valuations()->where('kind', ValuationKind::Reconciliation)->exists();
     }
 
     /**

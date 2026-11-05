@@ -872,6 +872,119 @@ it('keeps a current balance set after the form opened when only account details 
         ->and($opening->valued_on->toDateString())->toBe('2026-01-01');
 });
 
+function reconciledCashAccount(User $user): Account
+{
+    $account = Account::factory()->for($user)->create(['balance_source' => ImportSource::Manual]);
+    $service = app(AccountValuationService::class);
+    $service->setOpeningBalance($account, 100000, CarbonImmutable::parse('2026-01-01'));
+    $service->reconcile($account, 120000, CarbonImmutable::parse('2026-03-01'));
+
+    return $account;
+}
+
+function editAccountBalances(User $user, Account $account, ?string $openingBalance, string $balance): void
+{
+    $component = Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openEditModal', $account->id)
+        ->set('balance', $balance);
+
+    if ($openingBalance !== null) {
+        $component->set('openingBalance', $openingBalance);
+    }
+
+    $component->call('save')->assertHasNoErrors();
+}
+
+it('resolves a combined balance edit on an account with a reconciliation', function () {
+    $this->travelTo('2026-06-15 10:00:00');
+    $user = User::factory()->create();
+    $account = reconciledCashAccount($user);
+
+    editAccountBalances($user, $account, '2000.00', '1500.00');
+
+    $opening = $account->valuations()->where('kind', ValuationKind::OpeningBalance)->sole();
+    $today = $account->valuations()->whereDate('valued_on', '2026-06-15')->sole();
+    expect($opening->balance)->toBe(200000)
+        ->and($opening->valued_on->toDateString())->toBe('2026-01-01')
+        ->and($today->kind)->toBe(ValuationKind::Reconciliation)
+        ->and($today->balance)->toBe(150000)
+        ->and($account->fresh()->balance)->toBe(150000);
+
+    editAccountBalances($user, $account, '2100.00', '1600.00');
+
+    $today = $account->valuations()->whereDate('valued_on', '2026-06-15')->sole();
+    expect($account->valuations()->where('kind', ValuationKind::OpeningBalance)->sole()->balance)->toBe(210000)
+        ->and($today->kind)->toBe(ValuationKind::Reconciliation)
+        ->and($today->balance)->toBe(160000)
+        ->and($account->valuations()->count())->toBe(3)
+        ->and($account->fresh()->balance)->toBe(160000);
+});
+
+it('reconciles today when only the current balance changes on a reconciled account', function () {
+    $this->travelTo('2026-06-15 10:00:00');
+    $user = User::factory()->create();
+    $account = reconciledCashAccount($user);
+
+    editAccountBalances($user, $account, null, '1500.00');
+
+    $opening = $account->valuations()->where('kind', ValuationKind::OpeningBalance)->sole();
+    $today = $account->valuations()->whereDate('valued_on', '2026-06-15')->sole();
+    expect($opening->balance)->toBe(100000)
+        ->and($opening->valued_on->toDateString())->toBe('2026-01-01')
+        ->and($today->kind)->toBe(ValuationKind::Reconciliation)
+        ->and($today->balance)->toBe(150000)
+        ->and($account->valuations()->count())->toBe(3)
+        ->and($account->fresh()->balance)->toBe(150000);
+});
+
+it('keeps balance history consistent after a combined edit on a reconciled account', function () {
+    $this->travelTo('2026-06-15 10:00:00');
+    $user = User::factory()->create();
+    $account = reconciledCashAccount($user);
+    Transaction::factory()->for($user)->for($account)->create([
+        'amount' => 20000,
+        'direction' => TransactionDirection::Debit,
+        'post_date' => '2026-04-01',
+    ]);
+
+    editAccountBalances($user, $account, '2000.00', '1500.00');
+
+    expectBalanceHistoryConsistent($account);
+    expect($account->dailyBalances()->whereDate('balance_date', '2026-06-15')->sole()->end_balance)->toBe(150000);
+
+    editAccountBalances($user, $account, null, '1400.00');
+
+    expectBalanceHistoryConsistent($account);
+    expect($account->dailyBalances()->whereDate('balance_date', '2026-06-15')->sole()->end_balance)->toBe(140000)
+        ->and($account->fresh()->balance)->toBe(140000);
+});
+
+it('records the typed balance on a combined edit of a non-cash account', function (AccountClass $type) {
+    $this->travelTo('2026-06-15 10:00:00');
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['type' => $type, 'balance_source' => ImportSource::Manual]);
+    app(AccountValuationService::class)->setOpeningBalance($account, 100000, CarbonImmutable::parse('2026-01-01'));
+
+    editAccountBalances($user, $account, '2000.00', '1500.00');
+
+    $opening = $account->valuations()->where('kind', ValuationKind::OpeningBalance)->sole();
+    $today = $account->valuations()->whereDate('valued_on', '2026-06-15')->sole();
+    expect($opening->balance)->toBe(200000)
+        ->and($opening->valued_on->toDateString())->toBe('2026-01-01')
+        ->and($today->kind)->toBe(ValuationKind::Reconciliation)
+        ->and($today->balance)->toBe(150000)
+        ->and($account->fresh()->balance)->toBe(150000);
+    expectBalanceHistoryConsistent($account);
+})->with([
+    'savings' => [AccountClass::Savings],
+    'loan' => [AccountClass::Loan],
+    'mortgage' => [AccountClass::Mortgage],
+    'investment' => [AccountClass::Investment],
+    'insurance' => [AccountClass::Insurance],
+    'foreign' => [AccountClass::Foreign],
+    'term deposit' => [AccountClass::TermDeposit],
+]);
+
 function providerFedAccount(User $user, ImportSource $source): Account
 {
     return Account::factory()->for($user)->create([

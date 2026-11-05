@@ -212,7 +212,7 @@
             @error('openingBalanceDate')
                 <flux:text class="text-red-600 dark:text-red-500" data-test="account-opening-error">{{ $message }}</flux:text>
             @enderror
-            <flux:text class="text-xs">{{ __('Optional. When set, the current balance is worked out from the opening balance and your transactions.') }}</flux:text>
+            <flux:text class="text-xs" data-test="account-opening-help">{{ __('Optional. Without a reconciliation, the current balance is worked out from the opening balance and your transactions. With one, it is worked out from the latest reconciliation and later transactions, and changing Current Balance records a reconciliation dated today.') }}</flux:text>
             @endunless
 
             @unless($isUntracked)
