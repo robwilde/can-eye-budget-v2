@@ -42,7 +42,11 @@ final class AnalysisSuggestions extends Component
         /** @var User $user */
         $user = auth()->user();
 
-        $applier->applyPrimaryAccount($suggestion, $user);
+        if (! $applier->applyPrimaryAccount($suggestion, $user)) {
+            Flux::toast(text: 'That account cannot be your primary account', variant: 'danger');
+
+            return;
+        }
 
         Flux::toast(text: 'Primary account set', variant: 'success');
     }

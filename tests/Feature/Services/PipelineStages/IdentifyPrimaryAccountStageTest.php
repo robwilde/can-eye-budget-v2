@@ -5,6 +5,8 @@
 declare(strict_types=1);
 
 use App\DTOs\PipelineContext;
+use App\Enums\AccountClass;
+use App\Enums\AccountStatus;
 use App\Enums\PipelineTrigger;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
@@ -579,4 +581,22 @@ test('records no_transactions_to_analyze when accounts have no analysable credit
         ->first();
 
     expect($audit)->not->toBeNull();
+});
+
+test('does not pick a disabled account as the primary account', function () {
+    $this->account->update(['status' => AccountStatus::Inactive]);
+    createSalaryGroup($this->user, $this->account, 'SALARY DEPOSIT', 300_000, 4, 30);
+
+    $result = $this->stage->execute(makeContext($this->user));
+
+    expect($result->suggestionIds)->toBeEmpty()
+        ->and($this->user->fresh()->primary_account_id)->toBeNull();
+});
+
+test('does not fall back to a single account that is not eligible', function () {
+    $this->account->update(['type' => AccountClass::Investment]);
+
+    $this->stage->execute(makeContext($this->user));
+
+    expect($this->user->fresh()->primary_account_id)->toBeNull();
 });

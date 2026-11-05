@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Actions\Onboarding\ConfirmPayCycle;
-use App\Enums\AccountClass;
 use App\Enums\PayFrequency;
 use App\Enums\PipelineRunStatus;
 use App\Enums\RefreshStatus;
@@ -56,9 +55,8 @@ final class ConfirmPayCycleStep extends Component
     {
         return Account::query()
             ->where('user_id', Auth::id())
-            ->active()
+            ->eligibleAsPrimary()
             ->tracked()
-            ->whereIn('type', [AccountClass::Transaction, AccountClass::Savings])
             ->orderBy('name')
             ->get();
     }
