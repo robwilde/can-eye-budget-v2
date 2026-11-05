@@ -40,6 +40,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property AccountStatus $status
  * @property CarbonImmutable|null $disabled_at
  * @property bool $is_tracked
+ * @property bool $exclude_from_reports
  * @property CarbonImmutable|null $reconciled_on
  * @property int|null $reconcile_difference
  * @property CarbonImmutable $created_at
@@ -72,6 +73,7 @@ final class Account extends Model
         'status',
         'disabled_at',
         'is_tracked',
+        'exclude_from_reports',
         'reconciled_on',
         'reconcile_difference',
     ];
@@ -176,6 +178,31 @@ final class Account extends Model
     public function scopeTracked(Builder $query): Builder
     {
         return $query->where('is_tracked', true);
+    }
+
+    /**
+     * Accounts the user has not asked to keep out of dashboard totals and reports.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeInReports(Builder $query): Builder
+    {
+        return $query->where($query->qualifyColumn('exclude_from_reports'), false);
+    }
+
+    /**
+     * The single rule for which accounts may be a user's primary account: active, and a
+     * transaction, savings or credit-card account. Callers add the owner scope.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeEligibleAsPrimary(Builder $query): Builder
+    {
+        return $query
+            ->active()
+            ->whereIn($query->qualifyColumn('type'), [AccountClass::Transaction, AccountClass::Savings, AccountClass::CreditCard]);
     }
 
     /**
@@ -285,6 +312,7 @@ final class Account extends Model
             'balance_source' => ImportSource::class,
             'balance_updated_at' => 'immutable_datetime',
             'is_tracked' => 'boolean',
+            'exclude_from_reports' => 'boolean',
             'reconciled_on' => 'immutable_date',
             'reconcile_difference' => 'integer',
             'credit_limit' => MoneyCast::class,

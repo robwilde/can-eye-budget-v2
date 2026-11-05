@@ -103,6 +103,13 @@ final class AccountFactory extends Factory
         ]);
     }
 
+    public function excludedFromReports(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'exclude_from_reports' => true,
+        ]);
+    }
+
     public function inactive(): self
     {
         return $this->state(fn (array $attributes) => [
