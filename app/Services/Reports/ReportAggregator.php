@@ -111,6 +111,7 @@ final class ReportAggregator
             ->where('user_id', $user->id)
             ->current()
             ->countable()
+            ->whereHas('account', fn ($account) => $account->where('exclude_from_reports', false))
             ->min('post_date');
 
         return $min === null ? null : CarbonImmutable::parse((string) $min);
@@ -122,6 +123,7 @@ final class ReportAggregator
             ->where('user_id', $user->id)
             ->current()
             ->countable()
+            ->whereHas('account', fn ($account) => $account->where('exclude_from_reports', false))
             ->max('post_date');
 
         return $max === null ? null : CarbonImmutable::parse((string) $max);
@@ -135,7 +137,7 @@ final class ReportAggregator
         $monthExpr = $this->monthExpression();
         $transferCategoryIds = $this->transferCategoryIds($user->id);
 
-        $rows = CategoryAttribution::query($user->id, forMoney: true)
+        $rows = CategoryAttribution::query($user->id, forMoney: true, forReports: true)
             ->where(fn ($counted) => $counted
                 ->where(fn ($ordinary) => $ordinary
                     ->whereNull('transfer_pair_id')
@@ -205,8 +207,9 @@ final class ReportAggregator
             ->where('user_id', $user->id)
             ->where('is_active', true)
             ->when($includeTransfers, fn ($q) => $q->countable(), fn ($q) => $q->excludingTransfers())
-            ->with(['account:id,is_tracked', 'transferToAccount:id,is_tracked'])
-            ->get();
+            ->with(['account:id,is_tracked,exclude_from_reports', 'transferToAccount:id,is_tracked,exclude_from_reports'])
+            ->get()
+            ->filter(static fn (PlannedTransaction $plan): bool => $plan->countedAccount()?->exclude_from_reports === false);
 
         /** @var array<string, array{ym: string, direction: string, category_id: int|null, total: int, count: int}> $atoms */
         $atoms = [];

@@ -243,6 +243,7 @@ final class User extends Authenticatable
         return $this->accounts()
             ->active()
             ->tracked()
+            ->inReports()
             ->where(static function ($query): void {
                 $query->whereIn('type', [AccountClass::CreditCard, AccountClass::Loan])
                     ->orWhereNotNull('credit_limit');
@@ -256,9 +257,15 @@ final class User extends Authenticatable
         return $this->accounts()
             ->active()
             ->tracked()
+            ->inReports()
             ->get()
             ->filter(fn (Account $a) => $a->type->isSpendable())
             ->sum(fn (Account $a) => $a->availableBalance());
+    }
+
+    public function eligiblePrimaryAccount(int $accountId): ?Account
+    {
+        return $this->accounts()->eligibleAsPrimary()->whereKey($accountId)->first();
     }
 
     public function daysUntilNextPay(): ?int
@@ -296,9 +303,10 @@ final class User extends Authenticatable
         return (int) $this->plannedTransactions()
             ->where('is_active', true)
             ->countable()
-            ->with(['account:id,is_tracked', 'transferToAccount:id,is_tracked'])
+            ->with(['account:id,is_tracked,exclude_from_reports', 'transferToAccount:id,is_tracked,exclude_from_reports'])
             ->get()
-            ->filter(static fn (PlannedTransaction $plan): bool => $plan->countedDirection() === TransactionDirection::Debit)
+            ->filter(static fn (PlannedTransaction $plan): bool => $plan->countedDirection() === TransactionDirection::Debit
+                && $plan->countedAccount()?->exclude_from_reports === false)
             ->sum(static fn (PlannedTransaction $plan) => $plan->occurrencesBetween($today, $bounds['end'])->count() * abs($plan->amount));
     }
 
