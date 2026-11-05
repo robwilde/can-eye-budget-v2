@@ -75,6 +75,8 @@
                                     <flux:button variant="ghost" size="sm" icon="scale" wire:click="openReconcileModal({{ $account->id }})"
                                                  :aria-label="__('Reconcile')" data-test="account-reconcile-balance-{{ $account->id }}"/>
                                 @endif
+                                <flux:button variant="ghost" size="sm" icon="document-text" href="{{ route('accounts.show', $account) }}" wire:navigate
+                                             :aria-label="__('Account details')" data-test="account-details-link-{{ $account->id }}"/>
                                 <flux:button variant="ghost" size="sm" icon="pencil" wire:click="openEditModal({{ $account->id }})"/>
                                 @if ($account->redbarkAccount !== null)
                                     <flux:button variant="ghost" size="sm" icon="link-slash" wire:click="unlinkAccount({{ $account->id }})"
@@ -98,6 +100,9 @@
                                 <flux:button variant="ghost" size="sm" icon="ellipsis-vertical" :aria-label="__('Account actions')"/>
 
                                 <flux:menu>
+                                    <flux:menu.item icon="document-text" href="{{ route('accounts.show', $account) }}">
+                                        {{ __('Details') }}
+                                    </flux:menu.item>
                                     <flux:menu.item icon="pencil" wire:click="openEditModal({{ $account->id }})">
                                         {{ __('Edit') }}
                                     </flux:menu.item>
