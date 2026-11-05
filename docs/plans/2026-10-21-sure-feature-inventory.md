@@ -158,11 +158,11 @@ The remaining features have no ordering constraint beyond the conventions above.
     - delete after showing the transaction count.
   - RedbarkAccountSetup and ImportBank create accounts from the bank feed and from CSV import.
   - User::totalOwed and User::totalAvailable count only active, tracked accounts.
-  - User has a primary account (primary_account_id), chosen in onboarding's "Primary account" select. PlannedTransactionManager, RecurringTransactionReview and BnplAccountResolver use it as the default account; TransactionModal does not.
+  - Account has an exclude_from_reports flag, set in AccountManager; excluded accounts drop out of dashboard totals and reports, and their transactions are still listed.
+  - User has a primary account (primary_account_id), chosen in onboarding's "Primary account" select. PlannedTransactionManager, RecurringTransactionReview, BnplAccountResolver and TransactionModal use it as the default account. Account::scopeEligibleAsPrimary allows an active Transaction, Savings or CreditCard account; it has no import-source restriction, unlike the spec's "manual" wording, because onboarding and the pipeline use Redbark accounts.
 - **Gap:**
   - No disable/enable lifecycle. AccountStatus has four cases: active, available, inactive and closed. Only active is ever written, Account::active() treats available as active too, and every new account is active.
-  - No exclude-from-reports flag, no loan or card details beyond a credit limit, no amortisation, no owner or sharing, and no unlink.
-  - The primary account does not prefill TransactionModal, and there is no eligibility rule for it (active, manual, cash or card).
+  - No loan or card details beyond a credit limit, no amortisation, no owner or sharing, and no unlink.
   - Delete is an immediate hard delete that cascades transactions, planned transactions, CSV imports, statement reconciliations and transfer rules, even for a bank-linked account.
 - **Build it like:**
   - Extend Account and AccountManager:
