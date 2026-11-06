@@ -54,5 +54,10 @@ it('rejects a non-positive principal or term', function (int $principal, int $te
     app(LoanAmortisationService::class)->schedule($principal, 5.0, $term, CarbonImmutable::parse('2026-01-01'));
 })->with([
     'zero principal' => [0, 12],
+    'negative principal' => [-1000, 12],
     'zero term' => [1000, 0],
 ])->throws(InvalidArgumentException::class);
+
+it('rejects a negative rate', function () {
+    app(LoanAmortisationService::class)->schedule(100000, -0.5, 12, CarbonImmutable::parse('2026-01-01'));
+})->throws(InvalidArgumentException::class);
