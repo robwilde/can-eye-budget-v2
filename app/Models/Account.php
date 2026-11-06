@@ -45,6 +45,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property int|null $reconcile_difference
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
+ * @property-read AccountDetail|null $detail
  */
 final class Account extends Model
 {
@@ -100,6 +101,12 @@ final class Account extends Model
     public function valuations(): HasMany
     {
         return $this->hasMany(AccountValuation::class);
+    }
+
+    /** @return HasOne<AccountDetail, $this> */
+    public function detail(): HasOne
+    {
+        return $this->hasOne(AccountDetail::class);
     }
 
     /** @return HasMany<AccountDailyBalance, $this> */

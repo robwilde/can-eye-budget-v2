@@ -159,10 +159,11 @@ The remaining features have no ordering constraint beyond the conventions above.
   - RedbarkAccountSetup and ImportBank create accounts from the bank feed and from CSV import.
   - User::totalOwed and User::totalAvailable count only active, tracked accounts.
   - Account has an exclude_from_reports flag, set in AccountManager; excluded accounts drop out of dashboard totals and reports, and their transactions are still listed.
+  - AccountDetail (one-to-one with Account, scoped through it) holds loan terms (LoanRateType, rate, term, start date, original principal, down payment, insurance) and card terms (minimum payment, annual fee). AccountManager shows the type-specific fields; a new loan or mortgage records its principal as the opening balance at the start date and the amount owed as a reconciliation today. LoanAmortisationService builds the integer-cent schedule and payoff date, shown on the Schedule tab of the account page (accounts.show). Valuations for liabilities are negative.
   - User has a primary account (primary_account_id), chosen in onboarding's "Primary account" select. PlannedTransactionManager, RecurringTransactionReview, BnplAccountResolver and TransactionModal use it as the default account. Account::scopeEligibleAsPrimary allows an active Transaction, Savings or CreditCard account; it has no import-source restriction, unlike the spec's "manual" wording, because onboarding and the pipeline use Redbark accounts.
 - **Gap:**
   - No disable/enable lifecycle. AccountStatus has four cases: active, available, inactive and closed. Only active is ever written, Account::active() treats available as active too, and every new account is active.
-  - No loan or card details beyond a credit limit, no amortisation, no owner or sharing, and no unlink.
+  - No rate-change schedule, no owner or sharing, and no unlink.
   - Delete is an immediate hard delete that cascades transactions, planned transactions, CSV imports, statement reconciliations and transfer rules, even for a bank-linked account.
 - **Build it like:**
   - Extend Account and AccountManager:

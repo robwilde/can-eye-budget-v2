@@ -58,6 +58,15 @@ test('isAsset returns false for liability account types', function (AccountClass
     'mortgage' => AccountClass::Mortgage,
 ]);
 
+test('amortises is true only for loan and mortgage', function (AccountClass $type, bool $expected) {
+    expect($type->amortises())->toBe($expected);
+})->with([
+    'loan' => [AccountClass::Loan, true],
+    'mortgage' => [AccountClass::Mortgage, true],
+    'credit card' => [AccountClass::CreditCard, false],
+    'savings' => [AccountClass::Savings, false],
+]);
+
 test('isSpendable returns true for spendable account types', function (AccountClass $type) {
     expect($type->isSpendable())->toBeTrue();
 })->with([
