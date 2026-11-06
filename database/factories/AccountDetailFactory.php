@@ -27,7 +27,7 @@ final class AccountDetailFactory extends Factory
     public function loan(): self
     {
         return $this->state(fn (array $attributes) => [
-            'account_id' => Account::factory()->loan(),
+            'account_id' => $attributes['account_id'] instanceof Factory ? Account::factory()->loan() : $attributes['account_id'],
             'rate_type' => LoanRateType::Fixed,
             'rate' => fake()->randomFloat(3, 2, 9),
             'term_months' => fake()->randomElement([12, 36, 60, 84]),
@@ -39,7 +39,7 @@ final class AccountDetailFactory extends Factory
     public function creditCard(): self
     {
         return $this->state(fn (array $attributes) => [
-            'account_id' => Account::factory()->creditCard(),
+            'account_id' => $attributes['account_id'] instanceof Factory ? Account::factory()->creditCard() : $attributes['account_id'],
             'minimum_payment' => fake()->numberBetween(2500, 10000),
             'annual_fee' => fake()->randomElement([0, 9900, 39900]),
         ]);
