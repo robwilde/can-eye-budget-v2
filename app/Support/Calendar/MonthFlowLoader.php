@@ -66,6 +66,7 @@ final readonly class MonthFlowLoader
             ->where('user_id', $user->id)
             ->where('is_active', true)
             ->excludingTransfers()
+            ->whereHas('account', static fn ($account) => $account->where('exclude_from_reports', false))
             ->where('start_date', '<=', $monthEnd)
             ->where(static fn ($q) => $q->whereNull('until_date')->orWhere('until_date', '>=', $monthStart))
             ->get();
