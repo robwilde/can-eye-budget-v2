@@ -621,7 +621,7 @@ final class AccountManager extends Component
             'currency' => $this->currencyRules(),
         ];
 
-        if (! $this->isUntracked && ! ($this->editingAccountId === null && AccountClass::tryFrom($this->type)?->amortises())) {
+        if (! ($this->editingAccountId === null && AccountClass::tryFrom($this->type)?->amortises())) {
             $rules['openingBalance'] = ['nullable', 'numeric'];
             $rules['openingBalanceDate'] = ['nullable', 'date', 'before_or_equal:today'];
         }
