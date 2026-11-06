@@ -17,7 +17,6 @@ use App\Models\AuditEvent;
 use App\Models\User;
 use App\Services\AccountValuationService;
 use Carbon\CarbonImmutable;
-use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 
@@ -114,16 +113,41 @@ it('cannot write loan details for another users account', function () {
     $user = User::factory()->create();
     $foreign = Account::factory()->for(User::factory()->create())->loan()->create(['balance_source' => ImportSource::Manual]);
 
-    $component = Livewire::actingAs($user)->test(AccountManager::class)
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openAddModal')
         ->call('openEditModal', $foreign->id)
-        ->assertSet('editingAccountId', null);
+        ->assertSet('editingAccountId', null)
+        ->set('name', 'Car Loan')
+        ->set('type', AccountClass::Loan->value)
+        ->set('balance', '15000.00')
+        ->set('originalPrincipal', '20000.00')
+        ->set('startDate', '2024-06-15')
+        ->set('rate', '9')
+        ->call('save')
+        ->assertHasNoErrors();
 
-    expect(fn () => $component->set('editingAccountId', $foreign->id))
-        ->toThrow(CannotUpdateLockedPropertyException::class);
+    $own = Account::query()->where('user_id', $user->id)->sole();
 
-    $component->set('type', AccountClass::Loan->value)->set('rate', '9')->call('save');
+    expect(AccountDetail::query()->where('account_id', $foreign->id)->exists())->toBeFalse()
+        ->and(AccountDetail::query()->sole()->account_id)->toBe($own->id);
+});
 
-    expect(AccountDetail::query()->where('account_id', $foreign->id)->exists())->toBeFalse();
+it('ignores a future opening date left over from another account type on a new loan', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openAddModal')
+        ->set('type', AccountClass::Transaction->value)
+        ->set('openingBalanceDate', '2026-12-01')
+        ->set('name', 'Car Loan')
+        ->set('type', AccountClass::Loan->value)
+        ->set('balance', '15000.00')
+        ->set('originalPrincipal', '20000.00')
+        ->set('startDate', '2024-06-15')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(Account::query()->where('user_id', $user->id)->count())->toBe(1);
 });
 
 it('records an audit event when loan details are saved', function () {

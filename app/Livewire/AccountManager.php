@@ -609,7 +609,7 @@ final class AccountManager extends Component
     /** @return array<string, mixed> */
     private function formRules(): array
     {
-        return [
+        $rules = [
             'name' => ['required', 'string', 'max:255'],
             'balance' => ['required', 'numeric'],
             'credit_limit' => [$this->hasCreditLimit ? 'required' : 'nullable', 'numeric', 'min:0'],
@@ -619,9 +619,14 @@ final class AccountManager extends Component
             'group' => ['required', Rule::enum(AccountGroup::class)],
             'institution' => ['nullable', 'string', 'max:255'],
             'currency' => $this->currencyRules(),
-            'openingBalance' => ['nullable', 'numeric'],
-            'openingBalanceDate' => ['nullable', 'date', 'before_or_equal:today'],
-        ] + $this->detailRules();
+        ];
+
+        if (! $this->isUntracked && ! ($this->editingAccountId === null && AccountClass::tryFrom($this->type)?->amortises())) {
+            $rules['openingBalance'] = ['nullable', 'numeric'];
+            $rules['openingBalanceDate'] = ['nullable', 'date', 'before_or_equal:today'];
+        }
+
+        return $rules + $this->detailRules();
     }
 
     /** @return array<string, mixed> */
