@@ -206,6 +206,7 @@ final class Dashboard extends Component
         $debits = $user->transactions()
             ->current()
             ->countable()
+            ->whereHas('account', static fn ($account) => $account->where('exclude_from_reports', false))
             ->where('direction', TransactionDirection::Debit)
             ->whereBetween('post_date', [$windowStart->startOfDay(), $today->endOfDay()])
             ->get(['post_date', 'amount']);

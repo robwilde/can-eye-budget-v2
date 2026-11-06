@@ -1290,3 +1290,26 @@ test('an outflow row for a category group links to the transactions list filtere
     expect($html)->toContain('group='.$group->id)
         ->and(preg_match_all('/<a\b[^>]*data-testid="money-flow-outflow-row"/', $html))->toBe(1);
 });
+
+test('plan and still-to-come figures leave out plans on accounts excluded from reports', function () {
+    $this->travelTo('2026-10-01');
+    $user = User::factory()->create();
+    $included = Account::factory()->for($user)->create();
+    $excluded = Account::factory()->for($user)->excludedFromReports()->create();
+
+    PlannedTransaction::factory()->for($user)->for($included)->monthly()->create([
+        'amount' => 150000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => '2026-10-02',
+    ]);
+    PlannedTransaction::factory()->for($user)->for($excluded)->monthly()->create([
+        'amount' => 50000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => '2026-10-03',
+    ]);
+
+    $component = Livewire::actingAs($user)->test(CalendarView::class);
+
+    expect($component->get('plannedToCome'))->toBe(['income' => 0, 'spend' => 150000])
+        ->and($component->get('monthFlow')->planExpense)->toBe(150000);
+});
