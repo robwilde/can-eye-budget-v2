@@ -113,10 +113,8 @@ final readonly class IdentifyPrimaryAccountStage implements PipelineStageContrac
         if ($accounts->count() === 1 && $context->user->primary_account_id === null) {
             $singleAccount = $accounts->first();
 
-            if ($context->user->eligiblePrimaryAccount($singleAccount->id) !== null) {
-                $context->user->update(['primary_account_id' => $singleAccount->id]);
-                $this->audit($context, 'primary_account_fallback_applied', ['account_id' => $singleAccount->id]);
-            }
+            $context->user->update(['primary_account_id' => $singleAccount->id]);
+            $this->audit($context, 'primary_account_fallback_applied', ['account_id' => $singleAccount->id]);
         }
 
         return new StageResult(
