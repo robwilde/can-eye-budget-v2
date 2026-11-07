@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Casts\UserPreferencesCast;
 use App\DTOs\UserPreferences;
+use App\Enums\AccountOrder;
 use App\Enums\Theme;
 use Illuminate\Database\Eloquent\Model;
 use Tests\TestCase;
@@ -39,4 +40,8 @@ test('a null stored value stays null when written', function () {
     $model = new class extends Model {};
 
     expect($cast->set($model, 'preferences', null, []))->toBeNull();
+});
+
+test('defaults the account order to name ascending', function () {
+    expect(UserPreferences::fromStored([])->accountOrder)->toBe(AccountOrder::NameAsc);
 });
