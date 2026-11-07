@@ -265,17 +265,19 @@ final class Account extends Model
         return $this->balance;
     }
 
+    /**
+     * The single rule for which accounts are debt: a credit card, loan or mortgage
+     * (AccountClass::isAsset), plus any account carrying a credit limit, because bank feeds
+     * often type a credit card or overdraft as a transaction account.
+     */
+    public function isLiability(): bool
+    {
+        return ! $this->type->isAsset() || $this->credit_limit !== null;
+    }
+
     public function amountOwed(): int
     {
-        $isDebtAccount = $this->credit_limit !== null
-            || $this->type === AccountClass::CreditCard
-            || $this->type === AccountClass::Loan;
-
-        if ($isDebtAccount) {
-            return abs(min(0, $this->balance));
-        }
-
-        return 0;
+        return $this->isLiability() ? abs(min(0, $this->balance)) : 0;
     }
 
     /**
