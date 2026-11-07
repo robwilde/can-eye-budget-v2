@@ -94,6 +94,8 @@
                 <x-cib.money-card label="Needed" :amount="$this->numbers['needed']" tone="needed"/>
             </div>
 
+            <livewire:dashboard.net-worth/>
+
             <livewire:dashboard.pay-cycle-calendar/>
         </div>
 

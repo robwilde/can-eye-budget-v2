@@ -16,6 +16,7 @@ use App\Models\Account;
 use App\Models\AccountValuation;
 use App\Models\User;
 use App\Services\AccountValuationService;
+use App\Services\NetWorthService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\Transfers\TransferLinker;
 use App\Services\Transfers\UntrackedAccountCreator;
@@ -507,8 +508,17 @@ final class AccountManager extends Component
 
         $grouped = $accounts->groupBy(fn (Account $account) => $account->group->value);
 
+        $today = CarbonImmutable::today();
+        $netWorth = app(NetWorthService::class);
+        $trends = [];
+
+        foreach ($netWorth->accountSeries(auth()->user(), $accounts->pluck('id')->all(), $today->subDays(29), $today) as $accountId => $series) {
+            $trends[$accountId] = ['points' => $series, 'favourable' => $netWorth->isFavourable($series)];
+        }
+
         return view('livewire.account-manager', [
             'grouped' => $grouped,
+            'trends' => $trends,
             'formatMoney' => MoneyCast::format(...),
             'accountTypes' => AccountClass::cases(),
             'currencies' => $this->authenticatedUser()->allowedCurrencies(),

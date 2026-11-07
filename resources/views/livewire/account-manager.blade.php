@@ -48,6 +48,9 @@
                             <x-slot:meta>{{ $metaText }}</x-slot:meta>
                         @endif
                         <x-slot:actions>
+                            @isset($trends[$account->id])
+                                <x-cib.trend-spark :points="$trends[$account->id]['points']" :favourable="$trends[$account->id]['favourable']" data-test="account-sparkline-{{ $account->id }}"/>
+                            @endisset
                             @if ($account->status === \App\Enums\AccountStatus::Inactive)
                                 <x-cib.stat-pill tone="neutral" data-test="account-disabled-{{ $account->id }}">{{ __('Disabled') }}</x-cib.stat-pill>
                             @endif

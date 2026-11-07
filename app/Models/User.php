@@ -7,7 +7,6 @@ namespace App\Models;
 use App\Casts\MoneyCast;
 use App\Casts\UserPreferencesCast;
 use App\DTOs\UserPreferences;
-use App\Enums\AccountClass;
 use App\Enums\PayFrequency;
 use App\Enums\TransactionDirection;
 use App\Support\Currencies;
@@ -244,10 +243,6 @@ final class User extends Authenticatable
             ->active()
             ->tracked()
             ->inReports()
-            ->where(static function ($query): void {
-                $query->whereIn('type', [AccountClass::CreditCard, AccountClass::Loan])
-                    ->orWhereNotNull('credit_limit');
-            })
             ->get()
             ->sum(fn (Account $a) => $a->amountOwed());
     }
