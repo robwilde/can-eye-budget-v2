@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\DTOs;
 
+use App\Enums\AccountOrder;
 use App\Enums\SupportedLocale;
 use App\Enums\Theme;
 use App\Enums\TransactionPeriod;
@@ -21,6 +22,7 @@ final class UserPreferences extends Dto
         public readonly ?SupportedLocale $locale = null,
         public readonly TransactionPeriod $defaultPeriod = TransactionPeriod::ThisMonth,
         public readonly bool $rulePromptEnabled = true,
+        public readonly AccountOrder $accountOrder = AccountOrder::NameAsc,
         public readonly bool $previewFeatures = false,
         public readonly array $allowedCurrencies = [],
     ) {}
@@ -39,6 +41,7 @@ final class UserPreferences extends Dto
             locale: is_string($stored['locale'] ?? null) ? SupportedLocale::tryFrom($stored['locale']) : $defaults->locale,
             defaultPeriod: is_string($stored['defaultPeriod'] ?? null) ? TransactionPeriod::tryFrom($stored['defaultPeriod']) ?? $defaults->defaultPeriod : $defaults->defaultPeriod,
             rulePromptEnabled: is_bool($stored['rulePromptEnabled'] ?? null) ? $stored['rulePromptEnabled'] : $defaults->rulePromptEnabled,
+            accountOrder: is_string($stored['accountOrder'] ?? null) ? AccountOrder::tryFrom($stored['accountOrder']) ?? $defaults->accountOrder : $defaults->accountOrder,
             previewFeatures: is_bool($stored['previewFeatures'] ?? null) ? $stored['previewFeatures'] : $defaults->previewFeatures,
             allowedCurrencies: is_array($stored['allowedCurrencies'] ?? null) ? Currencies::normaliseList($stored['allowedCurrencies']) : $defaults->allowedCurrencies,
         );
