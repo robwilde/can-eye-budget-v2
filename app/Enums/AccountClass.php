@@ -39,6 +39,11 @@ enum AccountClass: string
         };
     }
 
+    public function amortises(): bool
+    {
+        return $this === self::Loan || $this === self::Mortgage;
+    }
+
     public function isSpendable(): bool
     {
         return match ($this) {

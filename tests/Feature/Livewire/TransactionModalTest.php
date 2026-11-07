@@ -5092,3 +5092,42 @@ test("rejects another user's category via crafted request", function () {
 
     expect(Transaction::query()->where('user_id', $user->id)->count())->toBe(0);
 });
+
+it('prefills the transaction modal with the primary account', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create();
+    $primary = Account::factory()->for($user)->create();
+    $user->update(['primary_account_id' => $primary->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->assertSet('accountId', $primary->id);
+});
+
+it('leaves the account empty when the primary account is not eligible', function (Closure $makePrimary) {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create();
+    $user->update(['primary_account_id' => $makePrimary($user)->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('open-transaction-modal', date: '2026-03-15')
+        ->assertSet('accountId', null);
+})->with([
+    'loan' => [fn (User $user) => Account::factory()->for($user)->loan()->create()],
+    'disabled' => [fn (User $user) => Account::factory()->for($user)->inactive()->create()],
+]);
+
+it('keeps the account of an edited transaction instead of the primary account', function () {
+    $user = User::factory()->create();
+    $primary = Account::factory()->for($user)->create();
+    $other = Account::factory()->for($user)->create();
+    $user->update(['primary_account_id' => $primary->id]);
+    $transaction = Transaction::factory()->for($user)->for($other)->manual()->create();
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->assertSet('accountId', $other->id);
+});

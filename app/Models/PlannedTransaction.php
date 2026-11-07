@@ -161,6 +161,23 @@ final class PlannedTransaction extends Model
     }
 
     /**
+     * The tracked account whose balance the plan moves, the one counted in dashboard totals and
+     * reports, or null when the plan nets to zero. Needs account and transferToAccount loaded.
+     */
+    public function countedAccount(): ?Account
+    {
+        if ($this->transfer_to_account_id === null) {
+            return $this->account;
+        }
+
+        return match ($this->countedDirection()) {
+            TransactionDirection::Debit => $this->account,
+            TransactionDirection::Credit => $this->transferToAccount,
+            null => null,
+        };
+    }
+
+    /**
      * @param  Builder<self>  $query
      * @return Builder<self>
      */

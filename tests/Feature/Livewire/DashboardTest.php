@@ -592,3 +592,25 @@ test('hides the connect your bank card once the user has a Redbark feed', functi
         ->test(Dashboard::class)
         ->assertDontSeeHtml('data-test="dashboard-connect-bank-card"');
 });
+
+test('spend last 7 days leaves out accounts excluded from reports', function () {
+    $user = User::factory()->withPayCycle()->create();
+    $included = Account::factory()->for($user)->create();
+    $excluded = Account::factory()->for($user)->excludedFromReports()->create();
+
+    Transaction::factory()->debit()->for($user)->for($included)->create([
+        'amount' => 5000,
+        'post_date' => now()->subDays(1),
+    ]);
+    Transaction::factory()->debit()->for($user)->for($excluded)->create([
+        'amount' => 9000,
+        'post_date' => now()->subDays(1),
+    ]);
+
+    $spend = Livewire::actingAs($user)
+        ->test(Dashboard::class)
+        ->instance()
+        ->spendLast7Days();
+
+    expect($spend['sum'])->toBe(5000);
+});

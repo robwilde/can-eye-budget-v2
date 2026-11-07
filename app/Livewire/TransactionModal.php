@@ -218,6 +218,7 @@ final class TransactionModal extends Component
     {
         $this->resetForm();
         $this->date = $date;
+        $this->accountId = $this->prefillAccountId();
         $this->mode = CarbonImmutable::parse($date)->isFuture() ? 'plan' : 'enter';
         $this->showModal = true;
     }
@@ -1078,6 +1079,24 @@ final class TransactionModal extends Component
     private static function blankSplitLine(): array
     {
         return ['name' => '', 'amount' => '', 'category_id' => null, 'notes' => '', 'excluded' => false];
+    }
+
+    private function prefillAccountId(): ?int
+    {
+        $user = auth()->user();
+
+        if ($user === null || $user->primary_account_id === null) {
+            return null;
+        }
+
+        $primary = $user->accounts()
+            ->eligibleAsPrimary()
+            ->tracked()
+            ->visible()
+            ->whereKey($user->primary_account_id)
+            ->first();
+
+        return $primary?->id;
     }
 
     /**

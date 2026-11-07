@@ -26,7 +26,7 @@ use Illuminate\Support\Facades\DB;
  */
 final class CategoryAttribution
 {
-    public static function atoms(int $userId, bool $forMoney = false): Builder
+    public static function atoms(int $userId, bool $forMoney = false, bool $forReports = false): Builder
     {
         $unsplit = Transaction::query()
             ->current()
@@ -39,6 +39,7 @@ final class CategoryAttribution
                     ->whereColumn('s.transaction_id', 'transactions.id');
             })
             ->when($forMoney, fn (Builder $q): Builder => $q->whereNotExists(self::untrackedAccount(...)))
+            ->when($forReports, fn (Builder $q): Builder => $q->whereNotExists(self::excludedFromReportsAccount(...)))
             ->select([
                 'transactions.id as transaction_id',
                 'transactions.category_id as category_id',
@@ -56,6 +57,7 @@ final class CategoryAttribution
             ->toBase()
             ->join('transaction_splits as s', 's.transaction_id', '=', 'transactions.id')
             ->when($forMoney, fn (Builder $q): Builder => $q->whereNotExists(self::untrackedAccount(...)))
+            ->when($forReports, fn (Builder $q): Builder => $q->whereNotExists(self::excludedFromReportsAccount(...)))
             ->select([
                 'transactions.id as transaction_id',
                 's.category_id as category_id',
@@ -74,10 +76,20 @@ final class CategoryAttribution
      *                          untracked accounts and excluded rows never count as spend or
      *                          income. Counting callers (category editor) keep both, matching
      *                          their lists.
+     * @param  bool  $forReports  Reports also leave out rows on accounts the user flagged
+     *                            exclude-from-reports; lists and counts never pass it.
      */
-    public static function query(int $userId, bool $forMoney = false): Builder
+    public static function query(int $userId, bool $forMoney = false, bool $forReports = false): Builder
     {
-        return DB::query()->fromSub(self::atoms($userId, $forMoney), 'atoms');
+        return DB::query()->fromSub(self::atoms($userId, $forMoney, $forReports), 'atoms');
+    }
+
+    private static function excludedFromReportsAccount(Builder $query): void
+    {
+        $query->select('a.id')
+            ->from('accounts as a')
+            ->whereColumn('a.id', 'transactions.account_id')
+            ->where('a.exclude_from_reports', true);
     }
 
     /** Untracked accounts hold transfer mirror legs only; they never count as spend or income. */

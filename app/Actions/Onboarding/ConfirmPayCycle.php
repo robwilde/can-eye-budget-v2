@@ -12,6 +12,7 @@ use App\Models\AnalysisSuggestion;
 use App\Models\PlannedTransaction;
 use App\Models\User;
 use App\Services\PayCycleConfigurator;
+use InvalidArgumentException;
 use Throwable;
 
 /**
@@ -45,6 +46,10 @@ final readonly class ConfirmPayCycle
                 ->orderBy('id')
                 ->lockForUpdate()
                 ->get();
+
+            if ($user->eligiblePrimaryAccount($account->id) === null) {
+                throw new InvalidArgumentException('The account is not an eligible primary account.');
+            }
 
             $user->update(['primary_account_id' => $account->id]);
 

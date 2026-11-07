@@ -30,11 +30,23 @@ final readonly class SuggestionApplier
         private PayeeConfirmer $payeeConfirmer,
     ) {}
 
-    public function applyPrimaryAccount(AnalysisSuggestion $suggestion, User $user): void
+    /**
+     * Returns false and changes nothing when the suggested account is not an eligible
+     * primary account of this user.
+     */
+    public function applyPrimaryAccount(AnalysisSuggestion $suggestion, User $user): bool
     {
-        $user->update(['primary_account_id' => $suggestion->payload['account_id']]);
+        $account = $user->eligiblePrimaryAccount((int) ($suggestion->payload['account_id'] ?? 0));
+
+        if ($account === null) {
+            return false;
+        }
+
+        $user->update(['primary_account_id' => $account->id]);
 
         $this->markAccepted($suggestion);
+
+        return true;
     }
 
     /**

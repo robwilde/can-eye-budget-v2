@@ -51,7 +51,7 @@ final readonly class IdentifyPrimaryAccountStage implements PipelineStageContrac
     public function execute(PipelineContext $context): StageResult
     {
         $accounts = $context->user->accounts()
-            ->active()
+            ->eligibleAsPrimary()
             ->tracked()
             ->whereIn('type', [AccountClass::Transaction, AccountClass::Savings])
             ->get();
@@ -97,11 +97,12 @@ final readonly class IdentifyPrimaryAccountStage implements PipelineStageContrac
                 $suggestionIds[] = $suggestion->id;
 
                 if ($best['confidence'] >= IncomePatternDetector::AUTO_APPLY_CONFIDENCE) {
-                    $this->applier->applyPrimaryAccount($suggestion, $context->user);
-                    $this->audit($context, 'auto_applied', [
-                        'account_id' => $best['account']->id,
-                        'confidence' => round($best['confidence'], 4),
-                    ]);
+                    if ($this->applier->applyPrimaryAccount($suggestion, $context->user)) {
+                        $this->audit($context, 'auto_applied', [
+                            'account_id' => $best['account']->id,
+                            'confidence' => round($best['confidence'], 4),
+                        ]);
+                    }
                 }
             }
         }
@@ -111,6 +112,7 @@ final readonly class IdentifyPrimaryAccountStage implements PipelineStageContrac
         // This is the "first import is your primary account" path.
         if ($accounts->count() === 1 && $context->user->primary_account_id === null) {
             $singleAccount = $accounts->first();
+
             $context->user->update(['primary_account_id' => $singleAccount->id]);
             $this->audit($context, 'primary_account_fallback_applied', ['account_id' => $singleAccount->id]);
         }

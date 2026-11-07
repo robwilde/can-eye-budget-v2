@@ -1116,3 +1116,50 @@ it('lets a new account set its balance after editing a provider-fed one', functi
         ->call('openAddModal')
         ->assertSet('balanceReadOnly', false);
 });
+
+it('records an audit event when exclude from reports is toggled', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    Livewire::actingAs($user)
+        ->test(AccountManager::class)
+        ->call('openEditModal', $account->id)
+        ->set('excludeFromReports', true)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $event = AuditEvent::query()->where('action', 'livewire.account-manager.save')->sole();
+
+    expect($event->user_id)->toBe($user->id)
+        ->and($event->outcome)->toBe(AuditOutcome::Success)
+        ->and($account->fresh()->exclude_from_reports)->toBeTrue();
+});
+
+it('shows and clears the exclude from reports flag when editing an account', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->excludedFromReports()->create();
+
+    Livewire::actingAs($user)
+        ->test(AccountManager::class)
+        ->call('openEditModal', $account->id)
+        ->assertSet('excludeFromReports', true)
+        ->set('excludeFromReports', false)
+        ->call('save');
+
+    expect($account->fresh()->exclude_from_reports)->toBeFalse();
+});
+
+it('creates an account excluded from reports', function () {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test(AccountManager::class)
+        ->call('openAddModal')
+        ->set('name', 'Side account')
+        ->set('balance', '10.00')
+        ->set('excludeFromReports', true)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(Account::query()->where('user_id', $user->id)->where('name', 'Side account')->sole()->exclude_from_reports)->toBeTrue();
+});
