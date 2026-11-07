@@ -109,6 +109,43 @@ it('rejects a loan principal too large to schedule', function () {
     expect(Account::query()->where('user_id', $user->id)->count())->toBe(0);
 });
 
+it('rejects invalid loan terms', function (string $field, string $value) {
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)->test(AccountManager::class)
+        ->call('openAddModal')
+        ->set('name', 'Car Loan')
+        ->set('type', AccountClass::Loan->value)
+        ->set('balance', '15000.00')
+        ->set('originalPrincipal', '20000.00')
+        ->set('startDate', '2024-06-15')
+        ->set('rateType', LoanRateType::Fixed->value)
+        ->set('rate', '6')
+        ->set('termMonths', '60')
+        ->set($field, $value)
+        ->call('save')
+        ->assertHasErrors($field);
+
+    expect(Account::query()->where('user_id', $user->id)->count())->toBe(0)
+        ->and(AccountDetail::query()->count())->toBe(0);
+})->with([
+    'unknown rate type' => ['rateType', 'bogus'],
+    'rate above 100' => ['rate', '100.001'],
+    'rate with four decimals' => ['rate', '6.1234'],
+    'zero term' => ['termMonths', '0'],
+    'term above 600' => ['termMonths', '601'],
+]);
+
+it('saves nothing for a new loan whose start date is too far back to value', function () {
+    $user = User::factory()->create();
+
+    addLoan($user, '15000.00', '20000.00', '1995-06-15')->assertHasErrors('startDate');
+
+    expect(Account::query()->where('user_id', $user->id)->count())->toBe(0)
+        ->and(AccountDetail::query()->count())->toBe(0)
+        ->and(AccountValuation::query()->count())->toBe(0);
+});
+
 it('cannot write loan details for another users account', function () {
     $user = User::factory()->create();
     $foreign = Account::factory()->for(User::factory()->create())->loan()->create(['balance_source' => ImportSource::Manual]);

@@ -47,6 +47,26 @@ it('leaves excluded-from-reports accounts out of report atoms', function () {
         ->and(array_sum(array_column($atoms, 'count')))->toBe(1);
 });
 
+it('leaves split lines of excluded-from-reports accounts out of report atoms', function () {
+    $included = Account::factory()->for($this->user)->create();
+    $excluded = Account::factory()->for($this->user)->excludedFromReports()->create();
+
+    $includedTransaction = Transaction::factory()->for($this->user)->debit()->create(['account_id' => $included->id, 'amount' => 5000, 'post_date' => '2026-07-05']);
+    $excludedTransaction = Transaction::factory()->for($this->user)->debit()->create(['account_id' => $excluded->id, 'amount' => 9000, 'post_date' => '2026-07-06']);
+
+    foreach ([$includedTransaction, $excludedTransaction] as $transaction) {
+        $half = intdiv(abs($transaction->amount), 2);
+
+        $transaction->splits()->create(['category_id' => null, 'amount' => $half, 'position' => 1]);
+        $transaction->splits()->create(['category_id' => null, 'amount' => abs($transaction->amount) - $half, 'position' => 2]);
+    }
+
+    $atoms = app(ReportAggregator::class)->atoms($this->user, 'actual', CarbonImmutable::parse('2026-07-01'), CarbonImmutable::parse('2026-07-31')->endOfDay());
+
+    expect(array_sum(array_column($atoms, 'total')))->toBe(5000)
+        ->and(array_sum(array_column($atoms, 'count')))->toBe(2);
+});
+
 it('counts a planned transfer by the tracked side that is not excluded from reports', function () {
     $included = Account::factory()->for($this->user)->create();
     $excluded = Account::factory()->for($this->user)->excludedFromReports()->create();
