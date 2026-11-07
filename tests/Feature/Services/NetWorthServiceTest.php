@@ -138,9 +138,28 @@ it('carries the last known balance across days without a row', function () {
     ]);
 });
 
-it('counts an account as zero before its first balance row', function () {
+it('carries the first row start balance back over days before it', function () {
     $account = Account::factory()->for($this->user)->create(['balance' => 40000]);
-    dailyBalance($account, '2026-05-12', 40000);
+    AccountDailyBalance::factory()->for($account)->create([
+        'balance_date' => '2026-05-12',
+        'start_balance' => 25000,
+        'end_balance' => 40000,
+    ]);
+
+    $series = $this->service->series($this->user, CarbonImmutable::parse('2026-05-10'), CarbonImmutable::parse('2026-05-12'));
+
+    expect($series)->toBe(['2026-05-10' => 25000, '2026-05-11' => 25000, '2026-05-12' => 40000])
+        ->and($this->service->accountSeries($this->user, [$account->id], CarbonImmutable::parse('2026-05-11'), CarbonImmutable::parse('2026-05-12')))
+        ->toBe([$account->id => ['2026-05-11' => 25000, '2026-05-12' => 40000]]);
+});
+
+it('counts days before an opening-balance account first row as zero', function () {
+    $account = Account::factory()->for($this->user)->create(['balance' => 40000]);
+    AccountDailyBalance::factory()->for($account)->create([
+        'balance_date' => '2026-05-12',
+        'start_balance' => 0,
+        'end_balance' => 40000,
+    ]);
 
     $series = $this->service->series($this->user, CarbonImmutable::parse('2026-05-11'), CarbonImmutable::parse('2026-05-12'));
 

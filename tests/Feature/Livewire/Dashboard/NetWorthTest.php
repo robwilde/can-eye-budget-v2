@@ -31,7 +31,7 @@ it('shows net worth as assets minus debts', function () {
 
     Livewire::actingAs($this->user)
         ->test(NetWorth::class)
-        ->assertSeeInOrder(['Net worth', '$200,000.00'])
+        ->assertSeeHtml('data-test="net-worth-figure">$200,000.00</div>')
         ->assertSee('Assets')
         ->assertSee('Liabilities');
 });
@@ -88,6 +88,22 @@ it('draws a balance chart on the account page and a sparkline on the account lis
     Livewire::actingAs($this->user)
         ->test(AccountManager::class)
         ->assertSeeHtml('data-trend="favourable"');
+});
+
+it('draws a falling account trend as unfavourable on the account list', function () {
+    $account = Account::factory()->for($this->user)->create(['balance' => 10000]);
+    foreach (CarbonImmutable::parse('2026-07-01')->daysUntil('2026-07-16') as $index => $day) {
+        AccountDailyBalance::factory()->for($account)->create([
+            'balance_date' => $day->toDateString(),
+            'start_balance' => 40000 - $index * 2000,
+            'end_balance' => 40000 - $index * 2000,
+        ]);
+    }
+
+    Livewire::actingAs($this->user)
+        ->test(AccountManager::class)
+        ->assertSeeHtml('data-trend="unfavourable"')
+        ->assertDontSeeHtml('data-trend="favourable"');
 });
 
 it('colours a falling net worth as unfavourable', function () {

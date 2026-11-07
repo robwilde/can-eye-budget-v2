@@ -141,9 +141,10 @@ final class NetWorthService
     }
 
     /**
-     * End-of-day balances per account and day. Each account's daily rows run from its first
-     * entry, so a day before its first row is 0 and a day without a row keeps the balance of
-     * the last earlier row, including one before $from.
+     * End-of-day balances per account and day. A day without a row keeps the balance of the
+     * last earlier row, including one before $from. A day before an account's first row keeps
+     * that row's start balance: the history only starts from 0 when the account has an opening
+     * balance, and otherwise begins from the balance the account already carried.
      *
      * @param  list<int>  $accountIds
      * @return array<int, array<string, int>>
@@ -177,13 +178,15 @@ final class NetWorthService
             ->whereIn('account_id', $accountIds)
             ->whereDate('balance_date', '>=', $from->toDateString())
             ->whereDate('balance_date', '<=', $to->toDateString())
-            ->selectRaw('account_id, date(balance_date) as day, end_balance')
+            ->selectRaw('account_id, date(balance_date) as day, start_balance, end_balance')
+            ->orderBy('balance_date')
             ->get()
             ->groupBy('account_id');
 
         foreach ($accountIds as $accountId) {
-            $byDay = $rows->get($accountId, collect())->pluck('end_balance', 'day');
-            $balance = (int) ($carried[$accountId] ?? 0);
+            $accountRows = $rows->get($accountId, collect());
+            $byDay = $accountRows->pluck('end_balance', 'day');
+            $balance = (int) ($carried[$accountId] ?? $accountRows->first()->start_balance ?? 0);
 
             foreach ($days as $day) {
                 $balance = (int) ($byDay[$day] ?? $balance);
