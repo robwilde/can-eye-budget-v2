@@ -163,7 +163,7 @@ The remaining features have no ordering constraint beyond the conventions above.
   - User has a primary account (primary_account_id), chosen in onboarding's "Primary account" select. PlannedTransactionManager, RecurringTransactionReview, BnplAccountResolver and TransactionModal use it as the default account. Account::scopeEligibleAsPrimary allows an active Transaction, Savings or CreditCard account; it has no import-source restriction, unlike the spec's "manual" wording, because onboarding and the pipeline use Redbark accounts.
 - **Gap:**
   - No disable/enable lifecycle. AccountStatus has four cases: active, available, inactive and closed. Only active is ever written, Account::active() treats available as active too, and every new account is active.
-  - No rate-change schedule, no owner or sharing, and no unlink.
+  - No rate-change schedule and no owner or sharing.
   - Delete is an immediate hard delete that cascades transactions, planned transactions, CSV imports, statement reconciliations and transfer rules, even for a bank-linked account.
 - **Build it like:**
   - Extend Account and AccountManager:
