@@ -8,6 +8,7 @@ use App\Casts\MoneyCast;
 use App\Enums\PayFrequency;
 use App\Livewire\Dashboard\Data\PayCyclePip;
 use App\Livewire\Data\CalendarDayData;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Support\Calendar\CashFlow;
@@ -165,7 +166,8 @@ final class CalendarView extends Component
     /**
      * Ordinary planned income and spend still to come this month. Reconciled occurrences are
      * suppressed by DayActivityLoader and past unreconciled ones are never loaded, so each
-     * plan counts once, as its posting once entered. Transfers are left out.
+     * plan counts once, as its posting once entered. Transfers and plans on accounts excluded
+     * from reports are left out, matching the reported actuals they are compared with.
      *
      * @return array{income: int, spend: int}
      */
@@ -174,6 +176,7 @@ final class CalendarView extends Component
     {
         $income = 0;
         $spend = 0;
+        $planIds = [];
 
         foreach ($this->days as $day) { // @phpstan-ignore property.notFound
             if (! $day->isCurrentMonth) {
@@ -181,7 +184,28 @@ final class CalendarView extends Component
             }
 
             foreach ($day->pips as $pip) {
-                if ($pip->kind !== 'plan') {
+                if ($pip->kind === 'plan' && $pip->plannedTransactionId !== null) {
+                    $planIds[$pip->plannedTransactionId] = true;
+                }
+            }
+        }
+
+        $excluded = $planIds === [] ? [] : array_flip(
+            PlannedTransaction::query()
+                ->where('user_id', $this->authenticatedUser()->id)
+                ->whereIn('id', array_keys($planIds))
+                ->whereHas('account', static fn ($account) => $account->where('exclude_from_reports', true))
+                ->pluck('id')
+                ->all()
+        );
+
+        foreach ($this->days as $day) { // @phpstan-ignore property.notFound
+            if (! $day->isCurrentMonth) {
+                continue;
+            }
+
+            foreach ($day->pips as $pip) {
+                if ($pip->kind !== 'plan' || isset($excluded[$pip->plannedTransactionId])) {
                     continue;
                 }
 
