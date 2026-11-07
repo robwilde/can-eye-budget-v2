@@ -7,6 +7,8 @@ namespace App\Livewire;
 use App\DTOs\LoanSchedule;
 use App\Models\Account;
 use App\Services\LoanAmortisationService;
+use App\Services\NetWorthService;
+use Carbon\CarbonImmutable;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
@@ -18,6 +20,8 @@ use Livewire\Component;
  * Read-only page for one account: its details and, for loans and mortgages, the repayment schedule.
  *
  * @property-read LoanSchedule|null $schedule
+ * @property-read array<string, int> $balanceSeries
+ * @property-read bool $favourable
  */
 #[Layout('layouts::app')]
 final class AccountShow extends Component
@@ -26,11 +30,15 @@ final class AccountShow extends Component
 
     private const string TAB_SCHEDULE = 'schedule';
 
+    private const array PERIOD_DAYS = [30, 90, 365];
+
     #[Locked]
     public Account $account;
 
     #[Url]
     public string $tab = self::TAB_OVERVIEW;
+
+    public int $days = 90;
 
     public function mount(Account $account): void
     {
@@ -43,6 +51,30 @@ final class AccountShow extends Component
     public function updatedTab(): void
     {
         $this->normaliseTab();
+    }
+
+    public function updatedDays(): void
+    {
+        if (! in_array($this->days, self::PERIOD_DAYS, true)) {
+            $this->days = 90;
+        }
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    #[Computed]
+    public function balanceSeries(): array
+    {
+        $today = CarbonImmutable::today();
+
+        return app(NetWorthService::class)->accountSeries(auth()->user(), [$this->account->id], $today->subDays($this->days - 1), $today)[$this->account->id] ?? [];
+    }
+
+    #[Computed]
+    public function favourable(): bool
+    {
+        return app(NetWorthService::class)->isFavourable($this->balanceSeries); // @phpstan-ignore property.notFound
     }
 
     #[Computed]
@@ -76,7 +108,7 @@ final class AccountShow extends Component
             $tabs[] = ['value' => self::TAB_SCHEDULE, 'label' => __('Schedule')];
         }
 
-        return view('livewire.account-show', ['tabs' => $tabs]);
+        return view('livewire.account-show', ['tabs' => $tabs, 'periods' => self::PERIOD_DAYS]);
     }
 
     private function normaliseTab(): void
