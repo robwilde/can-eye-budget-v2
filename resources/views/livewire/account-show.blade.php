@@ -99,5 +99,17 @@
                 @endif
             </dl>
         </x-cib.card>
+
+        <x-cib.card data-test="account-balance-chart-card">
+            <div class="mb-3 flex items-center justify-between">
+                <div class="cib-label">{{ __('Balance history') }}</div>
+                <flux:select wire:model.live="days" class="max-w-40" data-test="account-balance-period" aria-label="{{ __('Period') }}">
+                    @foreach ($periods as $period)
+                        <option value="{{ $period }}">{{ __('Last :days days', ['days' => $period]) }}</option>
+                    @endforeach
+                </flux:select>
+            </div>
+            <x-cib.balance-chart :points="$this->balanceSeries" :favourable="$this->favourable" :label="$account->name" data-test="account-balance-chart"/>
+        </x-cib.card>
     @endif
 </div>
