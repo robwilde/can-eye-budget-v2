@@ -8,7 +8,6 @@ use App\Casts\MoneyCast;
 use App\Casts\UserPreferencesCast;
 use App\DTOs\UserPreferences;
 use App\Enums\PayFrequency;
-use App\Enums\TransactionDirection;
 use App\Support\Currencies;
 use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
@@ -297,11 +296,10 @@ final class User extends Authenticatable
 
         return (int) $this->plannedTransactions()
             ->where('is_active', true)
-            ->countable()
+            ->where(static fn ($query) => $query->countable()->orWhere(static fn ($transfers) => $transfers->intoExcludedAccount()))
             ->with(['account:id,is_tracked,exclude_from_reports', 'transferToAccount:id,is_tracked,exclude_from_reports'])
             ->get()
-            ->filter(static fn (PlannedTransaction $plan): bool => $plan->countedDirection() === TransactionDirection::Debit
-                && $plan->countedAccount()?->exclude_from_reports === false)
+            ->filter(static fn (PlannedTransaction $plan): bool => $plan->drawsFromAvailable())
             ->sum(static fn (PlannedTransaction $plan) => $plan->occurrencesBetween($today, $bounds['end'])->count() * abs($plan->amount));
     }
 

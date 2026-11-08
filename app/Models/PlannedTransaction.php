@@ -140,6 +140,22 @@ final class PlannedTransaction extends Model
     }
 
     /**
+     * Transfers from a tracked account in reports into a tracked account excluded from them.
+     * They net to zero for the user, so countable() leaves them out, but they move money out
+     * of Available, which skips excluded accounts.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeIntoExcludedAccount(Builder $query): Builder
+    {
+        return $query
+            ->whereNotNull('transfer_to_account_id')
+            ->whereHas('account', fn (Builder $a): Builder => $a->where('is_tracked', true)->where('exclude_from_reports', false))
+            ->whereHas('transferToAccount', fn (Builder $a): Builder => $a->where('is_tracked', true)->where('exclude_from_reports', true));
+    }
+
+    /**
      * Direction the plan has for the tracked accounts, or null when it nets to zero. A transfer
      * out of a tracked account is a debit; a transfer into one is a credit, whatever side the
      * plan's own account sits on. Needs account and transferToAccount loaded for transfers.
@@ -175,6 +191,26 @@ final class PlannedTransaction extends Model
             TransactionDirection::Credit => $this->transferToAccount,
             null => null,
         };
+    }
+
+    /**
+     * Whether the plan takes money out of Available, which counts tracked accounts in reports:
+     * a counted debit on an account in reports, or a transfer from one into a tracked account
+     * excluded from reports. Needs account and transferToAccount loaded.
+     */
+    public function drawsFromAvailable(): bool
+    {
+        if ($this->countedDirection() === TransactionDirection::Debit) {
+            return $this->account->exclude_from_reports === false;
+        }
+
+        $destination = $this->transferToAccount;
+
+        return $destination !== null
+            && $this->account->is_tracked
+            && ! $this->account->exclude_from_reports
+            && $destination->is_tracked
+            && $destination->exclude_from_reports;
     }
 
     /**
