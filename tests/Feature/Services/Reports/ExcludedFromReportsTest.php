@@ -6,11 +6,15 @@ declare(strict_types=1);
 
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Livewire\Dashboard;
 use App\Livewire\TransactionList;
 use App\Models\Account;
+use App\Models\Budget;
+use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Projection\MonthlyProjectionService;
 use App\Services\Reports\ReportAggregator;
 use Carbon\CarbonImmutable;
 use Livewire\Livewire;
@@ -115,6 +119,76 @@ it('leaves planned debits of excluded-from-reports accounts out of the needed to
     $plan($excluded, $hidden, 7000);
 
     expect($user->totalNeededUntilPayday())->toBe(1200);
+});
+
+it('reserves a planned transfer into an excluded-from-reports account in the needed total', function () {
+    $user = User::factory()->withPayCycle()->create(['next_pay_date' => now()->addDays(7)]);
+    $included = Account::factory()->for($user)->create();
+    $otherIncluded = Account::factory()->for($user)->create();
+    $excluded = Account::factory()->for($user)->excludedFromReports()->create();
+
+    $transfer = fn (Account $from, Account $to, int $amount) => PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $from->id,
+        'transfer_to_account_id' => $to->id,
+        'direction' => TransactionDirection::Debit,
+        'amount' => $amount,
+        'is_active' => true,
+        'start_date' => now()->addDay(),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+
+    $transfer($included, $excluded, 6000);
+    $transfer($included, $otherIncluded, 3000);
+    $transfer($excluded, $included, 8000);
+
+    expect($user->totalNeededUntilPayday())->toBe(6000);
+});
+
+it('leaves debits of excluded-from-reports accounts out of budgets this cycle', function () {
+    $user = User::factory()->withPayCycle()->create(['next_pay_date' => now()->addDays(7)]);
+    $included = Account::factory()->for($user)->create();
+    $excluded = Account::factory()->for($user)->excludedFromReports()->create();
+    $category = Category::factory()->for($user)->create();
+    Budget::factory()->for($user)->create(['category_id' => $category->id, 'name' => 'Groceries', 'limit_amount' => 80000]);
+
+    foreach ([[$included, 1500], [$excluded, 9000]] as [$account, $amount]) {
+        Transaction::factory()->debit()->for($user)->for($account)->create([
+            'amount' => $amount,
+            'post_date' => now(),
+            'category_id' => $category->id,
+        ]);
+    }
+
+    $row = Livewire::actingAs($user)->test(Dashboard::class)->instance()->budgetsThisCycle()->sole();
+
+    expect($row['spent'])->toBe(1500);
+});
+
+it('leaves plans of excluded-from-reports accounts out of the monthly projection', function () {
+    $included = Account::factory()->for($this->user)->create(['balance' => 100000]);
+    $excluded = Account::factory()->for($this->user)->excludedFromReports()->create();
+    $hidden = Account::factory()->for($this->user)->untracked()->create();
+    $this->user->update(['primary_account_id' => $included->id]);
+
+    $plan = fn (Account $account, ?Account $to, int $amount) => PlannedTransaction::factory()->for($this->user)->create([
+        'account_id' => $account->id,
+        'transfer_to_account_id' => $to?->id,
+        'direction' => TransactionDirection::Debit,
+        'amount' => $amount,
+        'is_active' => true,
+        'start_date' => now()->addDays(2),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+
+    $plan($included, null, 1000);
+    $plan($excluded, null, 9000);
+    $plan($excluded, $hidden, 7000);
+    $plan($hidden, $excluded, 5000);
+
+    $projection = app(MonthlyProjectionService::class)->forUser($this->user->fresh());
+
+    expect(array_map(fn ($point) => $point->eventAmountCents, $projection->points))->toBe([0, -1000])
+        ->and($projection->points[1]->balanceCents)->toBe(99000);
 });
 
 it('still lists transactions of an excluded-from-reports account', function () {
