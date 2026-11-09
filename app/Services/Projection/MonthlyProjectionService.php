@@ -26,7 +26,7 @@ final readonly class MonthlyProjectionService
             ->where('user_id', $user->id)
             ->where('is_active', true)
             ->countable()
-            ->with(['account:id,is_tracked', 'transferToAccount:id,is_tracked'])
+            ->with(['account:id,is_tracked,exclude_from_reports', 'transferToAccount:id,is_tracked,exclude_from_reports'])
             ->where('start_date', '<=', $endDate)
             ->where(static function ($query) use ($today): void {
                 $query->whereNull('until_date')->orWhere('until_date', '>=', $today);
@@ -38,7 +38,7 @@ final readonly class MonthlyProjectionService
         foreach ($plannedTransactions as $planned) {
             $direction = $planned->countedDirection();
 
-            if ($direction === null) {
+            if ($direction === null || $planned->countedAccount()?->exclude_from_reports !== false) {
                 continue;
             }
 
