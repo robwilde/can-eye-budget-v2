@@ -93,6 +93,9 @@
                 <x-cib.money-card label="Available" :amount="$this->numbers['available']" tone="available"/>
                 <x-cib.money-card label="Needed" :amount="$this->numbers['needed']" tone="needed"/>
             </div>
+            @if (config('budget.multi_currency'))
+                <p class="text-sm text-gray-500" data-test="dashboard-base-currency">{{ __('Owed, Available, Needed and the buffer are in :currency', ['currency' => auth()->user()->base_currency]) }}</p>
+            @endif
 
             <livewire:dashboard.net-worth/>
 

@@ -10,7 +10,7 @@
                 'text-cib-green-600' => $this->favourable,
                 'text-red-600' => ! $this->favourable,
             ]) data-test="net-worth-figure">{{ MoneyCast::format($this->current) }}</div>
-            <p class="text-sm text-gray-500">{{ __('Assets minus debts') }}</p>
+            <p class="text-sm text-gray-500">{{ __('Assets minus debts') }}@if (config('budget.multi_currency')) <span data-test="net-worth-base-currency">{{ __('All amounts converted to :currency', ['currency' => auth()->user()->base_currency]) }}</span>@endif</p>
         </div>
         <flux:select wire:model.live="days" class="max-w-40" data-test="net-worth-period" aria-label="{{ __('Period') }}">
             @foreach ($periods as $period)
@@ -46,7 +46,7 @@
                         @foreach ($group->accounts as $account)
                             <div class="flex items-center justify-between py-1 text-sm" wire:key="balance-sheet-account-{{ $account->id }}" data-test="balance-sheet-account">
                                 <a href="{{ route('accounts.show', $account) }}" wire:navigate class="hover:underline">{{ $account->name }}</a>
-                                <span>{{ MoneyCast::format($account->balance) }}</span>
+                                <span>{{ MoneyCast::format($group->balances[$account->id]) }}</span>
                             </div>
                         @endforeach
                     </div>
