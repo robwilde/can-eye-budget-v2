@@ -21,7 +21,7 @@ use Illuminate\Support\Facades\DB;
  * category_id; its own category_id is suppressed, so nothing is double-counted.
  *
  * Columns exposed on each atom: transaction_id, category_id, amount, direction,
- * post_date, transfer_pair_id. Callers apply their own date/direction/category
+ * post_date, currency, transfer_pair_id. Callers apply their own date/direction/category
  * filters and aggregate. Portable across SQLite and MySQL.
  */
 final class CategoryAttribution
@@ -45,6 +45,7 @@ final class CategoryAttribution
                 'transactions.category_id as category_id',
                 'transactions.amount as amount',
                 'transactions.direction as direction',
+                'transactions.currency as currency',
                 'transactions.post_date as post_date',
                 'transactions.transfer_pair_id as transfer_pair_id',
                 'transactions.transfer_link_source as transfer_link_source',
@@ -63,6 +64,7 @@ final class CategoryAttribution
                 's.category_id as category_id',
                 's.amount as amount',
                 'transactions.direction as direction',
+                'transactions.currency as currency',
                 'transactions.post_date as post_date',
                 'transactions.transfer_pair_id as transfer_pair_id',
                 'transactions.transfer_link_source as transfer_link_source',
