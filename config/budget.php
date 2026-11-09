@@ -51,4 +51,19 @@ return [
 
     'transfer_fx_tolerance' => env('BUDGET_TRANSFER_FX_TOLERANCE', 10),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Multi-Currency Totals
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, totals, reports and the balance sheet convert into the
+    | user's base currency (CurrencyConverter): transaction totals at each
+    | entry's date, account balances at today's rate, and the net-worth series
+    | at each day's rate. A missing rate counts as 1. Off by default; with it
+    | off every total adds cents unconverted.
+    |
+    */
+
+    'multi_currency' => (bool) env('BUDGET_MULTI_CURRENCY', false),
+
 ];
