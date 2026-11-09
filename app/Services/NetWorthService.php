@@ -24,16 +24,17 @@ final class NetWorthService
 {
     public function current(User $user): int
     {
-        return (int) $this->countedAccounts($user)->sum('balance');
+        return array_sum($this->balancesInBase($user, $this->countedAccounts($user)->get()));
     }
 
     public function balanceSheet(User $user): BalanceSheet
     {
         $accounts = $this->countedAccounts($user)->get();
+        $balances = $this->balancesInBase($user, $accounts);
         $order = $user->preferences->accountOrder;
 
-        $assets = $this->groups($accounts->reject(fn (Account $account): bool => $account->isLiability()), $order);
-        $liabilities = $this->groups($accounts->filter(fn (Account $account): bool => $account->isLiability()), $order);
+        $assets = $this->groups($accounts->reject(fn (Account $account): bool => $account->isLiability()), $order, $balances);
+        $liabilities = $this->groups($accounts->filter(fn (Account $account): bool => $account->isLiability()), $order, $balances);
 
         return new BalanceSheet(
             assets: $assets,
@@ -51,17 +52,20 @@ final class NetWorthService
      */
     public function series(User $user, CarbonImmutable $from, CarbonImmutable $to): array
     {
-        $accounts = $this->countedAccounts($user, includeDisabled: true)->get(['id', 'disabled_at']);
+        $accounts = $this->countedAccounts($user, includeDisabled: true)->get(['id', 'disabled_at', 'currency']);
         $balances = $this->dailyBalances($accounts->pluck('id')->all(), $from, $to);
+        $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
 
         $series = [];
 
         foreach ($this->days($from, $to) as $day) {
             $total = 0;
+            $date = CarbonImmutable::parse($day);
 
             foreach ($accounts as $account) {
                 if ($account->disabled_at === null || $day < $account->disabled_at->toDateString()) {
-                    $total += $balances[$account->id][$day];
+                    $balance = $balances[$account->id][$day];
+                    $total += $converter === null ? $balance : $converter->convert($balance, $account->currency, $user->base_currency, $date);
                 }
             }
 
@@ -116,10 +120,33 @@ final class NetWorthService
     }
 
     /**
+     * Each account's balance in cents: as stored, or with budget.multi_currency on converted
+     * into the user's base currency at today's rate.
+     *
      * @param  Collection<int, Account>  $accounts
+     * @return array<int, int>
+     */
+    private function balancesInBase(User $user, Collection $accounts): array
+    {
+        $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
+        $today = CarbonImmutable::today();
+        $balances = [];
+
+        foreach ($accounts as $account) {
+            $balances[$account->id] = $converter === null
+                ? $account->balance
+                : $converter->convert($account->balance, $account->currency, $user->base_currency, $today);
+        }
+
+        return $balances;
+    }
+
+    /**
+     * @param  Collection<int, Account>  $accounts
+     * @param  array<int, int>  $balances  each account's balance in the user's base currency
      * @return list<BalanceSheetGroup>
      */
-    private function groups(Collection $accounts, AccountOrder $order): array
+    private function groups(Collection $accounts, AccountOrder $order, array $balances): array
     {
         $groups = [];
 
@@ -131,10 +158,21 @@ final class NetWorthService
             }
 
             $sorted = $order->sortsByBalance()
-                ? $inClass->sortBy([['balance', $order->isDescending() ? 'desc' : 'asc'], ['name', 'asc']])
+                ? $inClass->sort(function (Account $a, Account $b) use ($balances, $order): int {
+                    $byBalance = $order->isDescending()
+                        ? $balances[$b->id] <=> $balances[$a->id]
+                        : $balances[$a->id] <=> $balances[$b->id];
+
+                    return $byBalance !== 0 ? $byBalance : $a->name <=> $b->name;
+                })
                 : $inClass->sortBy(fn (Account $account): string => mb_strtolower($account->name), SORT_REGULAR, $order->isDescending());
 
-            $groups[] = new BalanceSheetGroup($class, $sorted->values()->all(), (int) $inClass->sum('balance'));
+            $groups[] = new BalanceSheetGroup(
+                $class,
+                $sorted->values()->all(),
+                array_sum(array_map(fn (Account $account): int => $balances[$account->id], $inClass->all())),
+                array_intersect_key($balances, $inClass->keyBy('id')->all()),
+            );
         }
 
         return $groups;
