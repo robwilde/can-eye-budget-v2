@@ -42,7 +42,7 @@ final class PayCycleCalendar extends Component
     public function goToCurrentCycle(): void
     {
         $this->cycleOffset = 0;
-        $this->selectedDate = CarbonImmutable::today()->format('Y-m-d');
+        $this->selectedDate = auth()->user()->today()->format('Y-m-d');
         $this->bustCache();
     }
 
@@ -143,7 +143,7 @@ final class PayCycleCalendar extends Component
             return [];
         }
 
-        $today = CarbonImmutable::today();
+        $today = auth()->user()->today();
         $cycleStart = $bounds['start'];
         $cycleEndPayday = $bounds['end'];
         // Render through to the actual payday so the PAYDAY cell lands on the real
@@ -152,7 +152,7 @@ final class PayCycleCalendar extends Component
 
         $userId = (int) auth()->id();
 
-        $activity = (new DayActivityLoader)->load($cycleStart, $lastRenderedDay, $userId, includeTransfers: true);
+        $activity = (new DayActivityLoader)->load($cycleStart, $lastRenderedDay, $userId, includeTransfers: true, today: $today);
 
         $days = [];
         $cursor = $cycleStart;
@@ -266,7 +266,7 @@ final class PayCycleCalendar extends Component
 
         $start = $bounds['start'];
         $end = $bounds['end'];
-        $today = CarbonImmutable::today();
+        $today = auth()->user()->today();
 
         if ($start->format('Y-m') === $end->format('Y-m')) {
             $monthLabel = $start->format('F Y');
@@ -341,7 +341,7 @@ final class PayCycleCalendar extends Component
         );
 
         // Stale deposit from a prior cycle: defer to the schedule (see docblock).
-        if ($end->lessThanOrEqualTo(CarbonImmutable::today())) {
+        if ($end->lessThanOrEqualTo($user->today())) {
             return $user->currentPayCycleBounds();
         }
 

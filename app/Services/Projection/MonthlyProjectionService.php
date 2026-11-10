@@ -7,7 +7,6 @@ namespace App\Services\Projection;
 use App\Enums\TransactionDirection;
 use App\Models\PlannedTransaction;
 use App\Models\User;
-use Carbon\CarbonImmutable;
 
 final readonly class MonthlyProjectionService
 {
@@ -19,7 +18,7 @@ final readonly class MonthlyProjectionService
             return null;
         }
 
-        $today = CarbonImmutable::today();
+        $today = $user->today();
         $endDate = $today->addMonthsNoOverflow($monthsAhead);
 
         $plannedTransactions = PlannedTransaction::query()

@@ -16,6 +16,7 @@ use App\Models\PlannedTransaction;
 use App\Models\RedbarkFeed;
 use App\Models\Transaction;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Livewire\Livewire;
 
 // ── Positive / negative / empty buffer ─────────────────────────────
@@ -613,4 +614,42 @@ test('spend last 7 days leaves out accounts excluded from reports', function () 
         ->spendLast7Days();
 
     expect($spend['sum'])->toBe(5000);
+});
+
+test('spend last 7 days ends on the user local date', function () {
+    useAppTimezone('UTC');
+    $this->travelTo(CarbonImmutable::parse('2026-03-31 14:30:00', 'UTC'));
+    $sydney = User::factory()->withPayCycle()->withTimezone('Australia/Sydney')->create();
+    $unset = User::factory()->withPayCycle()->create();
+
+    foreach ([$sydney, $unset] as $user) {
+        Transaction::factory()->debit()->for($user)->for(Account::factory()->for($user)->create())->create([
+            'amount' => 5000,
+            'post_date' => '2026-04-01',
+        ]);
+    }
+
+    $local = Livewire::actingAs($sydney)->test(Dashboard::class)->instance()->spendLast7Days();
+    $utc = Livewire::actingAs($unset)->test(Dashboard::class)->instance()->spendLast7Days();
+
+    expect($local['sum'])->toBe(5000)
+        ->and($utc['sum'])->toBe(0);
+});
+
+test('upcoming plans still due on the user local date are kept', function () {
+    useAppTimezone('UTC');
+    $this->travelTo(CarbonImmutable::parse('2026-04-01 03:00:00', 'UTC'));
+    $la = User::factory()->withTimezone('America/Los_Angeles')->create();
+    $account = Account::factory()->for($la)->create();
+    PlannedTransaction::factory()->for($la)->for($account)->create([
+        'start_date' => '2026-03-31',
+        'until_date' => '2026-03-31',
+        'frequency' => RecurrenceFrequency::EveryMonth,
+        'is_active' => true,
+    ]);
+
+    $upcoming = Livewire::actingAs($la)->test(Dashboard::class)->instance()->nextThreePlanned();
+
+    expect($upcoming)->toHaveCount(1)
+        ->and($upcoming->first()['next']->toDateString())->toBe('2026-03-31');
 });

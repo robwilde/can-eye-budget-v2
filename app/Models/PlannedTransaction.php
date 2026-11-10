@@ -217,9 +217,9 @@ final class PlannedTransaction extends Model
      * @param  Builder<self>  $query
      * @return Builder<self>
      */
-    public function scopeUpcoming(Builder $query): Builder
+    public function scopeUpcoming(Builder $query, ?CarbonImmutable $today = null): Builder
     {
-        $today = CarbonImmutable::today();
+        $today ??= CarbonImmutable::today();
 
         return $query
             ->where('is_active', true)

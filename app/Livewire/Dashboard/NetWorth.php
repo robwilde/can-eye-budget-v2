@@ -7,7 +7,6 @@ namespace App\Livewire\Dashboard;
 use App\DTOs\BalanceSheet;
 use App\Enums\AccountOrder;
 use App\Services\NetWorthService;
-use Carbon\CarbonImmutable;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
@@ -57,9 +56,10 @@ final class NetWorth extends Component
     #[Computed]
     public function series(): array
     {
-        $today = CarbonImmutable::today();
+        $user = auth()->user();
+        $today = $user->today();
 
-        return app(NetWorthService::class)->series(auth()->user(), $today->subDays($this->days - 1), $today);
+        return app(NetWorthService::class)->series($user, $today->subDays($this->days - 1), $today);
     }
 
     #[Computed]

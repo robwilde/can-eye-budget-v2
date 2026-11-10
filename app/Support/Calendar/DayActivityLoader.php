@@ -41,8 +41,8 @@ final readonly class DayActivityLoader
      * Split transactions use: split category > clean description > raw description > 'Transaction'.
      * Unreconciled posted transactions use: clean description > tx category > raw description > 'Transaction'.
      *
-     * Unreconciled planned occurrences dated before today are never rendered or counted: the past is
-     * represented by posted transactions only.
+     * Unreconciled planned occurrences dated before $today (the server's date when omitted) are never
+     * rendered or counted: the past is represented by posted transactions only.
      *
      * Postings and occurrences up to the tolerance outside the range are fetched only to decide
      * matches (each posting pairs with its nearest occurrence); they are never rendered or counted.
@@ -53,7 +53,7 @@ final readonly class DayActivityLoader
      *
      * @return array<string, DayActivity>
      */
-    public function load(CarbonImmutable $start, CarbonImmutable $end, int $userId, bool $includeTransfers = false): array
+    public function load(CarbonImmutable $start, CarbonImmutable $end, int $userId, bool $includeTransfers = false, ?CarbonImmutable $today = null): array
     {
         $tolerance = ReconciliationPolicy::DATE_TOLERANCE_DAYS;
 
@@ -72,7 +72,7 @@ final readonly class DayActivityLoader
 
         $startKey = $start->format('Y-m-d');
         $endKey = $end->format('Y-m-d');
-        $todayKey = CarbonImmutable::today()->format('Y-m-d');
+        $todayKey = ($today ?? CarbonImmutable::today())->format('Y-m-d');
         $inRange = static fn (Transaction $t): bool => $t->post_date->format('Y-m-d') >= $startKey && $t->post_date->format('Y-m-d') <= $endKey;
         $transactions = $withinTolerance->filter($inRange)->values();
 

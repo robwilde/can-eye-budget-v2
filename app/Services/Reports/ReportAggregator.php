@@ -30,7 +30,7 @@ final class ReportAggregator
     public function atoms(User $user, string $mode, ?CarbonInterface $start, ?CarbonInterface $end, bool $includeTransfers = true): array
     {
         if ($mode === 'plan') {
-            $now = CarbonImmutable::now();
+            $now = $user->today();
 
             $windowStart = $start !== null
                 ? CarbonImmutable::parse($start->toDateString())->startOfDay()
@@ -59,7 +59,7 @@ final class ReportAggregator
      */
     public function monthBounds(User $user, string $mode, ?CarbonInterface $start, ?CarbonInterface $end): array
     {
-        $now = CarbonImmutable::now();
+        $now = $user->today();
 
         if ($start !== null) {
             $startMonth = CarbonImmutable::parse($start->toDateString())->startOfMonth();

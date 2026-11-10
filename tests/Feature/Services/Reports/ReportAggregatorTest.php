@@ -407,3 +407,42 @@ test('open-range month bounds start at a transfer-only history', function () {
 
     expect($bounds['start']->format('Y-m'))->toBe('2026-04');
 });
+
+test('open-range month bounds take the current month from the user timezone', function (string $mode) {
+    useAppTimezone('UTC');
+    $this->travelTo(CarbonImmutable::parse('2026-03-31 14:30:00', 'UTC'));
+    $sydney = User::factory()->withTimezone('Australia/Sydney')->create();
+    $unset = User::factory()->create();
+
+    $local = app(ReportAggregator::class)->monthBounds($sydney, $mode, null, null);
+    $utc = app(ReportAggregator::class)->monthBounds($unset, $mode, null, null);
+
+    expect($local['start']->format('Y-m'))->toBe('2026-04')
+        ->and($local['end']->format('Y-m'))->toBe('2026-04')
+        ->and($utc['start']->format('Y-m'))->toBe('2026-03')
+        ->and($utc['end']->format('Y-m'))->toBe('2026-03');
+})->with(['real', 'plan']);
+
+test('open-range plan atoms start on the first of the user local month', function () {
+    useAppTimezone('UTC');
+    $this->travelTo(CarbonImmutable::parse('2026-03-31 14:30:00', 'UTC'));
+    $sydney = User::factory()->withTimezone('Australia/Sydney')->create();
+    $account = Account::factory()->for($sydney)->create();
+
+    PlannedTransaction::factory()->for($sydney)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 2500,
+        'start_date' => '2026-04-01',
+        'frequency' => RecurrenceFrequency::EveryMonth,
+    ]);
+    PlannedTransaction::factory()->for($sydney)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 1000,
+        'start_date' => '2026-03-31',
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+
+    $atoms = app(ReportAggregator::class)->atoms($sydney, 'plan', null, null);
+
+    expect(array_column($atoms, 'ym'))->toBe(['2026-04']);
+});
