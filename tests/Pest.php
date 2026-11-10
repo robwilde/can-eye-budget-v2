@@ -374,3 +374,12 @@ function balanceHistoryDifference(Account $account, array $stored, array $rebuil
 
     return '';
 }
+
+/**
+ * Run the rest of the test with $timezone as the app timezone, as it would be booted from config.
+ */
+function useAppTimezone(string $timezone): void
+{
+    config(['app.timezone' => $timezone]);
+    date_default_timezone_set($timezone);
+}

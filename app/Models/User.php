@@ -13,6 +13,8 @@ use App\Support\Currencies;
 use Carbon\CarbonImmutable;
 use Closure;
 use Database\Factories\UserFactory;
+use DateInvalidTimeZoneException;
+use DateTimeZone;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -21,6 +23,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Laravel\Fortify\TwoFactorAuthenticatable;
@@ -39,6 +43,8 @@ final class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable, TwoFactorAuthenticatable;
+
+    private const string UNKNOWN_TIMEZONE_CACHE_PREFIX = 'user-timezone-unknown:';
 
     /**
      * @var array<string, mixed>
@@ -221,7 +227,7 @@ final class User extends Authenticatable
         }
 
         $nextPay = CarbonImmutable::instance($this->next_pay_date);
-        $today = CarbonImmutable::today();
+        $today = $this->today();
 
         if ($nextPay->lessThanOrEqualTo($today)) {
             $nextPay = $this->fastForwardPayDate($nextPay, $today, $frequency);
@@ -275,7 +281,7 @@ final class User extends Authenticatable
             return null;
         }
 
-        return (int) now()->startOfDay()->diffInDays($this->next_pay_date, false);
+        return (int) $this->today()->diffInDays($this->next_pay_date, false);
     }
 
     public function bufferUntilNextPay(int $availableToSpend): ?int
@@ -295,7 +301,7 @@ final class User extends Authenticatable
             return 0;
         }
 
-        $today = CarbonImmutable::today();
+        $today = $this->today();
 
         if ($today->greaterThanOrEqualTo($bounds['end'])) {
             return 0;
@@ -353,9 +359,42 @@ final class User extends Authenticatable
         return array_values(array_unique([$this->base_currency, ...($chosen === [] ? Currencies::codes() : $chosen)]));
     }
 
+    /**
+     * The stored timezone, or the app timezone when none is stored or the stored one is not a
+     * known identifier; an unknown one is logged at most once a day per timezone.
+     */
     public function resolvedTimezone(): string
     {
-        return $this->timezone ?? (string) config('app.timezone');
+        $fallback = (string) config('app.timezone');
+
+        if ($this->timezone === null) {
+            return $fallback;
+        }
+
+        try {
+            new DateTimeZone($this->timezone);
+
+            return $this->timezone;
+        } catch (DateInvalidTimeZoneException) {
+            if (Cache::add(self::UNKNOWN_TIMEZONE_CACHE_PREFIX.$this->timezone, true, now()->addDay())) {
+                Log::warning('Unknown user timezone; using the app timezone', [
+                    'user_id' => $this->id,
+                    'timezone' => $this->timezone,
+                    'fallback' => $fallback,
+                ]);
+            }
+
+            return $fallback;
+        }
+    }
+
+    /**
+     * The user's current calendar date in their resolved timezone, held at midnight in the app
+     * timezone so it compares directly with stored date columns such as post_date.
+     */
+    public function today(): CarbonImmutable
+    {
+        return CarbonImmutable::today()->setDateFrom(CarbonImmutable::now($this->resolvedTimezone()));
     }
 
     /**

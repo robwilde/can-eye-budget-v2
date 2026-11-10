@@ -148,3 +148,36 @@ test('very stale monthly date uses arithmetic fast-forward', function () {
     expect($bounds['start']->toDateString())->toBe('2026-03-15')
         ->and($bounds['end']->toDateString())->toBe('2026-04-15');
 });
+
+it('computes the current pay cycle in the user timezone', function () {
+    useAppTimezone('UTC');
+    $this->travelTo(CarbonImmutable::parse('2026-04-17 14:05:00', 'UTC'));
+    $payCycle = [
+        'pay_amount' => 300000,
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => CarbonImmutable::parse('2026-04-18'),
+    ];
+    $sydney = User::factory()->withTimezone('Australia/Sydney')->create($payCycle);
+    $unset = User::factory()->create($payCycle);
+
+    $local = $sydney->currentPayCycleBounds();
+    $utc = $unset->currentPayCycleBounds();
+
+    expect($local['start']->toDateString())->toBe('2026-04-18')
+        ->and($local['end']->toDateString())->toBe('2026-05-02')
+        ->and($utc['start']->toDateString())->toBe('2026-04-04')
+        ->and($utc['end']->toDateString())->toBe('2026-04-18');
+});
+
+it('counts the days until the next pay from the user local date', function () {
+    useAppTimezone('UTC');
+    $this->travelTo(CarbonImmutable::parse('2026-04-17 14:05:00', 'UTC'));
+    $payCycle = [
+        'pay_amount' => 300000,
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => CarbonImmutable::parse('2026-04-18'),
+    ];
+
+    expect(User::factory()->withTimezone('Australia/Sydney')->create($payCycle)->daysUntilNextPay())->toBe(0)
+        ->and(User::factory()->create($payCycle)->daysUntilNextPay())->toBe(1);
+});
