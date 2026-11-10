@@ -13,6 +13,7 @@ enum TransactionPeriod: string
 {
     case SevenDays = '7d';
     case ThisMonth = 'this-month';
+    case BudgetMonth = 'budget-month';
     case ThreeMonths = '3m';
     case SixMonths = '6m';
     case OneYear = '1y';
@@ -25,6 +26,7 @@ enum TransactionPeriod: string
         return match ($this) {
             self::SevenDays => 'Last 7 Days',
             self::ThisMonth => 'This Month',
+            self::BudgetMonth => 'Budget Month',
             self::ThreeMonths => 'Last 3 Months',
             self::SixMonths => 'Last 6 Months',
             self::OneYear => 'Last Year',
@@ -39,16 +41,40 @@ enum TransactionPeriod: string
      */
     public function dateRange(?User $user = null, ?string $from = null, ?string $to = null): array
     {
+        $today = $user?->today() ?? CarbonImmutable::today();
+
         return match ($this) {
-            self::SevenDays => ['start' => now()->subDays(7)->startOfDay(), 'end' => null],
-            self::ThisMonth => ['start' => now()->startOfMonth(), 'end' => null],
-            self::ThreeMonths => ['start' => now()->subMonths(3)->startOfDay(), 'end' => null],
-            self::SixMonths => ['start' => now()->subMonths(6)->startOfDay(), 'end' => null],
-            self::OneYear => ['start' => now()->subYear()->startOfDay(), 'end' => null],
+            self::SevenDays => ['start' => $today->subDays(7), 'end' => null],
+            self::ThisMonth => ['start' => $today->startOfMonth(), 'end' => null],
+            self::BudgetMonth => $this->budgetMonthDateRange($user, $today),
+            self::ThreeMonths => ['start' => $today->subMonths(3), 'end' => null],
+            self::SixMonths => ['start' => $today->subMonths(6), 'end' => null],
+            self::OneYear => ['start' => $today->subYear(), 'end' => null],
             self::PayCycle => $this->payCycleDateRange($user),
             self::All => ['start' => null, 'end' => null],
-            self::Custom => $this->customDateRange($from, $to),
+            self::Custom => $this->customDateRange($from, $to, $user),
         };
+    }
+
+    /**
+     * Starts on the user's month start day: that day this month once today has reached it,
+     * otherwise that day last month. Ends today. Without a start day it is the calendar month.
+     *
+     * @return array{start: ?CarbonInterface, end: ?CarbonInterface}
+     */
+    private function budgetMonthDateRange(?User $user, CarbonImmutable $today): array
+    {
+        $startDay = $user?->month_start_day;
+
+        if ($startDay === null) {
+            return ['start' => $today->startOfMonth(), 'end' => $today->endOfDay()];
+        }
+
+        $start = $today->day >= $startDay
+            ? $today->setDay($startDay)
+            : $today->startOfMonth()->subMonth()->setDay($startDay);
+
+        return ['start' => $start, 'end' => $today->endOfDay()];
     }
 
     /**
@@ -63,7 +89,7 @@ enum TransactionPeriod: string
         $bounds = $user->currentPayCycleBounds();
 
         if (! $bounds) {
-            return self::ThisMonth->dateRange();
+            return self::ThisMonth->dateRange($user);
         }
 
         return [
@@ -75,7 +101,7 @@ enum TransactionPeriod: string
     /**
      * @return array{start: ?CarbonInterface, end: ?CarbonInterface}
      */
-    private function customDateRange(?string $from, ?string $to): array
+    private function customDateRange(?string $from, ?string $to, ?User $user): array
     {
         try {
             $start = $from ? CarbonImmutable::parse($from)->startOfDay() : null;
@@ -90,7 +116,7 @@ enum TransactionPeriod: string
         }
 
         if (! $start && ! $end) {
-            return self::ThisMonth->dateRange();
+            return self::ThisMonth->dateRange($user);
         }
 
         if ($start && $end && $start->greaterThan($end)) {
