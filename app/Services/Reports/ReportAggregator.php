@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\CurrencyConverter;
 use App\Support\Transactions\CategoryAttribution;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -136,8 +137,9 @@ final class ReportAggregator
     {
         $monthExpr = $this->monthExpression();
         $transferCategoryIds = $this->transferCategoryIds($user->id);
+        $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
 
-        $rows = CategoryAttribution::query($user->id, forMoney: true, forReports: true)
+        $query = CategoryAttribution::query($user->id, forMoney: true, forReports: true)
             ->where(fn ($counted) => $counted
                 ->where(fn ($ordinary) => $ordinary
                     ->whereNull('transfer_pair_id')
@@ -155,22 +157,37 @@ final class ReportAggregator
             ->when($end, fn ($q, $e) => $q->where('post_date', '<=', $e))
             ->selectRaw("{$monthExpr} as ym, direction, category_id, SUM(ABS(amount)) as total, COUNT(*) as tx_count")
             ->groupByRaw($monthExpr)
-            ->groupBy('direction', 'category_id')
-            ->get();
+            ->groupBy('direction', 'category_id');
+
+        if ($converter !== null) {
+            $query->selectRaw("currency, case when currency = ? then '' else date(post_date) end as fx_day", [$user->base_currency])
+                ->groupBy('currency', 'fx_day');
+        }
 
         $atoms = [];
 
-        foreach ($rows as $row) {
-            $atoms[] = [
+        foreach ($query->get() as $row) {
+            $total = (int) $row->total;
+
+            if ($converter !== null && $row->fx_day !== '') {
+                $total = $converter->convert($total, (string) $row->currency, $user->base_currency, CarbonImmutable::parse((string) $row->fx_day));
+            }
+
+            $key = $row->ym.'|'.$row->direction.'|'.($row->category_id ?? 'null');
+
+            $atoms[$key] ??= [
                 'ym' => (string) $row->ym,
                 'direction' => (string) $row->direction,
                 'category_id' => $row->category_id === null ? null : (int) $row->category_id,
-                'total' => (int) $row->total,
-                'count' => (int) $row->tx_count,
+                'total' => 0,
+                'count' => 0,
             ];
+
+            $atoms[$key]['total'] += $total;
+            $atoms[$key]['count'] += (int) $row->tx_count;
         }
 
-        return $atoms;
+        return array_values($atoms);
     }
 
     /**
@@ -207,12 +224,13 @@ final class ReportAggregator
             ->where('user_id', $user->id)
             ->where('is_active', true)
             ->when($includeTransfers, fn ($q) => $q->countable(), fn ($q) => $q->excludingTransfers())
-            ->with(['account:id,is_tracked,exclude_from_reports', 'transferToAccount:id,is_tracked,exclude_from_reports'])
+            ->with(['account:id,currency,is_tracked,exclude_from_reports', 'transferToAccount:id,is_tracked,exclude_from_reports'])
             ->get()
             ->filter(static fn (PlannedTransaction $plan): bool => $plan->countedAccount()?->exclude_from_reports === false);
 
         /** @var array<string, array{ym: string, direction: string, category_id: int|null, total: int, count: int}> $atoms */
         $atoms = [];
+        $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
 
         foreach ($plans as $plan) {
             $amount = abs($plan->amount);
@@ -220,6 +238,8 @@ final class ReportAggregator
             if ($amount === 0) {
                 continue;
             }
+
+            $currency = $plan->account->currency;
 
             $direction = $plan->countedDirection()?->value;
 
@@ -243,7 +263,9 @@ final class ReportAggregator
                     ];
                 }
 
-                $atoms[$key]['total'] += $amount;
+                $atoms[$key]['total'] += $converter === null
+                    ? $amount
+                    : $converter->convert($amount, $currency, $user->base_currency, $date);
                 $atoms[$key]['count']++;
             }
         }

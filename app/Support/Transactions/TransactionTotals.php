@@ -6,6 +6,9 @@ namespace App\Support\Transactions;
 
 use App\Enums\TransactionDirection;
 use App\Models\Transaction;
+use App\Models\User;
+use App\Services\CurrencyConverter;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 
@@ -56,10 +59,19 @@ final class TransactionTotals
     {
         $totals = [TransactionDirection::Credit->value => 0, TransactionDirection::Debit->value => 0];
 
-        $rows = ($categoryIds === null ? self::rowSums($query) : self::attributedSums($query, $userId, $categoryIds))->get();
+        $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
+        $base = $converter === null ? null : (string) User::query()->whereKey($userId)->value('base_currency');
+
+        $rows = ($categoryIds === null ? self::rowSums($query, $base) : self::attributedSums($query, $userId, $categoryIds, $base))->get();
 
         foreach ($rows as $row) {
-            $totals[(string) $row->direction] = (int) $row->total;
+            $total = (int) $row->total;
+
+            if ($converter !== null && $row->fx_day !== '') {
+                $total = $converter->convert($total, (string) $row->currency, (string) $base, CarbonImmutable::parse((string) $row->fx_day));
+            }
+
+            $totals[(string) $row->direction] += $total;
         }
 
         return $totals;
@@ -68,23 +80,42 @@ final class TransactionTotals
     /**
      * @param  Builder<Transaction>  $query
      */
-    private static function rowSums(Builder $query): QueryBuilder
+    private static function rowSums(Builder $query, ?string $base): QueryBuilder
     {
-        return $query->toBase()
+        $sums = $query->toBase()
             ->selectRaw('transactions.direction as direction, sum(abs(transactions.amount)) as total')
             ->groupBy('transactions.direction');
+
+        return self::perEntryDate($sums, 'transactions.currency', 'transactions.post_date', $base);
     }
 
     /**
      * @param  Builder<Transaction>  $query
      * @param  list<int>  $categoryIds
      */
-    private static function attributedSums(Builder $query, int $userId, array $categoryIds): QueryBuilder
+    private static function attributedSums(Builder $query, int $userId, array $categoryIds, ?string $base): QueryBuilder
     {
-        return CategoryAttribution::query($userId, true)
+        $sums = CategoryAttribution::query($userId, true)
             ->whereIn('transaction_id', $query->toBase()->select('transactions.id'))
             ->whereIn('category_id', $categoryIds)
             ->selectRaw('direction, sum(abs(amount)) as total')
             ->groupBy('direction');
+
+        return self::perEntryDate($sums, 'currency', 'post_date', $base);
+    }
+
+    /**
+     * With a base currency, splits each direction's sum by currency and, for a currency other
+     * than the base, by entry date, so every group converts at its own date's rate.
+     */
+    private static function perEntryDate(QueryBuilder $sums, string $currencyColumn, string $dateColumn, ?string $base): QueryBuilder
+    {
+        if ($base === null) {
+            return $sums;
+        }
+
+        return $sums
+            ->selectRaw("{$currencyColumn} as currency, case when {$currencyColumn} = ? then '' else date({$dateColumn}) end as fx_day", [$base])
+            ->groupBy($currencyColumn, 'fx_day');
     }
 }

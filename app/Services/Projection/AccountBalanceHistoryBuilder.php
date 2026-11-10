@@ -32,7 +32,8 @@ final class AccountBalanceHistoryBuilder
      * Recomputes from $from forward, or the whole history when $from is null. A partial
      * rebuild keeps earlier rows only when a valuation dated before $from pins them; without
      * one the earlier days are worked out backwards from a later anchor, so any change can
-     * move them and the whole history is rebuilt. Runs in the caller's DB transaction.
+     * move them and the whole history is rebuilt. An account holding transactions in more
+     * than one currency is always rebuilt whole. Runs in the caller's DB transaction.
      */
     public function rebuild(Account $account, ?CarbonImmutable $from = null): void
     {
@@ -40,6 +41,10 @@ final class AccountBalanceHistoryBuilder
             $account = Account::query()->whereKey($account->id)->lockForUpdate()->firstOrFail();
             $today = CarbonImmutable::today();
             $flows = $this->dailyFlows($account);
+
+            if ($from !== null && $this->holdsSeveralCurrencies($account)) {
+                $from = null;
+            }
 
             /** @var array<string, AccountValuation> $valuations */
             $valuations = $account->valuations()->orderBy('valued_on')->get()
@@ -216,6 +221,15 @@ final class AccountBalanceHistoryBuilder
             $transaction->status->value,
             CarbonImmutable::parse($transaction->post_date)->toDateString(),
         ];
+    }
+
+    private function holdsSeveralCurrencies(Account $account): bool
+    {
+        return Transaction::query()
+            ->current()
+            ->where('account_id', $account->id)
+            ->distinct()
+            ->count('currency') > 1;
     }
 
     /**

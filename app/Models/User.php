@@ -8,8 +8,10 @@ use App\Casts\MoneyCast;
 use App\Casts\UserPreferencesCast;
 use App\DTOs\UserPreferences;
 use App\Enums\PayFrequency;
+use App\Services\CurrencyConverter;
 use App\Support\Currencies;
 use Carbon\CarbonImmutable;
+use Closure;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -18,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Laravel\Fortify\TwoFactorAuthenticatable;
@@ -238,23 +241,27 @@ final class User extends Authenticatable
 
     public function totalOwed(): int
     {
-        return $this->accounts()
-            ->active()
-            ->tracked()
-            ->inReports()
-            ->get()
-            ->sum(fn (Account $a) => $a->amountOwed());
+        return $this->sumInBaseCurrency(
+            $this->accounts()
+                ->active()
+                ->tracked()
+                ->inReports()
+                ->get(),
+            fn (Account $a): int => $a->amountOwed(),
+        );
     }
 
     public function totalAvailable(): int
     {
-        return $this->accounts()
-            ->active()
-            ->tracked()
-            ->inReports()
-            ->get()
-            ->filter(fn (Account $a) => $a->type->isSpendable())
-            ->sum(fn (Account $a) => $a->availableBalance());
+        return $this->sumInBaseCurrency(
+            $this->accounts()
+                ->active()
+                ->tracked()
+                ->inReports()
+                ->get()
+                ->filter(fn (Account $a) => $a->type->isSpendable()),
+            fn (Account $a): int => $a->availableBalance(),
+        );
     }
 
     public function eligiblePrimaryAccount(int $accountId): ?Account
@@ -294,13 +301,24 @@ final class User extends Authenticatable
             return 0;
         }
 
+        $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
+
         return (int) $this->plannedTransactions()
             ->where('is_active', true)
             ->where(static fn ($query) => $query->countable()->orWhere(static fn ($transfers) => $transfers->intoExcludedAccount()))
-            ->with(['account:id,is_tracked,exclude_from_reports', 'transferToAccount:id,is_tracked,exclude_from_reports'])
+            ->with(['account:id,currency,is_tracked,exclude_from_reports', 'transferToAccount:id,is_tracked,exclude_from_reports'])
             ->get()
             ->filter(static fn (PlannedTransaction $plan): bool => $plan->drawsFromAvailable())
-            ->sum(static fn (PlannedTransaction $plan) => $plan->occurrencesBetween($today, $bounds['end'])->count() * abs($plan->amount));
+            ->sum(function (PlannedTransaction $plan) use ($today, $bounds, $converter): int {
+                $occurrences = $plan->occurrencesBetween($today, $bounds['end']);
+                $amount = abs($plan->amount);
+
+                if ($converter === null) {
+                    return $occurrences->count() * $amount;
+                }
+
+                return (int) $occurrences->sum(fn (CarbonImmutable $date): int => $converter->convert($amount, $plan->account->currency, $this->base_currency, $date));
+            });
     }
 
     /**
@@ -384,6 +402,25 @@ final class User extends Authenticatable
             'next_pay_date' => 'date',
             'preferences' => UserPreferencesCast::class,
         ];
+    }
+
+    /**
+     * With budget.multi_currency on, each account's amount converts into the base currency at
+     * today's rate; off, the cents add up as stored.
+     *
+     * @param  Collection<int, Account>  $accounts
+     * @param  Closure(Account): int  $amount
+     */
+    private function sumInBaseCurrency(Collection $accounts, Closure $amount): int
+    {
+        if (! CurrencyConverter::enabled()) {
+            return (int) $accounts->sum($amount);
+        }
+
+        $converter = app(CurrencyConverter::class);
+        $today = CarbonImmutable::today();
+
+        return (int) $accounts->sum(fn (Account $a): int => $converter->convert($amount($a), $a->currency, $this->base_currency, $today));
     }
 
     private function fastForwardPayDate(
