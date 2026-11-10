@@ -7,12 +7,13 @@ declare(strict_types=1);
 use App\Enums\TransactionPeriod;
 
 test('all transaction period cases exist', function () {
-    expect(TransactionPeriod::cases())->toHaveCount(8);
+    expect(TransactionPeriod::cases())->toHaveCount(9);
 });
 
 test('transaction period has correct backing values', function () {
     expect(TransactionPeriod::SevenDays->value)->toBe('7d')
         ->and(TransactionPeriod::ThisMonth->value)->toBe('this-month')
+        ->and(TransactionPeriod::BudgetMonth->value)->toBe('budget-month')
         ->and(TransactionPeriod::ThreeMonths->value)->toBe('3m')
         ->and(TransactionPeriod::SixMonths->value)->toBe('6m')
         ->and(TransactionPeriod::OneYear->value)->toBe('1y')
@@ -24,6 +25,7 @@ test('transaction period has correct backing values', function () {
 test('transaction period resolves from backing value', function () {
     expect(TransactionPeriod::from('7d'))->toBe(TransactionPeriod::SevenDays)
         ->and(TransactionPeriod::from('this-month'))->toBe(TransactionPeriod::ThisMonth)
+        ->and(TransactionPeriod::from('budget-month'))->toBe(TransactionPeriod::BudgetMonth)
         ->and(TransactionPeriod::from('3m'))->toBe(TransactionPeriod::ThreeMonths)
         ->and(TransactionPeriod::from('6m'))->toBe(TransactionPeriod::SixMonths)
         ->and(TransactionPeriod::from('1y'))->toBe(TransactionPeriod::OneYear)
@@ -35,6 +37,7 @@ test('transaction period resolves from backing value', function () {
 test('label returns expected strings', function () {
     expect(TransactionPeriod::SevenDays->label())->toBe('Last 7 Days')
         ->and(TransactionPeriod::ThisMonth->label())->toBe('This Month')
+        ->and(TransactionPeriod::BudgetMonth->label())->toBe('Budget Month')
         ->and(TransactionPeriod::ThreeMonths->label())->toBe('Last 3 Months')
         ->and(TransactionPeriod::SixMonths->label())->toBe('Last 6 Months')
         ->and(TransactionPeriod::OneYear->label())->toBe('Last Year')

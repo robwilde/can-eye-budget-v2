@@ -334,3 +334,17 @@ test('the scan is scheduled nightly at 04:00 without overlapping', function () {
         ->and($events->first()->withoutOverlapping)->toBeTrue()
         ->and($events->first()->description)->toBe('bnpl:scan-emails');
 });
+
+test('--since counts back from the local date of the user who owns the mailbox', function () {
+    useAppTimezone('UTC');
+    $this->travelTo(CarbonImmutable::parse('2026-07-24 20:00:00', 'UTC'));
+    $source = fakeScheduleSource();
+
+    $this->user->update(['timezone' => 'Australia/Sydney']);
+    $this->artisan('app:scan-bnpl-emails', ['--since' => '1d', '--user' => (string) $this->user->id])->assertSuccessful();
+    $this->user->update(['timezone' => null]);
+    $this->artisan('app:scan-bnpl-emails', ['--since' => '1d', '--user' => (string) $this->user->id])->assertSuccessful();
+
+    expect($source->queries[array_key_first($source->queries)])->toEndWith('after:2026/07/23')
+        ->and($source->queries[array_key_last($source->queries)])->toEndWith('after:2026/07/22');
+});

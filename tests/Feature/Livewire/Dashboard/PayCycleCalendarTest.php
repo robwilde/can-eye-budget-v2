@@ -1158,3 +1158,73 @@ test('a planned transfer renders with the transfer class in the grid and the tra
         ->and(mb_substr_count($html, 'cyc-pip plan'))->toBe(2)
         ->and(mb_substr_count($html, 'tx-amt xfer'))->toBe(1);
 });
+
+test('marks the user local date as today in the pay cycle calendar', function () {
+    useAppTimezone('UTC');
+    $this->travelTo(CarbonImmutable::parse('2026-04-17 14:05:00', 'UTC'));
+
+    $user = User::factory()->withTimezone('Australia/Sydney')->create([
+        'pay_amount' => 570660,
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => '2026-04-18',
+    ]);
+    Account::factory()->for($user)->create();
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)->test(PayCycleCalendar::class)->instance()->days();
+
+    expect($days[0]->iso)->toBe('2026-04-18')
+        ->and($days[0]->isToday)->toBeTrue()
+        ->and($days[0]->isPast)->toBeFalse();
+});
+
+test('a plan due on the user local date still shows on the calendar when the server date is already tomorrow', function () {
+    useAppTimezone('UTC');
+    $this->travelTo(CarbonImmutable::parse('2026-04-01 03:00:00', 'UTC'));
+
+    $user = User::factory()->withTimezone('America/Los_Angeles')->create([
+        'pay_amount' => 570660,
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => '2026-04-07',
+    ]);
+    $account = Account::factory()->for($user)->create();
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 60000,
+        'start_date' => '2026-03-31',
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'is_active' => true,
+    ]);
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)->test(PayCycleCalendar::class)->instance()->days();
+    $today = collect($days)->firstWhere('isToday', true);
+
+    expect($today->iso)->toBe('2026-03-31')
+        ->and(collect($today->pips)->where('kind', 'plan'))->toHaveCount(1);
+});
+
+test('an unmatched plan from the user local yesterday is not shown when the server date is still that day', function () {
+    useAppTimezone('UTC');
+    $this->travelTo(CarbonImmutable::parse('2026-04-17 14:05:00', 'UTC'));
+
+    $user = User::factory()->withTimezone('Australia/Sydney')->create([
+        'pay_amount' => 570660,
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => '2026-04-24',
+    ]);
+    $account = Account::factory()->for($user)->create();
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 60000,
+        'start_date' => '2026-04-17',
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'is_active' => true,
+    ]);
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)->test(PayCycleCalendar::class)->instance()->days();
+    $past = collect($days)->firstWhere('iso', '2026-04-17');
+
+    expect(collect($past->pips)->where('kind', 'plan'))->toHaveCount(0);
+});

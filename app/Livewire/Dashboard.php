@@ -175,12 +175,13 @@ final class Dashboard extends Component
     #[Computed]
     public function nextThreePlanned(): Collection
     {
-        $today = CarbonImmutable::today();
+        $user = auth()->user();
+        $today = $user->today();
         $horizon = $today->addMonths(3);
 
-        return auth()->user()
+        return $user
             ->plannedTransactions()
-            ->upcoming()
+            ->upcoming($today)
             ->with(['account', 'category'])
             ->limit(20)
             ->get()
@@ -200,7 +201,7 @@ final class Dashboard extends Component
     public function spendLast7Days(): array
     {
         $user = auth()->user();
-        $today = CarbonImmutable::today();
+        $today = $user->today();
         $windowStart = $today->subDays(13);
 
         $debits = $user->transactions()
