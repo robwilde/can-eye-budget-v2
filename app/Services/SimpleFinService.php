@@ -57,6 +57,7 @@ final class SimpleFinService implements RedbarkServiceContract
         private readonly string $accessUrl,
         private readonly int $timeoutSeconds = 120,
         private readonly int $maxAttempts = 3,
+        private readonly ?string $timezone = null,
     ) {}
 
     /**
@@ -261,7 +262,7 @@ final class SimpleFinService implements RedbarkServiceContract
             return null;
         }
 
-        $date = CarbonImmutable::createFromTimestamp($epoch, (string) config('app.timezone'))->toDateString();
+        $date = CarbonImmutable::createFromTimestamp($epoch, $this->timezone ?? (string) config('app.timezone'))->toDateString();
 
         $description = mb_trim((string) ($row['description'] ?? ''));
 

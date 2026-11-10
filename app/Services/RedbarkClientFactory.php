@@ -23,7 +23,7 @@ final readonly class RedbarkClientFactory
     public function for(RedbarkFeed $feed): RedbarkServiceContract
     {
         return match ($feed->transport) {
-            RedbarkTransport::SimpleFin => new SimpleFinService((string) $feed->simplefin_access_url),
+            RedbarkTransport::SimpleFin => new SimpleFinService((string) $feed->simplefin_access_url, timezone: $feed->user->resolvedTimezone()),
             RedbarkTransport::Rest => new RedbarkService((string) $feed->api_key, $this->baseUrl),
         };
     }

@@ -44,7 +44,7 @@ final class ScanBnplEmailsCommand extends Command
 
         try {
             $users = $this->users();
-            $since = $this->since((string) $this->option('since'));
+            $this->since((string) $this->option('since'));
         } catch (InvalidArgumentException $e) {
             $this->error($e->getMessage());
 
@@ -61,8 +61,10 @@ final class ScanBnplEmailsCommand extends Command
         $counts = ['scanned' => 0, 'parsed' => 0, 'orders' => 0, 'plans' => 0, 'linked' => 0, 'ambiguous' => 0, 'skipped' => 0, 'failed' => 0];
         $fetchFailed = false;
 
-        $users->with('gmailCredential')->chunkById(100, function (Collection $chunk) use ($parser, $source, $importer, $linker, $since, $dryRun, &$counts, &$fetchFailed): void {
+        $users->with('gmailCredential')->chunkById(100, function (Collection $chunk) use ($parser, $source, $importer, $linker, $dryRun, &$counts, &$fetchFailed): void {
             foreach ($chunk as $user) {
+                $since = $this->since((string) $this->option('since'), $user);
+
                 foreach ($parser->strategies() as $strategy) {
                     try {
                         $emails = $source->fetch($user, $strategy->query($since), self::FETCH_LIMIT);
@@ -160,9 +162,9 @@ final class ScanBnplEmailsCommand extends Command
     /**
      * @throws InvalidArgumentException
      */
-    private function since(string $value): CarbonImmutable
+    private function since(string $value, ?User $user = null): CarbonImmutable
     {
-        $timezone = (string) config('app.timezone');
+        $timezone = $user?->resolvedTimezone() ?? (string) config('app.timezone');
 
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1) {
             try {
