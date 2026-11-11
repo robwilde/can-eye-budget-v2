@@ -8,6 +8,7 @@ use App\Models\Tag;
 use App\Models\User;
 use App\Services\Tags\TagDeleter;
 use Illuminate\Contracts\View\View;
+use Illuminate\Support\Arr;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
@@ -39,7 +40,7 @@ final class TagManager extends Component
         $this->resetErrorBag();
         $this->editingTagId = null;
         $this->name = '';
-        $this->colour = Tag::PALETTE[array_rand(Tag::PALETTE)];
+        $this->colour = Arr::random(Tag::PALETTE);
         $this->showFormModal = true;
     }
 
@@ -111,6 +112,12 @@ final class TagManager extends Component
         $this->resetErrorBag();
 
         if ($this->deletingTagId === null) {
+            return;
+        }
+
+        if ($this->ownedTag($this->deletingTagId) === null) {
+            $this->closeDeleteModal();
+
             return;
         }
 
