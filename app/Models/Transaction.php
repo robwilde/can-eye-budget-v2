@@ -378,6 +378,10 @@ final class Transaction extends Model
             }
         }
 
+        if (array_key_exists('merchant_id', $changes) && $changes['merchant_id'] !== $this->merchant_id) {
+            $locked[] = 'merchant';
+        }
+
         return array_values(array_unique($locked));
     }
 
