@@ -25,6 +25,7 @@ use App\Exceptions\TransferAlreadyLinkedException;
 use App\Exceptions\TransferLinkRefusedException;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\Merchant;
 use App\Models\PlannedTransaction;
 use App\Models\Tag;
 use App\Models\Transaction;
@@ -97,6 +98,10 @@ final class TransactionModal extends Component
 
     #[Locked]
     public bool $categoryPicked = false;
+
+    public ?int $merchantId = null;
+
+    public string $newMerchantName = '';
 
     public string $date = '';
 
@@ -316,6 +321,7 @@ final class TransactionModal extends Component
 
         $this->categoryId = $transaction->category_id;
         $this->categoryPicked = false;
+        $this->merchantId = $transaction->merchant_id;
         $this->date = $transaction->post_date->format('Y-m-d');
         $this->notes = $transaction->notes ?? '';
         $this->tagIds = $this->openedTagIds = $this->tagIdsOf($transaction);
@@ -411,6 +417,17 @@ final class TransactionModal extends Component
     /**
      * @throws Throwable
      */
+    /**
+     * Picks the user's merchant of this name, creating it when there is none.
+     */
+    public function createMerchant(): void
+    {
+        $validated = $this->validate(['newMerchantName' => ['required', 'string', 'max:100']]);
+
+        $this->merchantId = Merchant::findOrCreateNamed((int) auth()->id(), $validated['newMerchantName'])->id;
+        $this->newMerchantName = '';
+    }
+
     public function save(): void
     {
         if ($this->categoriseConsentWithdrawn) {
@@ -907,6 +924,7 @@ final class TransactionModal extends Component
             'categories' => $categories,
             'recentCategories' => $recentCategories,
             'tags' => Tag::query()->where('user_id', auth()->id())->orderBy('name')->get(['id', 'name', 'colour']),
+            'merchants' => Merchant::query()->where('user_id', auth()->id())->orderBy('name')->get(['id', 'name']),
             'formatMoney' => MoneyCast::format(...),
             'parsedAmount' => $parsed->amount ?? 0,
             'parsedDescription' => $parsed->description ?? '',
@@ -1759,6 +1777,7 @@ final class TransactionModal extends Component
 
                 $child = $transaction->createChild($this->withLockedFields($transaction, [
                     'category_id' => $this->categoryId,
+                    'merchant_id' => $this->merchantId,
                     'notes' => $this->notes !== '' ? $this->notes : null,
                     'excluded' => $this->excluded,
                     ...$this->editedDescriptors($transaction),
@@ -1780,6 +1799,7 @@ final class TransactionModal extends Component
                 $child = $transaction->createChild($this->withLockedFields($transaction, [
                     'account_id' => $this->accountId,
                     'category_id' => $this->categoryId,
+                    'merchant_id' => $this->merchantId,
                     'amount' => $parsed->amount,
                     'direction' => $this->transactionType === 'expense'
                         ? TransactionDirection::Debit
@@ -2348,6 +2368,7 @@ final class TransactionModal extends Component
             'user_id' => auth()->id(),
             'account_id' => $this->accountId,
             'category_id' => $this->categoryId,
+            'merchant_id' => $this->merchantId,
             'amount' => $parsed->amount,
             'direction' => $this->transactionType === 'expense'
                 ? TransactionDirection::Debit
@@ -2710,6 +2731,8 @@ final class TransactionModal extends Component
         $this->accountId = null;
         $this->categoryId = null;
         $this->categoryPicked = false;
+        $this->merchantId = null;
+        $this->newMerchantName = '';
         $this->date = '';
         $this->notes = '';
         $this->tagIds = [];
@@ -2800,6 +2823,7 @@ final class TransactionModal extends Component
                 'nullable',
                 Rule::exists('categories', 'id')->where('user_id', auth()->id())->where('is_hidden', 0),
             ],
+            'merchantId' => ['nullable', Rule::exists('merchants', 'id')->where('user_id', auth()->id())],
             'date' => $this->mode === 'plan' && $this->editingPlannedTransactionId === null
                 ? ['required', 'date_format:Y-m-d', 'after:today']
                 : ['required', 'date_format:Y-m-d'],
