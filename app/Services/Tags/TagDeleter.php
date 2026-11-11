@@ -6,7 +6,6 @@ namespace App\Services\Tags;
 
 use App\Models\Tag;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Throwable;
 
@@ -27,7 +26,7 @@ final readonly class TagDeleter
 
         $ids = $replacementId === null ? [$tagId] : [$tagId, $replacementId];
 
-        DB::transaction(function () use ($userId, $tagId, $replacementId, $ids): void {
+        Tag::query()->getConnection()->transaction(function () use ($userId, $tagId, $replacementId, $ids): void {
             $locked = Tag::query()
                 ->where('user_id', $userId)
                 ->whereIn('id', $ids)
@@ -39,32 +38,34 @@ final readonly class TagDeleter
                 throw new ModelNotFoundException()->setModel(Tag::class, $ids);
             }
 
+            $tags = $locked->keyBy('id');
+
             if ($replacementId !== null) {
-                $this->moveLinks($userId, $tagId, $replacementId);
+                $this->moveLinks($userId, $tags[$tagId], $tags[$replacementId]);
             }
 
-            $locked->firstWhere('id', $tagId)?->delete();
+            $tags[$tagId]->delete();
         });
     }
 
     /**
      * @return int the number of tags deleted
-     *
-     * @throws Throwable
      */
     public function deleteAll(int $userId): int
     {
-        return DB::transaction(fn (): int => Tag::query()->where('user_id', $userId)->delete());
+        return Tag::query()->where('user_id', $userId)->delete();
     }
 
-    private function moveLinks(int $userId, int $tagId, int $replacementId): void
+    private function moveLinks(int $userId, Tag $from, Tag $to): void
     {
-        $links = DB::table('tag_transaction')
-            ->join('transactions', 'transactions.id', '=', 'tag_transaction.transaction_id')
-            ->where('tag_transaction.tag_id', $tagId)
-            ->where('transactions.user_id', $userId)
-            ->select('tag_transaction.transaction_id', DB::raw((string) $replacementId.' as tag_id'));
+        $existing = $to->transactions()->allRelatedIds();
 
-        DB::table('tag_transaction')->insertOrIgnoreUsing(['transaction_id', 'tag_id'], $links);
+        $from->transactions()
+            ->withTrashed()
+            ->where('transactions.user_id', $userId)
+            ->whereNotIn('transactions.id', $existing)
+            ->pluck('transactions.id')
+            ->chunk(500)
+            ->each(fn ($ids) => $to->transactions()->attach($ids->values()->all()));
     }
 }
