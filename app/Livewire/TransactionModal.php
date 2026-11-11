@@ -93,6 +93,9 @@ final class TransactionModal extends Component
 
     public ?int $categoryId = null;
 
+    #[Locked]
+    public bool $categoryPicked = false;
+
     public string $date = '';
 
     public string $notes = '';
@@ -303,6 +306,7 @@ final class TransactionModal extends Component
         }
 
         $this->categoryId = $transaction->category_id;
+        $this->categoryPicked = false;
         $this->date = $transaction->post_date->format('Y-m-d');
         $this->notes = $transaction->notes ?? '';
         $this->excluded = $transaction->excluded;
@@ -340,6 +344,7 @@ final class TransactionModal extends Component
         $this->descriptionInput = $description !== '' ? "{$dollars} {$description}" : $dollars;
 
         $this->categoryId = $transaction->category_id;
+        $this->categoryPicked = false;
         $this->date = CarbonImmutable::now()->format('Y-m-d');
         $this->fillCurrency($transaction);
 
@@ -380,6 +385,7 @@ final class TransactionModal extends Component
 
         $this->accountId = $planned->account_id;
         $this->categoryId = $planned->category_id;
+        $this->categoryPicked = false;
         $this->date = $occurrenceDate ?? $planned->start_date->format('Y-m-d');
         $this->frequency = $planned->frequency->value;
 
@@ -413,7 +419,6 @@ final class TransactionModal extends Component
         }
 
         $categoryBeforeCleanup = $this->categoryId;
-        $categoryBeforeSave = $this->editingOwnedTransaction()?->category_id;
 
         $this->dropInvestmentCategoryOnPlainTransfer();
 
@@ -437,7 +442,7 @@ final class TransactionModal extends Component
             return;
         }
 
-        if ($this->categoryId !== null && $this->categoryId !== $categoryBeforeSave) {
+        if ($this->categoryId !== null && $this->categoryPicked) {
             app(RecentCategoryPicks::class)->record($this->authenticatedUser(), $this->categoryId);
         }
 
@@ -856,6 +861,7 @@ final class TransactionModal extends Component
         }
 
         $this->categoryId = $category->id;
+        $this->categoryPicked = true;
 
         return ['id' => $category->id, 'label' => $category->fullPath()];
     }
@@ -1072,6 +1078,7 @@ final class TransactionModal extends Component
 
     public function updatedCategoryId(): void
     {
+        $this->categoryPicked = true;
         $this->refreshCategoriseContradictions();
     }
 
@@ -2613,6 +2620,7 @@ final class TransactionModal extends Component
         $this->descriptionInput = '';
         $this->accountId = null;
         $this->categoryId = null;
+        $this->categoryPicked = false;
         $this->date = '';
         $this->notes = '';
         $this->excluded = false;

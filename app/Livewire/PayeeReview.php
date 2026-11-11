@@ -73,6 +73,7 @@ final class PayeeReview extends Component
         }
 
         $this->categoryChoices[$payeeId] = $options->first()?->id;
+        $this->forgetHandPicked($payeeId);
     }
 
     /**

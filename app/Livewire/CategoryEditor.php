@@ -152,7 +152,7 @@ final class CategoryEditor extends Component
         }
 
         $parent = $this->editingParentId === null ? null : Category::query()->where('user_id', $userId)->find($this->editingParentId);
-        $color = $parent->color ?? ($this->editingColor === '' ? null : $this->editingColor);
+        $color = $parent !== null ? $parent->color : ($this->editingColor === '' ? null : $this->editingColor);
 
         DB::transaction(function () use ($category, $userId, $color): void {
             $category->update([
