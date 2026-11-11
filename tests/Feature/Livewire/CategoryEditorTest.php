@@ -836,3 +836,73 @@ it('switches the category lock on and off for the signed-in user only', function
 
     expect($user->fresh()->preferences->categoriesLocked)->toBeFalse();
 });
+
+function levelThreeTree(User $user): array
+{
+    $root = Category::factory()->for($user)->create(['name' => 'Home', 'color' => '#111111']);
+    $middle = Category::factory()->withParent($root)->create(['name' => 'Garden', 'color' => '#111111']);
+    $leaf = Category::factory()->withParent($middle)->create(['name' => 'Tools', 'color' => '#111111']);
+
+    return [$root, $middle, $leaf];
+}
+
+it('lets a category that already sits at level three be renamed, hidden, recoloured and deleted', function () {
+    $user = User::factory()->create();
+    [$root, , $leaf] = levelThreeTree($user);
+    $component = Livewire::actingAs($user)->test(CategoryEditor::class);
+
+    $component->call('selectCategory', $leaf->id)
+        ->set('editingName', 'Power tools')
+        ->set('editingIcon', 'wrench-screwdriver')
+        ->call('saveRename')
+        ->assertHasNoErrors()
+        ->call('toggleHidden', $leaf->id);
+
+    expect($leaf->fresh()->name)->toBe('Power tools')
+        ->and($leaf->fresh()->icon)->toBe('wrench-screwdriver')
+        ->and($leaf->fresh()->is_hidden)->toBeTrue();
+
+    $component->call('selectCategory', $root->id)
+        ->call('selectCategory', $root->id)
+        ->call('selectCategory', $root->id)
+        ->set('editingColor', '#abcdef')
+        ->call('saveRename')
+        ->assertHasNoErrors();
+
+    expect($leaf->fresh()->color)->toBe('#abcdef');
+
+    $component->call('confirmDelete', $leaf->id)->call('deleteCategory')->assertHasNoErrors();
+
+    expect(Category::query()->whereKey($leaf->id)->exists())->toBeFalse();
+});
+
+it('merges a level-three category into and out of other categories', function () {
+    $user = User::factory()->create();
+    [$root, $middle, $leaf] = levelThreeTree($user);
+    $other = Category::factory()->withParent($middle)->create(['name' => 'Hoses']);
+    $destination = Category::factory()->for($user)->create(['name' => 'Garage']);
+    $component = Livewire::actingAs($user)->test(CategoryEditor::class);
+
+    $component->set('mergeSourceIds', [$other->id])->set('mergeTargetId', $leaf->id)->call('mergeCategories')->assertHasNoErrors();
+    $component->set('mergeSourceIds', [$leaf->id])->set('mergeTargetId', $destination->id)->call('mergeCategories')->assertHasNoErrors();
+
+    expect(Category::query()->whereKey([$leaf->id, $other->id])->exists())->toBeFalse()
+        ->and(Category::query()->where('user_id', $user->id)->pluck('id')->sort()->values()->all())->toBe(collect([$root->id, $middle->id, $destination->id])->sort()->values()->all());
+});
+
+it('refuses only creating at level three and re-parenting to level three', function () {
+    $user = User::factory()->create();
+    [$root, $middle, $leaf] = levelThreeTree($user);
+    $loose = Category::factory()->for($user)->create(['name' => 'Loose']);
+    $component = Livewire::actingAs($user)->test(CategoryEditor::class);
+
+    $component->call('openCreateForm', $middle->id)->set('newCategoryName', 'New')->call('createCategory')->assertHasErrors('newParentId');
+    $component->call('selectCategory', $loose->id)->set('editingParentId', $middle->id)->call('saveRename')->assertHasErrors('editingParentId');
+
+    expect(Category::query()->where('name', 'New')->exists())->toBeFalse()
+        ->and($loose->fresh()->parent_id)->toBeNull();
+
+    $component->call('selectCategory', $loose->id)->call('selectCategory', $leaf->id)->set('editingParentId', $root->id)->call('saveRename')->assertHasNoErrors();
+
+    expect($leaf->fresh()->parent_id)->toBe($root->id);
+});

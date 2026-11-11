@@ -462,3 +462,13 @@ it('leaves a strict rule untouched when delete only affects a not-equals categor
     'alongside another trigger' => [[['field' => 'description', 'operator' => 'contains', 'value' => 'X']]],
     'as the only trigger' => [[]],
 ]);
+
+it('replaces a deleted category with its replacement in the recent picks', function () {
+    $doomed = mergerCategory($this->user, 'Doomed');
+    $replacement = mergerCategory($this->user, 'Replacement');
+    $this->user->updatePreferences(['recentCategoryIds' => [$doomed->id, $replacement->id]]);
+
+    $this->merger->deleteWithReplacement($this->user, $doomed->id, $replacement->id);
+
+    expect($this->user->fresh()->preferences->recentCategoryIds)->toBe([$replacement->id]);
+});
