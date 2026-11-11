@@ -141,7 +141,7 @@ final class MerchantMerger
                     ->orWhere(fn (Builder $unlinked): Builder => $unlinked
                         ->whereNull('merchant_id')
                         ->whereIn('merchant_key', $sourceKeys))),
-            ['merchant_id' => $target->id, 'merchant_key' => $target->merchant_key],
+            ['merchant_id' => $target->id],
         );
     }
 
