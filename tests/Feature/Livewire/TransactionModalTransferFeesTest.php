@@ -7,12 +7,14 @@
 declare(strict_types=1);
 
 use App\DTOs\NewTransfer;
+use App\Enums\AuditOutcome;
 use App\Enums\ImportSource;
 use App\Enums\TransactionDirection;
 use App\Enums\TransferLinkSource;
 use App\Livewire\TransactionModal;
 use App\Models\Account;
 use App\Models\AccountValuation;
+use App\Models\AuditEvent;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
@@ -117,6 +119,24 @@ it('books a destination fee on the destination account', function () {
         ->and($fees[1]->amount)->toBe(250)
         ->and($fees[1]->transfer_fee_for_id)->toBe($credit->id)
         ->and($fees[1]->category_id)->toBe($fees[0]->category_id);
+});
+
+it('records an audit event for a transfer with fees', function () {
+    $other = User::factory()->create();
+
+    feeTransferForm($this->user, $this->from, $this->to, '1000 savings', sourceFee: '10', destinationFee: '2.50')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $fees = Transaction::query()->where('user_id', $this->user->id)->whereNotNull('transfer_fee_for_id')->orderBy('id')->get();
+    $event = AuditEvent::query()->where('action', 'livewire.transaction-modal.save')->sole();
+
+    expect($fees)->toHaveCount(2)
+        ->and($fees->pluck('account_id')->all())->toBe([$this->from->id, $this->to->id])
+        ->and($fees->pluck('amount')->all())->toBe([1000, 250])
+        ->and($event->user_id)->toBe($this->user->id)
+        ->and($event->outcome)->toBe(AuditOutcome::Success)
+        ->and(AuditEvent::query()->where('user_id', $other->id)->exists())->toBeFalse();
 });
 
 it('writes no fee transaction for a blank or zero fee', function () {
