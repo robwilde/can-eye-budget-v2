@@ -250,3 +250,31 @@ it('does not ask about a merged transaction whose target payee is known', functi
     expect($suggester->hasCandidates($user))->toBeFalse()
         ->and($row->fresh()->merchant_id)->toBe($target->id);
 });
+
+it('moves soft-deleted transactions with the merge so a restore stays on the target', function () {
+    $user = User::factory()->create();
+    [$source, $target] = [merchantFor($user, 'Source Shop'), merchantFor($user, 'Target Shop')];
+    $trashed = Transaction::factory()->for($user)->create(['merchant_name' => 'Source Shop', 'merchant_id' => $source->id]);
+    $trashed->delete();
+
+    app(MerchantMerger::class)->merge($user, [$source], $target);
+
+    $trashed->restore();
+
+    expect($trashed->fresh()->merchant_id)->toBe($target->id)
+        ->and($trashed->fresh()->locked_fields)->toContain('merchant');
+});
+
+it('keeps a transaction unlinked from a merchant out of a later merge', function () {
+    $user = User::factory()->create();
+    [$source, $target] = [merchantFor($user, 'Source Shop'), merchantFor($user, 'Target Shop')];
+    $unlinked = Transaction::factory()->for($user)->create(['merchant_name' => 'Source Shop', 'merchant_id' => $source->id]);
+    $other = Transaction::factory()->for($user)->create(['merchant_name' => 'Source Shop', 'merchant_id' => $source->id]);
+    app(MerchantMerger::class)->unlink($user, $source);
+    Transaction::query()->whereKey($other->id)->update(['merchant_id' => $source->id]);
+
+    app(MerchantMerger::class)->merge($user, [$source], $target);
+
+    expect($unlinked->fresh()->merchant_id)->toBeNull()
+        ->and($other->fresh()->merchant_id)->toBe($target->id);
+});
