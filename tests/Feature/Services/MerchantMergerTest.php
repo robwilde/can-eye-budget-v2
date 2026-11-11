@@ -14,9 +14,11 @@ use App\Models\MerchantBrand;
 use App\Models\Payee;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Models\UserRule;
 use App\Services\Merchants\MerchantMerger;
 use App\Services\RedbarkClientFactory;
 use App\Services\RedbarkTransactionMatcher;
+use App\Services\RuleEvaluator;
 use App\Services\TransactionIngestor;
 use Illuminate\Support\Facades\Queue;
 
@@ -180,4 +182,25 @@ it('reuses the existing merchant with the same name', function () {
     expect(Merchant::findOrCreateNamed($user->id, 'woolworths')->id)->toBe($existing->id)
         ->and(Merchant::findOrCreateNamed(User::factory()->create()->id, 'Woolworths')->id)->not->toBe($existing->id)
         ->and(Merchant::query()->count())->toBe(2);
+});
+
+it('keeps rules on a source merchant matching after a merge', function () {
+    $user = User::factory()->create();
+    [$source, $target] = [merchantFor($user, 'Source Shop'), merchantFor($user, 'Target Shop')];
+    $linked = Transaction::factory()->for($user)->create(['merchant_name' => 'Source Shop', 'merchant_id' => $source->id]);
+    $unlinked = Transaction::factory()->for($user)->create(['merchant_name' => 'Source Shop']);
+    $rule = UserRule::factory()->for($user)->create([
+        'triggers' => [['field' => 'merchant_key', 'operator' => 'equals', 'value' => 'SOURCE SHOP']],
+    ]);
+    $evaluator = app(RuleEvaluator::class);
+
+    expect($evaluator->matches($linked->fresh(), $rule))->toBeTrue();
+
+    app(MerchantMerger::class)->merge($user, [$source], $target);
+
+    expect($linked->fresh()->merchant_id)->toBe($target->id)
+        ->and($unlinked->fresh()->merchant_id)->toBe($target->id)
+        ->and($linked->fresh()->merchant_key)->toBe('SOURCE SHOP')
+        ->and($evaluator->matches($linked->fresh(), $rule))->toBeTrue()
+        ->and($evaluator->matches($unlinked->fresh(), $rule))->toBeTrue();
 });
