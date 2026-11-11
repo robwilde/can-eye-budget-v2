@@ -14,11 +14,13 @@ use App\Enums\RuleActionType;
 use App\Enums\TransactionDirection;
 use App\Exceptions\TypeSafe\TypeSafeException;
 use App\Models\Category;
+use App\Models\Merchant;
 use App\Models\MerchantBrand;
 use App\Models\Payee;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserRule;
+use App\Services\Merchants\MerchantKeyResolver;
 use App\Services\RuleEvaluator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -64,6 +66,7 @@ final readonly class PayeeSuggester
     public function __construct(
         private TypeSafeServiceContract $typeSafe,
         private RuleEvaluator $evaluator,
+        private MerchantKeyResolver $keys,
     ) {}
 
     /**
@@ -159,10 +162,16 @@ final readonly class PayeeSuggester
      */
     private function candidates(User $user): Builder
     {
-        return $this->uncategorisedRows($user)->whereNotIn(
-            'merchant_key',
-            Payee::query()->where('user_id', $user->id)->select('merchant_key'),
-        );
+        $knownKeys = Payee::query()->where('user_id', $user->id)->select('merchant_key');
+
+        return $this->uncategorisedRows($user)
+            ->whereNotIn('merchant_key', $knownKeys)
+            ->where(fn (Builder $query): Builder => $query
+                ->whereNull('merchant_id')
+                ->orWhereNotIn('merchant_id', Merchant::query()
+                    ->select('id')
+                    ->where('user_id', $user->id)
+                    ->whereIn('merchant_key', Payee::query()->where('user_id', $user->id)->select('merchant_key'))));
     }
 
     /**
@@ -177,7 +186,12 @@ final readonly class PayeeSuggester
             return null;
         }
 
-        $merchantKey = (string) $row->merchant_key;
+        $merchantKey = $this->keys->keyFor($user->id, $row);
+
+        if (Payee::query()->where('user_id', $user->id)->where('merchant_key', $merchantKey)->exists()) {
+            return null;
+        }
+
         $merchantName = (string) $row->merchant_name;
 
         $state = ['merchant_name' => JevEvalCommand::maskDigits($merchantName)];
@@ -314,7 +328,7 @@ final readonly class PayeeSuggester
         $applied = 0;
 
         $this->uncategorisedRows($user)
-            ->where('merchant_key', $merchantKey)
+            ->forMerchantKey($user->id, $merchantKey)
             ->orderBy('id')
             ->lockForUpdate()
             ->get()

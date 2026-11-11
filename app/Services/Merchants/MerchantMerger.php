@@ -6,14 +6,12 @@ namespace App\Services\Merchants;
 
 use App\Enums\MerchantBrandStatus;
 use App\Enums\PayeeStatus;
-use App\Enums\RuleTriggerField;
 use App\Models\Merchant;
 use App\Models\MerchantAlias;
 use App\Models\MerchantBrand;
 use App\Models\Payee;
 use App\Models\Transaction;
 use App\Models\User;
-use App\Models\UserRule;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
@@ -48,7 +46,6 @@ final class MerchantMerger
 
             $this->moveAliases($user, $sourceMerchants, $sourceKeys, $target);
             $this->moveTransactions($user, $sourceMerchants->modelKeys(), $sourceKeys->all(), $target);
-            $this->moveRules($user, $sourceKeys->all(), $target);
             $this->movePayees($user, $sourceKeys->all(), $target);
             $this->moveBrands($user, $sourceKeys->all(), $target);
 
@@ -145,60 +142,21 @@ final class MerchantMerger
                         ->whereNull('merchant_id')
                         ->whereIn('merchant_key', $sourceKeys))),
             ['merchant_id' => $target->id],
-            rekey: true,
         );
-    }
-
-    /**
-     * Rule triggers that name a source merchant_key follow the merge, because the rows they
-     * matched now resolve to the target's key.
-     *
-     * @param  list<string>  $sourceKeys
-     */
-    private function moveRules(User $user, array $sourceKeys, Merchant $target): void
-    {
-        UserRule::query()
-            ->where('user_id', $user->id)
-            ->orderBy('id')
-            ->lockForUpdate()
-            ->get()
-            ->each(function (UserRule $rule) use ($sourceKeys, $target): void {
-                $changed = false;
-
-                $triggers = array_map(function (array $trigger) use ($sourceKeys, $target, &$changed): array {
-                    if (($trigger['field'] ?? null) === RuleTriggerField::MerchantKey->value && in_array($trigger['value'] ?? null, $sourceKeys, true)) {
-                        $trigger['value'] = $target->merchant_key;
-                        $changed = true;
-                    }
-
-                    return $trigger;
-                }, $rule->triggers);
-
-                if ($changed) {
-                    $rule->update(['triggers' => $triggers]);
-                }
-            });
     }
 
     /**
      * @param  Builder<Transaction>  $query
      * @param  array<string, mixed>  $values
-     * @param  bool  $rekey  recompute each row's merchant_key, which now resolves through the aliases
      */
-    private function rewrite(Builder $query, array $values, bool $rekey = false): void
+    private function rewrite(Builder $query, array $values): void
     {
-        $query->chunkById(200, function ($transactions) use ($values, $rekey): void {
+        $query->chunkById(200, function ($transactions) use ($values): void {
             foreach ($transactions as $transaction) {
                 $transaction->forceFill([
                     ...$values,
                     'locked_fields' => array_values(array_unique([...($transaction->locked_fields ?? []), self::LOCK])),
-                ]);
-
-                if ($rekey) {
-                    $transaction->merchant_key = $transaction->resolveMerchantKey();
-                }
-
-                $transaction->saveQuietly();
+                ])->saveQuietly();
             }
         });
     }
