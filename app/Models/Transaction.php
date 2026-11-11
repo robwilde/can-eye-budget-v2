@@ -49,6 +49,7 @@ use Illuminate\Support\Facades\DB;
  * @property string|null $csv_hash
  * @property string|null $merchant_name
  * @property string|null $merchant_key
+ * @property int|null $merchant_id
  * @property string|null $anzsic_code
  * @property array<string, mixed>|null $enrich_data
  * @property TransactionSource $source
@@ -150,6 +151,7 @@ final class Transaction extends Model
         'csv_hash',
         'merchant_name',
         'merchant_key',
+        'merchant_id',
         'anzsic_code',
         'enrich_data',
         'source',
@@ -250,6 +252,12 @@ final class Transaction extends Model
     public function account(): BelongsTo
     {
         return $this->belongsTo(Account::class);
+    }
+
+    /** @return BelongsTo<Merchant, $this> */
+    public function merchant(): BelongsTo
+    {
+        return $this->belongsTo(Merchant::class);
     }
 
     /** @return BelongsTo<Category, $this> */
@@ -647,6 +655,9 @@ final class Transaction extends Model
      * Returns UNKNOWN_MERCHANT_KEY rather than an empty string when all three
      * are blank, so descriptionless rows stay in one explicit bucket instead of
      * silently colliding under ''.
+     *
+     * The key is never rewritten for an alias: aliasTarget() resolves it to the
+     * Merchant, and saving a row sets merchant_id from that.
      */
     public function resolveMerchantKey(): string
     {
@@ -663,6 +674,27 @@ final class Transaction extends Model
         }
 
         return self::UNKNOWN_MERCHANT_KEY;
+    }
+
+    /**
+     * The merchant a user-defined alias maps this row's stored key onto, if any. The key
+     * itself is never rewritten: only merchant_id follows the alias.
+     */
+    public function aliasTarget(?string $key = null): ?Merchant
+    {
+        $key ??= $this->resolveMerchantKey();
+
+        if ($key === self::UNKNOWN_MERCHANT_KEY || $this->getAttribute('user_id') === null) {
+            return null;
+        }
+
+        return Merchant::query()
+            ->where('user_id', $this->user_id)
+            ->whereIn('id', MerchantAlias::query()
+                ->select('merchant_id')
+                ->where('user_id', $this->user_id)
+                ->where('merchant_key', $key))
+            ->first();
     }
 
     public function identityCleanDescription(): ?string
@@ -724,7 +756,18 @@ final class Transaction extends Model
                 return;
             }
 
+            $previousKey = $transaction->exists ? $transaction->getOriginal('merchant_key') : $transaction->merchant_key;
             $transaction->merchant_key = $transaction->resolveMerchantKey();
+
+            if (in_array('merchant', $transaction->locked_fields ?? [], true)) {
+                return;
+            }
+
+            $previous = is_string($previousKey) ? $transaction->aliasTarget($previousKey) : null;
+
+            if ($transaction->merchant_id === null || $previous?->id === $transaction->merchant_id) {
+                $transaction->merchant_id = ($previousKey === $transaction->merchant_key ? $previous : $transaction->aliasTarget($transaction->merchant_key))?->id;
+            }
         });
 
         // Keep the provenance invariant: category_source is set exactly when
