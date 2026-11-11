@@ -11,6 +11,7 @@ use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\RecentCategoryPicks;
 use Carbon\CarbonImmutable;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
@@ -18,6 +19,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
 final class PlannedTransactionManager extends Component
@@ -34,6 +36,9 @@ final class PlannedTransactionManager extends Component
 
     public int|string|null $categoryId = null;
 
+    #[Locked]
+    public bool $categoryPicked = false;
+
     public string $direction = '';
 
     public bool $isActive = true;
@@ -45,6 +50,11 @@ final class PlannedTransactionManager extends Component
     public ?int $deletingId = null;
 
     public string $deletingDescription = '';
+
+    public function updatedCategoryId(): void
+    {
+        $this->categoryPicked = true;
+    }
 
     public function mount(): void
     {
@@ -71,6 +81,7 @@ final class PlannedTransactionManager extends Component
         $this->amount = (string) ($plan->amount / 100);
         $this->frequency = $plan->frequency->value;
         $this->categoryId = $plan->category_id;
+        $this->categoryPicked = false;
         $this->direction = $plan->direction->value;
         $this->isActive = $plan->is_active;
         $this->untilDate = $plan->until_date?->format('Y-m-d');
@@ -91,16 +102,22 @@ final class PlannedTransactionManager extends Component
             return;
         }
 
-        DB::transaction(function () use ($plan): void {
+        $categoryId = $this->resolvedCategoryId();
+
+        DB::transaction(function () use ($plan, $categoryId): void {
             $plan->update([
                 'amount' => (int) round((float) $this->amount * 100),
                 'frequency' => $this->frequency,
-                'category_id' => $this->resolvedCategoryId(),
+                'category_id' => $categoryId,
                 'direction' => $this->direction,
                 'until_date' => $this->untilDate !== null && $this->untilDate !== '' ? $this->untilDate : null,
                 'is_active' => $this->isActive,
             ]);
         });
+
+        if ($this->categoryPicked && $categoryId !== null) {
+            app(RecentCategoryPicks::class)->record($this->authenticatedUser(), $categoryId);
+        }
 
         Flux::toast(text: 'Planned transaction updated', variant: 'success');
 
@@ -301,6 +318,7 @@ final class PlannedTransactionManager extends Component
         $this->amount = '';
         $this->frequency = '';
         $this->categoryId = null;
+        $this->categoryPicked = false;
         $this->direction = '';
         $this->isActive = true;
         $this->untilDate = null;

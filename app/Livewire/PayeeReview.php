@@ -7,6 +7,7 @@ namespace App\Livewire;
 use App\DTOs\PayeeReviewItem;
 use App\Enums\BudgetTag;
 use App\Enums\PayeeStatus;
+use App\Livewire\Concerns\RecordsHandPickedCategories;
 use App\Models\Category;
 use App\Models\Payee;
 use App\Models\User;
@@ -26,6 +27,8 @@ use Throwable;
  */
 final class PayeeReview extends Component
 {
+    use RecordsHandPickedCategories;
+
     public const array WORK_ROOTS = ['Software & Online Services', 'Work Equipment'];
 
     public const array PERSONAL_ROOTS = ['Personal & Shopping', 'Entertainment', 'Learning & Reading'];
@@ -46,6 +49,11 @@ final class PayeeReview extends Component
         foreach ($queue->pending($this->authenticatedUser()) as $item) {
             $this->categoryChoices[$item->payeeId] = $item->suggestedCategoryId;
         }
+    }
+
+    public function updatedCategoryChoices(mixed $value, string $key): void
+    {
+        $this->markHandPicked($key);
     }
 
     public function updatedIntents(mixed $value, string $key): void
@@ -89,6 +97,7 @@ final class PayeeReview extends Component
         }
 
         $confirmer->confirm($user, $payee, $categoryId, BudgetTag::tryFrom((string) ($this->tagChoices[$payeeId] ?? '')));
+        $this->recordHandPicked($user, $payeeId, $categoryId);
 
         $this->forget($payeeId);
 
@@ -181,6 +190,7 @@ final class PayeeReview extends Component
     private function forget(int $payeeId): void
     {
         unset($this->categoryChoices[$payeeId], $this->tagChoices[$payeeId], $this->intents[$payeeId]);
+        $this->forgetHandPicked($payeeId);
     }
 
     /**

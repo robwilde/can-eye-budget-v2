@@ -7,6 +7,7 @@ namespace App\Livewire;
 use App\Casts\MoneyCast;
 use App\Enums\BnplOrderEventType;
 use App\Enums\BnplOrderStatus;
+use App\Livewire\Concerns\RecordsHandPickedCategories;
 use App\Models\BnplOrder;
 use App\Models\Category;
 use Illuminate\Contracts\View\View;
@@ -17,8 +18,15 @@ use Livewire\Component;
 
 final class BnplOrderReview extends Component
 {
+    use RecordsHandPickedCategories;
+
     /** @var array<int, int|string|null> */
     public array $categories = [];
+
+    public function updatedCategories(mixed $value, string $key): void
+    {
+        $this->markHandPicked($key);
+    }
 
     /** @return Collection<array-key, Collection<int, BnplOrder>> */
     #[Computed]
@@ -77,6 +85,8 @@ final class BnplOrderReview extends Component
             $order->recordEvent(BnplOrderEventType::Approved, [], (string) Auth::id());
         });
 
+        $this->recordHandPicked($order->user, $orderId, $categoryId);
+
         $this->refreshLists();
     }
 
@@ -113,6 +123,8 @@ final class BnplOrderReview extends Component
             $order->plannedTransaction?->update(['category_id' => $categoryId]);
             $order->recordEvent(BnplOrderEventType::CategorySet, ['category_id' => $categoryId], (string) Auth::id());
         });
+
+        $this->recordHandPicked($order->user, $orderId, $categoryId);
 
         $this->refreshLists();
     }
