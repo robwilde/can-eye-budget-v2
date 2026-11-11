@@ -4,11 +4,13 @@
 
 declare(strict_types=1);
 
+use App\Enums\MerchantBrandStatus;
 use App\Jobs\ResolveMerchantBrandJob;
 use App\Livewire\MerchantManager;
 use App\Models\AuditEvent;
 use App\Models\Merchant;
 use App\Models\MerchantAlias;
+use App\Models\MerchantBrand;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Merchants\MerchantMerger;
@@ -134,4 +136,34 @@ it('queues a brand lookup for a saved merchant only when enrichment is on', func
     config()->set('services.context_dev.enrichment_enabled', true);
     Livewire::actingAs($this->user)->test(MerchantManager::class)->set('name', 'On Cafe')->call('save');
     Queue::assertPushed(ResolveMerchantBrandJob::class, fn (ResolveMerchantBrandJob $job): bool => $job->merchantKey === 'ON CAFE');
+});
+
+it('counts and lists merchants by current transaction versions only', function () {
+    $merchant = Merchant::factory()->for($this->user)->create(['name' => 'Corner Cafe', 'unlinked_at' => now()]);
+    $row = Transaction::factory()->for($this->user)->create(['merchant_id' => $merchant->id]);
+    $row->createChild(['merchant_id' => null]);
+
+    $html = Livewire::actingAs($this->user)->test(MerchantManager::class)->html();
+
+    expect($html)->toContain('data-testid="recently-unlinked-row"')
+        ->and($html)->toContain('0 transactions');
+
+    $row->fresh()->children()->sole()->createChild(['merchant_id' => $merchant->id]);
+
+    $html = Livewire::actingAs($this->user)->test(MerchantManager::class)->html();
+
+    expect($html)->not->toContain('data-testid="recently-unlinked-row"')
+        ->and($html)->toContain('1 transaction');
+});
+
+it('shows only resolved brand logos on the merchants page', function () {
+    $merchant = Merchant::factory()->for($this->user)->create(['name' => 'Corner Cafe', 'merchant_key' => 'CORNER CAFE']);
+    MerchantBrand::factory()->for($this->user)->vetoed()->create(['merchant_key' => 'CORNER CAFE', 'logo_url' => 'https://media.brand.dev/vetoed.png']);
+
+    Livewire::actingAs($this->user)->test(MerchantManager::class)->assertDontSeeHtml('https://media.brand.dev/vetoed.png');
+
+    MerchantBrand::query()->where('user_id', $this->user->id)->update(['status' => MerchantBrandStatus::Resolved]);
+
+    Livewire::actingAs($this->user)->test(MerchantManager::class)->assertSeeHtml('https://media.brand.dev/vetoed.png');
+    expect($merchant->exists)->toBeTrue();
 });

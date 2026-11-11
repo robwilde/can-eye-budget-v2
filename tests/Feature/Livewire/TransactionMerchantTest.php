@@ -9,6 +9,7 @@ use App\Livewire\TransactionList;
 use App\Livewire\TransactionModal;
 use App\Models\Account;
 use App\Models\Merchant;
+use App\Models\MerchantAlias;
 use App\Models\MerchantBrand;
 use App\Models\Transaction;
 use App\Models\User;
@@ -149,4 +150,60 @@ it('shows the target merchant brand on a merged transaction', function () {
         ->test(TransactionList::class)
         ->assertSeeHtml('https://media.brand.dev/target.png')
         ->assertSee('Target Brand');
+});
+
+it('keeps the merchant picked on a new transaction even when its description is aliased', function () {
+    $picked = Merchant::factory()->for($this->user)->create(['name' => 'Picked Shop', 'merchant_key' => 'PICKED SHOP']);
+    $aliased = Merchant::factory()->for($this->user)->create(['name' => 'Woolworths', 'merchant_key' => 'WOOLWORTHS']);
+    MerchantAlias::factory()->create(['user_id' => $this->user->id, 'merchant_id' => $aliased->id, 'merchant_key' => 'WOOLIES']);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionModal::class)
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '12.50 Woolies')
+        ->set('accountId', $this->account->id)
+        ->set('date', '2026-06-10')
+        ->set('merchantId', $picked->id)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $row = Transaction::query()->where('description', 'Woolies')->sole();
+
+    expect($row->merchant_id)->toBe($picked->id)
+        ->and($row->locked_fields)->toBe(['merchant']);
+});
+
+it('keeps the merchant when a transfer is converted to an expense', function () {
+    $merchant = Merchant::factory()->for($this->user)->create();
+    $toAccount = Account::factory()->for($this->user)->create();
+    $debit = merchantRow($this->user, $this->account, 'transfer out', ['amount' => 5000]);
+    $credit = merchantRow($this->user, $toAccount, 'transfer out', ['amount' => 5000, 'direction' => TransactionDirection::Credit, 'transfer_pair_id' => $debit->id]);
+    $debit->update(['transfer_pair_id' => $credit->id]);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $debit->id)
+        ->set('transactionType', 'expense')
+        ->set('descriptionInput', '50.00 now an expense')
+        ->set('merchantId', $merchant->id)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $child = Transaction::query()->where('parent_transaction_id', $debit->id)->sole();
+
+    expect($child->merchant_id)->toBe($merchant->id)
+        ->and($child->locked_fields)->toContain('merchant');
+});
+
+it('picks the existing merchant instead of creating one when a picker name collides with its key', function () {
+    $existing = Merchant::factory()->for($this->user)->create(['name' => 'Shop 1', 'merchant_key' => 'SHOP']);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionModal::class)
+        ->set('newMerchantName', 'Shop 2')
+        ->call('createMerchant')
+        ->assertHasNoErrors()
+        ->assertSet('merchantId', $existing->id);
+
+    expect(Merchant::query()->where('user_id', $this->user->id)->count())->toBe(1);
 });
