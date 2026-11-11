@@ -27,6 +27,7 @@ use Illuminate\Validation\Rule;
  * @property string $merchant_key
  * @property string $colour
  * @property string|null $website
+ * @property CarbonImmutable|null $unlinked_at
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
  */
@@ -50,7 +51,25 @@ final class Merchant extends Model
         'merchant_key',
         'colour',
         'website',
+        'unlinked_at',
     ];
+
+    /**
+     * The merchant of this name for the user, created when none exists. Detection and import
+     * reuse an existing merchant when the name matches ignoring case, when an alias left by
+     * a merge points at one for the name's key, or when another merchant already owns that key.
+     */
+    public static function findOrCreateNamed(int $userId, string $name): self
+    {
+        $name = mb_trim($name);
+        $key = MerchantSignature::for($name);
+        $owned = static fn (): Builder => self::query()->where('user_id', $userId);
+
+        return $owned()->whereRaw('LOWER(name) = ?', [mb_strtolower($name)])->first()
+            ?? $owned()->whereIn('id', MerchantAlias::query()->select('merchant_id')->where('user_id', $userId)->where('merchant_key', $key))->first()
+            ?? $owned()->where('merchant_key', $key)->first()
+            ?? self::query()->create(['user_id' => $userId, 'name' => $name]);
+    }
 
     /** @return BelongsTo<User, $this> */
     public function user(): BelongsTo
@@ -105,5 +124,13 @@ final class Merchant extends Model
                 }],
             ])->validate();
         });
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return ['unlinked_at' => 'datetime'];
     }
 }
