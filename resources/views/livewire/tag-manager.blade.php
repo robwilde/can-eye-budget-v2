@@ -53,7 +53,8 @@
                     @foreach ($palette as $swatch)
                         <button type="button" wire:click="$set('colour', '{{ $swatch }}')"
                                 class="size-7 rounded-full border-2 {{ strtoupper($colour) === $swatch ? 'border-cib-black ring-2 ring-offset-1' : 'border-transparent' }}"
-                                style="background-color: {{ $swatch }}" aria-label="{{ $swatch }}"></button>
+                                style="background-color: {{ $swatch }}" aria-label="{{ $swatch }}"
+                                aria-pressed="{{ strtoupper($colour) === $swatch ? 'true' : 'false' }}"></button>
                     @endforeach
                 </div>
                 <flux:error name="colour"/>
