@@ -38,6 +38,7 @@ use App\Services\MerchantBrands\BrandNameWriter;
 use App\Services\MerchantBrands\ContextDevCreditBalance;
 use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\MerchantBrands\DescriptorGate;
+use App\Services\Merchants\MerchantKeyResolver;
 use App\Services\Merchants\MerchantMerger;
 use App\Services\Payees\PayeeConfirmer;
 use App\Services\Payees\PayeeReviewQueue;
@@ -2036,7 +2037,7 @@ final class TransactionList extends Component
      * For the rows on screen: the resolved brand per transaction id, and the ids
      * of rows that may offer "Identify merchant" (enrichment on, a lookup still
      * affordable today, gate passes, no resolved, vetoed or still-fresh sidecar
-     * row). Keys are derived with merchantKeyFor() for display and veto; identify
+     * row). Keys are resolved with MerchantKeyResolver (the linked merchant's key, else the row's own) for display and veto; identify
      * is offered only when the column is persisted, because the job selects rows
      * by it. Also the distinct merchant keys of those identifiable rows, in
      * first-seen order. One query per render, not per row.
@@ -2046,7 +2047,7 @@ final class TransactionList extends Component
      */
     private function merchantBrandState(Collection $rows): array
     {
-        $keyById = $rows->mapWithKeys(fn (Transaction $row): array => [$row->id => $this->merchantKeyFor($row)]);
+        $keyById = collect(app(MerchantKeyResolver::class)->keysFor((int) auth()->id(), $rows));
 
         if ($keyById->isEmpty()) {
             return [[], [], []];
@@ -2092,7 +2093,7 @@ final class TransactionList extends Component
 
     private function merchantKeyFor(Transaction $transaction): string
     {
-        return $transaction->merchant_key ?? $transaction->resolveMerchantKey();
+        return app(MerchantKeyResolver::class)->keyFor((int) auth()->id(), $transaction);
     }
 
     /**
