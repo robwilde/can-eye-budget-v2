@@ -9,8 +9,10 @@ use App\Livewire\TransactionList;
 use App\Livewire\TransactionModal;
 use App\Models\Account;
 use App\Models\Merchant;
+use App\Models\MerchantBrand;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Merchants\MerchantMerger;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
@@ -133,4 +135,18 @@ it('adds a merchant to a new manual transaction', function () {
         ->assertHasNoErrors();
 
     expect(Transaction::query()->where('description', 'coffee')->value('merchant_id'))->toBe($merchant->id);
+});
+
+it('shows the target merchant brand on a merged transaction', function () {
+    $source = Merchant::factory()->for($this->user)->create(['name' => 'Source Shop', 'merchant_key' => 'SOURCE SHOP']);
+    $target = Merchant::factory()->for($this->user)->create(['name' => 'Target Shop', 'merchant_key' => 'TARGET SHOP']);
+    merchantRow($this->user, $this->account, 'MERGED ROW', ['merchant_name' => 'Source Shop', 'merchant_id' => $source->id]);
+    MerchantBrand::factory()->for($this->user)->create(['merchant_key' => 'TARGET SHOP', 'title' => 'Target Brand', 'logo_url' => 'https://media.brand.dev/target.png']);
+
+    app(MerchantMerger::class)->merge($this->user, [$source], $target);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->assertSeeHtml('https://media.brand.dev/target.png')
+        ->assertSee('Target Brand');
 });
