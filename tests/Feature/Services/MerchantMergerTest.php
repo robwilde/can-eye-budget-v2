@@ -2,12 +2,14 @@
 
 declare(strict_types=1);
 
+use App\Enums\BudgetTag;
 use App\Enums\MerchantBrandStatus;
 use App\Enums\PayeeStatus;
 use App\Enums\RefreshTrigger;
 use App\Enums\TransactionDirection;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Jobs\SyncRedbarkFeedJob;
+use App\Models\Account;
 use App\Models\Category;
 use App\Models\Merchant;
 use App\Models\MerchantAlias;
@@ -24,7 +26,10 @@ use App\Services\RedbarkClientFactory;
 use App\Services\RedbarkTransactionMatcher;
 use App\Services\RuleEvaluator;
 use App\Services\TransactionIngestor;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Sleep;
 
 function merchantFor(User $user, string $name, ?string $key = null): Merchant
 {
@@ -114,6 +119,9 @@ it('never touches another users merchants or transactions', function () {
     $foreign = merchantFor($other, 'Shop');
     $foreignRow = Transaction::factory()->for($other)->create(['merchant_id' => $foreign->id]);
     $foreignRow->forceFill(['merchant_key' => 'SHOP'])->saveQuietly();
+    $foreignKeyOnly = Transaction::factory()->for($other)->create(['merchant_id' => null]);
+    $foreignKeyOnly->forceFill(['merchant_key' => 'SHOP'])->saveQuietly();
+    $foreignBrand = MerchantBrand::factory()->for($other)->create(['merchant_key' => 'SHOP']);
     $foreignPayee = Payee::factory()->for($other)->create(['merchant_key' => 'SHOP']);
     $ownRow = Transaction::factory()->for($user)->create(['merchant_id' => $source->id]);
     $ownRow->forceFill(['merchant_key' => 'SHOP'])->saveQuietly();
@@ -126,6 +134,9 @@ it('never touches another users merchants or transactions', function () {
     expect($foreignRow->fresh()->merchant_id)->toBe($foreign->id)
         ->and($foreignRow->fresh()->merchant_key)->toBe('SHOP')
         ->and($foreignRow->fresh()->locked_fields)->toBeNull()
+        ->and($foreignKeyOnly->fresh()->merchant_id)->toBeNull()
+        ->and($foreignKeyOnly->fresh()->locked_fields)->toBeNull()
+        ->and($foreignBrand->fresh()->merchant_key)->toBe('SHOP')
         ->and($foreignPayee->fresh()->merchant_key)->toBe('SHOP')
         ->and($foreignGone->fresh()->merchant_id)->toBe($foreign->id)
         ->and(Merchant::query()->whereKey($foreign->id)->exists())->toBeTrue()
@@ -241,6 +252,7 @@ it('does not ask about a merged transaction whose target payee is known', functi
     $row = Transaction::factory()->for($user)->create(['merchant_name' => 'Source Shop', 'merchant_id' => $source->id, 'category_id' => null, 'direction' => TransactionDirection::Debit, 'transfer_pair_id' => null]);
     Category::factory()->for($user)->create(['is_hidden' => false]);
     Payee::factory()->for($user)->create(['merchant_key' => 'TARGET SHOP', 'merchant_name' => 'Target Shop']);
+    config(['services.typesafe.api_key' => 'ts_test']);
     $suggester = app(PayeeSuggester::class);
 
     expect($suggester->hasCandidates($user))->toBeTrue();
@@ -277,4 +289,90 @@ it('keeps a transaction unlinked from a merchant out of a later merge', function
 
     expect($unlinked->fresh()->merchant_id)->toBeNull()
         ->and($other->fresh()->merchant_id)->toBe($target->id);
+});
+
+it('reuses a merchant whose key matches or that a merge folded away', function () {
+    $user = User::factory()->create();
+    $existing = merchantFor($user, 'Woolworths', 'WOOLWORTHS');
+    $source = merchantFor($user, 'Coles', 'COLES');
+    $target = merchantFor($user, 'Big Grocer');
+    app(MerchantMerger::class)->merge($user, [$source], $target);
+
+    expect(Merchant::findOrCreateNamed($user->id, 'Woolworths 1234')->id)->toBe($existing->id)
+        ->and(Merchant::findOrCreateNamed($user->id, 'Coles')->id)->toBe($target->id)
+        ->and(Merchant::query()->where('user_id', $user->id)->count())->toBe(2);
+});
+
+it('suggests a single payee under the target key after a merge', function () {
+    config(['services.typesafe.api_key' => 'ts_test']);
+    Sleep::fake();
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    Category::factory()->for($user)->create(['name' => 'Groceries', 'parent_id' => null, 'budget_tag' => BudgetTag::Needs]);
+    [$source, $target] = [merchantFor($user, 'Source Shop'), merchantFor($user, 'Target Shop')];
+    $merged = Transaction::factory()->for($user)->for($account)->debit()->create(['merchant_name' => 'Source Shop', 'merchant_id' => $source->id, 'category_id' => null, 'category_source' => null]);
+    Transaction::factory()->for($user)->for($account)->debit()->create(['merchant_name' => 'Target Shop', 'merchant_id' => $target->id, 'category_id' => null, 'category_source' => null]);
+    app(MerchantMerger::class)->merge($user, [$source], $target);
+    Http::fake(function (Request $request) {
+        $choice = array_key_first($request['questions']['answer']['criteria']);
+
+        return Http::response([
+            'model' => 'jev-1.13.0',
+            'answers' => ['answer' => ['type' => 'choice', 'choice' => $choice, 'probabilities' => [$choice => 0.5], 'confidence' => 0.5]],
+            'usage' => ['input_tokens' => 1, 'output_tokens' => 1],
+        ]);
+    });
+
+    app(PayeeSuggester::class)->suggestForUser($user);
+
+    expect($merged->fresh()->merchant_key)->toBe('SOURCE SHOP')
+        ->and(Payee::query()->where('user_id', $user->id)->pluck('merchant_key')->all())->toBe(['TARGET SHOP']);
+});
+
+it('keeps a confirmed source payee working for the target key after a merge', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
+    [$source, $target] = [merchantFor($user, 'Source Shop'), merchantFor($user, 'Target Shop')];
+    $merged = Transaction::factory()->for($user)->for($account)->debit()->create(['merchant_name' => 'Source Shop', 'merchant_id' => $source->id, 'category_id' => null, 'category_source' => null]);
+    $own = Transaction::factory()->for($user)->for($account)->debit()->create(['merchant_name' => 'Target Shop', 'merchant_id' => $target->id, 'category_id' => null, 'category_source' => null]);
+    $payee = Payee::factory()->for($user)->create(['merchant_key' => 'SOURCE SHOP', 'merchant_name' => 'Source Shop', 'status' => PayeeStatus::Pending]);
+    app(PayeeConfirmer::class)->confirm($user, $payee, $category->id);
+    $oldRuleId = $payee->fresh()->user_rule_id;
+    $own->update(['category_id' => null, 'category_source' => null]);
+    $merged->update(['category_id' => null, 'category_source' => null]);
+
+    app(MerchantMerger::class)->merge($user, [$source], $target);
+
+    $winner = Payee::query()->where('user_id', $user->id)->sole();
+    $rule = UserRule::query()->findOrFail($winner->user_rule_id);
+
+    expect($winner->merchant_key)->toBe('TARGET SHOP')
+        ->and($winner->user_rule_id)->not->toBe($oldRuleId)
+        ->and($rule->triggers[0]['value'])->toBe('TARGET SHOP')
+        ->and($own->fresh()->category_id)->toBe($category->id)
+        ->and($merged->fresh()->category_id)->toBe($category->id);
+});
+
+it('sends a rekeyed payee back to review when its confirmed category is no longer available', function () {
+    $user = User::factory()->create();
+    $hidden = Category::factory()->for($user)->create(['is_hidden' => true]);
+    [$source, $target] = [merchantFor($user, 'Source Shop'), merchantFor($user, 'Target Shop')];
+    $rule = UserRule::factory()->for($user)->create();
+    Payee::factory()->for($user)->create([
+        'merchant_key' => 'SOURCE SHOP',
+        'status' => PayeeStatus::Confirmed,
+        'confirmed_category_id' => $hidden->id,
+        'user_rule_id' => $rule->id,
+    ]);
+
+    app(MerchantMerger::class)->merge($user, [$source], $target);
+
+    $payee = Payee::query()->where('user_id', $user->id)->sole();
+
+    expect($payee->merchant_key)->toBe('TARGET SHOP')
+        ->and($payee->status)->toBe(PayeeStatus::Pending)
+        ->and($payee->confirmed_category_id)->toBeNull()
+        ->and($payee->user_rule_id)->toBeNull()
+        ->and(Merchant::query()->whereKey($source->id)->exists())->toBeFalse();
 });
