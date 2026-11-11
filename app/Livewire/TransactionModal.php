@@ -424,7 +424,14 @@ final class TransactionModal extends Component
     {
         $validated = $this->validate(['newMerchantName' => ['required', 'string', 'max:100']]);
 
-        $this->merchantId = Merchant::findOrCreateNamed((int) auth()->id(), $validated['newMerchantName'])->id;
+        try {
+            $this->merchantId = Merchant::findOrCreateNamed((int) auth()->id(), $validated['newMerchantName'])->id;
+        } catch (ValidationException $e) {
+            $this->addError('newMerchantName', $e->errors()['name'][0] ?? __('That merchant could not be created.'));
+
+            return;
+        }
+
         $this->newMerchantName = '';
     }
 
@@ -1473,6 +1480,7 @@ final class TransactionModal extends Component
     private function bankFeedFieldsChanged(Transaction $row): bool
     {
         return $row->category_id !== $this->categoryId
+            || $row->merchant_id !== $this->merchantId
             || ($row->notes ?? '') !== $this->notes
             || $this->cleanDescription !== $this->openedCleanDescription;
     }
@@ -2055,6 +2063,8 @@ final class TransactionModal extends Component
                 'amount' => $parsed->amount,
                 'post_date' => $this->date,
                 'category_id' => $this->categoryId,
+                'merchant_id' => $this->merchantId,
+                'locked_fields' => $debitSide->lockedFieldsAfter(['merchant_id' => $this->merchantId]) ?: null,
                 'notes' => $this->notes !== '' ? $this->notes : null,
                 'transfer_pair_id' => null,
                 'kind' => TransactionKind::Standard,
@@ -2369,6 +2379,7 @@ final class TransactionModal extends Component
             'account_id' => $this->accountId,
             'category_id' => $this->categoryId,
             'merchant_id' => $this->merchantId,
+            'locked_fields' => $this->merchantId === null ? null : ['merchant'],
             'amount' => $parsed->amount,
             'direction' => $this->transactionType === 'expense'
                 ? TransactionDirection::Debit

@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Livewire;
 
+use App\Enums\MerchantBrandStatus;
 use App\Jobs\ResolveMerchantBrandJob;
 use App\Models\Merchant;
 use App\Models\MerchantBrand;
+use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Merchants\MerchantMerger;
 use Flux\Flux;
@@ -157,7 +159,7 @@ final class MerchantManager extends Component
 
         $merchants = Merchant::query()
             ->where('user_id', $user->id)
-            ->withCount(['transactions' => fn (Builder $query): Builder => $query->where('user_id', $user->id)])
+            ->withCount(['transactions' => fn ($query) => $query->where('user_id', $user->id)->current()])
             ->when(mb_trim($this->search) !== '', fn (Builder $query): Builder => $query
                 ->where('name', 'like', '%'.addcslashes(mb_trim($this->search), '%_\\').'%'))
             ->orderBy('name')
@@ -166,7 +168,11 @@ final class MerchantManager extends Component
         $recentlyUnlinked = Merchant::query()
             ->where('user_id', $user->id)
             ->where('unlinked_at', '>=', now()->subDays(self::RECENTLY_UNLINKED_DAYS))
-            ->whereDoesntHave('transactions', fn (Builder $query): Builder => $query->where('user_id', $user->id))
+            ->whereNotIn('id', Transaction::query()
+                ->where('user_id', $user->id)
+                ->whereNotNull('merchant_id')
+                ->current()
+                ->select('merchant_id'))
             ->orderByDesc('unlinked_at')
             ->get();
 
@@ -187,6 +193,7 @@ final class MerchantManager extends Component
         return MerchantBrand::query()
             ->where('user_id', $user->id)
             ->whereIn('merchant_key', $merchants->pluck('merchant_key')->all())
+            ->where('status', MerchantBrandStatus::Resolved)
             ->whereNotNull('logo_url')
             ->pluck('logo_url', 'merchant_key')
             ->all();
