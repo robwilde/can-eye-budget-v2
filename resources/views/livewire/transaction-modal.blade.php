@@ -319,9 +319,14 @@
             <x-category-combobox
                 wire:model="categoryId"
                 :categories="$categories"
+                :recent="$recentCategories"
+                :creatable="true"
                 :label="__('Category')"
                 :placeholder="__('No category')"
             />
+            @error('categoryCreate')
+                <flux:text size="sm" class="text-red-600" data-testid="category-create-error">{{ $message }}</flux:text>
+            @enderror
 
             @if($editingTransactionId && $transactionType !== 'transfer')
                 <flux:field variant="inline">

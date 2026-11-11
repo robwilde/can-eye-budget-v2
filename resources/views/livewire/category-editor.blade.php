@@ -4,12 +4,17 @@
         <div class="flex flex-col space-y-4">
             <div class="flex items-center justify-between gap-3">
                 <flux:heading size="lg">{{ __('Categories') }}</flux:heading>
-                @unless($showCreateForm)
-                    <button type="button" wire:click="openCreateForm" class="cib-yellow-pill">
-                        <flux:icon.plus class="size-4"/>
-                        {{ __('Add category') }}
-                    </button>
-                @endunless
+                <div class="flex items-center gap-2">
+                    <flux:button wire:click="toggleCategoriesLocked" variant="ghost" size="sm" :icon="$categoriesLocked ? 'lock-closed' : 'lock-open'" data-testid="categories-lock-toggle">
+                        {{ $categoriesLocked ? __('Locked') : __('Lock') }}
+                    </flux:button>
+                    @unless($showCreateForm)
+                        <button type="button" wire:click="openCreateForm" class="cib-yellow-pill">
+                            <flux:icon.plus class="size-4"/>
+                            {{ __('Add category') }}
+                        </button>
+                    @endunless
+                </div>
             </div>
 
             @if($showCreateForm)
@@ -30,6 +35,50 @@
                     <div class="flex gap-2">
                         <flux:button wire:click="createCategory" variant="primary" size="sm">{{ __('Create') }}</flux:button>
                         <flux:button wire:click="$set('showCreateForm', false)" variant="ghost" size="sm">{{ __('Cancel') }}</flux:button>
+                    </div>
+                </div>
+            @endif
+
+            @if($showMergeForm)
+                <div class="space-y-2 rounded-lg border-2 border-[var(--color-border-strong)] p-3">
+                    <flux:heading size="sm">{{ __('Merge categories') }}</flux:heading>
+                    <flux:text size="sm">{{ __('Choose the categories to merge away, then the category they merge into.') }}</flux:text>
+                    <div class="max-h-48 space-y-1 overflow-auto rounded border p-2">
+                        @foreach($parentOptions as $option)
+                            @continue($option->id === $mergeTargetId)
+                            <label wire:key="merge-source-{{ $option->id }}" class="flex items-center gap-2 text-sm">
+                                <input type="checkbox" wire:model.live="mergeSourceIds" value="{{ $option->id }}"/>
+                                {{ $option->fullPath() }}
+                            </label>
+                        @endforeach
+                    </div>
+                    <div>
+                        <label class="cib-label" for="merge-target-select">{{ __('Merge into') }}</label>
+                        <flux:select id="merge-target-select" wire:model.live="mergeTargetId" size="sm">
+                            <flux:select.option value="">{{ __('Choose a category') }}</flux:select.option>
+                            @foreach($parentOptions as $option)
+                                @continue(in_array((string) $option->id, array_map('strval', $mergeSourceIds), true))
+                                <flux:select.option value="{{ $option->id }}">{{ $option->fullPath() }}</flux:select.option>
+                            @endforeach
+                        </flux:select>
+                    </div>
+                    @error('mergeSourceIds')
+                        <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text>
+                    @enderror
+                    @error('mergeSourceIds.*')
+                        <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text>
+                    @enderror
+                    @error('mergeTargetId')
+                        <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text>
+                    @enderror
+                    @if($mergeTransactionCount > 0)
+                        <flux:text size="sm" data-testid="merge-transaction-count">
+                            {{ __(':count transactions will move to the target category.', ['count' => $mergeTransactionCount]) }}
+                        </flux:text>
+                    @endif
+                    <div class="flex gap-2">
+                        <flux:button wire:click="mergeCategories" variant="primary" size="sm">{{ __('Merge') }}</flux:button>
+                        <flux:button wire:click="closeMergeForm" variant="ghost" size="sm">{{ __('Cancel') }}</flux:button>
                     </div>
                 </div>
             @endif
@@ -94,12 +143,32 @@
                                         <flux:text size="sm" class="mt-1 text-red-600">{{ $message }}</flux:text>
                                     @enderror
                                 </div>
+                                <div>
+                                    <label class="cib-label" for="category-color-input">{{ __('Colour') }}</label>
+                                    <input id="category-color-input" type="color" wire:model="editingColor" class="h-8 w-14 rounded border" @disabled($category['parent_id'] !== null)/>
+                                </div>
+                                <div class="flex-1">
+                                    <label class="cib-label" for="category-icon-select">{{ __('Icon') }}</label>
+                                    <flux:select id="category-icon-select" wire:model="editingIcon" size="sm">
+                                        <flux:select.option value="">{{ __('Default') }}</flux:select.option>
+                                        @foreach($icons as $icon)
+                                            <flux:select.option value="{{ $icon }}">{{ $icon }}</flux:select.option>
+                                        @endforeach
+                                    </flux:select>
+                                    @error('editingIcon')
+                                        <flux:text size="sm" class="mt-1 text-red-600">{{ $message }}</flux:text>
+                                    @enderror
+                                </div>
                                 <flux:button wire:click="saveRename" variant="primary" size="sm">{{ __('Save') }}</flux:button>
                                 <flux:button wire:click="toggleHidden({{ $category['id'] }})" variant="ghost" size="sm" icon="eye-slash">
                                     {{ $category['is_hidden'] ? __('Unhide') : __('Hide') }}
                                 </flux:button>
+                                <flux:button wire:click="openMergeForm" variant="ghost" size="sm" icon="arrows-pointing-in">{{ __('Merge') }}</flux:button>
                                 <flux:button wire:click="confirmDelete({{ $category['id'] }})" variant="ghost" size="sm" icon="trash" class="text-red-500 hover:text-red-600"/>
                             </div>
+                            @error('editingColor')
+                                <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text>
+                            @enderror
                             @error('deletingCategoryId')
                                 <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text>
                             @enderror
@@ -121,13 +190,28 @@
                             </div>
 
                             @if($showDeleteConfirm)
-                                <div class="rounded-lg border-2 border-red-300 bg-red-50 p-3">
+                                <div class="space-y-2 rounded-lg border-2 border-red-300 bg-red-50 p-3">
                                     <flux:text size="sm" class="font-medium text-red-700">
                                         {{ __('Delete') }} <strong>{{ $deletingCategoryName }}</strong>?
                                     </flux:text>
+                                    <div>
+                                        <label class="cib-label" for="category-replacement-select">{{ __('Replace with (optional)') }}</label>
+                                        <flux:select id="category-replacement-select" wire:model.live="deletingReplacementId" size="sm">
+                                            <flux:select.option value="">{{ __('No replacement') }}</flux:select.option>
+                                            @foreach($parentOptions as $option)
+                                                @continue($option->id === $deletingCategoryId)
+                                                <flux:select.option value="{{ $option->id }}">{{ $option->fullPath() }}</flux:select.option>
+                                            @endforeach
+                                        </flux:select>
+                                        @error('deletingReplacementId')
+                                            <flux:text size="sm" class="mt-1 text-red-600">{{ $message }}</flux:text>
+                                        @enderror
+                                    </div>
                                     @if($deletingTransactionCount > 0)
-                                        <flux:text size="sm" class="mt-1 text-red-600">
-                                            {{ __(':count transactions will be uncategorized.', ['count' => $deletingTransactionCount]) }}
+                                        <flux:text size="sm" class="text-red-600">
+                                            {{ $deletingReplacementId === null
+                                                ? __(':count transactions will be uncategorized.', ['count' => $deletingTransactionCount])
+                                                : __(':count transactions will move to the replacement category.', ['count' => $deletingTransactionCount]) }}
                                         </flux:text>
                                     @endif
                                     <div class="mt-2 flex gap-2">
