@@ -45,3 +45,17 @@ test('a null stored value stays null when written', function () {
 test('defaults the account order to name ascending', function () {
     expect(UserPreferences::fromStored([])->accountOrder)->toBe(AccountOrder::NameAsc);
 });
+
+test('defaults the category lock off and the recent picks empty', function () {
+    $preferences = UserPreferences::fromStored([]);
+
+    expect($preferences->categoriesLocked)->toBeFalse()
+        ->and($preferences->recentCategoryIds)->toBe([]);
+});
+
+test('keeps at most four distinct positive recent category ids and drops malformed ones', function () {
+    $preferences = UserPreferences::fromStored(['categoriesLocked' => true, 'recentCategoryIds' => [3, '4', 3, 0, -1, 'x', 5.5, 6, 7, 8]]);
+
+    expect($preferences->categoriesLocked)->toBeTrue()
+        ->and($preferences->recentCategoryIds)->toBe([3, 4, 6, 7]);
+});

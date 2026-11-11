@@ -617,3 +617,34 @@ it('does not carry a refusal message over to the next category', function () {
         ->assertHasNoErrors()
         ->assertSet('showDeleteConfirm', true);
 });
+
+it('refuses to create a category while the user has locked categories', function () {
+    $user = User::factory()->create();
+    $user->updatePreferences(['categoriesLocked' => true]);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->set('newCategoryName', 'Sneaky')
+        ->call('createCategory')
+        ->assertHasErrors('newCategoryName');
+
+    expect(Category::query()->where('user_id', $user->id)->where('name', 'Sneaky')->exists())->toBeFalse();
+});
+
+it('deactivates a rule that set a category when that category is deleted', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->for($user)->create(['name' => 'Streaming']);
+    $rule = App\Models\UserRule::factory()->for($user)->create([
+        'triggers' => [['field' => 'description', 'operator' => 'contains', 'value' => 'NETFLIX']],
+        'actions' => [['type' => 'set_category', 'value' => (string) $category->id]],
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('confirmDelete', $category->id)
+        ->call('deleteCategory');
+
+    expect(Category::query()->whereKey($category->id)->exists())->toBeFalse()
+        ->and($rule->fresh()->is_active)->toBeFalse()
+        ->and($rule->fresh()->actions)->toBe([]);
+});
