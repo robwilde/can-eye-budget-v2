@@ -14,8 +14,11 @@ use Spatie\LaravelData\Dto;
 
 final class UserPreferences extends Dto
 {
+    public const int RECENT_CATEGORY_LIMIT = 4;
+
     /**
      * @param  list<string>  $allowedCurrencies  Currencies the pickers offer; empty means every supported currency.
+     * @param  list<int>  $recentCategoryIds  Categories the user last picked by hand, most recent first.
      */
     public function __construct(
         public readonly Theme $theme = Theme::System,
@@ -25,6 +28,8 @@ final class UserPreferences extends Dto
         public readonly AccountOrder $accountOrder = AccountOrder::NameAsc,
         public readonly bool $previewFeatures = false,
         public readonly array $allowedCurrencies = [],
+        public readonly bool $categoriesLocked = false,
+        public readonly array $recentCategoryIds = [],
     ) {}
 
     /**
@@ -44,6 +49,8 @@ final class UserPreferences extends Dto
             accountOrder: is_string($stored['accountOrder'] ?? null) ? AccountOrder::tryFrom($stored['accountOrder']) ?? $defaults->accountOrder : $defaults->accountOrder,
             previewFeatures: is_bool($stored['previewFeatures'] ?? null) ? $stored['previewFeatures'] : $defaults->previewFeatures,
             allowedCurrencies: is_array($stored['allowedCurrencies'] ?? null) ? Currencies::normaliseList($stored['allowedCurrencies']) : $defaults->allowedCurrencies,
+            categoriesLocked: is_bool($stored['categoriesLocked'] ?? null) ? $stored['categoriesLocked'] : $defaults->categoriesLocked,
+            recentCategoryIds: is_array($stored['recentCategoryIds'] ?? null) ? self::categoryIds($stored['recentCategoryIds']) : $defaults->recentCategoryIds,
         );
     }
 
@@ -54,5 +61,16 @@ final class UserPreferences extends Dto
             static fn (mixed $value): mixed => $value instanceof BackedEnum ? $value->value : $value,
             get_object_vars($this),
         );
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $ids
+     * @return list<int>
+     */
+    private static function categoryIds(array $ids): array
+    {
+        $valid = array_filter($ids, static fn (mixed $id): bool => (is_int($id) && $id > 0) || (is_string($id) && ctype_digit($id) && (int) $id > 0));
+
+        return array_slice(array_values(array_unique(array_map(intval(...), $valid))), 0, self::RECENT_CATEGORY_LIMIT);
     }
 }
