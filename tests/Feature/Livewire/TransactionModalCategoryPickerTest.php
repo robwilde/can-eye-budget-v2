@@ -141,3 +141,18 @@ it('keeps at most four picks, most recent first, without duplicates', function (
 
     expect($user->fresh()->preferences->recentCategoryIds)->toBe([$ids[2], $ids[4], $ids[3], $ids[1]]);
 });
+
+it('records no pick when a copied transaction is saved with its category untouched', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->for($user)->create(['name' => 'One']);
+    $transaction = Transaction::factory()->for($user)->for($account)->create(['category_id' => $category->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionModal::class)
+        ->dispatch('copy-transaction', id: $transaction->id)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($user->fresh()->preferences->recentCategoryIds)->toBe([]);
+});

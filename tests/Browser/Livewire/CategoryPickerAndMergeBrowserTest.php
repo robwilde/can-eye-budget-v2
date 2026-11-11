@@ -95,3 +95,25 @@ test('categories page merges a category into another and moves its transactions'
     expect(Category::query()->whereKey($beta->id)->exists())->toBeFalse()
         ->and(Transaction::query()->where('category_id', $alpha->id)->count())->toBe(2);
 });
+
+test('picker shows a newly saved pick in the recent list without a reload', function () use ($openModal) {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    Category::factory()->for($user)->create(['name' => 'Zebra Supplies']);
+
+    $this->actingAs($user);
+
+    $page = visit('/calendar');
+    $page->script($openModal);
+
+    $page->assertPresent('[role="combobox"] input')
+        ->type('[role="combobox"] input', 'Zebra')
+        ->click('[role="listbox"] button[role="option"]');
+
+    $page->script("(() => { const modal = Livewire.getByName('transaction-modal')[0]; modal.set('descriptionInput', '12.50 feed'); modal.set('accountId', {$account->id}); modal.call('save'); })()");
+    $page->wait(2);
+    $page->script($openModal);
+
+    $page->click('[role="combobox"] input')
+        ->assertSee('Recently used');
+});

@@ -906,3 +906,18 @@ it('refuses only creating at level three and re-parenting to level three', funct
 
     expect($leaf->fresh()->parent_id)->toBe($root->id);
 });
+
+it('inherits a parent\'s missing colour instead of keeping the old one', function () {
+    $user = User::factory()->create();
+    $plain = Category::factory()->for($user)->create(['name' => 'Plain', 'color' => null]);
+    $coloured = Category::factory()->for($user)->create(['name' => 'Coloured', 'color' => '#abcdef']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $coloured->id)
+        ->set('editingParentId', $plain->id)
+        ->call('saveRename')
+        ->assertHasNoErrors();
+
+    expect($coloured->fresh()->color)->toBeNull();
+});
