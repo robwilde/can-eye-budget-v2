@@ -317,6 +317,7 @@
             <hr class="panel-rule">
 
             <x-category-combobox
+                wire:key="category-combobox-{{ md5(json_encode($recentCategories)) }}"
                 wire:model="categoryId"
                 :categories="$categories"
                 :recent="$recentCategories"
