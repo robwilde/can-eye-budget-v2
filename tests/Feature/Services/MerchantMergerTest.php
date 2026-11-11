@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Enums\MerchantBrandStatus;
 use App\Enums\PayeeStatus;
 use App\Enums\RefreshTrigger;
+use App\Enums\TransactionDirection;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Jobs\SyncRedbarkFeedJob;
 use App\Models\Category;
@@ -16,6 +17,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserRule;
 use App\Services\Merchants\MerchantMerger;
+use App\Services\Payees\PayeeConfirmer;
 use App\Services\RedbarkClientFactory;
 use App\Services\RedbarkTransactionMatcher;
 use App\Services\RuleEvaluator;
@@ -98,7 +100,9 @@ it('keeps merged transactions on the target through a sync', function () {
     $sync();
 
     expect($existing->fresh()->merchant_id)->toBe($target->id)
-        ->and(Transaction::query()->where('redbark_id', 'rb_txn_2')->value('merchant_id'))->toBe($target->id);
+        ->and($existing->fresh()->merchant_key)->toBe('BIG GROCER')
+        ->and(Transaction::query()->where('redbark_id', 'rb_txn_2')->value('merchant_id'))->toBe($target->id)
+        ->and(Transaction::query()->where('redbark_id', 'rb_txn_2')->value('merchant_key'))->toBe('BIG GROCER');
 });
 
 it('never touches another users merchants or transactions', function () {
@@ -192,15 +196,41 @@ it('keeps rules on a source merchant matching after a merge', function () {
     $rule = UserRule::factory()->for($user)->create([
         'triggers' => [['field' => 'merchant_key', 'operator' => 'equals', 'value' => 'SOURCE SHOP']],
     ]);
+    $unrelated = UserRule::factory()->for($user)->create([
+        'triggers' => [['field' => 'merchant_key', 'operator' => 'equals', 'value' => 'OTHER SHOP']],
+    ]);
+    $foreignRule = UserRule::factory()->for(User::factory()->create())->create([
+        'triggers' => [['field' => 'merchant_key', 'operator' => 'equals', 'value' => 'SOURCE SHOP']],
+    ]);
     $evaluator = app(RuleEvaluator::class);
 
-    expect($evaluator->matches($linked->fresh(), $rule))->toBeTrue();
+    expect($evaluator->matches($linked->fresh(), $rule->fresh()))->toBeTrue();
 
     app(MerchantMerger::class)->merge($user, [$source], $target);
 
-    expect($linked->fresh()->merchant_id)->toBe($target->id)
-        ->and($unlinked->fresh()->merchant_id)->toBe($target->id)
-        ->and($linked->fresh()->merchant_key)->toBe('SOURCE SHOP')
-        ->and($evaluator->matches($linked->fresh(), $rule))->toBeTrue()
-        ->and($evaluator->matches($unlinked->fresh(), $rule))->toBeTrue();
+    expect($linked->fresh()->merchant_key)->toBe('TARGET SHOP')
+        ->and($evaluator->matches($linked->fresh(), $rule->fresh()))->toBeTrue()
+        ->and($evaluator->matches($unlinked->fresh(), $rule->fresh()))->toBeTrue()
+        ->and($unrelated->fresh()->triggers[0]['value'])->toBe('OTHER SHOP')
+        ->and($foreignRule->fresh()->triggers[0]['value'])->toBe('SOURCE SHOP');
+});
+
+it('moves merged transactions onto the target payee and brand', function () {
+    $user = User::factory()->create();
+    [$source, $target] = [merchantFor($user, 'Source Shop'), merchantFor($user, 'Target Shop')];
+    $row = Transaction::factory()->for($user)->create(['merchant_name' => 'Source Shop', 'merchant_id' => $source->id, 'category_id' => null, 'direction' => TransactionDirection::Debit]);
+    $category = Category::factory()->for($user)->create(['is_hidden' => false]);
+    $payee = Payee::factory()->for($user)->create(['merchant_key' => 'TARGET SHOP', 'merchant_name' => 'Target Shop']);
+    MerchantBrand::factory()->for($user)->create(['merchant_key' => 'TARGET SHOP', 'title' => 'Target Brand']);
+    MerchantBrand::factory()->for($user)->create(['merchant_key' => 'SOURCE SHOP', 'title' => 'Source Brand', 'status' => MerchantBrandStatus::Unresolved]);
+
+    app(MerchantMerger::class)->merge($user, [$source], $target);
+
+    $row->refresh();
+    app(PayeeConfirmer::class)->confirm($user, $payee, $category->id);
+
+    expect($row->merchant_key)->toBe('TARGET SHOP')
+        ->and(MerchantBrand::query()->where('user_id', $user->id)->where('merchant_key', $row->merchant_key)->value('title'))->toBe('Target Brand')
+        ->and(Payee::query()->where('user_id', $user->id)->where('merchant_key', $row->merchant_key)->value('status'))->toBe(PayeeStatus::Confirmed)
+        ->and($row->fresh()->category_id)->toBe($category->id);
 });
