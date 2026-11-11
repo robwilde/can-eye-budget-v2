@@ -36,6 +36,10 @@ final class Category extends Model
     /** @use HasFactory<CategoryFactory> */
     use HasFactory;
 
+    public const string RESERVED_NAME = '__uncategorized__';
+
+    public const int MAX_LEVELS = 2;
+
     /**
      * @var list<string>
      */
