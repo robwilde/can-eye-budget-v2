@@ -12,6 +12,7 @@ use App\Models\MerchantBrand;
 use App\Models\Payee;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Payees\PayeeConfirmer;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
@@ -26,6 +27,8 @@ use InvalidArgumentException;
 final class MerchantMerger
 {
     public const string LOCK = 'merchant';
+
+    public function __construct(private readonly PayeeConfirmer $confirmer) {}
 
     /**
      * @param  iterable<Merchant>  $sources
@@ -43,11 +46,14 @@ final class MerchantMerger
             $target = $merchants->get($target->id);
             $sourceMerchants = $merchants->except([$target->id]);
             $sourceKeys = $sourceMerchants->pluck('merchant_key')->reject(fn (string $key): bool => $key === $target->merchant_key)->values();
+            $keys = [...$sourceKeys->all(), $target->merchant_key];
+            $payees = $this->lockPayees($user, $keys);
+            $brands = $this->lockBrands($user, $keys);
 
             $this->moveAliases($user, $sourceMerchants, $sourceKeys, $target);
             $this->moveTransactions($user, $sourceMerchants->modelKeys(), $sourceKeys->all(), $target);
-            $this->movePayees($user, $sourceKeys->all(), $target);
-            $this->moveBrands($user, $sourceKeys->all(), $target);
+            $this->movePayees($user, $payees, $target);
+            $this->moveBrands($brands, $target);
 
             Merchant::query()->where('user_id', $user->id)->whereKey($sourceMerchants->modelKeys())->delete();
         });
@@ -73,7 +79,7 @@ final class MerchantMerger
             $locked = $this->lockOwned($user, [$merchant->id])->get($merchant->id);
 
             $this->rewrite(
-                Transaction::query()->where('user_id', $user->id)->where('merchant_id', $locked->id),
+                Transaction::query()->withTrashed()->where('user_id', $user->id)->where('merchant_id', $locked->id),
                 ['merchant_id' => null],
             );
 
@@ -135,12 +141,16 @@ final class MerchantMerger
     {
         $this->rewrite(
             Transaction::query()
+                ->withTrashed()
                 ->where('user_id', $user->id)
                 ->where(fn (Builder $query): Builder => $query
                     ->whereIn('merchant_id', $sourceIds)
                     ->orWhere(fn (Builder $unlinked): Builder => $unlinked
                         ->whereNull('merchant_id')
-                        ->whereIn('merchant_key', $sourceKeys))),
+                        ->whereIn('merchant_key', $sourceKeys)
+                        ->where(fn (Builder $unlocked): Builder => $unlocked
+                            ->whereNull('locked_fields')
+                            ->orWhereJsonDoesntContain('locked_fields', self::LOCK)))),
             ['merchant_id' => $target->id],
         );
     }
@@ -162,17 +172,38 @@ final class MerchantMerger
     }
 
     /**
-     * @param  list<string>  $sourceKeys
+     * @param  list<string>  $keys
+     * @return EloquentCollection<int, Payee>
      */
-    private function movePayees(User $user, array $sourceKeys, Merchant $target): void
+    private function lockPayees(User $user, array $keys): EloquentCollection
     {
-        $payees = Payee::query()
+        return Payee::query()
             ->where('user_id', $user->id)
-            ->whereIn('merchant_key', [...$sourceKeys, $target->merchant_key])
+            ->whereIn('merchant_key', $keys)
             ->orderBy('id')
             ->lockForUpdate()
             ->get();
+    }
 
+    /**
+     * @param  list<string>  $keys
+     * @return EloquentCollection<int, MerchantBrand>
+     */
+    private function lockBrands(User $user, array $keys): EloquentCollection
+    {
+        return MerchantBrand::query()
+            ->where('user_id', $user->id)
+            ->whereIn('merchant_key', $keys)
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get();
+    }
+
+    /**
+     * @param  EloquentCollection<int, Payee>  $payees
+     */
+    private function movePayees(User $user, EloquentCollection $payees, Merchant $target): void
+    {
         if ($payees->isEmpty()) {
             return;
         }
@@ -186,21 +217,36 @@ final class MerchantMerger
 
         Payee::query()->whereKey($payees->reject(fn (Payee $payee): bool => $payee->is($winner))->modelKeys())->delete();
 
+        $rekeyed = $winner->merchant_key !== $target->merchant_key;
+
         $winner->forceFill(['merchant_key' => $target->merchant_key])->save();
+
+        if ($rekeyed && $isConfirmed($winner)) {
+            $this->reconfirm($user, $winner);
+        }
+    }
+
+    private function reconfirm(User $user, Payee $payee): void
+    {
+        $payee->forceFill(['user_rule_id' => null])->save();
+
+        try {
+            $this->confirmer->confirm($user, $payee, (int) $payee->confirmed_category_id, $payee->budget_tag);
+        } catch (InvalidArgumentException) {
+            $payee->forceFill([
+                'status' => PayeeStatus::Pending,
+                'confirmed_category_id' => null,
+                'budget_tag' => null,
+                'resolved_at' => null,
+            ])->save();
+        }
     }
 
     /**
-     * @param  list<string>  $sourceKeys
+     * @param  EloquentCollection<int, MerchantBrand>  $brands
      */
-    private function moveBrands(User $user, array $sourceKeys, Merchant $target): void
+    private function moveBrands(EloquentCollection $brands, Merchant $target): void
     {
-        $brands = MerchantBrand::query()
-            ->where('user_id', $user->id)
-            ->whereIn('merchant_key', [...$sourceKeys, $target->merchant_key])
-            ->orderBy('id')
-            ->lockForUpdate()
-            ->get();
-
         if ($brands->isEmpty()) {
             return;
         }
