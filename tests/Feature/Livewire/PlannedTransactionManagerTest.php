@@ -267,3 +267,23 @@ test("a plan never keeps another user's category", function () {
 
     expect($plan->fresh()->category_id)->not->toBe($theirs->id);
 });
+
+test('save records a recent pick only when the user changed the category by hand', function () {
+    $newCategory = Category::factory()->for($this->user)->create();
+    $plan = PlannedTransaction::factory()->for($this->user)->for($this->primaryAccount)->create(['category_id' => $this->category->id]);
+
+    Livewire::actingAs($this->user)
+        ->test(PlannedTransactionManager::class)
+        ->call('openEdit', $plan->id)
+        ->call('save');
+
+    expect($this->user->fresh()->preferences->recentCategoryIds)->toBe([]);
+
+    Livewire::actingAs($this->user)
+        ->test(PlannedTransactionManager::class)
+        ->call('openEdit', $plan->id)
+        ->set('categoryId', (string) $newCategory->id)
+        ->call('save');
+
+    expect($this->user->fresh()->preferences->recentCategoryIds)->toBe([$newCategory->id]);
+});

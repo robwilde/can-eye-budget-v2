@@ -6,6 +6,9 @@
     // 'up' anchors the popover above the input: needed where the field sits at
     // the viewport bottom (the sticky bulk bar), where dropping down is off-screen.
     'dropdown' => 'down',
+    'recent' => [],
+    'creatable' => false,
+    'createMethod' => 'createCategoryFromPicker',
 ])
 
 @php
@@ -27,6 +30,29 @@
         items: {{ Js::from($items) }},
         wireModel: '{{ $wireModel }}',
         dropUp: {{ Js::from($dropdown === 'up') }},
+        recent: {{ Js::from($recent) }},
+        creatable: {{ Js::from($creatable) }},
+        createMethod: '{{ $createMethod }}',
+        creating: false,
+
+        get canCreate() {
+            const term = this.search.trim();
+            return this.creatable && term.length >= 3 && ! this.items.some(i => i.label.toLowerCase() === term.toLowerCase());
+        },
+
+        async createFromSearch() {
+            if (this.creating) return;
+            this.creating = true;
+            try {
+                const created = await this.$wire[this.createMethod](this.search.trim());
+                if (created) {
+                    this.items.push(created);
+                    this.select(created);
+                }
+            } finally {
+                this.creating = false;
+            }
+        },
 
         init() {
             this.syncFromWire();
@@ -134,7 +160,7 @@
             x-ref="input"
             x-model="search"
             @input="onInput()"
-            @focus="if (search.length >= 3) openDropdown()"
+            @focus="if (search.length >= 3 || recent.length > 0) openDropdown()"
             @keydown.escape.prevent="closeDropdown()"
             placeholder="{{ $placeholder }}"
             autocomplete="off"
@@ -171,6 +197,31 @@
         class="m-0 max-h-60 overflow-auto rounded-lg border border-zinc-200 bg-white shadow-lg dark:border-white/10 dark:bg-zinc-800"
         role="listbox"
     >
+        <template x-if="open && search.length < 3 && recent.length > 0">
+            <div data-testid="recent-categories">
+                <div class="px-3 pt-2 text-xs font-medium uppercase tracking-wide text-zinc-400">{{ __('Recently used') }}</div>
+                <template x-for="item in recent" :key="'recent-' + item.id">
+                    <button
+                        type="button"
+                        @click="select(item)"
+                        class="flex w-full cursor-pointer items-center px-3 py-1.5 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10 whitespace-nowrap"
+                        role="option"
+                        x-text="item.label"
+                    ></button>
+                </template>
+            </div>
+        </template>
+
+        <template x-if="open && canCreate">
+            <button
+                type="button"
+                @click="createFromSearch()"
+                :disabled="creating"
+                class="flex w-full cursor-pointer items-center px-3 py-1.5 text-left text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/10 whitespace-nowrap"
+                data-testid="create-category"
+            >{{ __('Create') }}&nbsp;“<span x-text="search.trim()"></span>”</button>
+        </template>
+
         <template x-if="open && search.length < 3">
             <div class="px-3 py-2 text-sm text-zinc-400">
                 Type 3+ characters to search...

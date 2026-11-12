@@ -223,3 +223,24 @@ test("approving with another user's category is refused and changes nothing", fu
     expect($order->fresh()->status)->toBe(BnplOrderStatus::PendingReview)
         ->and($order->fresh()->category_id)->not->toBe($theirs->id);
 });
+
+test('approving and recategorising record a recent pick only for a hand-picked category', function () {
+    $user = User::factory()->create();
+    $prefilled = Category::factory()->for($user)->create();
+    $picked = Category::factory()->for($user)->create();
+    $plan = bnplPlanFor($user, ['category_id' => null]);
+    $order = BnplOrder::factory()->create(['user_id' => $user->id, 'planned_transaction_id' => $plan->id, 'category_id' => $prefilled->id]);
+
+    Livewire::actingAs($user)->test(BnplOrderReview::class)->call('approve', $order->id);
+
+    expect($user->fresh()->preferences->recentCategoryIds)->toBe([]);
+
+    $auto = BnplOrder::factory()->create(['user_id' => $user->id, 'status' => BnplOrderStatus::AutoApproved, 'category_id' => $prefilled->id]);
+
+    Livewire::actingAs($user)
+        ->test(BnplOrderReview::class)
+        ->set("categories.{$auto->id}", $picked->id)
+        ->call('recategorise', $auto->id);
+
+    expect($user->fresh()->preferences->recentCategoryIds)->toBe([$picked->id]);
+});

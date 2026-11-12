@@ -822,3 +822,29 @@ it("refuses another user's category without writing anything", function () {
         ->and($txn->fresh()->category_id)->toBeNull()
         ->and($component->viewData('bulkCategories')->pluck('id')->all())->not->toContain($theirs->id);
 });
+
+it('records a recent pick when a bulk apply uses a hand-picked category', function () {
+    $txn = bulkTxn($this->user, $this->account);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('selected', [$txn->id => true])
+        ->set('bulkCategoryId', (string) $this->category->id)
+        ->call('applyCategoryToSelection');
+
+    expect($this->user->fresh()->preferences->recentCategoryIds)->toBe([$this->category->id]);
+});
+
+it('does not record a recent pick when the rule builder uses the bulk category', function () {
+    $txn = bulkTxn($this->user, $this->account);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('selected', [$txn->id => true])
+        ->set('bulkCategoryId', (string) $this->category->id)
+        ->call('openRulePanel')
+        ->set('ruleMatchValue', 'NETFLIX')
+        ->call('createRuleFromSelection');
+
+    expect($this->user->fresh()->preferences->recentCategoryIds)->toBe([]);
+});

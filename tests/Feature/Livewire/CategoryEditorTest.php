@@ -4,8 +4,10 @@
 
 declare(strict_types=1);
 
+use App\Enums\AuditOutcome;
 use App\Livewire\CategoryEditor;
 use App\Models\Account;
+use App\Models\AuditEvent;
 use App\Models\Category;
 use App\Models\CategoryGroup;
 use App\Models\Transaction;
@@ -383,20 +385,12 @@ test('cib: nested rows indent by depth and top-level rows are group headers', fu
 test('parent dropdown lists nested categories by full path', function () {
     $user = User::factory()->create();
     $office = Category::factory()->for($user)->create(['name' => 'Office']);
-    $onlineService = Category::factory()->withParent($office)->create(['name' => 'Online Service']);
+    Category::factory()->withParent($office)->create(['name' => 'Online Service']);
 
     Livewire::actingAs($user)
         ->test(CategoryEditor::class)
         ->call('openCreateForm')
-        ->assertSee('Office / Online Service')
-        ->call('openCreateForm', $onlineService->id)
-        ->assertSet('newParentId', $onlineService->id)
-        ->set('newCategoryName', 'Apple')
-        ->call('createCategory');
-
-    $child = Category::query()->where('name', 'Apple')->firstOrFail();
-    expect($child->parent_id)->toBe($onlineService->id)
-        ->and($child->depth())->toBe(2);
+        ->assertSee('Office / Online Service');
 });
 
 test('search matches an ancestor three levels up', function () {
@@ -410,25 +404,6 @@ test('search matches an ancestor three levels up', function () {
         ->test(CategoryEditor::class)
         ->set('search', 'Alpha')
         ->assertSee('Alpha / Bravo / Charlie / Delta');
-});
-
-test('can re-parent an existing category under a nested category', function () {
-    $user = User::factory()->create();
-    $office = Category::factory()->for($user)->create(['name' => 'Office']);
-    $onlineService = Category::factory()->withParent($office)->create(['name' => 'Online Service']);
-    $training = Category::factory()->for($user)->create(['name' => 'Training']);
-
-    Livewire::actingAs($user)
-        ->test(CategoryEditor::class)
-        ->call('selectCategory', $training->id)
-        ->assertSet('editingParentId', null)
-        ->set('editingParentId', $onlineService->id)
-        ->call('saveRename')
-        ->assertHasNoErrors();
-
-    $training->refresh();
-    expect($training->parent_id)->toBe($onlineService->id)
-        ->and($training->fullPath())->toBe('Office / Online Service / Training');
 });
 
 test('re-parent rejects moving a category under its own descendant', function () {
@@ -647,4 +622,302 @@ it('deactivates a rule that set a category when that category is deleted', funct
     expect(Category::query()->whereKey($category->id)->exists())->toBeFalse()
         ->and($rule->fresh()->is_active)->toBeFalse()
         ->and($rule->fresh()->actions)->toBe([]);
+});
+
+it('refuses to nest a category more than the allowed depth', function () {
+    $user = User::factory()->create();
+    $food = Category::factory()->for($user)->create(['name' => 'Food']);
+    $coffee = Category::factory()->withParent($food)->create(['name' => 'Coffee']);
+    $beans = Category::factory()->for($user)->create(['name' => 'Beans']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $beans->id)
+        ->set('editingParentId', $coffee->id)
+        ->call('saveRename')
+        ->assertHasErrors('editingParentId')
+        ->call('openCreateForm', $coffee->id)
+        ->set('newCategoryName', 'Espresso')
+        ->call('createCategory')
+        ->assertHasErrors('newParentId');
+
+    expect($beans->fresh()->parent_id)->toBeNull()
+        ->and(Category::query()->where('name', 'Espresso')->exists())->toBeFalse();
+});
+
+it('refuses to move a category with subcategories under another category', function () {
+    $user = User::factory()->create();
+    $food = Category::factory()->for($user)->create(['name' => 'Food']);
+    $home = Category::factory()->for($user)->create(['name' => 'Home']);
+    Category::factory()->withParent($home)->create(['name' => 'Tools']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $home->id)
+        ->set('editingParentId', $food->id)
+        ->call('saveRename')
+        ->assertHasErrors('editingParentId');
+
+    expect($home->fresh()->parent_id)->toBeNull();
+});
+
+it('rejects an invalid colour or the reserved name', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->for($user)->create(['name' => 'Coffee', 'color' => '#112233']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $category->id)
+        ->set('editingColor', 'red')
+        ->call('saveRename')
+        ->assertHasErrors('editingColor')
+        ->set('editingColor', '#112233')
+        ->set('editingName', '__uncategorized__')
+        ->call('saveRename')
+        ->assertHasErrors('editingName')
+        ->call('openCreateForm')
+        ->set('newCategoryName', '__Uncategorized__')
+        ->call('createCategory')
+        ->assertHasErrors('newCategoryName');
+
+    expect($category->fresh()->name)->toBe('Coffee')
+        ->and($category->fresh()->color)->toBe('#112233')
+        ->and(Category::query()->where('user_id', $user->id)->count())->toBe(1);
+});
+
+it('saves a category colour and icon and recolours its subcategories', function () {
+    $user = User::factory()->create();
+    $food = Category::factory()->for($user)->create(['name' => 'Food', 'color' => '#111111']);
+    $coffee = Category::factory()->withParent($food)->create(['name' => 'Coffee', 'color' => '#111111']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $food->id)
+        ->set('editingColor', '#abcdef')
+        ->set('editingIcon', 'gift')
+        ->call('saveRename')
+        ->assertHasNoErrors();
+
+    expect($food->fresh()->color)->toBe('#abcdef')
+        ->and($food->fresh()->icon)->toBe('gift')
+        ->and($coffee->fresh()->color)->toBe('#abcdef');
+});
+
+it('gives a subcategory its parent\'s colour when saved', function () {
+    $user = User::factory()->create();
+    $food = Category::factory()->for($user)->create(['name' => 'Food', 'color' => '#abcdef']);
+    $coffee = Category::factory()->withParent($food)->create(['name' => 'Coffee', 'color' => '#111111']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $coffee->id)
+        ->set('editingColor', '#222222')
+        ->call('saveRename')
+        ->assertHasNoErrors();
+
+    expect($coffee->fresh()->color)->toBe('#abcdef');
+});
+
+it('merges categories from the editor and reports the affected transaction count', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $a = Category::factory()->for($user)->create(['name' => 'Alpha']);
+    $b = Category::factory()->for($user)->create(['name' => 'Beta']);
+    Transaction::factory()->for($user)->for($account)->count(3)->create(['category_id' => $b->id]);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $b->id)
+        ->call('openMergeForm')
+        ->assertSet('mergeSourceIds', [$b->id])
+        ->assertSeeText('3 transactions will move to the target category.')
+        ->set('mergeTargetId', $a->id)
+        ->call('mergeCategories')
+        ->assertHasNoErrors()
+        ->assertSet('showMergeForm', false)
+        ->assertSet('selectedCategoryId', null);
+
+    expect(Category::query()->whereKey($b->id)->exists())->toBeFalse()
+        ->and(Transaction::query()->where('category_id', $a->id)->count())->toBe(3);
+});
+
+it('shows a refused merge as an error and changes nothing', function () {
+    $user = User::factory()->create();
+    $parent = Category::factory()->for($user)->create(['name' => 'Food']);
+    $child = Category::factory()->withParent($parent)->create(['name' => 'Coffee']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->set('mergeSourceIds', [$parent->id])
+        ->set('mergeTargetId', $child->id)
+        ->call('mergeCategories')
+        ->assertHasErrors('mergeSourceIds');
+
+    expect(Category::query()->where('user_id', $user->id)->count())->toBe(2);
+});
+
+it('ignores another user\'s categories sent as merge ids', function () {
+    $user = User::factory()->create();
+    $mine = Category::factory()->for($user)->create(['name' => 'Mine']);
+    $theirs = Category::factory()->for(User::factory()->create())->create(['name' => 'Theirs']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->set('mergeSourceIds', [$theirs->id])
+        ->set('mergeTargetId', $mine->id)
+        ->call('mergeCategories')
+        ->assertHasErrors('mergeSourceIds.0');
+
+    expect(Category::query()->whereKey($theirs->id)->exists())->toBeTrue();
+});
+
+it('records an audit event when categories are merged', function () {
+    $user = User::factory()->create();
+    $a = Category::factory()->for($user)->create(['name' => 'Alpha']);
+    $b = Category::factory()->for($user)->create(['name' => 'Beta']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->set('mergeSourceIds', [$b->id])
+        ->set('mergeTargetId', $a->id)
+        ->call('mergeCategories');
+
+    $event = AuditEvent::query()->where('action', 'livewire.category-editor.mergeCategories')->sole();
+
+    expect($event->user_id)->toBe($user->id)
+        ->and($event->outcome)->toBe(AuditOutcome::Success);
+});
+
+it('deletes with a replacement from the editor and moves the transactions there', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $doomed = Category::factory()->for($user)->create(['name' => 'Doomed']);
+    $replacement = Category::factory()->for($user)->create(['name' => 'Replacement']);
+    Transaction::factory()->for($user)->for($account)->count(2)->create(['category_id' => $doomed->id]);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $doomed->id)
+        ->call('confirmDelete', $doomed->id)
+        ->set('deletingReplacementId', $replacement->id)
+        ->assertSeeText('2 transactions will move to the replacement category.')
+        ->call('deleteCategory')
+        ->assertHasNoErrors();
+
+    expect(Category::query()->whereKey($doomed->id)->exists())->toBeFalse()
+        ->and(Transaction::query()->where('category_id', $replacement->id)->count())->toBe(2);
+});
+
+it('refuses another user\'s category as a delete replacement', function () {
+    $user = User::factory()->create();
+    $doomed = Category::factory()->for($user)->create(['name' => 'Doomed']);
+    $theirs = Category::factory()->for(User::factory()->create())->create(['name' => 'Theirs']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('confirmDelete', $doomed->id)
+        ->set('deletingReplacementId', $theirs->id)
+        ->call('deleteCategory')
+        ->assertHasErrors('deletingReplacementId');
+
+    expect(Category::query()->whereKey($doomed->id)->exists())->toBeTrue();
+});
+
+it('switches the category lock on and off for the signed-in user only', function () {
+    $user = User::factory()->create();
+    $other = User::factory()->create();
+
+    $component = Livewire::actingAs($user)->test(CategoryEditor::class)->call('toggleCategoriesLocked');
+
+    expect($user->fresh()->preferences->categoriesLocked)->toBeTrue()
+        ->and($other->fresh()->preferences->categoriesLocked)->toBeFalse();
+
+    $component->call('toggleCategoriesLocked');
+
+    expect($user->fresh()->preferences->categoriesLocked)->toBeFalse();
+});
+
+function levelThreeTree(User $user): array
+{
+    $root = Category::factory()->for($user)->create(['name' => 'Home', 'color' => '#111111']);
+    $middle = Category::factory()->withParent($root)->create(['name' => 'Garden', 'color' => '#111111']);
+    $leaf = Category::factory()->withParent($middle)->create(['name' => 'Tools', 'color' => '#111111']);
+
+    return [$root, $middle, $leaf];
+}
+
+it('lets a category that already sits at level three be renamed, hidden, recoloured and deleted', function () {
+    $user = User::factory()->create();
+    [$root, , $leaf] = levelThreeTree($user);
+    $component = Livewire::actingAs($user)->test(CategoryEditor::class);
+
+    $component->call('selectCategory', $leaf->id)
+        ->set('editingName', 'Power tools')
+        ->set('editingIcon', 'wrench-screwdriver')
+        ->call('saveRename')
+        ->assertHasNoErrors()
+        ->call('toggleHidden', $leaf->id);
+
+    expect($leaf->fresh()->name)->toBe('Power tools')
+        ->and($leaf->fresh()->icon)->toBe('wrench-screwdriver')
+        ->and($leaf->fresh()->is_hidden)->toBeTrue();
+
+    $component->call('selectCategory', $root->id)
+        ->call('selectCategory', $root->id)
+        ->call('selectCategory', $root->id)
+        ->set('editingColor', '#abcdef')
+        ->call('saveRename')
+        ->assertHasNoErrors();
+
+    expect($leaf->fresh()->color)->toBe('#abcdef');
+
+    $component->call('confirmDelete', $leaf->id)->call('deleteCategory')->assertHasNoErrors();
+
+    expect(Category::query()->whereKey($leaf->id)->exists())->toBeFalse();
+});
+
+it('merges a level-three category into and out of other categories', function () {
+    $user = User::factory()->create();
+    [$root, $middle, $leaf] = levelThreeTree($user);
+    $other = Category::factory()->withParent($middle)->create(['name' => 'Hoses']);
+    $destination = Category::factory()->for($user)->create(['name' => 'Garage']);
+    $component = Livewire::actingAs($user)->test(CategoryEditor::class);
+
+    $component->set('mergeSourceIds', [$other->id])->set('mergeTargetId', $leaf->id)->call('mergeCategories')->assertHasNoErrors();
+    $component->set('mergeSourceIds', [$leaf->id])->set('mergeTargetId', $destination->id)->call('mergeCategories')->assertHasNoErrors();
+
+    expect(Category::query()->whereKey([$leaf->id, $other->id])->exists())->toBeFalse()
+        ->and(Category::query()->where('user_id', $user->id)->pluck('id')->sort()->values()->all())->toBe(collect([$root->id, $middle->id, $destination->id])->sort()->values()->all());
+});
+
+it('refuses only creating at level three and re-parenting to level three', function () {
+    $user = User::factory()->create();
+    [$root, $middle, $leaf] = levelThreeTree($user);
+    $loose = Category::factory()->for($user)->create(['name' => 'Loose']);
+    $component = Livewire::actingAs($user)->test(CategoryEditor::class);
+
+    $component->call('openCreateForm', $middle->id)->set('newCategoryName', 'New')->call('createCategory')->assertHasErrors('newParentId');
+    $component->call('selectCategory', $loose->id)->set('editingParentId', $middle->id)->call('saveRename')->assertHasErrors('editingParentId');
+
+    expect(Category::query()->where('name', 'New')->exists())->toBeFalse()
+        ->and($loose->fresh()->parent_id)->toBeNull();
+
+    $component->call('selectCategory', $loose->id)->call('selectCategory', $leaf->id)->set('editingParentId', $root->id)->call('saveRename')->assertHasNoErrors();
+
+    expect($leaf->fresh()->parent_id)->toBe($root->id);
+});
+
+it('inherits a parent\'s missing colour instead of keeping the old one', function () {
+    $user = User::factory()->create();
+    $plain = Category::factory()->for($user)->create(['name' => 'Plain', 'color' => null]);
+    $coloured = Category::factory()->for($user)->create(['name' => 'Coloured', 'color' => '#abcdef']);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $coloured->id)
+        ->set('editingParentId', $plain->id)
+        ->call('saveRename')
+        ->assertHasNoErrors();
+
+    expect($coloured->fresh()->color)->toBeNull();
 });

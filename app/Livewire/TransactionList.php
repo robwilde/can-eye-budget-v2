@@ -38,6 +38,7 @@ use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\MerchantBrands\DescriptorGate;
 use App\Services\Payees\PayeeConfirmer;
 use App\Services\Payees\PayeeReviewQueue;
+use App\Services\RecentCategoryPicks;
 use App\Services\Reports\CategoryGroupMap;
 use App\Services\TransactionEmailLinker;
 use App\Services\Transactions\TransactionBulkEditor;
@@ -250,6 +251,9 @@ final class TransactionList extends Component
     public array $bulkExcluded = [];
 
     public string $bulkCategoryId = '';
+
+    #[Locked]
+    public bool $bulkCategoryPicked = false;
 
     public string $clusterIntent = '';
 
@@ -550,6 +554,7 @@ final class TransactionList extends Component
         $this->closeRulePanel();
         $this->clusterIntent = '';
         $this->bulkCategoryId = (string) ($this->suggestedClusterPayee($merchantKey)->suggested_category_id ?? '');
+        $this->bulkCategoryPicked = false;
     }
 
     public function updatedClusterIntent(): void
@@ -561,6 +566,7 @@ final class TransactionList extends Component
         }
 
         $this->bulkCategoryId = (string) ($options->first()->id ?? '');
+        $this->bulkCategoryPicked = false;
     }
 
     public function clearSelection(): void
@@ -569,6 +575,7 @@ final class TransactionList extends Component
         $this->bulkScope = null;
         $this->bulkExcluded = [];
         $this->bulkCategoryId = '';
+        $this->bulkCategoryPicked = false;
         $this->clusterIntent = '';
         $this->bulkError = null;
         $this->bulkNotice = null;
@@ -667,6 +674,10 @@ final class TransactionList extends Component
                 }
             });
         });
+
+        if ($this->bulkCategoryPicked) {
+            app(RecentCategoryPicks::class)->record($this->authenticatedUser(), $categoryId);
+        }
 
         if ($clusterPayee !== null) {
             $payeeConfirmer->confirm($this->authenticatedUser(), $clusterPayee, $categoryId);
@@ -855,6 +866,7 @@ final class TransactionList extends Component
 
     public function updatedBulkCategoryId(): void
     {
+        $this->bulkCategoryPicked = true;
         $this->refreshRulePreview();
     }
 
@@ -1376,6 +1388,8 @@ final class TransactionList extends Component
             return;
         }
 
+        $knownCategoryIds = array_filter([$transaction->category_id, ...$transaction->splits()->pluck('category_id')->all()]);
+
         $saved = DB::transaction(static function () use ($transaction, $lines): bool {
             $locked = Transaction::query()->where('user_id', $transaction->user_id)->whereKey($transaction->id)->lockForUpdate()->first();
 
@@ -1401,6 +1415,12 @@ final class TransactionList extends Component
             $this->splitError = 'A transaction split into transactions cannot also have category lines.';
 
             return;
+        }
+
+        $recent = app(RecentCategoryPicks::class);
+
+        foreach (array_diff(array_unique($categoryIds), $knownCategoryIds) as $pickedId) {
+            $recent->record($this->authenticatedUser(), $pickedId);
         }
 
         $this->closeSplitPanel();

@@ -2363,3 +2363,22 @@ test("saveSplit rejects another user's category", function () {
 
     $this->assertDatabaseCount('transaction_splits', 0);
 });
+
+test('saveSplit records a recent pick for each category the user added by hand', function () {
+    $user = User::factory()->create();
+    $transaction = splitTransaction($user, -10000);
+    $kept = Category::factory()->for($user)->create();
+    $fuel = Category::factory()->for($user)->create();
+    $transaction->update(['category_id' => $kept->id]);
+
+    Livewire::actingAs($user)
+        ->test(TransactionList::class)
+        ->call('toggleSplit', $transaction->id)
+        ->set('splitLines', [
+            ['category_id' => $kept->id, 'amount' => '70.00', 'notes' => ''],
+            ['category_id' => $fuel->id, 'amount' => '30.00', 'notes' => ''],
+        ])
+        ->call('saveSplit');
+
+    expect($user->fresh()->preferences->recentCategoryIds)->toBe([$fuel->id]);
+});

@@ -251,3 +251,40 @@ test('the rules page shows the payee review', function () {
         ->assertSeeLivewire(PayeeReview::class)
         ->assertSee('Check your biggest payees');
 });
+
+test('accept records a recent pick only for a category the user chose by hand', function () {
+    $suggested = reviewPayee($this->user, $this->account, 'FRESH GROCER', 3000, $this->groceries);
+
+    Livewire::actingAs($this->user)->test(PayeeReview::class)->call('accept', $suggested->id);
+
+    expect($this->user->fresh()->preferences->recentCategoryIds)->toBe([]);
+
+    $picked = reviewPayee($this->user, $this->account, 'CLOTHES SHOP', 3000, $this->groceries);
+
+    Livewire::actingAs($this->user)
+        ->test(PayeeReview::class)
+        ->set('categoryChoices.'.$picked->id, $this->clothes->id)
+        ->call('accept', $picked->id);
+
+    expect($this->user->fresh()->preferences->recentCategoryIds)->toBe([$this->clothes->id]);
+});
+
+test('accept all never records a recent pick', function () {
+    reviewPayee($this->user, $this->account, 'FRESH GROCER', 3000, $this->groceries);
+
+    Livewire::actingAs($this->user)->test(PayeeReview::class)->call('acceptAll');
+
+    expect($this->user->fresh()->preferences->recentCategoryIds)->toBe([]);
+});
+
+test('accept records no recent pick when an intent change replaced the chosen category', function () {
+    $payee = reviewPayee($this->user, $this->account, 'CLOTHES SHOP', 3000, $this->groceries);
+
+    Livewire::actingAs($this->user)
+        ->test(PayeeReview::class)
+        ->set('categoryChoices.'.$payee->id, $this->clothes->id)
+        ->set('intents.'.$payee->id, 'work')
+        ->call('accept', $payee->id);
+
+    expect($this->user->fresh()->preferences->recentCategoryIds)->toBe([]);
+});

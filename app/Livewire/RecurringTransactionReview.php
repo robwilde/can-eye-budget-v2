@@ -8,6 +8,7 @@ use App\Enums\PipelineRunStatus;
 use App\Enums\PipelineTrigger;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
+use App\Livewire\Concerns\RecordsHandPickedCategories;
 use App\Models\Account;
 use App\Models\AnalysisSuggestion;
 use App\Models\Category;
@@ -26,10 +27,17 @@ use Throwable;
 
 final class RecurringTransactionReview extends Component
 {
+    use RecordsHandPickedCategories;
+
     public ?int $accountId = null;
 
     /** @var array<int, int|string|null> */
     public array $recurringCategories = [];
+
+    public function updatedRecurringCategories(mixed $value, string $key): void
+    {
+        $this->markHandPicked($key);
+    }
 
     public function mount(): void
     {
@@ -109,6 +117,7 @@ final class RecurringTransactionReview extends Component
         $user = $this->authenticatedUser();
 
         $applier->applyRecurringTransaction($suggestion, $user, $categoryId);
+        $this->recordHandPicked($user, $suggestionId, $categoryId);
 
         Flux::toast(text: $categoryId !== null ? 'Recurring transaction created and all matching transactions categorised' : 'Recurring transaction created', variant: 'success');
     }

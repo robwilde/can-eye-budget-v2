@@ -502,6 +502,7 @@ The remaining features have no ordering constraint beyond the conventions above.
 
 #### Edge cases
 - Categories are one level deep. A subcategory cannot get children ("can't have more than 2 levels"), and a parent cannot become a subcategory.
+- In Can-I-Budget the limit (`Category::MAX_LEVELS = 2`) is enforced only when a category is created or its parent is changed. Existing deeper categories, including the three-level default tree new users still get from `UserCategoryProvisioner`, are kept and stay editable, mergeable and deletable. Flattening the default tree is a follow-up.
 - Subcategories take their parent's colour when saved.
 - Names are unique per family, and the reserved filter value `__uncategorized__` is rejected as a name. Name, colour and icon are required, and the colour must be a 6-digit hex.
 - Categories have no income or expense type. Direction comes from the transaction's sign.

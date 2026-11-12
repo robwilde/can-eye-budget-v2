@@ -16,6 +16,7 @@ use App\Enums\TransactionKind;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Enums\TransferLinkSource;
+use App\Exceptions\CategoriesLockedException;
 use App\Exceptions\ExchangeRateUnavailableException;
 use App\Exceptions\IdempotencyKeyReusedException;
 use App\Exceptions\PendingMergeRefusedException;
@@ -28,10 +29,12 @@ use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\TransactionAttachment;
 use App\Models\User;
+use App\Services\CategoryCreator;
 use App\Services\CategoryRuleGenerator;
 use App\Services\ExchangeRateLookup;
 use App\Services\PendingMergeService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
+use App\Services\RecentCategoryPicks;
 use App\Services\TransactionIdempotency;
 use App\Services\Transactions\TransactionDeleter;
 use App\Services\Transactions\TransactionSplitter;
@@ -40,6 +43,7 @@ use App\Services\Transfers\TransferKinds;
 use App\Services\Transfers\TransferLinker;
 use App\Support\AmountParser;
 use App\Support\AmountParseResult;
+use App\Support\Categories\ProtectedCategories;
 use Carbon\CarbonImmutable;
 use Carbon\Exceptions\InvalidFormatException;
 use Illuminate\Database\Eloquent\Collection;
@@ -88,6 +92,9 @@ final class TransactionModal extends Component
     public ?int $accountId = null;
 
     public ?int $categoryId = null;
+
+    #[Locked]
+    public bool $categoryPicked = false;
 
     public string $date = '';
 
@@ -299,6 +306,7 @@ final class TransactionModal extends Component
         }
 
         $this->categoryId = $transaction->category_id;
+        $this->categoryPicked = false;
         $this->date = $transaction->post_date->format('Y-m-d');
         $this->notes = $transaction->notes ?? '';
         $this->excluded = $transaction->excluded;
@@ -336,6 +344,7 @@ final class TransactionModal extends Component
         $this->descriptionInput = $description !== '' ? "{$dollars} {$description}" : $dollars;
 
         $this->categoryId = $transaction->category_id;
+        $this->categoryPicked = false;
         $this->date = CarbonImmutable::now()->format('Y-m-d');
         $this->fillCurrency($transaction);
 
@@ -376,6 +385,7 @@ final class TransactionModal extends Component
 
         $this->accountId = $planned->account_id;
         $this->categoryId = $planned->category_id;
+        $this->categoryPicked = false;
         $this->date = $occurrenceDate ?? $planned->start_date->format('Y-m-d');
         $this->frequency = $planned->frequency->value;
 
@@ -430,6 +440,10 @@ final class TransactionModal extends Component
             $this->categoryId = $categoryBeforeCleanup;
 
             return;
+        }
+
+        if ($this->categoryId !== null && $this->categoryPicked) {
+            app(RecentCategoryPicks::class)->record($this->authenticatedUser(), $this->categoryId);
         }
 
         $this->showModal = false;
@@ -809,6 +823,49 @@ final class TransactionModal extends Component
             ->values();
     }
 
+    /**
+     * Creates a root category from the picker's search text and assigns it to
+     * the transaction being edited straight away. Refused while the user has
+     * locked their categories.
+     *
+     * @return array{id: int, label: string}|null
+     */
+    public function createCategoryFromPicker(string $name, CategoryCreator $creator): ?array
+    {
+        $this->resetErrorBag('categoryCreate');
+
+        $user = $this->authenticatedUser();
+        $name = mb_trim($name);
+
+        if ($name === '' || mb_strlen($name) > 255 || mb_strtolower($name) === Category::RESERVED_NAME) {
+            $this->addError('categoryCreate', __('Enter a valid category name.'));
+
+            return null;
+        }
+
+        $taken = Category::query()->where('user_id', $user->id)->whereNull('parent_id')->pluck('name')
+            ->contains(static fn (string $existing): bool => mb_strtolower(mb_trim($existing)) === mb_strtolower($name));
+
+        if ($taken || ProtectedCategories::isProtectedPath($name)) {
+            $this->addError('categoryCreate', __('A category with that name already exists or is reserved.'));
+
+            return null;
+        }
+
+        try {
+            $category = $creator->create($user, $name);
+        } catch (CategoriesLockedException $exception) {
+            $this->addError('categoryCreate', $exception->getMessage());
+
+            return null;
+        }
+
+        $this->categoryId = $category->id;
+        $this->categoryPicked = true;
+
+        return ['id' => $category->id, 'label' => $category->fullPath()];
+    }
+
     public function render(): View
     {
         $accounts = auth()
@@ -820,6 +877,9 @@ final class TransactionModal extends Component
             ->get();
 
         $categories = Category::visibleSortedByFullPath((int) auth()->id());
+        $recentCategories = app(RecentCategoryPicks::class)->categoriesFor($this->authenticatedUser())
+            ->map(static fn (Category $category): array => ['id' => $category->id, 'label' => $category->fullPath()])
+            ->all();
 
         $parsed = $this->descriptionInput !== '' ? AmountParser::parse($this->descriptionInput) : null;
 
@@ -834,6 +894,7 @@ final class TransactionModal extends Component
                     || ($this->isBankFeedTransaction && $this->originalWasTransfer && $account->id === $this->accountId),
             ),
             'categories' => $categories,
+            'recentCategories' => $recentCategories,
             'formatMoney' => MoneyCast::format(...),
             'parsedAmount' => $parsed->amount ?? 0,
             'parsedDescription' => $parsed->description ?? '',
@@ -1017,6 +1078,7 @@ final class TransactionModal extends Component
 
     public function updatedCategoryId(): void
     {
+        $this->categoryPicked = true;
         $this->refreshCategoriseContradictions();
     }
 
@@ -1079,6 +1141,14 @@ final class TransactionModal extends Component
     private static function blankSplitLine(): array
     {
         return ['name' => '', 'amount' => '', 'category_id' => null, 'notes' => '', 'excluded' => false];
+    }
+
+    private function authenticatedUser(): User
+    {
+        /** @var User $user */
+        $user = auth()->user();
+
+        return $user;
     }
 
     private function prefillAccountId(): ?int
@@ -2550,6 +2620,7 @@ final class TransactionModal extends Component
         $this->descriptionInput = '';
         $this->accountId = null;
         $this->categoryId = null;
+        $this->categoryPicked = false;
         $this->date = '';
         $this->notes = '';
         $this->excluded = false;

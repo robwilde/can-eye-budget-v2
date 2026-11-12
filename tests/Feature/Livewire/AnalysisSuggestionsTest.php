@@ -675,3 +675,22 @@ test('recurring suggestion row is clickable to copy the last transaction', funct
         ->test(AnalysisSuggestions::class)
         ->assertSeeHtml('wire:click="copyRecurringTransaction('.$suggestion->id.')"');
 });
+
+test('accepting a recurring suggestion records a recent pick only for a hand-picked category', function () {
+    $prefilled = Category::factory()->for($this->user)->create();
+    $picked = Category::factory()->for($this->user)->create();
+    $suggestion = createSuggestion($this, 'recurring', recurringPayload($this->account->id, ['category_id' => $prefilled->id]));
+
+    Livewire::actingAs($this->user)->test(AnalysisSuggestions::class)->call('acceptRecurringTransaction', $suggestion->id);
+
+    expect($this->user->fresh()->preferences->recentCategoryIds)->toBe([]);
+
+    $second = createSuggestion($this, 'recurring', recurringPayload($this->account->id, ['category_id' => $prefilled->id, 'description' => 'SPOTIFY']));
+
+    Livewire::actingAs($this->user)
+        ->test(AnalysisSuggestions::class)
+        ->set('recurringCategories.'.$second->id, $picked->id)
+        ->call('acceptRecurringTransaction', $second->id);
+
+    expect($this->user->fresh()->preferences->recentCategoryIds)->toBe([$picked->id]);
+});

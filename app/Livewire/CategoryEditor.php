@@ -16,6 +16,8 @@ use App\Services\CategoryMerger;
 use App\Services\Reports\CategoryGroupMap;
 use App\Support\Categories\ProtectedCategories;
 use App\Support\Transactions\CategoryAttribution;
+use Closure;
+use Flux\Flux;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -60,6 +62,21 @@ final class CategoryEditor extends Component
 
     public int $deletingTransactionCount = 0;
 
+    public ?int $deletingReplacementId = null;
+
+    public string $editingColor = '';
+
+    public string $editingIcon = '';
+
+    public bool $showMergeForm = false;
+
+    /**
+     * @var list<int|string>
+     */
+    public array $mergeSourceIds = [];
+
+    public ?int $mergeTargetId = null;
+
     public function selectCategory(int $id): void
     {
         $this->resetErrorBag();
@@ -84,6 +101,8 @@ final class CategoryEditor extends Component
         $this->editingName = $category->name;
         $this->editingParentId = $category->parent_id;
         $this->editingGroupId = $category->group_id;
+        $this->editingColor = $category->color ?? '';
+        $this->editingIcon = $category->icon ?? '';
         $this->showDeleteConfirm = false;
     }
 
@@ -96,8 +115,10 @@ final class CategoryEditor extends Component
         $userId = $this->authenticatedUser()->id;
 
         $this->validate([
-            'editingName' => ['required', 'string', 'max:255'],
+            'editingName' => ['required', 'string', 'max:255', $this->reservedNameRule()],
             'editingParentId' => ['nullable', 'integer', Rule::exists('categories', 'id')->where('user_id', $userId)],
+            'editingColor' => ['nullable', 'regex:'.CategoryGroup::COLOR_PATTERN],
+            'editingIcon' => ['nullable', 'string', Rule::in($this->iconOptions($userId))],
         ]);
 
         $category = Category::allWithLinkedParents($userId)->firstWhere('id', $this->selectedCategoryId);
@@ -124,10 +145,29 @@ final class CategoryEditor extends Component
             return;
         }
 
-        $category->update([
-            'name' => $this->editingName,
-            'parent_id' => $this->editingParentId,
-        ]);
+        if ($this->editingParentId !== $category->parent_id && $this->exceedsMaxLevels($userId, $category->id, $this->editingParentId)) {
+            $this->addError('editingParentId', __('Categories can only be nested :levels levels deep.', ['levels' => Category::MAX_LEVELS]));
+
+            return;
+        }
+
+        $parent = $this->editingParentId === null ? null : Category::query()->where('user_id', $userId)->find($this->editingParentId);
+        $color = $parent !== null ? $parent->color : ($this->editingColor === '' ? null : $this->editingColor);
+
+        DB::transaction(function () use ($category, $userId, $color): void {
+            $category->update([
+                'name' => $this->editingName,
+                'parent_id' => $this->editingParentId,
+                'color' => $color,
+                'icon' => $this->editingIcon === '' ? null : $this->editingIcon,
+            ]);
+
+            if ($category->wasChanged('color')) {
+                $this->recolourDescendants($userId, $category->id, $color);
+            }
+        });
+
+        $this->editingColor = $color ?? '';
     }
 
     public function saveCategoryGroup(): void
@@ -215,9 +255,15 @@ final class CategoryEditor extends Component
         $userId = $this->authenticatedUser()->id;
 
         $this->validate([
-            'newCategoryName' => ['required', 'string', 'max:255'],
+            'newCategoryName' => ['required', 'string', 'max:255', $this->reservedNameRule()],
             'newParentId' => ['nullable', 'integer', Rule::exists('categories', 'id')->where('user_id', $userId)],
         ]);
+
+        if ($this->exceedsMaxLevels($userId, null, $this->newParentId)) {
+            $this->addError('newParentId', __('Categories can only be nested :levels levels deep.', ['levels' => Category::MAX_LEVELS]));
+
+            return;
+        }
 
         if (ProtectedCategories::isProtectedPath($this->resultingPath($userId, $this->newParentId, $this->newCategoryName))) {
             $this->addError('newCategoryName', __('That name is used by a category the app finds by name, so it cannot be created.'));
@@ -261,6 +307,7 @@ final class CategoryEditor extends Component
             ->where('category_id', $category->id)
             ->distinct()
             ->count('transaction_id');
+        $this->deletingReplacementId = null;
         $this->showDeleteConfirm = true;
     }
 
@@ -273,6 +320,11 @@ final class CategoryEditor extends Component
         }
 
         $userId = $this->authenticatedUser()->id;
+
+        $this->validate([
+            'deletingReplacementId' => ['nullable', 'integer', Rule::exists('categories', 'id')->where('user_id', $userId)],
+        ]);
+
         $category = Category::allWithLinkedParents($userId)->firstWhere('id', $this->deletingCategoryId);
 
         if ($category !== null && ProtectedCategories::isProtected($category)) {
@@ -283,7 +335,7 @@ final class CategoryEditor extends Component
 
         if ($category !== null) {
             try {
-                $merger->deleteWithReplacement($this->authenticatedUser(), $category->id);
+                $merger->deleteWithReplacement($this->authenticatedUser(), $category->id, $this->deletingReplacementId);
             } catch (CategoryMergeRefusedException $exception) {
                 $this->addError('deletingCategoryId', $exception->getMessage());
 
@@ -301,6 +353,60 @@ final class CategoryEditor extends Component
         $this->deletingCategoryId = null;
         $this->deletingCategoryName = '';
         $this->deletingTransactionCount = 0;
+        $this->deletingReplacementId = null;
+    }
+
+    public function openMergeForm(): void
+    {
+        $this->resetErrorBag();
+        $this->showMergeForm = true;
+        $this->mergeSourceIds = $this->selectedCategoryId === null ? [] : [$this->selectedCategoryId];
+        $this->mergeTargetId = null;
+    }
+
+    public function closeMergeForm(): void
+    {
+        $this->resetErrorBag();
+        $this->resetMergeForm();
+    }
+
+    public function mergeCategories(CategoryMerger $merger): void
+    {
+        $this->resetErrorBag();
+
+        $userId = $this->authenticatedUser()->id;
+
+        $this->validate([
+            'mergeSourceIds' => ['required', 'array', 'min:1'],
+            'mergeSourceIds.*' => ['integer', Rule::exists('categories', 'id')->where('user_id', $userId)],
+            'mergeTargetId' => ['required', 'integer', Rule::exists('categories', 'id')->where('user_id', $userId)],
+        ]);
+
+        $sourceIds = array_map(intval(...), $this->mergeSourceIds);
+
+        try {
+            $merger->merge($this->authenticatedUser(), $sourceIds, (int) $this->mergeTargetId);
+        } catch (CategoryMergeRefusedException $exception) {
+            $this->addError('mergeSourceIds', $exception->getMessage());
+
+            return;
+        }
+
+        if ($this->selectedCategoryId !== null && in_array($this->selectedCategoryId, $sourceIds, true)) {
+            $this->selectedCategoryId = null;
+            $this->editingName = '';
+            $this->editingParentId = null;
+        }
+
+        $this->resetMergeForm();
+        Flux::toast(text: __('Categories merged.'), variant: 'success');
+    }
+
+    public function toggleCategoriesLocked(): void
+    {
+        $user = $this->authenticatedUser();
+
+        $user->updatePreferences(['categoriesLocked' => ! $user->preferences->categoriesLocked]);
     }
 
     public function render(): View
@@ -353,6 +459,11 @@ final class CategoryEditor extends Component
 
         $parentOptions = Category::visibleSortedByFullPath($userId);
 
+        $mergeSourceIds = array_map(intval(...), array_filter($this->mergeSourceIds, is_numeric(...)));
+        $mergeTransactionCount = $this->showMergeForm && $mergeSourceIds !== []
+            ? (int) CategoryAttribution::query($userId)->whereIn('category_id', $mergeSourceIds)->distinct()->count('transaction_id')
+            : 0;
+
         return view('livewire.category-editor', [
             'categories' => $categories,
             'transactions' => $transactions,
@@ -360,6 +471,9 @@ final class CategoryEditor extends Component
             'groups' => $groups,
             'isSearching' => $isSearching,
             'formatMoney' => MoneyCast::format(...),
+            'categoriesLocked' => $this->authenticatedUser()->preferences->categoriesLocked,
+            'mergeTransactionCount' => $mergeTransactionCount,
+            'icons' => $this->iconOptions($userId),
         ]);
     }
 
@@ -368,6 +482,68 @@ final class CategoryEditor extends Component
         $parent = $parentId === null ? null : Category::allWithLinkedParents($userId)->firstWhere('id', $parentId);
 
         return $parent === null ? $name : $parent->fullPath().' / '.$name;
+    }
+
+    private function exceedsMaxLevels(int $userId, ?int $categoryId, ?int $parentId): bool
+    {
+        if ($parentId === null) {
+            return false;
+        }
+
+        $all = Category::allWithLinkedParents($userId);
+        $parent = $all->firstWhere('id', $parentId);
+
+        if ($parent === null) {
+            return false;
+        }
+
+        $height = 0;
+        $level = $categoryId === null ? [] : [$categoryId];
+        $visited = [];
+
+        while ($level !== []) {
+            $visited = [...$visited, ...$level];
+            $level = $all->whereIn('parent_id', $level)->pluck('id')->diff($visited)->values()->all();
+            $height += $level === [] ? 0 : 1;
+        }
+
+        return $parent->depth() + 1 + $height >= Category::MAX_LEVELS;
+    }
+
+    private function reservedNameRule(): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail): void {
+            if (is_string($value) && mb_strtolower(mb_trim($value)) === Category::RESERVED_NAME) {
+                $fail(__('That name is reserved.'));
+            }
+        };
+    }
+
+    /**
+     * @return list<string> The group icon set plus every icon already on one of the user's categories.
+     */
+    private function iconOptions(int $userId): array
+    {
+        $used = Category::query()->where('user_id', $userId)->whereNotNull('icon')->distinct()->pluck('icon')->all();
+
+        return collect([...CategoryGroup::ICONS, ...$used])->unique()->sort()->values()->all();
+    }
+
+    private function resetMergeForm(): void
+    {
+        $this->showMergeForm = false;
+        $this->mergeSourceIds = [];
+        $this->mergeTargetId = null;
+    }
+
+    private function recolourDescendants(int $userId, int $categoryId, ?string $color): void
+    {
+        $level = [$categoryId];
+
+        while ($level !== []) {
+            Category::query()->where('user_id', $userId)->whereIn('parent_id', $level)->update(['color' => $color]);
+            $level = Category::query()->where('user_id', $userId)->whereIn('parent_id', $level)->pluck('id')->all();
+        }
     }
 
     private function wouldCreateCycle(int $userId, int $categoryId, ?int $newParentId): bool

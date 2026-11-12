@@ -341,3 +341,35 @@ test('recurringCategories does not retain superseded suggestion keys across scan
     expect($secondKeys)->toHaveCount(1)
         ->and(array_intersect($firstKeys, $secondKeys))->toBeEmpty();
 });
+
+test('accept records a recent pick only for a hand-picked category', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $user->update(['primary_account_id' => $account->id]);
+    $category = Category::factory()->for($user)->create(['name' => 'Entertainment']);
+
+    createRecurringReviewMonthlyGroup($user, $account, 'Netflix', 1699, 3);
+    Livewire::actingAs($user)->test(RecurringTransactionReview::class)->call('findRecurring');
+    $suggestion = AnalysisSuggestion::query()->where('user_id', $user->id)->ofType(SuggestionType::RecurringTransaction)->pending()->firstOrFail();
+
+    Livewire::actingAs($user)
+        ->test(RecurringTransactionReview::class)
+        ->set('recurringCategories.'.$suggestion->id, $category->id)
+        ->call('accept', $suggestion->id);
+
+    expect($user->fresh()->preferences->recentCategoryIds)->toBe([$category->id]);
+});
+
+test('accept without choosing a category records no recent pick', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $user->update(['primary_account_id' => $account->id]);
+
+    createRecurringReviewMonthlyGroup($user, $account, 'Netflix', 1699, 3);
+    Livewire::actingAs($user)->test(RecurringTransactionReview::class)->call('findRecurring');
+    $suggestion = AnalysisSuggestion::query()->where('user_id', $user->id)->ofType(SuggestionType::RecurringTransaction)->pending()->firstOrFail();
+
+    Livewire::actingAs($user)->test(RecurringTransactionReview::class)->call('accept', $suggestion->id);
+
+    expect($user->fresh()->preferences->recentCategoryIds)->toBe([]);
+});
