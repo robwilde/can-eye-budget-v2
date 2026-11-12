@@ -329,6 +329,18 @@
                 <flux:text size="sm" class="text-red-600" data-testid="category-create-error">{{ $message }}</flux:text>
             @enderror
 
+            @if($mode === 'enter' && $editingPlannedTransactionId === null && $tags->isNotEmpty())
+                <flux:field data-test="modal-tags">
+                    <flux:label>{{ __('Tags') }}</flux:label>
+                    <div class="flex flex-wrap gap-x-4 gap-y-2">
+                        @foreach($tags as $tag)
+                            <flux:checkbox wire:model="tagIds" value="{{ $tag->id }}" :label="$tag->name" wire:key="modal-tag-{{ $tag->id }}"/>
+                        @endforeach
+                    </div>
+                    <flux:error name="tagIds"/>
+                </flux:field>
+            @endif
+
             @if($editingTransactionId && $transactionType !== 'transfer')
                 <flux:field variant="inline">
                     <flux:checkbox wire:model.live="categoriseMatching"/>
