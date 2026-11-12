@@ -26,6 +26,7 @@ use App\Models\Category;
 use App\Models\CategoryGroup;
 use App\Models\MerchantBrand;
 use App\Models\Payee;
+use App\Models\Tag;
 use App\Models\Transaction;
 use App\Models\TransactionEmail;
 use App\Models\TransactionSplit;
@@ -40,9 +41,11 @@ use App\Services\Payees\PayeeConfirmer;
 use App\Services\Payees\PayeeReviewQueue;
 use App\Services\RecentCategoryPicks;
 use App\Services\Reports\CategoryGroupMap;
+use App\Services\Tags\TransactionTagger;
 use App\Services\TransactionEmailLinker;
 use App\Services\Transactions\TransactionBulkEditor;
 use App\Services\Transactions\TransactionDeleter;
+use App\Services\Transfers\TransferKinds;
 use App\Services\Transfers\TransferLinker;
 use App\Services\Transfers\TransferReviewQueue;
 use App\Support\AmountParser;
@@ -53,6 +56,7 @@ use ContextDev\Core\Exceptions\ContextDevException;
 use Flux\Flux;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Collection;
@@ -133,6 +137,14 @@ final class TransactionList extends Component
 
     #[Url]
     public ?int $category = null;
+
+    /**
+     * The tag filter: tag ids and the word 'untagged', any of which matches a row. Empty applies no filter.
+     *
+     * @var array<int, mixed>
+     */
+    #[Url]
+    public array $tags = [];
 
     #[Url]
     public ?int $group = null;
@@ -271,7 +283,7 @@ final class TransactionList extends Component
     public ?string $bulkPanel = null;
 
     /**
-     * The fields the bulk edit changes: any of 'date', 'name' and 'notes'. A field that is
+     * The fields the bulk edit changes: any of 'date', 'name', 'notes' and 'tags'. A field that is
      * not listed keeps its value on every row, whatever its input holds.
      *
      * @var list<string>
@@ -283,6 +295,13 @@ final class TransactionList extends Component
     public string $bulkEditName = '';
 
     public string $bulkEditNotes = '';
+
+    /**
+     * The tags a bulk edit sets when 'tags' is included; none selected clears them.
+     *
+     * @var list<int|string>
+     */
+    public array $bulkEditTagIds = [];
 
     /**
      * The editable `description contains` value the generated rule will carry.
@@ -383,6 +402,7 @@ final class TransactionList extends Component
             $this->attachments = 'all';
         }
 
+        $this->normaliseTagFilter();
         $this->normaliseAmountFilter();
         $this->amountDollars = $this->amountCents === null ? '' : number_format($this->amountCents / 100, 2, '.', '');
         $this->normaliseStatuses();
@@ -772,6 +792,7 @@ final class TransactionList extends Component
         $this->bulkEditDate = '';
         $this->bulkEditName = '';
         $this->bulkEditNotes = '';
+        $this->bulkEditTagIds = [];
         $this->resetErrorBag();
     }
 
@@ -1525,6 +1546,42 @@ final class TransactionList extends Component
         $this->resetPage();
     }
 
+    public function updatedTags(): void
+    {
+        $this->normaliseTagFilter();
+        $this->resetPage();
+    }
+
+    public function clearTagFilter(): void
+    {
+        $this->tags = [];
+        $this->resetPage();
+    }
+
+    /**
+     * Adds the tag to a row that does not carry it and removes it from one that does, on both
+     * legs of a transfer. Each toggle reads the row's state under lock, so rapid toggles apply
+     * in the order they arrive. A tag the user does not own changes nothing.
+     *
+     * @throws Throwable
+     */
+    public function toggleTag(int $transactionId, int $tagId, TransactionTagger $tagger): void
+    {
+        $toggled = DB::transaction(function () use ($transactionId, $tagId, $tagger): bool {
+            try {
+                $current = Transaction::lockCurrentVersion($transactionId, (int) auth()->id());
+            } catch (ModelNotFoundException) {
+                return false;
+            }
+
+            return $tagger->toggle($current, $tagId);
+        }, TransferKinds::TRANSACTION_ATTEMPTS);
+
+        if ($toggled) {
+            $this->dispatch('transaction-saved');
+        }
+    }
+
     public function updatedAmountOp(): void
     {
         $this->normaliseAmountFilter();
@@ -1668,6 +1725,7 @@ final class TransactionList extends Component
             'gmailEnabled' => app(GmailServiceContract::class)->isConfigured(auth()->user()),
             'splitCategories' => Category::visibleSortedByFullPath($this->authenticatedUser()->id),
             'clusterSuggestion' => $this->clusterSuggestion(),
+            'userTags' => Tag::query()->where('user_id', auth()->id())->orderBy('name')->get(['id', 'name', 'colour']),
             'bulkCategories' => $this->narrowedByIntent(Category::visibleSortedByFullPath($this->authenticatedUser()->id)),
             'selectionCount' => $selectionCount,
             'pageEligibleIds' => $pageEligibleIds,
@@ -1719,6 +1777,28 @@ final class TransactionList extends Component
         }
 
         return [$lines, $cents];
+    }
+
+    private function normaliseTagFilter(): void
+    {
+        $this->tags = array_values(array_unique(array_map(
+            strval(...),
+            array_filter($this->tags, static fn (mixed $tag): bool => is_int($tag) || (is_string($tag) && ($tag === 'untagged' || ctype_digit($tag)))),
+        )));
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     * @return array{0: list<int>, 1: bool} the tag ids to match and whether untagged rows match
+     */
+    private function tagFilter(array $filters): array
+    {
+        $tags = is_array($filters['tags'] ?? null) ? $filters['tags'] : [];
+
+        return [
+            array_values(array_map(intval(...), array_filter($tags, static fn (mixed $tag): bool => is_int($tag) || (is_string($tag) && ctype_digit($tag))))),
+            in_array('untagged', $tags, true),
+        ];
     }
 
     private function normaliseAmountFilter(): void
@@ -2059,7 +2139,7 @@ final class TransactionList extends Component
     {
         return $this->queryFor($filters)
             ->withRelations()
-            ->with(['emails', 'splits.category', 'splitChildren'])
+            ->with(['emails', 'splits.category', 'splitChildren', 'tags'])
             ->orderBy(
                 in_array($this->sortBy, self::SORTABLE_COLUMNS, true) ? $this->sortBy : 'post_date',
                 in_array($this->sortDir, ['asc', 'desc'], true) ? $this->sortDir : 'desc',
@@ -2309,7 +2389,7 @@ final class TransactionList extends Component
      */
     private function validatedBulkEdit(): BulkTransactionEdit
     {
-        $include = array_values(array_intersect(['date', 'name', 'notes'], $this->bulkEditInclude));
+        $include = array_values(array_intersect(['date', 'name', 'notes', 'tags'], $this->bulkEditInclude));
 
         if ($include === []) {
             throw ValidationException::withMessages(['bulkEditInclude' => 'Choose at least one field to change.']);
@@ -2329,6 +2409,11 @@ final class TransactionList extends Component
             $rules['bulkEditNotes'] = ['nullable', 'string', 'max:1000'];
         }
 
+        if (in_array('tags', $include, true)) {
+            $rules['bulkEditTagIds'] = ['array', 'max:50'];
+            $rules['bulkEditTagIds.*'] = ['integer'];
+        }
+
         $this->validate($rules);
 
         return new BulkTransactionEdit(
@@ -2336,6 +2421,7 @@ final class TransactionList extends Component
             name: in_array('name', $include, true) ? mb_trim($this->bulkEditName) : null,
             setNotes: in_array('notes', $include, true),
             notes: in_array('notes', $include, true) && mb_trim($this->bulkEditNotes) !== '' ? $this->bulkEditNotes : null,
+            tagIds: in_array('tags', $include, true) ? array_map(intval(...), $this->bulkEditTagIds) : null,
         );
     }
 
@@ -2378,7 +2464,7 @@ final class TransactionList extends Component
 
     private function bulkEditPreview(): ?BulkTransactionEdit
     {
-        $include = array_intersect(['date', 'name', 'notes'], $this->bulkEditInclude);
+        $include = array_intersect(['date', 'name', 'notes', 'tags'], $this->bulkEditInclude);
 
         if ($include === []) {
             return null;
@@ -2388,6 +2474,7 @@ final class TransactionList extends Component
             date: in_array('date', $include, true) ? CarbonImmutable::today() : null,
             name: in_array('name', $include, true) ? '' : null,
             setNotes: in_array('notes', $include, true),
+            tagIds: in_array('tags', $include, true) ? [] : null,
         );
     }
 
@@ -2459,6 +2546,7 @@ final class TransactionList extends Component
             'account' => $this->account,
             'category' => $this->category,
             'group' => $this->group,
+            'tags' => $this->tags,
             'exactCategory' => $this->exactCategory,
             'amountOp' => $this->amountOp,
             'amountCents' => $this->amountCents,
@@ -2513,6 +2601,7 @@ final class TransactionList extends Component
             : [];
         $statusFilter = count($statuses) === 1 ? $statuses[0] : null;
         $categoryIds = $this->attributionIds($filters);
+        [$tagIds, $untagged] = $this->tagFilter($filters);
 
         return Transaction::query()
             ->where('user_id', auth()->id())
@@ -2537,6 +2626,11 @@ final class TransactionList extends Component
                 : $q->where(fn ($q) => $q
                     ->whereIn('category_id', $categoryIds)
                     ->orWhereHas('splits', fn ($s) => $s->whereIn('category_id', $categoryIds))))
+            ->when($tagIds !== [] || $untagged, fn ($q) => $q->where(fn ($q) => $q
+                ->when($tagIds !== [], fn ($q) => $q->whereHas('tags', fn ($t) => $t
+                    ->where('tags.user_id', auth()->id())
+                    ->whereIn('tags.id', $tagIds)))
+                ->when($untagged, fn ($q) => $q->orWhereDoesntHave('tags'))))
             ->when($amountOperator, fn ($q, string $operator) => $q->whereRaw(
                 "abs(transactions.amount) {$operator} ?",
                 [$amountCents],
@@ -2796,7 +2890,7 @@ final class TransactionList extends Component
         return $this->queryFor($filters)
             ->where('merchant_key', $this->expandedKey)
             ->withRelations()
-            ->with(['emails', 'splits.category', 'splitChildren'])
+            ->with(['emails', 'splits.category', 'splitChildren', 'tags'])
             ->orderByDesc('post_date')
             ->orderByDesc('id')
             ->get();

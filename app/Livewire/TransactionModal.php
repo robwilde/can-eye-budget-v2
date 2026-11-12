@@ -26,6 +26,7 @@ use App\Exceptions\TransferLinkRefusedException;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
+use App\Models\Tag;
 use App\Models\Transaction;
 use App\Models\TransactionAttachment;
 use App\Models\User;
@@ -35,6 +36,7 @@ use App\Services\ExchangeRateLookup;
 use App\Services\PendingMergeService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\RecentCategoryPicks;
+use App\Services\Tags\TransactionTagger;
 use App\Services\TransactionIdempotency;
 use App\Services\Transactions\TransactionDeleter;
 use App\Services\Transactions\TransactionSplitter;
@@ -99,6 +101,13 @@ final class TransactionModal extends Component
     public string $date = '';
 
     public string $notes = '';
+
+    /** @var list<int> */
+    public array $tagIds = [];
+
+    /** @var list<int> */
+    #[Locked]
+    public array $openedTagIds = [];
 
     public bool $excluded = false;
 
@@ -309,6 +318,7 @@ final class TransactionModal extends Component
         $this->categoryPicked = false;
         $this->date = $transaction->post_date->format('Y-m-d');
         $this->notes = $transaction->notes ?? '';
+        $this->tagIds = $this->openedTagIds = $this->tagIdsOf($transaction);
         $this->excluded = $transaction->excluded;
         $this->isSplitParent = $transaction->isSplitParent();
         $this->isSplitChild = $transaction->isSplitChild();
@@ -345,6 +355,7 @@ final class TransactionModal extends Component
 
         $this->categoryId = $transaction->category_id;
         $this->categoryPicked = false;
+        $this->tagIds = $this->tagIdsOf($transaction);
         $this->date = CarbonImmutable::now()->format('Y-m-d');
         $this->fillCurrency($transaction);
 
@@ -895,6 +906,7 @@ final class TransactionModal extends Component
             ),
             'categories' => $categories,
             'recentCategories' => $recentCategories,
+            'tags' => Tag::query()->where('user_id', auth()->id())->orderBy('name')->get(['id', 'name', 'colour']),
             'formatMoney' => MoneyCast::format(...),
             'parsedAmount' => $parsed->amount ?? 0,
             'parsedDescription' => $parsed->description ?? '',
@@ -1151,6 +1163,38 @@ final class TransactionModal extends Component
         return $user;
     }
 
+    /**
+     * Sets the form's tags on the saved transaction, and on the other leg of a transfer. Called
+     * inside the save's own DB transaction, so a failure rolls the save back and a deadlock
+     * retry runs it again. A planned transaction takes no tags. An unchanged selection writes
+     * nothing, except when the save forms a transfer pair: then the selection is set on both legs.
+     *
+     * @throws Throwable
+     */
+    private function syncChosenTags(Transaction $row, bool $formsPair = false): void
+    {
+        if ($this->mode === 'plan' || $this->editingPlannedTransactionId !== null) {
+            return;
+        }
+
+        $chosen = array_values(array_unique(array_map(intval(...), $this->tagIds)));
+        sort($chosen);
+
+        if (! $formsPair && $chosen === ($this->editingTransactionId !== null ? $this->openedTagIds : [])) {
+            return;
+        }
+
+        app(TransactionTagger::class)->replace($row->refresh(), $chosen);
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function tagIdsOf(Transaction $transaction): array
+    {
+        return $transaction->tags()->orderBy('tags.id')->pluck('tags.id')->map(static fn (mixed $id): int => (int) $id)->all();
+    }
+
     private function prefillAccountId(): ?int
     {
         $user = auth()->user();
@@ -1199,6 +1243,7 @@ final class TransactionModal extends Component
             'description' => 'description',
             'clean_description' => 'name',
             'notes' => 'notes',
+            'tags' => 'tags',
             'category_id' => 'category',
             'amount' => 'amount',
             'direction' => 'type',
@@ -1369,16 +1414,38 @@ final class TransactionModal extends Component
         $isLinked = $row->transfer_pair_id !== null;
 
         if ($isLinked && $this->originalWasTransfer && ! $wantsTransfer) {
-            // Unlink first so the edit's new version does not inherit the stale pair id.
-            app(TransferLinker::class)->unlink($row);
-            $this->kind = TransactionKind::Standard->value;
-            $this->openedKind = TransactionKind::Standard->value;
+            return DB::transaction(function () use ($row): bool {
+                $fresh = Transaction::query()->where('user_id', auth()->id())->find($row->id);
 
-            return ! $this->bankFeedFieldsChanged($row) || $this->updateTransaction();
+                if (! $fresh instanceof Transaction) {
+                    return false;
+                }
+
+                // Unlink first so the edit's new version does not inherit the stale pair id.
+                app(TransferLinker::class)->unlink($fresh);
+                $this->kind = TransactionKind::Standard->value;
+                $this->openedKind = TransactionKind::Standard->value;
+
+                if ($this->bankFeedFieldsChanged($fresh) && ! $this->updateTransaction()) {
+                    return false;
+                }
+
+                $this->syncChosenTags(Transaction::findCurrentVersion($row->id, (int) auth()->id()) ?? $fresh);
+
+                return true;
+            }, TransferKinds::TRANSACTION_ATTEMPTS);
         }
 
         if (! $isLinked && $wantsTransfer) {
-            return $this->linkBankFeedRow($row);
+            return DB::transaction(function () use ($row): bool {
+                if (! $this->linkBankFeedRow($row)) {
+                    return false;
+                }
+
+                $this->syncChosenTags(Transaction::findCurrentVersion($row->id, (int) auth()->id()) ?? $row, formsPair: true);
+
+                return true;
+            }, TransferKinds::TRANSACTION_ATTEMPTS);
         }
 
         return $this->updateTransaction();
@@ -1560,10 +1627,17 @@ final class TransactionModal extends Component
             return false;
         }
 
-        app(TransactionIdempotency::class)->ingestOnce(
-            new Transaction($this->manualSingleAttributes($parsed, null)),
-            $this->submissionToken,
-        );
+        DB::transaction(function () use ($parsed): void {
+            app(AccountBalanceHistoryBuilder::class)->lockAccounts($this->accountId);
+
+            $created = app(TransactionIdempotency::class)->ingestOnce(
+                new Transaction($this->manualSingleAttributes($parsed, null)),
+                $this->submissionToken,
+            );
+
+            $targets = $created->trashed() ? $created->children()->current()->get() : collect([$created]);
+            $targets->each(fn (Transaction $row) => $this->syncChosenTags($row));
+        }, TransferKinds::TRANSACTION_ATTEMPTS);
 
         return true;
     }
@@ -1581,7 +1655,11 @@ final class TransactionModal extends Component
             return false;
         }
 
-        $this->createTransferPair($parsed);
+        DB::transaction(function () use ($parsed): void {
+            app(AccountBalanceHistoryBuilder::class)->lockAccounts($this->accountId, $this->transferToAccountId);
+
+            $this->syncChosenTags($this->createTransferPair($parsed));
+        }, TransferKinds::TRANSACTION_ATTEMPTS);
 
         return true;
     }
@@ -1678,17 +1756,20 @@ final class TransactionModal extends Component
                 $this->assertSplitRowUnchanged($transaction);
                 $this->reloadCleanNamesUnderLock($transaction);
 
-                return $transaction->createChild($this->withLockedFields($transaction, [
+                $child = $transaction->createChild($this->withLockedFields($transaction, [
                     'category_id' => $this->categoryId,
                     'notes' => $this->notes !== '' ? $this->notes : null,
                     'excluded' => $this->excluded,
                     ...$this->editedDescriptors($transaction),
                     ...$this->kindOverride(),
                 ]));
-            });
 
-            // The partner follows the new version, but only for links that still hold under lock.
-            app(TransferLinker::class)->followVersion($transaction, $child);
+                // The partner follows the new version, but only for links that still hold under lock.
+                app(TransferLinker::class)->followVersion($transaction, $child);
+                $this->syncChosenTags($child);
+
+                return $child;
+            }, TransferKinds::TRANSACTION_ATTEMPTS);
         } else {
             $child = DB::transaction(function () use ($transaction, $parsed): Transaction {
                 app(AccountBalanceHistoryBuilder::class)->lockAccounts($transaction->account_id, $this->accountId);
@@ -1712,9 +1793,10 @@ final class TransactionModal extends Component
 
                 app(AccountBalanceHistoryBuilder::class)->rebuildForEdit($transaction, $child);
                 app(TransferLinker::class)->followEditedVersion($transaction, $child);
+                $this->syncChosenTags($child);
 
                 return $child;
-            });
+            }, TransferKinds::TRANSACTION_ATTEMPTS);
         }
 
         $this->applyCategoriseMatching($child);
@@ -1838,6 +1920,8 @@ final class TransactionModal extends Component
             $debitChild->update(['transfer_pair_id' => $creditChild->id] + $manual);
             $creditChild->update(['transfer_pair_id' => $debitChild->id] + $manual);
 
+            $this->syncChosenTags($debitChild);
+
             app(AccountBalanceHistoryBuilder::class)->rebuildForEdits([$debitSide, $debitChild], [$creditSide, $creditChild]);
         }, TransferKinds::TRANSACTION_ATTEMPTS);
 
@@ -1907,6 +1991,8 @@ final class TransactionModal extends Component
                 ->where('suggested_pair_id', $transaction->id)
                 ->update(['suggested_pair_id' => null, 'transfer_link_source' => null]);
 
+            $this->syncChosenTags($debitChild, formsPair: true);
+
             app(AccountBalanceHistoryBuilder::class)->rebuildForTransactions($transaction, $debitChild, $credit);
         }, TransferKinds::TRANSACTION_ATTEMPTS);
 
@@ -1954,6 +2040,8 @@ final class TransactionModal extends Component
                 'transfer_link_source' => $keepCreditSide ? TransferLinkSource::Unlinked : null,
                 ...$this->renamedDescriptors($debitSide, $parsed->description),
             ]);
+
+            $this->syncChosenTags($child);
 
             if (! $keepCreditSide) {
                 $creditSide->delete();
@@ -2623,6 +2711,8 @@ final class TransactionModal extends Component
         $this->categoryPicked = false;
         $this->date = '';
         $this->notes = '';
+        $this->tagIds = [];
+        $this->openedTagIds = [];
         $this->excluded = false;
         $this->submissionToken = (string) Str::uuid();
         $this->currency = '';
@@ -2713,6 +2803,8 @@ final class TransactionModal extends Component
                 ? ['required', 'date_format:Y-m-d', 'after:today']
                 : ['required', 'date_format:Y-m-d'],
             'notes' => ['nullable', 'string', 'max:1000'],
+            'tagIds' => ['array', 'max:50'],
+            'tagIds.*' => ['integer'],
             'cleanDescription' => ['nullable', 'string', 'max:255'],
             'currency' => ['nullable', 'string', Rule::in([...auth()->user()->allowedCurrencies(), $this->openedCurrency])],
             'exchangeRate' => $this->storesExchangeRate() || $this->transferNeedsRate() ? ['nullable', 'numeric', 'min:0.00000001', 'lt:10000000000'] : ['nullable'],
