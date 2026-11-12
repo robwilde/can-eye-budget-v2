@@ -312,6 +312,7 @@ final readonly class TransactionSplitter
                 'exchange_rate' => $parent->exchange_rate,
                 'split_parent_id' => $parent->id,
                 'merchant_key' => $parent->merchant_key,
+                'merchant_id' => $parent->merchant_id,
             ]));
         }
 
