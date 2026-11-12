@@ -7,6 +7,7 @@
         'connect-bank' => ['Connect', 'Link your bank'],
         'import-bank' => ['Import', 'Upload a CSV statement'],
         'rules' => ['Rules', 'Automations'],
+        'tags' => ['Tags', 'Organise transactions'],
     ];
 
     [$crumb, $title] = $titles[request()->route()?->getName()] ?? ['Can I Budget', ''];
