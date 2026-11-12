@@ -176,6 +176,24 @@
             <flux:checkbox value="pending" label="Pending"/>
         </flux:checkbox.group>
 
+        <flux:dropdown data-testid="tag-filter">
+            <flux:button size="sm" icon="tag" icon:trailing="chevron-down">
+                {{ $tags === [] ? 'Any tag' : count($tags).' '.Str::plural('tag', count($tags)) }}
+            </flux:button>
+            <flux:menu>
+                <flux:menu.checkbox.group wire:model.live="tags">
+                    <flux:menu.checkbox value="untagged" data-testid="tag-filter-untagged">Untagged</flux:menu.checkbox>
+                    @foreach($userTags as $userTag)
+                        <flux:menu.checkbox value="{{ $userTag->id }}" wire:key="tag-filter-{{ $userTag->id }}" data-testid="tag-filter-{{ $userTag->id }}">{{ $userTag->name }}</flux:menu.checkbox>
+                    @endforeach
+                </flux:menu.checkbox.group>
+                @if($tags !== [])
+                    <flux:menu.separator/>
+                    <flux:menu.item wire:click="clearTagFilter" data-testid="tag-filter-clear">Clear</flux:menu.item>
+                @endif
+            </flux:menu>
+        </flux:dropdown>
+
         @if($amountOp !== 'any' && $amountCents !== null)
             <flux:badge size="sm" data-testid="amount-filter-chip">
                 Amount {{ ['eq' => '=', 'lt' => '<', 'gt' => '>'][$amountOp] }} {{ $formatMoney($amountCents) }}
@@ -628,6 +646,7 @@
                                     <flux:checkbox value="date" label="Date" data-testid="bulk-include-date"/>
                                     <flux:checkbox value="name" label="Name" data-testid="bulk-include-name"/>
                                     <flux:checkbox value="notes" label="Notes" data-testid="bulk-include-notes"/>
+                                    <flux:checkbox value="tags" label="Tags" data-testid="bulk-include-tags"/>
                                 </flux:checkbox.group>
                                 <flux:error name="bulkEditInclude"/>
 
@@ -645,6 +664,18 @@
                                             <flux:label>New name</flux:label>
                                             <flux:input wire:model="bulkEditName" size="sm" data-testid="bulk-edit-name"/>
                                             <flux:error name="bulkEditName"/>
+                                        </flux:field>
+                                    @endif
+
+                                    @if(in_array('tags', $bulkEditInclude, true))
+                                        <flux:field class="min-w-64" data-testid="bulk-edit-tags">
+                                            <flux:label>Tags (none selected clears them)</flux:label>
+                                            <flux:checkbox.group wire:model="bulkEditTagIds">
+                                                @foreach($userTags as $userTag)
+                                                    <flux:checkbox value="{{ $userTag->id }}" :label="$userTag->name" wire:key="bulk-tag-{{ $userTag->id }}"/>
+                                                @endforeach
+                                            </flux:checkbox.group>
+                                            <flux:error name="bulkEditTagIds"/>
                                         </flux:field>
                                     @endif
 
@@ -670,7 +701,7 @@
                                 will be {{ $bulkPanel === 'delete' ? 'deleted' : 'edited' }}@if($bulkImpact['skipped'] > 0),
                                     <strong data-testid="bulk-impact-skipped">{{ $bulkImpact['skipped'] }}</strong>
                                     skipped
-                                    ({{ $bulkPanel === 'delete' ? 'bank-feed transactions are kept' : (in_array('date', $bulkEditInclude, true) && count($bulkEditInclude) === 1 ? 'split transactions are left alone, and so are bank-feed rows and linked transfers, which keep their date' : 'split transactions are left alone') }})@endif.
+                                    ({{ $bulkPanel === 'delete' ? 'bank-feed transactions are kept' : ($bulkEditInclude === ['tags'] ? 'only transactions that are not yours or no longer exist' : (in_array('date', $bulkEditInclude, true) && count($bulkEditInclude) === 1 ? 'split transactions are left alone, and so are bank-feed rows and linked transfers, which keep their date' : 'split transactions are left alone')) }})@endif.
                                 @if($bulkImpact['keepDate'] > 0)
                                     <span data-testid="bulk-impact-keep-date">
                                         {{ $bulkImpact['keepDate'] }} bank-feed or linked transfer

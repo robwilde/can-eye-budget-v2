@@ -9,7 +9,7 @@
      panels behave identically in both modes.
 
      Passed in: $transaction.
-     Read from the component's view data: $account, $formatMoney, $gmailEnabled,
+     Read from the component's view data: $account, $userTags, $formatMoney, $gmailEnabled,
      $merchantBrands (resolved brands keyed by transaction id), $identifiableIds,
      $emailPanelTxnId, $emailResults, $emailScanError, $splitPanelTxnId,
      $splitLines, $splitCategories, $splitError.
@@ -70,6 +70,24 @@
             </x-slot:category>
             <x-slot:meta :class="$hasDesktopMeta ? null : 'phone-only'">{{ implode(' · ', $metaParts) }}<span class="tx-cat-inline">{{ $metaParts !== [] ? ' · ' : '' }}{{ $categoryLabel ?? 'Uncategorised' }}</span>@if($isPlanned) <span class="pill plan">Planned</span>@endif@if($isPossibleTransfer) <span class="pill split" data-testid="possible-transfer-{{ $transaction->id }}">Possible transfer</span>@endif@if($transaction->excluded) <span class="pill" data-testid="excluded-{{ $transaction->id }}">Excluded</span>@endif@if($transaction->isSplit()) <span class="pill split">Split ({{ $transaction->splits->count() }})</span>@endif@if($isSplitParent) <span class="pill split" data-testid="split-parent-{{ $transaction->id }}">Split into transactions</span>@endif@if($isSplitChild) <span class="pill split" data-testid="split-child-{{ $transaction->id }}">Split line</span>@endif@if($transaction->emails->isNotEmpty()) <span class="pill email">{{ $transaction->emails->count() }} email{{ $transaction->emails->count() > 1 ? 's' : '' }}</span>@endif</x-slot:meta>
             <x-slot:actions>
+                @foreach($transaction->tags as $rowTag)
+                    <span class="pill" style="border-color: {{ $rowTag->colour }}" data-testid="row-tag-{{ $transaction->id }}-{{ $rowTag->id }}">{{ $rowTag->name }}</span>
+                @endforeach
+                @if($userTags->isNotEmpty())
+                    <flux:dropdown>
+                        <flux:button variant="ghost" size="sm" icon="tag" data-testid="tag-menu-{{ $transaction->id }}" aria-label="Tag transaction"/>
+                        <flux:menu>
+                            @foreach($userTags as $userTag)
+                                <flux:menu.checkbox
+                                    wire:key="tag-toggle-{{ $transaction->id }}-{{ $userTag->id }}"
+                                    wire:click="toggleTag({{ $transaction->id }}, {{ $userTag->id }})"
+                                    :checked="$transaction->tags->contains('id', $userTag->id)"
+                                    data-testid="toggle-tag-{{ $transaction->id }}-{{ $userTag->id }}"
+                                >{{ $userTag->name }}</flux:menu.checkbox>
+                            @endforeach
+                        </flux:menu>
+                    </flux:dropdown>
+                @endif
                 @if($brand !== null)
                     <flux:button variant="ghost" size="sm" icon="no-symbol"
                                  wire:click="vetoMerchantBrand({{ $transaction->id }})"

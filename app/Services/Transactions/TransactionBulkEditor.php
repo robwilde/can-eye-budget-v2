@@ -9,6 +9,7 @@ use App\Enums\CleanDescriptionSource;
 use App\Enums\TransactionSource;
 use App\Models\Transaction;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
+use App\Services\Tags\TransactionTagger;
 use App\Services\Transfers\TransferLinker;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -31,6 +32,7 @@ final readonly class TransactionBulkEditor
     public function __construct(
         private TransferLinker $transfers,
         private AccountBalanceHistoryBuilder $history,
+        private TransactionTagger $tagger,
     ) {}
 
     /**
@@ -42,8 +44,9 @@ final readonly class TransactionBulkEditor
     public function editable(Builder $query, BulkTransactionEdit $edit): Builder
     {
         return $query
-            ->whereDoesntHave('splits')
-            ->whereDoesntHave('splitChildren')
+            ->unless($edit->changesOnlyTags(), fn (Builder $q): Builder => $q
+                ->whereDoesntHave('splits')
+                ->whereDoesntHave('splitChildren'))
             ->when($edit->changesOnlyDate(), fn (Builder $q): Builder => $q
                 ->whereNull('transfer_pair_id')
                 ->whereNull('split_parent_id')
@@ -88,11 +91,22 @@ final readonly class TransactionBulkEditor
             $this->history->lockAccounts(...$accountIds);
 
             $edited = [];
+            $tagged = 0;
+            $tagIds = [];
 
             foreach ((clone $editable)->orderBy('id')->lockForUpdate()->get() as $transaction) {
+                $transaction->refresh();
                 $overrides = $this->overrides($transaction, $edit);
+                $rowTagIds = $edit->tagIds === null
+                    ? null
+                    : $tagIds[$transaction->user_id] ??= $this->tagger->resolve($transaction->user_id, $edit->tagIds);
 
                 if ($overrides === []) {
+                    if ($rowTagIds !== null) {
+                        $this->tagger->apply($transaction, $rowTagIds);
+                        $tagged++;
+                    }
+
                     continue;
                 }
 
@@ -102,12 +116,16 @@ final readonly class TransactionBulkEditor
                     ? $this->transfers->followVersion($transaction, $child)
                     : $this->transfers->followEditedVersion($transaction, $child);
 
+                if ($rowTagIds !== null) {
+                    $this->tagger->apply($child->refresh(), $rowTagIds);
+                }
+
                 $edited[] = [$transaction, $child];
             }
 
             $this->history->rebuildForEdits(...$edited);
 
-            return count($edited);
+            return count($edited) + $tagged;
         });
     }
 
