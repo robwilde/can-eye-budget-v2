@@ -5,10 +5,14 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Casts\MoneyCast;
+use App\Exceptions\CategoriesLockedException;
+use App\Exceptions\CategoryMergeRefusedException;
 use App\Models\Category;
 use App\Models\CategoryGroup;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\CategoryCreator;
+use App\Services\CategoryMerger;
 use App\Services\Reports\CategoryGroupMap;
 use App\Support\Categories\ProtectedCategories;
 use App\Support\Transactions\CategoryAttribution;
@@ -206,7 +210,7 @@ final class CategoryEditor extends Component
         $this->newParentId = $parentId;
     }
 
-    public function createCategory(): void
+    public function createCategory(CategoryCreator $creator): void
     {
         $userId = $this->authenticatedUser()->id;
 
@@ -221,11 +225,13 @@ final class CategoryEditor extends Component
             return;
         }
 
-        Category::create([
-            'user_id' => $userId,
-            'name' => $this->newCategoryName,
-            'parent_id' => $this->newParentId,
-        ]);
+        try {
+            $creator->create($this->authenticatedUser(), $this->newCategoryName, $this->newParentId);
+        } catch (CategoriesLockedException $exception) {
+            $this->addError('newCategoryName', $exception->getMessage());
+
+            return;
+        }
 
         $this->showCreateForm = false;
         $this->newCategoryName = '';
@@ -258,7 +264,7 @@ final class CategoryEditor extends Component
         $this->showDeleteConfirm = true;
     }
 
-    public function deleteCategory(): void
+    public function deleteCategory(CategoryMerger $merger): void
     {
         $this->resetErrorBag();
 
@@ -275,7 +281,15 @@ final class CategoryEditor extends Component
             return;
         }
 
-        $category?->delete();
+        if ($category !== null) {
+            try {
+                $merger->deleteWithReplacement($this->authenticatedUser(), $category->id);
+            } catch (CategoryMergeRefusedException $exception) {
+                $this->addError('deletingCategoryId', $exception->getMessage());
+
+                return;
+            }
+        }
 
         if ($this->selectedCategoryId === $this->deletingCategoryId) {
             $this->selectedCategoryId = null;
