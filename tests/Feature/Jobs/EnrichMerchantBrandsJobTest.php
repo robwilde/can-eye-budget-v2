@@ -7,6 +7,7 @@ declare(strict_types=1);
 use App\Enums\TransactionDirection;
 use App\Jobs\EnrichMerchantBrandsJob;
 use App\Jobs\ResolveMerchantBrandJob;
+use App\Models\Merchant;
 use App\Models\MerchantBrand;
 use App\Models\Transaction;
 use App\Models\User;
@@ -111,4 +112,15 @@ it('only considers the user\'s own transactions', function () {
     dispatch_sync(new EnrichMerchantBrandsJob($this->user));
 
     Queue::assertNothingPushed();
+});
+
+it('does not look up a source key of rows merged into a merchant whose brand is vetoed', function () {
+    $target = Merchant::factory()->for($this->user)->create(['name' => 'Target Shop', 'merchant_key' => 'TARGET SHOP']);
+    MerchantBrand::factory()->for($this->user)->vetoed()->create(['merchant_key' => 'TARGET SHOP']);
+    rows($this->user, 'ALDI STORES BRISBANE', 2, ['merchant_id' => $target->id]);
+    rows($this->user, 'COLES SUPERMARKET MELBOURNE', 2);
+
+    dispatch_sync(new EnrichMerchantBrandsJob($this->user));
+
+    expect(queuedKeys())->toBe(['COLES SUPERMARKET MELBOURNE']);
 });
