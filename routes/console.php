@@ -35,3 +35,8 @@ Schedule::command('exchange-rates:fetch')
     ->dailyAt('05:00')
     ->name('exchange-rates:fetch')
     ->withoutOverlapping();
+
+Schedule::command('goals:maintain')
+    ->dailyAt('02:00')
+    ->name('goals:maintain')
+    ->withoutOverlapping();
