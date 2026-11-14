@@ -66,4 +66,28 @@ return [
 
     'multi_currency' => (bool) env('BUDGET_MULTI_CURRENCY', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Savings Goals
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, the goals feature (goals, linked accounts and pledges) is
+    | available. Off by default.
+    |
+    */
+
+    'goals_enabled' => (bool) env('BUDGET_GOALS_ENABLED', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Insights Feed
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, the insights feature (typed, prioritised observations with a
+    | read, acknowledge and resurfacing lifecycle) is available. Off by default.
+    |
+    */
+
+    'insights_enabled' => (bool) env('BUDGET_INSIGHTS_ENABLED', false),
+
 ];
