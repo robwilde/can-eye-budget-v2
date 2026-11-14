@@ -6,10 +6,15 @@ namespace App\Jobs;
 
 use App\Contracts\InsightGenerator;
 use App\Models\User;
+use App\Services\InsightGenerators\BudgetAtRiskGenerator;
+use App\Services\InsightGenerators\BudgetOnTrackGenerator;
 use App\Services\InsightGenerators\CashFlowWarningGenerator;
+use App\Services\InsightGenerators\GoalDepletedGenerator;
 use App\Services\InsightGenerators\IdleCashGenerator;
+use App\Services\InsightGenerators\NetWorthMilestoneGenerator;
 use App\Services\InsightGenerators\SavingsRateChangeGenerator;
 use App\Services\InsightGenerators\SpendingAnomalyGenerator;
+use App\Services\InsightGenerators\SubscriptionAuditGenerator;
 use App\Services\InsightRecorder;
 use App\Support\Audit\AttributeJobToUser;
 use DateTimeInterface;
@@ -34,6 +39,11 @@ final class GenerateInsightsJob implements ShouldQueue
         CashFlowWarningGenerator::class,
         SavingsRateChangeGenerator::class,
         IdleCashGenerator::class,
+        BudgetAtRiskGenerator::class,
+        BudgetOnTrackGenerator::class,
+        GoalDepletedGenerator::class,
+        SubscriptionAuditGenerator::class,
+        NetWorthMilestoneGenerator::class,
     ];
 
     private const int LOCK_SECONDS = 120;
