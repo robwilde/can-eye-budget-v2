@@ -123,6 +123,43 @@ final readonly class BudgetPlanCalculator
     }
 
     /**
+     * Median monthly spend and income over the user's last twelve complete months, counting
+     * months with any spending (one refunded in full counts as 0) or any income; 0 for each
+     * when there is no history. Spend and income net per
+     * top-level category as a plan does.
+     *
+     * @return array{spending: int, income: int}
+     */
+    public function historyMedians(User $user): array
+    {
+        $thisMonth = $user->today()->startOfMonth();
+        $tree = $this->categoryTree($user->id);
+        $byMonth = [];
+
+        foreach ($this->flowRows($user->id, $thisMonth->subMonthsNoOverflow(self::HISTORY_MONTHS), $thisMonth->subDay()) as $row) {
+            $byMonth[$row['ym']][] = $row;
+        }
+
+        $spending = [];
+        $income = [];
+
+        foreach ($byMonth as $rows) {
+            $flows = $this->groupFlows($rows, $tree);
+            [$spent, $earned] = $this->spendAndIncome($flows, $tree);
+
+            if (array_filter($flows, static fn (array $flow): bool => $flow['debit'] > 0) !== []) {
+                $spending[] = $spent;
+            }
+
+            if ($earned > 0) {
+                $income[] = $earned;
+            }
+        }
+
+        return ['spending' => $this->median($spending), 'income' => $this->median($income)];
+    }
+
+    /**
      * What a line passes to the next initialised month: only a surplus, and only while rollover
      * is on. A Shared line, with no allocation of its own, carries nothing.
      */
@@ -196,9 +233,19 @@ final readonly class BudgetPlanCalculator
      */
     private function ownFlows(BudgetPlan $plan, array $tree): array
     {
+        return $this->groupFlows($this->flowRows($plan->user_id, $plan->period_start, $plan->period_end), $tree);
+    }
+
+    /**
+     * @param  list<array{ym: string, category: int, direction: string, total: int}>  $rows
+     * @param  array{parent: array<int, int|null>, children: array<int, list<int>>}  $tree
+     * @return array<int, array{debit: int, credit: int}>
+     */
+    private function groupFlows(array $rows, array $tree): array
+    {
         $flows = [];
 
-        foreach ($this->flowRows($plan->user_id, $plan->period_start, $plan->period_end) as $row) {
+        foreach ($rows as $row) {
             $category = array_key_exists($row['category'], $tree['parent']) ? $row['category'] : self::UNCATEGORISED;
             $flows[$category] ??= ['debit' => 0, 'credit' => 0];
             $flows[$category][$row['direction'] === TransactionDirection::Debit->value ? 'debit' : 'credit'] += $row['total'];
