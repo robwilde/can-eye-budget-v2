@@ -14,6 +14,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Budgets\BudgetPlanCalculator;
 use App\Services\Budgets\BudgetPlanManager;
+use App\Services\CashOnHandCalculator;
 use Carbon\CarbonImmutable;
 use Closure;
 use Flux\Flux;
@@ -39,6 +40,7 @@ use Livewire\Component;
  * @property-read bool $hasOverBudget
  * @property-read list<array{line: BudgetLineSummaryDto, depth: int}> $rows
  * @property-read BudgetLineSummaryDto|null $drilldown
+ * @property-read int|null $cashOnHand
  */
 final class MonthlyBudget extends Component
 {
@@ -341,6 +343,15 @@ final class MonthlyBudget extends Component
         ));
     }
 
+    /** Cash-account balances less goal earmarks, or null while goals are off. */
+    #[Computed]
+    public function cashOnHand(): ?int
+    {
+        return config('budget.goals_enabled') === true
+            ? app(CashOnHandCalculator::class)->for($this->authenticatedUser())
+            : null;
+    }
+
     #[Computed]
     public function drilldown(): ?BudgetLineSummaryDto
     {
@@ -438,7 +449,7 @@ final class MonthlyBudget extends Component
 
     private function invalidateReadState(): void
     {
-        unset($this->plan, $this->summary, $this->rows, $this->hasOverBudget, $this->copySource, $this->drilldown); // @phpstan-ignore property.notFound
+        unset($this->plan, $this->summary, $this->rows, $this->hasOverBudget, $this->copySource, $this->drilldown, $this->cashOnHand); // @phpstan-ignore property.notFound
     }
 
     private function refreshFigures(): void
