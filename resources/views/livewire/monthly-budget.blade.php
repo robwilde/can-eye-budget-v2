@@ -129,6 +129,16 @@
             </flux:card>
         </div>
 
+        @if ($this->cashOnHand !== null)
+            <flux:card class="flex items-center justify-between gap-3" data-testid="cash-on-hand">
+                <div>
+                    <flux:heading size="lg">{{ __('Cash on hand') }}</flux:heading>
+                    <flux:text size="sm" class="text-zinc-500">{{ __('Cash-account balances less money earmarked for goals. A preview only: it is not part of the allocations.') }}</flux:text>
+                </div>
+                <span class="text-xl font-semibold" data-testid="cash-on-hand-amount">{{ MoneyCast::format($this->cashOnHand) }}</span>
+            </flux:card>
+        @endif
+
         @if ($this->drilldown !== null)
             @php($detail = $this->drilldown)
             <flux:card class="space-y-4" data-testid="budget-drilldown">

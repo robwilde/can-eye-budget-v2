@@ -67,6 +67,16 @@
             >
                 {{ __('Budget') }}
             </flux:menu.item>
+            @if (config('budget.goals_enabled'))
+                <flux:menu.item
+                    :href="route('goals')"
+                    icon="flag"
+                    wire:navigate
+                    class="data-active:bg-cib-yellow-400 data-active:text-cib-black data-active:font-black"
+                >
+                    {{ __('Goals') }}
+                </flux:menu.item>
+            @endif
             <flux:menu.item
                 :href="route('profile.edit')"
                 icon="cog"
