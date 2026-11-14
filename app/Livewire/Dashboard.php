@@ -4,15 +4,19 @@ declare(strict_types=1);
 
 namespace App\Livewire;
 
+use App\Enums\InsightStatus;
+use App\Enums\InsightType;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\Budget;
+use App\Models\Insight;
 use App\Models\PlannedTransaction;
 use App\Models\RedbarkFeed;
 use App\Services\FirstImportSummary;
 use App\Services\Transfers\TransferReviewQueue;
 use App\Support\Transactions\CategoryAttribution;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
@@ -85,6 +89,28 @@ final class Dashboard extends Component
     public function firstImportSummary(): ?array
     {
         return app(FirstImportSummary::class)->for(auth()->user());
+    }
+
+    /**
+     * The top three insights. Cash-flow warnings stay off the card while the buffer hero
+     * shows a figure, because the hero already says the same thing.
+     *
+     * @return EloquentCollection<int, Insight>
+     */
+    #[Computed]
+    public function insights(): EloquentCollection
+    {
+        if (config('budget.insights_enabled') !== true) {
+            return new EloquentCollection;
+        }
+
+        return Insight::query()
+            ->where('user_id', auth()->id())
+            ->whereIn('status', [InsightStatus::Active->value, InsightStatus::Read->value])
+            ->when($this->buffer() !== null, fn ($query) => $query->where('type', '!=', InsightType::CashFlowWarning->value))
+            ->feedOrder()
+            ->limit(3)
+            ->get();
     }
 
     #[Computed]
