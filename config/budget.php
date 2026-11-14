@@ -66,4 +66,16 @@ return [
 
     'multi_currency' => (bool) env('BUDGET_MULTI_CURRENCY', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Insights Feed
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, the insights feature (typed, prioritised observations with a
+    | read, acknowledge and resurfacing lifecycle) is available. Off by default.
+    |
+    */
+
+    'insights_enabled' => (bool) env('BUDGET_INSIGHTS_ENABLED', false),
+
 ];
