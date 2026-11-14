@@ -10,7 +10,7 @@
     $spentCents = (int) $spent;
     $limitCents = (int) $limit;
     $over = $spentCents > $limitCents;
-    $pct = $limitCents > 0 ? min(100, ($spentCents / $limitCents) * 100) : 0;
+    $pct = $limitCents > 0 ? min(100, ($spentCents / $limitCents) * 100) : ($spentCents > 0 ? 100 : 0);
 @endphp
 
 <div {{ $attributes }}>
