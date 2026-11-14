@@ -211,6 +211,78 @@ test('budgets this cycle ignores lines that belong to a budget plan', function (
     expect($names->all())->toBe(['Insurance']);
 });
 
+it('lists current budget plan lines on the dashboard', function () {
+    $this->travelTo('2026-03-22 12:00:00');
+    $user = User::factory()->withPayCycle()->create();
+    $account = Account::factory()->for($user)->create();
+    Budget::factory()->for($user)->create(['name' => 'Legacy insurance', 'limit_amount' => 30000]);
+    $plan = BudgetPlan::factory()->for($user)->create([
+        'period_start' => '2026-03-01',
+        'period_end' => '2026-03-31',
+        'total_amount' => 100000,
+        'initialised_at' => '2026-03-01',
+    ]);
+    $groceries = Budget::factory()->inPlan($plan)->withCategory(Category::factory()->for($user)->create(['name' => 'Groceries']))->create(['limit_amount' => 40000]);
+    Budget::factory()->inPlan($plan)->withCategory(Category::factory()->for($user)->create(['name' => 'Idle']))->create(['limit_amount' => 0]);
+    Budget::factory()->inPlan($plan)->withCategory(Category::factory()->for($user)->create(['name' => 'Shared one']))->create(['limit_amount' => null]);
+    Transaction::factory()->debit()->for($user)->for($account)->create([
+        'amount' => 12500,
+        'post_date' => '2026-03-10',
+        'category_id' => $groceries->category_id,
+    ]);
+
+    $rows = Livewire::actingAs($user)
+        ->test(Dashboard::class)
+        ->instance()
+        ->budgetsThisCycle()
+        ->keyBy(fn (array $row): string => $row['budget']->name);
+
+    expect($rows->keys()->all())->toBe(['Groceries'])
+        ->and($rows['Groceries']['spent'])->toBe(12500)
+        ->and($rows['Groceries']['limit'])->toBe(40000);
+});
+
+it('does not bring back plan-less budgets when the initialised month has no figures', function () {
+    $this->travelTo('2026-03-22 12:00:00');
+    $user = User::factory()->withPayCycle()->create();
+    Budget::factory()->for($user)->create(['name' => 'Legacy insurance', 'limit_amount' => 30000]);
+    $plan = BudgetPlan::factory()->for($user)->create(['period_start' => '2026-03-01', 'period_end' => '2026-03-31', 'initialised_at' => '2026-03-01']);
+    Budget::factory()->inPlan($plan)->create(['name' => 'Idle', 'limit_amount' => 0]);
+
+    $rows = Livewire::actingAs($user)->test(Dashboard::class)->instance()->budgetsThisCycle();
+
+    expect($rows)->toBeEmpty();
+});
+
+it('shows the current category name on dashboard plan rows', function () {
+    $this->travelTo('2026-03-22 12:00:00');
+    $user = User::factory()->withPayCycle()->create();
+    $plan = BudgetPlan::factory()->for($user)->create(['period_start' => '2026-03-01', 'period_end' => '2026-03-31', 'initialised_at' => '2026-03-01']);
+    $line = Budget::factory()->inPlan($plan)->create(['name' => 'Groceries', 'limit_amount' => 40000]);
+    $line->category->update(['name' => 'Supermarket']);
+
+    $names = Livewire::actingAs($user)->test(Dashboard::class)->instance()->budgetsThisCycle()
+        ->map(fn (array $row): string => $row['budget']->name);
+
+    expect($names->all())->toBe(['Supermarket']);
+});
+
+it('keeps listing plan-less budgets while the current month is not set up', function () {
+    $this->travelTo('2026-03-22 12:00:00');
+    $user = User::factory()->withPayCycle()->create();
+    Budget::factory()->for($user)->create(['name' => 'Legacy insurance', 'limit_amount' => 30000]);
+    $plan = BudgetPlan::factory()->for($user)->create(['period_start' => '2026-03-01', 'period_end' => '2026-03-31', 'initialised_at' => null]);
+    Budget::factory()->inPlan($plan)->create(['name' => 'Groceries', 'limit_amount' => 40000]);
+
+    $names = Livewire::actingAs($user)
+        ->test(Dashboard::class)
+        ->instance()
+        ->budgetsThisCycle()
+        ->map(fn (array $row): string => $row['budget']->name);
+
+    expect($names->all())->toBe(['Legacy insurance']);
+});
+
 test('next three planned section renders upcoming plans', function () {
     $user = User::factory()->withPayCycle()->create();
     $account = Account::factory()->for($user)->create();

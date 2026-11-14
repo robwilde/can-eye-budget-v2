@@ -22,6 +22,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('transfers/review', 'transfers-review')->name('transfers.review');
     Route::view('calendar', 'calendar')->name('calendar');
     Route::view('reports', 'reports')->name('reports');
+    Route::view('budget', 'budget')->name('budget');
     Route::view('accounts', 'accounts')->name('accounts');
     Route::view('rules', 'rules')->name('rules');
     Route::view('tags', 'tags')->name('tags');

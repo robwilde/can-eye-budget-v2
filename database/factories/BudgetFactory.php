@@ -5,11 +5,9 @@ declare(strict_types=1);
 namespace Database\Factories;
 
 use App\Enums\BudgetPeriod;
-use App\Models\Account;
 use App\Models\Budget;
 use App\Models\BudgetPlan;
 use App\Models\Category;
-use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -78,34 +76,5 @@ final class BudgetFactory extends Factory
         return $this->state(fn (array $attributes) => [
             'period' => BudgetPeriod::Yearly,
         ]);
-    }
-
-    public function overBudget(): self
-    {
-        return $this->withCategory()->afterCreating(function (Budget $budget) {
-            $account = Account::factory()->for($budget->user)->create();
-            Transaction::factory()
-                ->count(3)
-                ->for($budget->user)
-                ->for($account)
-                ->create([
-                    'category_id' => $budget->category_id,
-                    'amount' => (int) ceil($budget->limit_amount / 2),
-                ]);
-        });
-    }
-
-    public function underBudget(): self
-    {
-        return $this->withCategory()->afterCreating(function (Budget $budget) {
-            $account = Account::factory()->for($budget->user)->create();
-            Transaction::factory()
-                ->for($budget->user)
-                ->for($account)
-                ->create([
-                    'category_id' => $budget->category_id,
-                    'amount' => (int) ceil($budget->limit_amount / 4),
-                ]);
-        });
     }
 }
