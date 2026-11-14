@@ -8,6 +8,7 @@ use App\Http\Middleware\AttributeRequestToUser;
 use App\Jobs\EnrichMerchantBrandsJob;
 use App\Jobs\GenerateInsightsJob;
 use App\Jobs\ImportCsvTransactionsJob;
+use App\Jobs\MaintainGoalsJob;
 use App\Jobs\ResolveMerchantBrandJob;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Jobs\SyncRedbarkFeedJob;
@@ -187,6 +188,7 @@ test('every queued job is in the inventory and carries the audit middleware as d
         ImportCsvTransactionsJob::class => [new ImportCsvTransactionsJob(BankImport::factory()->create()), true],
         RunTransactionAnalysisJob::class => [new RunTransactionAnalysisJob($user), true],
         SyncRedbarkFeedJob::class => [new SyncRedbarkFeedJob(RedbarkFeed::factory()->create()), true],
+        MaintainGoalsJob::class => [new MaintainGoalsJob($user), false],
     ];
 
     $discovered = collect(File::allFiles(app_path('Jobs')))
@@ -221,4 +223,15 @@ it('pins GenerateInsightsJob in the user action inventory', function () {
     $attribution->handle($job, fn () => null);
 
     expect(AuditEvent::query()->where('action', 'job.GenerateInsightsJob')->exists())->toBeTrue();
+});
+
+it('pins MaintainGoalsJob in the user action inventory', function () {
+    $job = new MaintainGoalsJob(User::factory()->create());
+    $attribution = collect($job->middleware())->first(fn (object $middleware): bool => $middleware instanceof AttributeJobToUser);
+
+    expect($attribution)->toBeInstanceOf(AttributeJobToUser::class);
+
+    $attribution->handle($job, fn () => null);
+
+    expect(AuditEvent::query()->where('action', 'job.MaintainGoalsJob')->exists())->toBeFalse();
 });
