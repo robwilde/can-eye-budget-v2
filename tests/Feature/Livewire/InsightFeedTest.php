@@ -221,3 +221,12 @@ it('blocks feed updates once the flag is turned off', function () {
 
     expect($insight->fresh()->status)->toBe(InsightStatus::Read);
 });
+
+it('links a net-worth insight to the accounts page', function () {
+    $user = User::factory()->create();
+    Insight::factory()->for($user)->create(['type' => InsightType::NetWorthMilestone, 'action_route' => 'accounts']);
+
+    Livewire::actingAs($user)->test(InsightFeed::class)
+        ->assertSeeHtml('href="'.route('accounts').'"')
+        ->assertSeeHtmlInOrder(['data-testid="insight-link"', 'View accounts']);
+});
