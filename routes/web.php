@@ -25,6 +25,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('accounts', 'accounts')->name('accounts');
     Route::view('rules', 'rules')->name('rules');
     Route::view('tags', 'tags')->name('tags');
+    Route::view('merchants', 'merchants')->name('merchants');
     // Transient page reached from the providers panel, so deliberately not in the sidebar.
     Route::view('redbark/setup', 'redbark-setup')->name('redbark.setup');
     Route::get('accounts/{account}/reconcile', ReconcileStatement::class)->name('accounts.reconcile');

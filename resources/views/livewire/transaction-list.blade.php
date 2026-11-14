@@ -138,6 +138,14 @@
             wire-model="attachments"
         />
 
+ <flux:select wire:model.live="merchant" size="sm" class="w-auto" aria-label="Merchant" data-testid="merchant-filter">
+            <flux:select.option value="">Any merchant</flux:select.option>
+            <flux:select.option value="none">No merchant</flux:select.option>
+            @foreach($merchants as $merchantOption)
+                <flux:select.option value="{{ $merchantOption->id }}">{{ $merchantOption->name }}</flux:select.option>
+            @endforeach
+        </flux:select>
+
         {{-- Suggested transfers are only "possible" (still counted normally) until
              confirmed; this filter and the review page show the pending queue. --}}
         @if($suggestedTransferCount > 0 || $transfers === 'suggested')
@@ -531,6 +539,22 @@
                             Undo rule-set categories
                         </flux:button>
                     @endif
+
+                    <div class="min-w-44">
+                        <flux:select wire:model="bulkMerchantId" size="sm" aria-label="Merchant" data-testid="bulk-merchant">
+                            <flux:select.option value="">Merchant</flux:select.option>
+                            @foreach($merchants as $merchantOption)
+                                <flux:select.option value="{{ $merchantOption->id }}">{{ $merchantOption->name }}</flux:select.option>
+                            @endforeach
+                        </flux:select>
+                    </div>
+
+                    <flux:button variant="ghost" size="sm"
+                                 wire:click="applyMerchantToSelection"
+                                 wire:loading.attr="disabled" wire:target="applyMerchantToSelection"
+                                 data-testid="bulk-merchant-apply">
+                        Set merchant
+                    </flux:button>
 
                     <flux:button variant="ghost" size="sm" wire:click="clearSelection" data-testid="bulk-clear">
                         Clear

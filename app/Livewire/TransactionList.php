@@ -24,6 +24,7 @@ use App\Livewire\Attributes\NotAudited;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\CategoryGroup;
+use App\Models\Merchant;
 use App\Models\MerchantBrand;
 use App\Models\Payee;
 use App\Models\Tag;
@@ -37,6 +38,8 @@ use App\Services\MerchantBrands\BrandNameWriter;
 use App\Services\MerchantBrands\ContextDevCreditBalance;
 use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\MerchantBrands\DescriptorGate;
+use App\Services\Merchants\MerchantKeyResolver;
+use App\Services\Merchants\MerchantMerger;
 use App\Services\Payees\PayeeConfirmer;
 use App\Services\Payees\PayeeReviewQueue;
 use App\Services\RecentCategoryPicks;
@@ -65,6 +68,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
+use InvalidArgumentException;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
@@ -134,6 +138,9 @@ final class TransactionList extends Component
 
     #[Url(except: 'all')]
     public string $attachments = 'all';
+
+    #[Url]
+    public ?string $merchant = null;
 
     #[Url]
     public ?int $category = null;
@@ -266,6 +273,8 @@ final class TransactionList extends Component
 
     #[Locked]
     public bool $bulkCategoryPicked = false;
+
+    public string $bulkMerchantId = '';
 
     public string $clusterIntent = '';
 
@@ -403,6 +412,8 @@ final class TransactionList extends Component
         }
 
         $this->normaliseTagFilter();
+        $this->normaliseMerchantFilter();
+
         $this->normaliseAmountFilter();
         $this->amountDollars = $this->amountCents === null ? '' : number_format($this->amountCents / 100, 2, '.', '');
         $this->normaliseStatuses();
@@ -596,6 +607,7 @@ final class TransactionList extends Component
         $this->bulkExcluded = [];
         $this->bulkCategoryId = '';
         $this->bulkCategoryPicked = false;
+        $this->bulkMerchantId = '';
         $this->clusterIntent = '';
         $this->bulkError = null;
         $this->bulkNotice = null;
@@ -767,6 +779,45 @@ final class TransactionList extends Component
             : sprintf('Reverted %d rule-set categories.', $reverted);
 
         $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * Set one merchant on the selection. The selection is re-resolved for the signed-in user
+     * and a merchant that is not theirs is refused.
+     *
+     * @throws Throwable
+     */
+    public function applyMerchantToSelection(MerchantMerger $merger): void
+    {
+        $this->bulkError = null;
+        $this->bulkNotice = null;
+
+        $query = $this->selectionQuery();
+
+        if ($query === null) {
+            $this->bulkError = 'Nothing is selected.';
+
+            return;
+        }
+
+        if (! ctype_digit($this->bulkMerchantId)) {
+            $this->bulkError = 'Choose a merchant.';
+
+            return;
+        }
+
+        $requested = $this->requestedCount($query);
+
+        try {
+            $written = $merger->assign($this->authenticatedUser(), $query, (int) $this->bulkMerchantId);
+        } catch (InvalidArgumentException) {
+            $this->bulkError = 'That merchant is not available.';
+
+            return;
+        }
+
+        $this->bulkMerchantId = '';
+        $this->finishBulkWrite('Set the merchant on', $written, $requested - $written, 'could not be changed');
     }
 
     /**
@@ -1535,6 +1586,12 @@ final class TransactionList extends Component
         $this->resetPage();
     }
 
+    public function updatedMerchant(): void
+    {
+        $this->normaliseMerchantFilter();
+        $this->resetPage();
+    }
+
     public function updatedCategory(): void
     {
         $this->exactCategory = false;
@@ -1705,6 +1762,7 @@ final class TransactionList extends Component
             'clusters' => $clusters,
             'clusterRows' => $clusterRows,
             'accounts' => $accounts,
+            'merchants' => Merchant::query()->where('user_id', auth()->id())->orderBy('name')->get(['id', 'name']),
             'categoryName' => $this->category
                 ? Category::query()->where('user_id', auth()->id())->whereKey($this->category)->value('name')
                 : null,
@@ -1799,6 +1857,13 @@ final class TransactionList extends Component
             array_values(array_map(intval(...), array_filter($tags, static fn (mixed $tag): bool => is_int($tag) || (is_string($tag) && ctype_digit($tag))))),
             in_array('untagged', $tags, true),
         ];
+    }
+
+    private function normaliseMerchantFilter(): void
+    {
+        if ($this->merchant !== 'none' && ! (is_string($this->merchant) && ctype_digit($this->merchant))) {
+            $this->merchant = null;
+        }
     }
 
     private function normaliseAmountFilter(): void
@@ -1972,7 +2037,7 @@ final class TransactionList extends Component
      * For the rows on screen: the resolved brand per transaction id, and the ids
      * of rows that may offer "Identify merchant" (enrichment on, a lookup still
      * affordable today, gate passes, no resolved, vetoed or still-fresh sidecar
-     * row). Keys are derived with merchantKeyFor() for display and veto; identify
+     * row). Keys are resolved with MerchantKeyResolver (the linked merchant's key, else the row's own) for display and veto; identify
      * is offered only when the column is persisted, because the job selects rows
      * by it. Also the distinct merchant keys of those identifiable rows, in
      * first-seen order. One query per render, not per row.
@@ -1982,7 +2047,7 @@ final class TransactionList extends Component
      */
     private function merchantBrandState(Collection $rows): array
     {
-        $keyById = $rows->mapWithKeys(fn (Transaction $row): array => [$row->id => $this->merchantKeyFor($row)]);
+        $keyById = collect(app(MerchantKeyResolver::class)->keysFor((int) auth()->id(), $rows));
 
         if ($keyById->isEmpty()) {
             return [[], [], []];
@@ -2028,7 +2093,7 @@ final class TransactionList extends Component
 
     private function merchantKeyFor(Transaction $transaction): string
     {
-        return $transaction->merchant_key ?? $transaction->resolveMerchantKey();
+        return app(MerchantKeyResolver::class)->keyFor((int) auth()->id(), $transaction);
     }
 
     /**
@@ -2560,6 +2625,7 @@ final class TransactionList extends Component
             'to' => $this->to,
             'search' => $this->search,
             'attachments' => $this->attachments,
+            'merchant' => $this->merchant,
             'clusterableOnly' => $this->inMerchantMode(),
         ];
     }
@@ -2659,6 +2725,8 @@ final class TransactionList extends Component
                 ->where('category_source', CategorySource::Rule->value))
             ->when(($filters['transfers'] ?? null) === 'suggested', fn ($q) => $q->possibleTransfer())
             ->when(($filters['attachments'] ?? null) === 'with', fn ($q) => $q->whereHas('attachments'))
+            ->when(($filters['merchant'] ?? null) === 'none', fn ($q) => $q->whereNull('merchant_id'))
+            ->when(is_string($filters['merchant'] ?? null) && ctype_digit($filters['merchant']), fn ($q) => $q->where('merchant_id', (int) $filters['merchant']))
             ->when($filters['search'] ?? null, fn ($q, $term) => $q->where(function ($q) use ($term) {
                 $q->where('description', 'like', "%{$term}%")
                     ->orWhere('clean_description', 'like', "%{$term}%")

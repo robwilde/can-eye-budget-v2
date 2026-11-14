@@ -341,6 +341,23 @@
                 </flux:field>
             @endif
 
+            @if($transactionType !== 'transfer' && $mode === 'enter')
+                <div class="space-y-2" data-testid="merchant-picker">
+                    <flux:select wire:model="merchantId" :label="__('Merchant')" data-testid="merchant-select">
+                        <flux:select.option value="">{{ __('No merchant') }}</flux:select.option>
+                        @foreach($merchants as $merchantOption)
+                            <flux:select.option value="{{ $merchantOption->id }}">{{ $merchantOption->name }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                    <flux:error name="merchantId"/>
+                    <div class="flex items-end gap-2">
+                        <flux:input wire:model="newMerchantName" size="sm" :placeholder="__('New merchant name')" data-testid="new-merchant-name" wire:keydown.enter.prevent="createMerchant"/>
+                        <flux:button type="button" size="sm" variant="ghost" wire:click="createMerchant" data-testid="create-merchant">{{ __('Add') }}</flux:button>
+                    </div>
+                    <flux:error name="newMerchantName"/>
+                </div>
+            @endif
+
             @if($editingTransactionId && $transactionType !== 'transfer')
                 <flux:field variant="inline">
                     <flux:checkbox wire:model.live="categoriseMatching"/>

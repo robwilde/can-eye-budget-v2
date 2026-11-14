@@ -59,6 +59,22 @@ final class MerchantMerger
         });
     }
 
+    /**
+     * Sets one of the user's merchants on every row the query selects, locking the merchant
+     * against sync. Refuses a merchant that is not the user's.
+     *
+     * @param  Builder<Transaction>  $query
+     * @return int the number of rows written
+     */
+    public function assign(User $user, Builder $query, int $merchantId): int
+    {
+        return DB::transaction(function () use ($user, $query, $merchantId): int {
+            $merchant = $this->lockOwned($user, [$merchantId])->get($merchantId);
+
+            return $this->rewrite($query->where('user_id', $user->id), ['merchant_id' => $merchant->id]);
+        });
+    }
+
     public function delete(User $user, Merchant $merchant): void
     {
         DB::transaction(function () use ($user, $merchant): void {
@@ -159,16 +175,21 @@ final class MerchantMerger
      * @param  Builder<Transaction>  $query
      * @param  array<string, mixed>  $values
      */
-    private function rewrite(Builder $query, array $values): void
+    private function rewrite(Builder $query, array $values): int
     {
-        $query->chunkById(200, function ($transactions) use ($values): void {
+        $written = 0;
+
+        $query->chunkById(200, function ($transactions) use ($values, &$written): void {
             foreach ($transactions as $transaction) {
                 $transaction->forceFill([
                     ...$values,
                     'locked_fields' => array_values(array_unique([...($transaction->locked_fields ?? []), self::LOCK])),
                 ])->saveQuietly();
+                $written++;
             }
         });
+
+        return $written;
     }
 
     /**
