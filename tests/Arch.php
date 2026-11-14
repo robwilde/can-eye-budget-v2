@@ -21,3 +21,14 @@ arch('dtos')
 arch('enums are string backed')
     ->expect('App\Enums')
     ->toBeStringBackedEnum();
+
+arch('insight code keeps the DB facade out')
+    ->expect([
+        App\Services\InsightRecorder::class,
+        'App\Services\InsightGenerators',
+        'App\Support\Insights',
+        App\Jobs\GenerateInsightsJob::class,
+        App\Console\Commands\GenerateInsightsCommand::class,
+        App\Models\Insight::class,
+    ])
+    ->not->toUse(Illuminate\Support\Facades\DB::class);
