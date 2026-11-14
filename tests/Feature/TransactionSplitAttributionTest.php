@@ -7,9 +7,11 @@ declare(strict_types=1);
 use App\Livewire\CategoryEditor;
 use App\Models\Account;
 use App\Models\Budget;
+use App\Models\BudgetPlan;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Budgets\BudgetPlanCalculator;
 use App\Services\Reports\ReportAggregator;
 use App\Support\Calendar\DayActivityLoader;
 use Carbon\CarbonImmutable;
@@ -22,14 +24,14 @@ test('budget spend follows split lines not the parent category', function () {
     $groceries = Category::factory()->for($user)->create();
     $fuel = Category::factory()->for($user)->create();
 
-    $budget = Budget::factory()->for($user)->create([
-        'category_id' => $groceries->id,
-        'limit_amount' => 100000,
-    ]);
+    $plan = BudgetPlan::factory()->for($user)->create(['period_start' => '2026-06-01', 'period_end' => '2026-06-30']);
+    $groceriesLine = Budget::factory()->inPlan($plan)->withCategory($groceries)->create(['limit_amount' => 100000]);
+    $ownLine = Budget::factory()->inPlan($plan)->withCategory($ownCategory)->create(['limit_amount' => 100000]);
 
     $transaction = Transaction::factory()->for($user)->for($account)->create([
         'category_id' => $ownCategory->id,
         'amount' => 10000,
+        'post_date' => '2026-06-10',
     ]);
 
     $transaction->splits()->createMany([
@@ -37,13 +39,10 @@ test('budget spend follows split lines not the parent category', function () {
         ['category_id' => $fuel->id, 'amount' => 3000, 'position' => 1],
     ]);
 
-    $ownBudget = Budget::factory()->for($user)->create([
-        'category_id' => $ownCategory->id,
-        'limit_amount' => 100000,
-    ]);
+    $lines = collect(app(BudgetPlanCalculator::class)->summarise($plan)->lines)->keyBy('budgetId');
 
-    expect($budget->remaining())->toBe(93000)
-        ->and($ownBudget->remaining())->toBe(100000);
+    expect($lines[$groceriesLine->id]->available)->toBe(93000)
+        ->and($lines[$ownLine->id]->available)->toBe(100000);
 });
 
 test('reports break a split transaction into its line categories without double counting', function () {
