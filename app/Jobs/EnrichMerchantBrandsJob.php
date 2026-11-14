@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Enums\TransactionDirection;
+use App\Models\Merchant;
 use App\Models\MerchantBrand;
 use App\Models\Transaction;
 use App\Models\User;
@@ -14,6 +15,7 @@ use App\Services\MerchantBrands\RepresentativeTransaction;
 use App\Support\Audit\AttributeJobToUser;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Queue\Queueable;
 
 /**
@@ -90,6 +92,12 @@ final class EnrichMerchantBrandsJob implements ShouldBeUnique, ShouldQueue
             ->whereNull('transfer_pair_id')
             ->where('direction', TransactionDirection::Debit)
             ->whereNotIn('merchant_key', $blocked)
+            ->where(fn (Builder $query): Builder => $query
+                ->whereNull('merchant_id')
+                ->orWhereNotIn('merchant_id', Merchant::query()
+                    ->select('id')
+                    ->where('user_id', $this->user->id)
+                    ->whereIn('merchant_key', $blocked)))
             ->groupBy('merchant_key')
             ->havingRaw('COUNT(*) >= ?', [self::MIN_OCCURRENCES])
             ->orderByRaw('COUNT(*) DESC')

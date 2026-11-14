@@ -118,7 +118,7 @@ final class PayeeConfirmer
     {
         Transaction::query()
             ->where('user_id', $user->id)
-            ->where('merchant_key', $merchantKey)
+            ->forMerchantKey($user->id, $merchantKey)
             ->where('direction', TransactionDirection::Debit)
             ->excludingTransfers()
             ->current()

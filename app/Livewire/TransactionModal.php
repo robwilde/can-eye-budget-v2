@@ -1249,6 +1249,7 @@ final class TransactionModal extends Component
             'direction' => 'type',
             'post_date' => 'date',
             'account_id' => 'account',
+            'merchant' => 'merchant',
         ];
 
         return array_map(static fn (string $field): string => __($labels[$field] ?? $field), $fields);

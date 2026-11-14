@@ -632,6 +632,25 @@ final class Transaction extends Model
     }
 
     /**
+     * Rows that belong to a merchant key: their own stored key matches, or they are linked to
+     * one of the user's merchants carrying that key. A merged row keeps its derived source key
+     * and points at the target merchant through merchant_id, so this is how it finds the
+     * Payee and MerchantBrand that moved to the target key.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeForMerchantKey(Builder $query, int $userId, string $merchantKey): Builder
+    {
+        return $query->where(fn (Builder $q): Builder => $q
+            ->where('merchant_key', $merchantKey)
+            ->orWhereIn('merchant_id', Merchant::query()
+                ->select('id')
+                ->where('user_id', $userId)
+                ->where('merchant_key', $merchantKey)));
+    }
+
+    /**
      * @param  Builder<self>  $query
      * @return Builder<self>
      */
