@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\TransactionAttachmentController;
+use App\Http\Middleware\EnsureGoalsEnabled;
 use App\Livewire\AccountShow;
 use App\Livewire\ReconcileStatement;
 use Illuminate\Support\Facades\Route;
@@ -22,6 +23,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('transfers/review', 'transfers-review')->name('transfers.review');
     Route::view('calendar', 'calendar')->name('calendar');
     Route::view('reports', 'reports')->name('reports');
+    Route::view('budget', 'budget')->name('budget');
+    Route::view('goals', 'goals')->middleware(EnsureGoalsEnabled::class)->name('goals');
+    Route::view('goals/{goal}', 'goal-show')->whereNumber('goal')->middleware(EnsureGoalsEnabled::class)->name('goals.show');
     Route::view('accounts', 'accounts')->name('accounts');
     Route::view('rules', 'rules')->name('rules');
     Route::view('tags', 'tags')->name('tags');

@@ -32,6 +32,14 @@
             <flux:sidebar.item icon="chart-bar" :href="route('reports')" :current="request()->routeIs('reports')" wire:navigate :class="$navItem">
                 {{ __('Reports') }}
             </flux:sidebar.item>
+            <flux:sidebar.item icon="banknotes" :href="route('budget')" :current="request()->routeIs('budget')" wire:navigate :class="$navItem">
+                {{ __('Budget') }}
+            </flux:sidebar.item>
+            @if (config('budget.goals_enabled'))
+                <flux:sidebar.item icon="flag" :href="route('goals')" :current="request()->routeIs('goals', 'goals.*')" wire:navigate :class="$navItem">
+                    {{ __('Goals') }}
+                </flux:sidebar.item>
+            @endif
             <flux:sidebar.item icon="arrow-up-tray" :href="route('import-bank')" :current="request()->routeIs('import-bank')" wire:navigate
                                :class="$navItem">
                 {{ __('Import Bank') }}
