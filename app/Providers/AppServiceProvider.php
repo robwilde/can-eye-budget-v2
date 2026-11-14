@@ -20,6 +20,7 @@ use App\Services\GitHubService;
 use App\Services\GmailService;
 use App\Services\MerchantBrands\ContextDevCreditBalance;
 use App\Services\MerchantBrands\ContextDevCreditBudget;
+use App\Services\PipelineStages\GoalPledgeMatchStage;
 use App\Services\PipelineStages\IdentifyPrimaryAccountStage;
 use App\Services\PipelineStages\IdentifyRecurringTransactionsStage;
 use App\Services\PipelineStages\MatchPlannedTransactionsStage;
@@ -134,6 +135,7 @@ final class AppServiceProvider extends ServiceProvider
                 $this->app->make(PayeeSuggestionStage::class),
                 $this->app->make(IdentifyRecurringTransactionsStage::class),
                 $this->app->make(MatchPlannedTransactionsStage::class),
+                $this->app->make(GoalPledgeMatchStage::class),
             ],
         ));
 

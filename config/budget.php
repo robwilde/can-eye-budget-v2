@@ -66,4 +66,16 @@ return [
 
     'multi_currency' => (bool) env('BUDGET_MULTI_CURRENCY', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Savings Goals
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, the goals feature (goals, linked accounts and pledges) is
+    | available. Off by default.
+    |
+    */
+
+    'goals_enabled' => (bool) env('BUDGET_GOALS_ENABLED', false),
+
 ];
