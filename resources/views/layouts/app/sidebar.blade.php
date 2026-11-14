@@ -46,6 +46,11 @@
             <flux:sidebar.item icon="building-storefront" :href="route('merchants')" :current="request()->routeIs('merchants')" wire:navigate :class="$navItem">
                 {{ __('Merchants') }}
             </flux:sidebar.item>
+            @if (config('budget.insights_enabled'))
+                <flux:sidebar.item icon="light-bulb" :href="route('insights')" :current="request()->routeIs('insights')" wire:navigate :class="$navItem">
+                    {{ __('Insights') }}
+                </flux:sidebar.item>
+            @endif
         </flux:sidebar.group>
     </flux:sidebar.nav>
 
