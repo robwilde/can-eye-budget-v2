@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace App\Livewire;
 
+use App\DTOs\BudgetLineSummaryDto;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\Budget;
+use App\Models\BudgetPlan;
 use App\Models\PlannedTransaction;
 use App\Models\RedbarkFeed;
+use App\Models\User;
+use App\Services\Budgets\BudgetPlanCalculator;
 use App\Services\FirstImportSummary;
 use App\Services\Transfers\TransferReviewQueue;
 use App\Support\Transactions\CategoryAttribution;
@@ -137,6 +141,12 @@ final class Dashboard extends Component
     public function budgetsThisCycle(): Collection
     {
         $user = auth()->user();
+        $planRows = $this->currentPlanRows($user);
+
+        if ($planRows !== null) {
+            return $planRows;
+        }
+
         $bounds = $user->currentPayCycleBounds();
 
         return $user->budgets()
@@ -249,5 +259,40 @@ final class Dashboard extends Component
     public function render(): View
     {
         return view('livewire.dashboard');
+    }
+
+    /**
+     * The current month's initialised budget plan lines that carry a budget or spend, with the
+     * figures the budget page shows for them, or null when the month has no initialised plan.
+     *
+     * @return Collection<int, array{budget: Budget, spent: int, limit: int}>|null
+     */
+    private function currentPlanRows(User $user): ?Collection
+    {
+        $plan = BudgetPlan::query()
+            ->where('user_id', $user->id)
+            ->whereNotNull('initialised_at')
+            ->whereDate('period_start', $user->today()->startOfMonth())
+            ->first();
+
+        if ($plan === null) {
+            return null;
+        }
+
+        $lines = $plan->lines()->where('user_id', $user->id)->get();
+
+        return collect(app(BudgetPlanCalculator::class)->summarise($plan)->lines)
+            ->reject(static fn (BudgetLineSummaryDto $line): bool => $line->isShared() || ($line->allocation + $line->rolledOver === 0 && $line->actual === 0))
+            ->map(static function (BudgetLineSummaryDto $line) use ($lines): array {
+                $budget = $lines->firstOrFail('id', $line->budgetId);
+                $budget->name = $line->name;
+
+                return [
+                    'budget' => $budget,
+                    'spent' => $line->actual,
+                    'limit' => $line->allocation + $line->rolledOver,
+                ];
+            })
+            ->values();
     }
 }
