@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Http\Middleware\AttributeRequestToUser;
 use App\Jobs\EnrichMerchantBrandsJob;
+use App\Jobs\GenerateInsightsJob;
 use App\Jobs\ImportCsvTransactionsJob;
 use App\Jobs\ResolveMerchantBrandJob;
 use App\Jobs\RunTransactionAnalysisJob;
@@ -181,6 +182,7 @@ test('every queued job is in the inventory and carries the audit middleware as d
 
     $jobs = [
         EnrichMerchantBrandsJob::class => [new EnrichMerchantBrandsJob($user), false],
+        GenerateInsightsJob::class => [new GenerateInsightsJob($user), true],
         ResolveMerchantBrandJob::class => [new ResolveMerchantBrandJob($user, 'merchant'), false],
         ImportCsvTransactionsJob::class => [new ImportCsvTransactionsJob(BankImport::factory()->create()), true],
         RunTransactionAnalysisJob::class => [new RunTransactionAnalysisJob($user), true],
@@ -206,4 +208,17 @@ test('every queued job is in the inventory and carries the audit middleware as d
         expect(AuditEvent::query()->where('action', 'job.'.class_basename($class))->exists())
             ->toBe($audited, $class.' audit behaviour differs from the inventory');
     }
+});
+
+it('pins GenerateInsightsJob in the user action inventory', function () {
+    $user = User::factory()->create();
+    $job = new GenerateInsightsJob($user);
+
+    $attribution = collect($job->middleware())->first(fn (object $middleware): bool => $middleware instanceof AttributeJobToUser);
+
+    expect($attribution)->toBeInstanceOf(AttributeJobToUser::class);
+
+    $attribution->handle($job, fn () => null);
+
+    expect(AuditEvent::query()->where('action', 'job.GenerateInsightsJob')->exists())->toBeTrue();
 });
