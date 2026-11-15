@@ -43,6 +43,20 @@ it('totals only the allocations no numeric line covers', function () {
         ->and(allocationTree([])->allocatedTotal())->toBe(0);
 });
 
+it('adds up every branch of nearest numeric lines below a Shared category', function () {
+    $parents = [1 => null, 2 => 1, 3 => 1, 4 => 3, 5 => 3];
+    $tree = new AllocationTree($parents, [1 => 9000, 2 => 3000, 3 => null, 4 => 1000, 5 => 2000]);
+
+    expect($tree->held(1))->toBe(6000)
+        ->and($tree->inclusive(3))->toBe(3000)
+        ->and($tree->allocatedTotal())->toBe(9000)
+        ->and((new AllocationTree($parents, [2 => 3000, 3 => null, 4 => 1000, 5 => 2000]))->allocatedTotal())->toBe(6000);
+});
+
+it('counts what a parent line holds below it when that exceeds the parent allocation', function () {
+    expect((new AllocationTree([1 => null, 2 => 1], [1 => 100, 2 => 300]))->allocatedTotal())->toBe(300);
+});
+
 it('survives a parent cycle', function () {
     $tree = new AllocationTree([1 => 2, 2 => 1], [1 => 100, 2 => 200]);
 

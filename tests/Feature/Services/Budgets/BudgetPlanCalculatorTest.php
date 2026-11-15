@@ -288,15 +288,38 @@ it('recomputes from a middle plan using the earlier plan as the carry source', f
     $groceries = budgetCalcCategory($this->user);
     $january = budgetCalcPlan($this->user, '2026-01');
     $february = budgetCalcPlan($this->user, '2026-02');
-    $other = budgetCalcPlan(User::factory()->create(), '2026-01');
     budgetCalcLine($january, $groceries, 40000, rollover: true);
     $februaryLine = budgetCalcLine($february, $groceries, 40000, rollover: true);
 
     budgetCalcSpend($this->user, $this->account, $groceries, 25000, '2026-01-10');
     budgetCalcRecompute($february);
 
+    expect($februaryLine->fresh()->rolled_over_amount)->toBe(15000);
+});
+
+it('leaves another user plans alone when recomputing the chain', function () {
+    $groceries = budgetCalcCategory($this->user);
+    $january = budgetCalcPlan($this->user, '2026-01');
+    $february = budgetCalcPlan($this->user, '2026-02');
+    budgetCalcLine($january, $groceries, 40000, rollover: true);
+    $februaryLine = budgetCalcLine($february, $groceries, 40000, rollover: true);
+
+    $other = User::factory()->create();
+    $otherGroceries = budgetCalcCategory($other);
+    $otherJanuary = BudgetPlan::factory()->for($other)->create([
+        'period_start' => '2026-01-15',
+        'period_end' => '2026-01-31',
+        'initialised_at' => '2026-01-15',
+    ]);
+    budgetCalcLine($otherJanuary, $otherGroceries, 40000, rollover: true);
+    $otherFebruaryLine = budgetCalcLine(budgetCalcPlan($other, '2026-02'), $otherGroceries, 40000, rollover: true);
+    $otherFebruaryLine->update(['rolled_over_amount' => 777]);
+
+    budgetCalcSpend($this->user, $this->account, $groceries, 25000, '2026-01-10');
+    budgetCalcRecompute($february);
+
     expect($februaryLine->fresh()->rolled_over_amount)->toBe(15000)
-        ->and($other->lines()->count())->toBe(0);
+        ->and($otherFebruaryLine->fresh()->rolled_over_amount)->toBe(777);
 });
 
 it('reports percent spent and status edges for unbudgeted lines', function () {
@@ -773,4 +796,22 @@ it('shows the current category name on monthly lines', function () {
 
     expect(budgetCalcLineFor($plan, $line)->name)->toBe('Supermarket')
         ->and($calculator->drilldown($plan, $line->id)->name)->toBe('Supermarket');
+});
+
+it('finishes and counts spend once when categories form a parent cycle', function () {
+    $food = budgetCalcCategory($this->user, 'Food');
+    $groceries = budgetCalcCategory($this->user, 'Groceries', $food);
+    Category::query()->whereKey($food->id)->update(['parent_id' => $groceries->id]);
+    $plan = budgetCalcPlan($this->user, '2026-03', total: 100000);
+    budgetCalcLine($plan, $food, 60000);
+    $groceriesLine = budgetCalcLine($plan, $groceries, 10000);
+
+    budgetCalcSpend($this->user, $this->account, $groceries, 4000, '2026-03-05');
+    budgetCalcSpend($this->user, $this->account, $food, 1000, '2026-03-06');
+
+    $summary = app(BudgetPlanCalculator::class)->summarise($plan);
+
+    expect($summary->spent)->toBe(5000)
+        ->and(budgetCalcLineFor($plan, $groceriesLine)->actual)->toBe(5000)
+        ->and(app(BudgetPlanCalculator::class)->drilldown($plan, $groceriesLine->id)->actual)->toBe(5000);
 });
