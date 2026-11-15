@@ -5,10 +5,8 @@
 declare(strict_types=1);
 
 use App\Enums\BudgetPeriod;
-use App\Models\Account;
 use App\Models\Budget;
 use App\Models\Category;
-use App\Models\Transaction;
 use App\Models\User;
 
 test('factory creates a valid budget', function () {
@@ -107,56 +105,6 @@ test('limit_amount is stored as integer cents', function () {
         ->and($budget->limit_amount)->toBeInt();
 });
 
-test('remaining calculates correctly with no transactions', function () {
-    $budget = Budget::factory()->withCategory()->create(['limit_amount' => 100000]);
-
-    expect($budget->remaining())->toBe(100000);
-});
-
-test('remaining calculates correctly with transactions', function () {
-    $user = User::factory()->create();
-    $category = Category::factory()->for($user)->create();
-    $account = Account::factory()->for($user)->create();
-    $budget = Budget::factory()->for($user)->create([
-        'category_id' => $category->id,
-        'limit_amount' => 100000,
-    ]);
-
-    Transaction::factory()->for($user)->for($account)->create([
-        'category_id' => $category->id,
-        'amount' => 30000,
-    ]);
-    Transaction::factory()->for($user)->for($account)->create([
-        'category_id' => $category->id,
-        'amount' => 20000,
-    ]);
-
-    expect($budget->remaining())->toBe(50000);
-});
-
-test('remaining excludes other users transactions in the same category', function () {
-    $user = User::factory()->create();
-    $otherUser = User::factory()->create();
-    $category = Category::factory()->for($user)->create();
-    $account = Account::factory()->for($user)->create();
-    $otherAccount = Account::factory()->for($otherUser)->create();
-    $budget = Budget::factory()->for($user)->create([
-        'category_id' => $category->id,
-        'limit_amount' => 100000,
-    ]);
-
-    Transaction::factory()->for($user)->for($account)->create([
-        'category_id' => $category->id,
-        'amount' => 30000,
-    ]);
-    Transaction::factory()->for($otherUser)->for($otherAccount)->create([
-        'category_id' => $category->id,
-        'amount' => 50000,
-    ]);
-
-    expect($budget->remaining())->toBe(70000);
-});
-
 test('weekly state produces weekly period', function () {
     $budget = Budget::factory()->weekly()->create();
 
@@ -173,16 +121,4 @@ test('yearly state produces yearly period', function () {
     $budget = Budget::factory()->yearly()->create();
 
     expect($budget->period)->toBe(BudgetPeriod::Yearly);
-});
-
-test('overBudget state creates budget with negative remaining', function () {
-    $budget = Budget::factory()->overBudget()->create();
-
-    expect($budget->remaining())->toBeLessThan(0);
-});
-
-test('underBudget state creates budget with positive remaining', function () {
-    $budget = Budget::factory()->underBudget()->create();
-
-    expect($budget->remaining())->toBeGreaterThan(0);
 });

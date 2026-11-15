@@ -106,6 +106,72 @@ final class ReportAggregator
         return $keys;
     }
 
+    /**
+     * Category ids treated as internal transfers: the user's categories named "Transfer"
+     * and its direct children. Mirrors Transaction::scopeExcludingTransfers so
+     * attributed atoms exclude the same rows the Eloquent scope would.
+     *
+     * @return list<int>
+     */
+    public function transferCategoryIds(int $userId): array
+    {
+        $direct = Category::query()->where('user_id', $userId)->where('name', 'Transfer')->pluck('id');
+
+        if ($direct->isEmpty()) {
+            return [];
+        }
+
+        return Category::query()
+            ->where('user_id', $userId)
+            ->whereIn('parent_id', $direct->all())
+            ->pluck('id')
+            ->merge($direct)
+            ->map(static fn ($id): int => (int) $id)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Occurrences of a plan inside [$start, $end]. Jumping straight to the first
+     * occurrence on or after $start means an old, high-frequency plan is never
+     * silently truncated by a fixed cap that counts from start_date.
+     *
+     * @return list<CarbonImmutable>
+     */
+    public function planOccurrences(PlannedTransaction $plan, CarbonImmutable $start, CarbonImmutable $end): array
+    {
+        $current = $plan->nextOccurrenceOnOrAfter($start);
+
+        if ($current === null) {
+            return [];
+        }
+
+        $dates = [];
+        $maxIterations = (int) ceil($start->diffInDays($end)) + 2;
+
+        for ($i = 0; $i < $maxIterations; $i++) {
+            if ($current->greaterThan($end)) {
+                break;
+            }
+
+            if ($plan->until_date !== null && $current->greaterThan($plan->until_date)) {
+                break;
+            }
+
+            $dates[] = $current;
+
+            $next = $plan->frequency->nextOccurrence($current);
+
+            if ($next === null) {
+                break;
+            }
+
+            $current = $next;
+        }
+
+        return $dates;
+    }
+
     private function earliestActualDate(User $user): ?CarbonImmutable
     {
         $min = Transaction::query()
@@ -191,31 +257,6 @@ final class ReportAggregator
     }
 
     /**
-     * Category ids treated as internal transfers: the user's categories named "Transfer"
-     * and its direct children. Mirrors Transaction::scopeExcludingTransfers so
-     * attributed atoms exclude the same rows the Eloquent scope would.
-     *
-     * @return list<int>
-     */
-    private function transferCategoryIds(int $userId): array
-    {
-        $direct = Category::query()->where('user_id', $userId)->where('name', 'Transfer')->pluck('id');
-
-        if ($direct->isEmpty()) {
-            return [];
-        }
-
-        return Category::query()
-            ->where('user_id', $userId)
-            ->whereIn('parent_id', $direct->all())
-            ->pluck('id')
-            ->merge($direct)
-            ->map(static fn ($id): int => (int) $id)
-            ->values()
-            ->all();
-    }
-
-    /**
      * @return list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>
      */
     private function plannedAtoms(User $user, CarbonImmutable $start, CarbonImmutable $end, bool $includeTransfers): array
@@ -271,47 +312,6 @@ final class ReportAggregator
         }
 
         return array_values($atoms);
-    }
-
-    /**
-     * Occurrences of a plan inside [$start, $end]. Jumping straight to the first
-     * occurrence on or after $start means an old, high-frequency plan is never
-     * silently truncated by a fixed cap that counts from start_date.
-     *
-     * @return list<CarbonImmutable>
-     */
-    private function planOccurrences(PlannedTransaction $plan, CarbonImmutable $start, CarbonImmutable $end): array
-    {
-        $current = $plan->nextOccurrenceOnOrAfter($start);
-
-        if ($current === null) {
-            return [];
-        }
-
-        $dates = [];
-        $maxIterations = (int) ceil($start->diffInDays($end)) + 2;
-
-        for ($i = 0; $i < $maxIterations; $i++) {
-            if ($current->greaterThan($end)) {
-                break;
-            }
-
-            if ($plan->until_date !== null && $current->greaterThan($plan->until_date)) {
-                break;
-            }
-
-            $dates[] = $current;
-
-            $next = $plan->frequency->nextOccurrence($current);
-
-            if ($next === null) {
-                break;
-            }
-
-            $current = $next;
-        }
-
-        return $dates;
     }
 
     private function monthExpression(): string

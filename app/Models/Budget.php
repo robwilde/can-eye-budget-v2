@@ -6,7 +6,6 @@ namespace App\Models;
 
 use App\Casts\MoneyCast;
 use App\Enums\BudgetPeriod;
-use App\Support\Transactions\CategoryAttribution;
 use Carbon\CarbonImmutable;
 use Database\Factories\BudgetFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -83,19 +82,6 @@ final class Budget extends Model
     public function scopeWithRelations(Builder $query): Builder
     {
         return $query->with(['user', 'category']);
-    }
-
-    public function remaining(): int
-    {
-        if ($this->category_id === null) {
-            return $this->limit_amount ?? 0;
-        }
-
-        $spent = (int) CategoryAttribution::query($this->user_id, forMoney: true)
-            ->where('category_id', $this->category_id)
-            ->sum('amount');
-
-        return ($this->limit_amount ?? 0) - $spent;
     }
 
     protected static function booted(): void
