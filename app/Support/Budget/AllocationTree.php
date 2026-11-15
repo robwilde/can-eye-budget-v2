@@ -120,7 +120,8 @@ final readonly class AllocationTree
     }
 
     /**
-     * Money allocated across the plan: numeric lines no other numeric line covers.
+     * Money allocated across the plan: numeric lines no other numeric line covers, each counted
+     * at no less than the lines held below it.
      */
     public function allocatedTotal(): int
     {
@@ -128,7 +129,7 @@ final readonly class AllocationTree
 
         foreach ($this->limits as $id => $limit) {
             if ($limit !== null && ! $this->isCovered($id)) {
-                $total += $limit;
+                $total += max($limit, $this->held($id));
             }
         }
 
