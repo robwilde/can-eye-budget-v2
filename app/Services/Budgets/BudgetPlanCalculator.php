@@ -150,19 +150,41 @@ final readonly class BudgetPlanCalculator
     }
 
     /**
+     * The user's category parents and children. A parent that is not the user's own becomes a
+     * root, and a parent cycle is cut so every walk down the tree ends.
+     *
      * @return array{parent: array<int, int|null>, children: array<int, list<int>>}
      */
     private function categoryTree(int $userId): array
     {
         /** @var array<int, int|null> $parent */
-        $parent = Category::query()->where('user_id', $userId)->pluck('parent_id', 'id')->all();
+        $parent = Category::query()->where('user_id', $userId)->orderBy('id')->pluck('parent_id', 'id')->all();
+
+        foreach ($parent as $id => $parentId) {
+            if ($parentId !== null && ! array_key_exists($parentId, $parent)) {
+                $parent[$id] = null;
+            }
+        }
+
+        foreach (array_keys($parent) as $id) {
+            $seen = [$id => true];
+
+            for ($cursor = $id; $parent[$cursor] !== null; $cursor = $parent[$cursor]) {
+                if (isset($seen[$parent[$cursor]])) {
+                    $parent[$cursor] = null;
+
+                    break;
+                }
+
+                $seen[$parent[$cursor]] = true;
+            }
+        }
+
         $children = [];
 
         foreach ($parent as $id => $parentId) {
-            if ($parentId !== null && array_key_exists($parentId, $parent)) {
+            if ($parentId !== null) {
                 $children[$parentId][] = $id;
-            } else {
-                $parent[$id] = null;
             }
         }
 
@@ -437,8 +459,8 @@ final readonly class BudgetPlanCalculator
                 ->whereIn('id', $counted)
                 ->orWhere(fn (EloquentBuilder $split): EloquentBuilder => $split
                     ->where('excluded', true)
-                    ->whereHas('splitChildren', fn ($child) => $child
-                        ->whereDoesntHave('children', fn ($version) => $version->whereNull('deleted_at'))
+                    ->whereHas('splitChildren', fn (EloquentBuilder $child): EloquentBuilder => $child
+                        ->whereDoesntHave('children', fn (EloquentBuilder $version): EloquentBuilder => $version->whereNull('deleted_at'))
                         ->whereIn('id', $counted))))
             ->get(['id', 'planned_transaction_id', 'post_date'])
             ->groupBy('planned_transaction_id');

@@ -6,6 +6,7 @@ namespace App\Services\Budgets;
 
 use App\Models\Budget;
 use App\Models\BudgetPlan;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Collection;
 
 /**
@@ -19,11 +20,13 @@ final readonly class BudgetRolloverRecomputer
     /**
      * Recomputes every initialised plan of the user from $plan onward, $plan included when it is
      * initialised, taking the carry in from the latest initialised plan before it. Runs in one
-     * transaction, so callers that change a plan can run it inside their own.
+     * transaction that first locks the user row, so two recomputes for the same user cannot
+     * interleave and callers that change a plan can run it inside their own transaction.
      */
     public function recomputeFrom(BudgetPlan $plan): void
     {
         $plan->getConnection()->transaction(function () use ($plan): void {
+            User::query()->whereKey($plan->user_id)->lockForUpdate()->value('id');
             $carry = $this->carryBefore($plan);
 
             $chain = BudgetPlan::query()
@@ -94,6 +97,7 @@ final readonly class BudgetRolloverRecomputer
         return $plan->lines()
             ->where('user_id', $plan->user_id)
             ->whereNotNull('category_id')
+            ->orderBy('id')
             ->get();
     }
 }
