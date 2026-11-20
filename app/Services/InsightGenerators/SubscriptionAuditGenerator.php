@@ -10,19 +10,24 @@ use App\Enums\InsightType;
 use App\Enums\OccurrenceStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Models\PlannedOccurrence;
 use App\Models\PlannedTransaction;
 use App\Models\User;
 use App\Services\InsightRecorder;
 use App\Support\Insights\InsightMoney;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 
 /**
  * Flags recurring bills that look forgotten or cancelled: an active, repeating expense plan
- * whose last paid stored occurrence is followed by two scheduled dates that have both passed,
- * so the payment that should have followed is itself a full cycle late. Dates advance through
- * the plan's frequency from the occurrence's schedule date (original_date, not the
- * weekend-adjusted due date), so uneven month and workday cycles are counted as they fall.
- * Plans that were never paid are skipped. Most overdue first, at most three.
+ * that was paid at least once and whose last settled stored occurrence is followed by two
+ * scheduled dates that have both passed, so the payment that should have followed is itself a
+ * full cycle late. A skipped occurrence counts as settled, like a paid one, and a snoozed
+ * occurrence pushes the cycle's expected date out to the end of its snooze, so neither is
+ * counted as unpaid. Dates advance through the plan's frequency from the occurrence's schedule
+ * date (original_date, not the weekend-adjusted due date), so uneven month and workday cycles
+ * are counted as they fall. Plans that were never paid are skipped. Most overdue first, at
+ * most three.
  */
 final readonly class SubscriptionAuditGenerator implements InsightGenerator
 {
@@ -54,6 +59,7 @@ final readonly class SubscriptionAuditGenerator implements InsightGenerator
             ->where('frequency', '!=', RecurrenceFrequency::DontRepeat)
             ->where(fn ($query) => $query->whereNull('until_date')->orWhere('until_date', '>=', $today->toDateString()))
             ->withMax(['occurrences as last_paid' => fn ($query) => $query->where('status', OccurrenceStatus::Paid)], 'original_date')
+            ->withMax(['occurrences as last_settled' => fn ($query) => $query->whereIn('status', [OccurrenceStatus::Paid, OccurrenceStatus::Skipped])], 'original_date')
             ->with('account:id,currency')
             ->orderBy('id')
             ->get();
@@ -61,6 +67,13 @@ final readonly class SubscriptionAuditGenerator implements InsightGenerator
         if ($plans->isEmpty()) {
             return [];
         }
+
+        $snoozes = PlannedOccurrence::query()
+            ->forUser($user)
+            ->where('status', OccurrenceStatus::Scheduled)
+            ->whereNotNull('snoozed_until')
+            ->get()
+            ->groupBy('planned_transaction_id');
 
         $overdue = [];
 
@@ -72,10 +85,17 @@ final readonly class SubscriptionAuditGenerator implements InsightGenerator
             }
 
             $lastPaidOn = CarbonImmutable::parse((string) $paid);
-            $expected = $plan->frequency->nextOccurrence($lastPaidOn);
+            $lastSettledOn = CarbonImmutable::parse((string) $plan->getAttribute('last_settled'));
+            $expected = $plan->frequency->nextOccurrence($lastSettledOn);
 
             if ($expected === null) {
                 continue;
+            }
+
+            $snoozedUntil = $this->snoozeEnd($snoozes->get($plan->id), $lastSettledOn, $expected);
+
+            if ($snoozedUntil !== null && $snoozedUntil->greaterThan($expected)) {
+                $expected = $snoozedUntil;
             }
 
             $following = $plan->frequency->nextOccurrence($expected);
@@ -136,5 +156,18 @@ final readonly class SubscriptionAuditGenerator implements InsightGenerator
         }
 
         return $keys;
+    }
+
+    /**
+     * @param  Collection<int, PlannedOccurrence>|null  $snoozes
+     */
+    private function snoozeEnd(?Collection $snoozes, CarbonImmutable $lastSettledOn, CarbonImmutable $expected): ?CarbonImmutable
+    {
+        return $snoozes
+            ?->filter(fn (PlannedOccurrence $occurrence): bool => $occurrence->original_date->greaterThan($lastSettledOn)
+                && $occurrence->original_date->lessThanOrEqualTo($expected))
+            ->sortByDesc(fn (PlannedOccurrence $occurrence): int => $occurrence->snoozed_until->getTimestamp())
+            ->first()
+            ?->snoozed_until;
     }
 }
