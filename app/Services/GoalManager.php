@@ -145,6 +145,40 @@ final class GoalManager
     }
 
     /**
+     * Recomputes every months-of-expenses reserve target of the user from the current median
+     * monthly spend and returns how many targets changed. Completed and archived goals are
+     * left alone.
+     *
+     * @throws Throwable
+     */
+    public function refreshReserveTargets(User $user): int
+    {
+        return Goal::resolveConnection()->transaction(function () use ($user): int {
+            $reserves = $this->lockGoals($user)->filter(fn (Goal $goal): bool => $goal->kind === GoalKind::Reserve
+                && $goal->target_months_of_expenses !== null
+                && $this->holdsEarmarks($goal));
+
+            if ($reserves->isEmpty()) {
+                return 0;
+            }
+
+            $median = $this->medianMonthlySpend->forUser($user);
+            $changed = 0;
+
+            foreach ($reserves as $reserve) {
+                $target = $reserve->target_months_of_expenses * $median;
+
+                if ($reserve->target_amount !== $target) {
+                    $reserve->update(['target_amount' => $target]);
+                    $changed++;
+                }
+            }
+
+            return $changed;
+        });
+    }
+
+    /**
      * Records money spent from one of the goal's accounts. The account's earmark shrinks by
      * the same amount and the spend still counts toward the goal's progress.
      *

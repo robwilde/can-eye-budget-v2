@@ -40,3 +40,8 @@ Schedule::command('insights:generate')
     ->dailyAt('02:00')
     ->name('insights:generate')
     ->withoutOverlapping();
+
+Schedule::command('goals:maintain')
+    ->dailyAt('02:00')
+    ->name('goals:maintain')
+    ->withoutOverlapping();
