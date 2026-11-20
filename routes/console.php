@@ -35,3 +35,8 @@ Schedule::command('exchange-rates:fetch')
     ->dailyAt('05:00')
     ->name('exchange-rates:fetch')
     ->withoutOverlapping();
+
+Schedule::command('insights:generate')
+    ->dailyAt('02:00')
+    ->name('insights:generate')
+    ->withoutOverlapping();
