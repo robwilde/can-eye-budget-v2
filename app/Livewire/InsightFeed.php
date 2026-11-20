@@ -160,6 +160,7 @@ final class InsightFeed extends Component
         return match ($insight->action_route) {
             'reports' => ['url' => route('reports'), 'label' => __('View reports')],
             'dashboard' => ['url' => route('dashboard'), 'label' => __('View dashboard')],
+            'accounts' => ['url' => route('accounts'), 'label' => __('View accounts')],
             'accounts.show' => $insight->account_id === null ? null : ['url' => route('accounts.show', $insight->account_id), 'label' => __('Go to account')],
             default => null,
         };
