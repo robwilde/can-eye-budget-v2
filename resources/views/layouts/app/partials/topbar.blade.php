@@ -9,6 +9,7 @@
         'rules' => ['Rules', 'Automations'],
         'tags' => ['Tags', 'Organise transactions'],
         'merchants' => ['Merchants', 'Where you spend'],
+        'insights' => ['Insights', 'What changed'],
     ];
 
     [$crumb, $title] = $titles[request()->route()?->getName()] ?? ['Can I Budget', ''];
@@ -41,6 +42,19 @@
                 <span class="size-1.75 rounded-full bg-cib-green-500 ring-4 ring-cib-green-500/20"></span>
                 Synced {{ $shellSyncedHuman }} · Redbark
             </span>
+        @endif
+
+        @if(config('budget.insights_enabled'))
+            <a
+                    href="{{ route('insights') }}"
+                    wire:navigate
+                    data-testid="topbar-insights"
+                    class="inline-flex h-9 items-center justify-center gap-1 rounded-md border-2 border-cib-black bg-white px-2 shadow-pop-sm hover:bg-cib-cream-50"
+            >
+                <flux:icon name="light-bulb" class="size-4"/>
+                <span class="sr-only">{{ __('Insights') }}</span>
+                <livewire:insight-badge/>
+            </a>
         @endif
 
         <a

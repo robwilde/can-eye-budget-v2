@@ -104,6 +104,7 @@ test('every callable Livewire method, in class and view-based components, is aud
 
     expect($unaudited)->toEqualCanonicalizing([
         'App\\Livewire\\ImportBank::pollStatus',
+        'App\\Livewire\\InsightFeed::pollRefresh',
         'App\\Livewire\\TransactionList::pollMerchantBrands',
         'App\\Livewire\\UserRuleManager::testRule',
     ]);
