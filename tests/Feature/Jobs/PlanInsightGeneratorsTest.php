@@ -357,6 +357,25 @@ function paidOn(PlannedTransaction $plan, string $date): PlannedOccurrence
     ]);
 }
 
+function skippedOn(PlannedTransaction $plan, string $date): PlannedOccurrence
+{
+    return PlannedOccurrence::factory()->skipped()->create([
+        'planned_transaction_id' => $plan->id,
+        'original_date' => $date,
+        'due_date' => $date,
+    ]);
+}
+
+function snoozedOn(PlannedTransaction $plan, string $date, string $until): PlannedOccurrence
+{
+    return PlannedOccurrence::factory()->create([
+        'planned_transaction_id' => $plan->id,
+        'original_date' => $date,
+        'due_date' => $date,
+        'snoozed_until' => $until,
+    ]);
+}
+
 it('flags a recurring item overdue by a full cycle', function () {
     $plan = monthlyBill($this->user, $this->account, 'Streaming Service');
     paidOn($plan, '2026-09-16');
@@ -463,6 +482,87 @@ it('flags a monthly item exactly when the second scheduled date has passed, what
     GenerateInsightsJob::dispatchSync($this->user);
 
     expect(insightsOf($this->user, InsightType::SubscriptionAudit)->sole()->comparison['cycles_overdue'])->toBe(1);
+});
+
+it('does not flag a recurring item whose missing cycle was skipped', function () {
+    $plan = monthlyBill($this->user, $this->account, 'Streaming Service');
+    paidOn($plan, '2026-09-16');
+    skippedOn($plan, '2026-10-16');
+
+    GenerateInsightsJob::dispatchSync($this->user);
+
+    expect(insightsOf($this->user, InsightType::SubscriptionAudit))->toHaveCount(0);
+});
+
+it('does not flag a recurring item whose missing cycle is snoozed before a full cycle passes its snooze', function () {
+    $plan = monthlyBill($this->user, $this->account, 'Streaming Service');
+    paidOn($plan, '2026-09-16');
+    snoozedOn($plan, '2026-10-16', '2026-11-25');
+
+    GenerateInsightsJob::dispatchSync($this->user);
+
+    expect(insightsOf($this->user, InsightType::SubscriptionAudit))->toHaveCount(0);
+
+    $this->travelTo('2026-12-24 12:00:00');
+    GenerateInsightsJob::dispatchSync($this->user);
+
+    expect(insightsOf($this->user, InsightType::SubscriptionAudit))->toHaveCount(0);
+});
+
+it('ignores a snooze on a later cycle when the expected cycle is missed', function () {
+    $plan = monthlyBill($this->user, $this->account, 'Streaming Service');
+    paidOn($plan, '2026-09-16');
+    snoozedOn($plan, '2026-11-16', '2027-01-10');
+
+    GenerateInsightsJob::dispatchSync($this->user);
+
+    $insight = insightsOf($this->user, InsightType::SubscriptionAudit)->sole();
+
+    expect($insight->dedup_key)->toBe("subscription_audit:{$plan->id}")
+        ->and($insight->comparison['cycles_overdue'])->toBe(1);
+});
+
+it('does not bring the expected date forward for a snooze that ends before it', function () {
+    $plan = monthlyBill($this->user, $this->account, 'Streaming Service');
+    paidOn($plan, '2026-09-16');
+    snoozedOn($plan, '2026-10-16', '2026-10-10');
+
+    $this->travelTo('2026-11-15 12:00:00');
+    GenerateInsightsJob::dispatchSync($this->user);
+
+    expect(insightsOf($this->user, InsightType::SubscriptionAudit))->toHaveCount(0);
+
+    $this->travelTo('2026-11-16 12:00:00');
+    GenerateInsightsJob::dispatchSync($this->user);
+
+    expect(insightsOf($this->user, InsightType::SubscriptionAudit)->sole()->comparison['cycles_overdue'])->toBe(1);
+});
+
+it('flags a recurring item once a full cycle is missed after a skipped or snoozed cycle', function () {
+    $skipped = monthlyBill($this->user, $this->account, 'Gym');
+    paidOn($skipped, '2026-09-16');
+    skippedOn($skipped, '2026-10-16');
+    $snoozed = monthlyBill($this->user, $this->account, 'Phone');
+    paidOn($snoozed, '2026-09-16');
+    snoozedOn($snoozed, '2026-10-16', '2026-11-25');
+
+    $this->travelTo('2026-12-24 12:00:00');
+    GenerateInsightsJob::dispatchSync($this->user);
+
+    $insight = insightsOf($this->user, InsightType::SubscriptionAudit)->sole();
+
+    expect($insight->dedup_key)->toBe("subscription_audit:{$skipped->id}")
+        ->and($insight->figures['last_paid_date'])->toBe('2026-09-16')
+        ->and($insight->comparison['cycles_overdue'])->toBe(1);
+
+    $this->travelTo('2026-12-25 12:00:00');
+    GenerateInsightsJob::dispatchSync($this->user);
+
+    $insights = insightsOf($this->user, InsightType::SubscriptionAudit)->keyBy('dedup_key');
+
+    expect($insights)->toHaveCount(2)
+        ->and($insights["subscription_audit:{$snoozed->id}"]->figures['last_paid_date'])->toBe('2026-09-16')
+        ->and($insights["subscription_audit:{$snoozed->id}"]->comparison['cycles_overdue'])->toBe(1);
 });
 
 it('keeps goal and subscription insight titles within the 255 character column', function () {
