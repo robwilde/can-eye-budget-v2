@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int $id
  * @property int $user_id
  * @property int $account_id
+ * @property int|null $statement_id
  * @property CarbonImmutable $period_start
  * @property CarbonImmutable $period_end
  * @property StatementReconciliationStatus $status
@@ -46,6 +47,7 @@ final class StatementReconciliation extends Model
     protected $fillable = [
         'user_id',
         'account_id',
+        'statement_id',
         'period_start',
         'period_end',
         'status',
@@ -77,6 +79,12 @@ final class StatementReconciliation extends Model
     public function account(): BelongsTo
     {
         return $this->belongsTo(Account::class);
+    }
+
+    /** @return BelongsTo<Statement, $this> */
+    public function statement(): BelongsTo
+    {
+        return $this->belongsTo(Statement::class);
     }
 
     /** @return HasMany<StatementReconciliationLine, $this> */

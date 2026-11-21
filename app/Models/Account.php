@@ -10,6 +10,7 @@ use App\Enums\AccountGroup;
 use App\Enums\AccountStatus;
 use App\Enums\ImportSource;
 use App\Enums\StatementReconciliationStatus;
+use App\Enums\StatementReviewStatus;
 use App\Support\Redbark\InitialSyncWindow;
 use Carbon\CarbonImmutable;
 use Database\Factories\AccountFactory;
@@ -119,6 +120,12 @@ final class Account extends Model
     public function statementReconciliations(): HasMany
     {
         return $this->hasMany(StatementReconciliation::class);
+    }
+
+    /** @return HasMany<Statement, $this> */
+    public function statements(): HasMany
+    {
+        return $this->hasMany(Statement::class);
     }
 
     /** @return HasOne<RedbarkAccount, $this> */
@@ -299,6 +306,11 @@ final class Account extends Model
             TransactionAttachment::remember($account, TransactionAttachment::query()
                 ->whereIn('transaction_id', Transaction::withTrashed()->where('account_id', $account->id)->select('id'))
                 ->get(['disk', 'path']));
+
+            Statement::query()->where('user_id', $account->user_id)->where('account_id', $account->id)
+                ->update(['review_status' => StatementReviewStatus::Unmatched]);
+            Statement::query()->where('user_id', $account->user_id)->where('suggested_account_id', $account->id)
+                ->update(['suggestion_confidence' => null]);
         });
 
         self::deleted(static function (self $account): void {
