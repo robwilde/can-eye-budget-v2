@@ -14,6 +14,7 @@ enum RuleActionType: string
     case LinkToPlannedTransaction = 'link_to_planned_transaction';
     case FoldIntoParent = 'fold_into_parent';
     case ExcludeFromReports = 'exclude_from_reports';
+    case MarkAsTransfer = 'mark_as_transfer';
 
     public function label(): string
     {
@@ -26,6 +27,7 @@ enum RuleActionType: string
             self::LinkToPlannedTransaction => 'Link to Planned Transaction',
             self::FoldIntoParent => 'Fold into parent transaction',
             self::ExcludeFromReports => 'Exclude from budgets and reports',
+            self::MarkAsTransfer => 'Mark as Transfer',
         };
     }
 
@@ -39,6 +41,7 @@ enum RuleActionType: string
             self::SetNotes => 'notes',
             self::LinkToPlannedTransaction => 'planned_transaction_id',
             self::FoldIntoParent, self::ExcludeFromReports => '',
+            self::MarkAsTransfer => 'account_id',
         };
     }
 
