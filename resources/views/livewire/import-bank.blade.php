@@ -110,6 +110,20 @@
                 </flux:button>
             </div>
         </x-cib.card>
+
+        @if (config('budget.pdf_import.enabled'))
+            <x-cib.card data-testid="import-bank-pdf">
+                <flux:heading size="lg">{{ __('Or upload a PDF statement') }}</flux:heading>
+                <flux:text size="sm" class="mt-1">
+                    {{ __('The PDF is stored in your statement vault and read by an AI provider, so the whole file is sent to it. You review the transactions before anything is added. Up to :size MB; uses the account chosen above if any.', ['size' => intdiv(\App\Livewire\ImportBank::maxPdfKilobytes(), 1024)]) }}
+                </flux:text>
+                <div class="mt-4 space-y-3">
+                    <input type="file" wire:model="pdfFile" accept=".pdf,application/pdf" data-testid="import-bank-pdf-input" class="block w-full text-sm"/>
+                    @error('pdfFile') <flux:text class="text-sm text-cib-red-600">{{ $message }}</flux:text> @enderror
+                    <flux:button wire:click="startPdfImport" wire:loading.attr="disabled" data-testid="import-bank-pdf-start">{{ __('Read the PDF') }}</flux:button>
+                </div>
+            </x-cib.card>
+        @endif
     @endif
 
     {{-- STEP 2: mapping + preview --}}
