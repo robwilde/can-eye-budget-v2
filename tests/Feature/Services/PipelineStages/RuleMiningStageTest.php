@@ -570,7 +570,8 @@ test('the first import report counts rules applied by a later sync and not rows 
     $blocking = false;
 
     expect($first->stages_completed)->toContain('rule-mining')
-        ->and(collect($first->stages_failed)->pluck('stage'))->toContain('user-rules')
+        ->and(collect($first->stages_failed)->pluck('stage'))->not->toContain('user-rules')
+        ->and(PipelineAuditEntry::query()->where('action', 'rule_failed')->exists())->toBeTrue()
         ->and(Transaction::query()->where('user_id', $this->user->id)->whereNotNull('category_id')->exists())->toBeFalse();
 
     $this->travel(1)->hours();
