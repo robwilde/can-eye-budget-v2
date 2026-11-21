@@ -9,6 +9,7 @@ use App\Contracts\ExchangeRateProviderContract;
 use App\Contracts\GitHubServiceContract;
 use App\Contracts\GmailServiceContract;
 use App\Contracts\ScheduleSource;
+use App\Contracts\StatementPdfExtractor;
 use App\Contracts\TypeSafeServiceContract;
 use App\Models\Transaction;
 use App\Observers\TransactionObserver;
@@ -32,6 +33,7 @@ use App\Services\PipelineStages\UserRulesStage;
 use App\Services\RedbarkClientFactory;
 use App\Services\RuleAiCategorisationQueue;
 use App\Services\SimpleFinClaimer;
+use App\Services\Statement\AnthropicStatementPdfExtractor;
 use App\Services\TransactionAnalysisPipeline;
 use App\Services\TypeSafeService;
 use App\Support\Email\ScheduleParser;
@@ -84,6 +86,13 @@ final class AppServiceProvider extends ServiceProvider
                 model: (string) config('services.typesafe.model'),
             );
         });
+
+        $this->app->bind(StatementPdfExtractor::class, fn (): AnthropicStatementPdfExtractor => new AnthropicStatementPdfExtractor(
+            apiKey: config('services.statement_ai.api_key'),
+            baseUrl: (string) config('services.statement_ai.base_url'),
+            model: (string) config('services.statement_ai.model'),
+            maxTokens: (int) config('services.statement_ai.max_tokens'),
+        ));
 
         $this->app->bind(ContextDevCreditBudget::class, fn (): ContextDevCreditBudget => new ContextDevCreditBudget(
             cache: $this->app->make('cache.store'),
