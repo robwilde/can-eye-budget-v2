@@ -1,0 +1,28 @@
+{
+  "format": "can-eye-budget.rules",
+  "version": 1,
+  "groups": [
+    {
+      "name": "Spending",
+      "description": null,
+      "is_active": true,
+      "stop_processing": false,
+      "rules": [
+        {
+          "name": "Groceries",
+          "description": null,
+          "is_active": true,
+          "is_auto_apply": true,
+          "strict_mode": true,
+          "effective_from": null,
+          "triggers": [
+            {"field": "description", "operator": "contains", "value": "ALDI"}
+          ],
+          "actions": [
+            {"type": "set_category", "value": "Groceries"}
+          ]
+        }
+      ]
+    }
+  ]
+}
