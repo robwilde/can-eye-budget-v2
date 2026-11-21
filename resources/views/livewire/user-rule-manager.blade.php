@@ -3,6 +3,7 @@
     use App\Enums\RuleTriggerField;
     use App\Enums\RuleTriggerOperator;
     use App\Enums\TransactionDirection;
+    use App\Support\Rules\RuleTriggers;
     use Illuminate\Support\Carbon;
     use Illuminate\Support\Str;
 @endphp
@@ -94,7 +95,7 @@
                                         </flux:text>
                                     </div>
                                     <div class="flex flex-wrap items-center gap-1.5">
-                                        <flux:badge size="sm" color="blue">{{ count($rule->triggers) }} {{ Str::plural('trigger', count($rule->triggers)) }}</flux:badge>
+                                        <flux:badge size="sm" color="blue" data-testid="rule-if-summary">IF {{ $rule->conditionSummary() }}</flux:badge>
                                         <flux:badge size="sm" color="purple">{{ count($rule->actions) }} {{ Str::plural('action', count($rule->actions)) }}</flux:badge>
                                         @unless($rule->is_active)
                                             <flux:badge size="sm" color="yellow">Inactive</flux:badge>
@@ -208,43 +209,46 @@
             <div class="space-y-2">
                 <div class="flex items-center justify-between">
                     <flux:heading size="sm">Triggers</flux:heading>
-                    <flux:button variant="ghost" size="sm" wire:click="addTrigger">Add Trigger</flux:button>
+                    <div class="flex items-center gap-1">
+                        @unless(array_any($triggers, RuleTriggers::isGroup(...)))
+                            <flux:button variant="ghost" size="sm" wire:click="addGroup" data-testid="rule-add-group">Add Group</flux:button>
+                        @endunless
+                        <flux:button variant="ghost" size="sm" wire:click="addTrigger">Add Trigger</flux:button>
+                    </div>
                 </div>
                 <flux:error name="triggers" />
 
                 @foreach($triggers as $index => $trigger)
-                    <div wire:key="trigger-{{ $index }}" class="flex items-start gap-2 rounded-lg border border-neutral-200 p-2 dark:border-neutral-700">
-                        <flux:field class="flex-1">
-                            <flux:select wire:model="triggers.{{ $index }}.field" size="sm">
-                                <flux:select.option value="">Field...</flux:select.option>
-                                @foreach(RuleTriggerField::cases() as $field)
-                                    <flux:select.option value="{{ $field->value }}">{{ $field->label() }}</flux:select.option>
-                                @endforeach
-                            </flux:select>
-                            <flux:error name="triggers.{{ $index }}.field" />
-                        </flux:field>
+                    @if(RuleTriggers::isGroup($trigger))
+                        <div wire:key="trigger-{{ $index }}" class="space-y-2 rounded-lg border border-dashed border-neutral-300 p-2 dark:border-neutral-600" data-testid="rule-condition-group">
+                            <div class="flex items-center gap-2">
+                                <flux:text size="sm">Match</flux:text>
+                                <flux:select wire:model="triggers.{{ $index }}.match" size="sm" class="w-24" data-testid="rule-group-match">
+                                    <flux:select.option value="all">all</flux:select.option>
+                                    <flux:select.option value="any">any</flux:select.option>
+                                </flux:select>
+                                <flux:text size="sm">of these</flux:text>
+                                <flux:button variant="ghost" size="sm" class="ml-auto" wire:click="removeTrigger({{ $index }})" data-testid="rule-group-remove">
+                                    <flux:icon.x-mark class="size-4" />
+                                </flux:button>
+                            </div>
+                            <flux:error name="triggers.{{ $index }}" />
+                            <flux:error name="triggers.{{ $index }}.match" />
 
-                        <flux:field class="flex-1">
-                            <flux:select wire:model.live="triggers.{{ $index }}.operator" size="sm">
-                                <flux:select.option value="">Operator...</flux:select.option>
-                                @foreach(RuleTriggerOperator::cases() as $operator)
-                                    <flux:select.option value="{{ $operator->value }}">{{ $operator->label() }}</flux:select.option>
-                                @endforeach
-                            </flux:select>
-                            <flux:error name="triggers.{{ $index }}.operator" />
-                        </flux:field>
+                            @foreach($trigger['conditions'] ?? [] as $conditionIndex => $condition)
+                                <div wire:key="trigger-{{ $index }}-{{ $conditionIndex }}">
+                                    @include('partials.rule-condition-row', ['path' => "triggers.{$index}.conditions.{$conditionIndex}", 'condition' => $condition, 'remove' => "removeGroupCondition({$index}, {$conditionIndex})"])
+                                    <flux:error name="triggers.{{ $index }}.conditions.{{ $conditionIndex }}" />
+                                </div>
+                            @endforeach
 
-                        @if(! isset($trigger['operator']) || $trigger['operator'] === '' || RuleTriggerOperator::tryFrom($trigger['operator'])?->requiresValue() !== false)
-                            <flux:field class="flex-1">
-                                <flux:input wire:model="triggers.{{ $index }}.value" size="sm" placeholder="Value" />
-                                <flux:error name="triggers.{{ $index }}.value" />
-                            </flux:field>
-                        @endif
-
-                        <flux:button variant="ghost" size="sm" wire:click="removeTrigger({{ $index }})">
-                            <flux:icon.x-mark class="size-4" />
-                        </flux:button>
-                    </div>
+                            <flux:button variant="ghost" size="sm" wire:click="addGroupCondition({{ $index }})" data-testid="rule-group-add-condition">Add condition to group</flux:button>
+                        </div>
+                    @else
+                        <div wire:key="trigger-{{ $index }}">
+                            @include('partials.rule-condition-row', ['path' => "triggers.{$index}", 'condition' => $trigger, 'remove' => "removeTrigger({$index})"])
+                        </div>
+                    @endif
                 @endforeach
             </div>
 

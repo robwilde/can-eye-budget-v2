@@ -48,7 +48,7 @@ final readonly class ManualContradictionChecker
     }
 
     /**
-     * @param  list<array<string, string>>  $triggers  strict-mode (AND) triggers: [{field, operator, value}, ...]
+     * @param  list<array<string, mixed>>  $triggers  strict-mode (AND) entries: {field, operator, value}, or one {type: group, match, conditions}
      * @return array{agrees: Collection<int, Transaction>, contradicts: Collection<int, Transaction>, contradictingCategories: array<string, int>}
      */
     public function check(int $userId, int $targetCategoryId, array $triggers): array

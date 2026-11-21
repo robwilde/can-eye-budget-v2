@@ -9,13 +9,14 @@ use App\Enums\RuleTriggerOperator;
 use App\Models\Transaction;
 use App\Models\UserRule;
 use App\Support\Rules\RegexPattern;
+use App\Support\Rules\RuleTriggers;
 use BackedEnum;
 
 final readonly class RuleEvaluator
 {
     public function matches(Transaction $transaction, UserRule $rule): bool
     {
-        $triggers = $rule->triggers;
+        $triggers = array_values(array_filter($rule->triggers, static fn (mixed $entry): bool => ! RuleTriggers::isEmptyGroup($entry)));
 
         if ($triggers === []) {
             return false;
@@ -26,23 +27,41 @@ final readonly class RuleEvaluator
         }
 
         if ($rule->strict_mode) {
-            return array_all($triggers, fn ($trigger) => $this->evaluateTrigger($transaction, $trigger));
+            return array_all($triggers, fn ($entry) => $this->evaluateEntry($transaction, $entry));
         }
 
-        return array_any($triggers, fn ($trigger) => $this->evaluateTrigger($transaction, $trigger));
+        return array_any($triggers, fn ($entry) => $this->evaluateEntry($transaction, $entry));
     }
 
-    /** @param  array<string, string>  $trigger */
+    /** @param  array<string, mixed>  $entry */
+    private function evaluateEntry(Transaction $transaction, array $entry): bool
+    {
+        if (! RuleTriggers::isGroup($entry)) {
+            return $this->evaluateTrigger($transaction, $entry);
+        }
+
+        $conditions = RuleTriggers::conditionsOf($entry);
+
+        if ($conditions === []) {
+            return true;
+        }
+
+        return ($entry['match'] ?? RuleTriggers::MATCH_ALL) === RuleTriggers::MATCH_ANY
+            ? array_any($conditions, fn ($condition) => $this->evaluateEntry($transaction, $condition))
+            : array_all($conditions, fn ($condition) => $this->evaluateEntry($transaction, $condition));
+    }
+
+    /** @param  array<string, mixed>  $trigger */
     private function evaluateTrigger(Transaction $transaction, array $trigger): bool
     {
-        $field = RuleTriggerField::tryFrom($trigger['field'] ?? '');
-        $operator = RuleTriggerOperator::tryFrom($trigger['operator'] ?? '');
+        $field = RuleTriggerField::tryFrom(is_string($trigger['field'] ?? null) ? $trigger['field'] : '');
+        $operator = RuleTriggerOperator::tryFrom(is_string($trigger['operator'] ?? null) ? $trigger['operator'] : '');
 
         if ($field === null || $operator === null) {
             return false;
         }
 
-        $expected = $trigger['value'] ?? '';
+        $expected = is_scalar($trigger['value'] ?? null) ? (string) $trigger['value'] : '';
 
         if ($operator->requiresValue() && $expected === '') {
             return false;

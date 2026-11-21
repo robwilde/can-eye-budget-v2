@@ -13,6 +13,7 @@ use App\Exceptions\CategoryMergeRefusedException;
 use App\Models\Category;
 use App\Models\User;
 use App\Support\Categories\ProtectedCategories;
+use App\Support\Rules\RuleTriggers;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -319,9 +320,9 @@ final class CategoryMerger
 
                 if ($to !== null) {
                     $newActions = $this->remapActions($actions, $from, $to);
-                    $newTriggers = array_map(
-                        fn (mixed $trigger): mixed => $this->isCategoryTrigger($trigger, $from) ? [...$trigger, 'value' => $this->remapId($trigger['value'], $to)] : $trigger,
+                    $newTriggers = RuleTriggers::map(
                         $triggers,
+                        fn (array $trigger): array => $this->isCategoryTrigger($trigger, $from) ? [...$trigger, 'value' => $this->remapId($trigger['value'], $to)] : $trigger,
                     );
 
                     if ($newActions !== $actions || $newTriggers !== $triggers) {
@@ -332,14 +333,14 @@ final class CategoryMerger
                 }
 
                 $keptActions = $this->stripActions($actions, $from);
-                $keptTriggers = array_values(array_filter($triggers, fn (mixed $trigger): bool => ! $this->isPositiveCategoryTrigger($trigger, $from)));
-                $lostTrigger = count($keptTriggers) !== count($triggers);
+                $keptTriggers = RuleTriggers::reject($triggers, fn (array $trigger): bool => $this->isPositiveCategoryTrigger($trigger, $from));
+                $lostTrigger = count(RuleTriggers::flatten($keptTriggers)) !== count(RuleTriggers::flatten($triggers));
 
                 if (count($keptActions) === count($actions) && ! $lostTrigger) {
                     continue;
                 }
 
-                $deactivate = $keptActions === [] || $keptTriggers === [] || ($lostTrigger && $rule->strict_mode);
+                $deactivate = $keptActions === [] || RuleTriggers::flatten($keptTriggers) === [] || ($lostTrigger && $rule->strict_mode);
 
                 DB::table('user_rules')->where('id', $rule->id)->update([
                     'actions' => json_encode($keptActions, JSON_THROW_ON_ERROR),

@@ -26,7 +26,7 @@ final readonly class RuleTester
     ) {}
 
     /**
-     * @param  array<int, array<string, string>>  $triggers
+     * @param  array<int, array<string, mixed>>  $triggers
      * @param  array<int, array<string, string>>  $actions
      */
     public function test(int $userId, array $triggers, bool $strictMode, array $actions, ?string $effectiveFrom = null, bool $overrideLocks = false): RuleTestResult

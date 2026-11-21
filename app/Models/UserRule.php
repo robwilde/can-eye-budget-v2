@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\RuleTriggerField;
+use App\Enums\RuleTriggerOperator;
+use App\Support\Rules\RuleTriggers;
 use Carbon\CarbonImmutable;
 use Database\Factories\UserRuleFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -17,7 +20,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $user_rule_group_id
  * @property string $name
  * @property string|null $description
- * @property array<int, array<string, string>> $triggers
+ * @property array<int, array<string, mixed>> $triggers
  * @property array<int, array<string, string>> $actions
  * @property bool $strict_mode
  * @property bool $is_auto_apply
@@ -46,6 +49,26 @@ final class UserRule extends Model
         'effective_from',
         'order',
     ];
+
+    /**
+     * The first condition and how many more follow, whether top-level or inside the group.
+     */
+    public function conditionSummary(): string
+    {
+        $conditions = RuleTriggers::flatten($this->triggers);
+
+        if ($conditions === []) {
+            return '';
+        }
+
+        $field = RuleTriggerField::tryFrom((string) ($conditions[0]['field'] ?? ''));
+        $operator = RuleTriggerOperator::tryFrom((string) ($conditions[0]['operator'] ?? ''));
+        $value = is_scalar($conditions[0]['value'] ?? null) ? (string) $conditions[0]['value'] : '';
+        $first = mb_trim(implode(' ', array_filter([$field?->label(), $operator?->label(), $value], static fn (?string $part): bool => $part !== null && $part !== '')));
+        $more = count($conditions) - 1;
+
+        return $first.($more > 0 ? " and {$more} more" : '');
+    }
 
     /** @return BelongsTo<User, $this> */
     public function user(): BelongsTo
