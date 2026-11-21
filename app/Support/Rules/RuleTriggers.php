@@ -41,6 +41,16 @@ final class RuleTriggers
     }
 
     /**
+     * Whether any condition, at the top or inside a group, tests the given field.
+     *
+     * @param  array<int|string, mixed>  $triggers
+     */
+    public static function usesField(array $triggers, string $field): bool
+    {
+        return array_any(self::flatten($triggers), static fn (array $condition): bool => ($condition['field'] ?? null) === $field);
+    }
+
+    /**
      * Every {field, operator, value} entry, whether at the top or inside a group.
      *
      * @param  array<int|string, mixed>  $triggers
