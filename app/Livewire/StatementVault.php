@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Enums\StatementReviewStatus;
+use App\Exceptions\Statement\StatementHasPdfImports;
 use App\Livewire\Concerns\ReportsFailure;
 use App\Models\Account;
 use App\Models\Statement;
@@ -178,7 +179,13 @@ final class StatementVault extends Component
 
     public function delete(int $statementId): void
     {
-        $this->ownedStatement($statementId)?->delete();
+        try {
+            $this->ownedStatement($statementId)?->delete();
+        } catch (StatementHasPdfImports) {
+            $this->addError('statement', __('This statement has PDF imports, so it cannot be deleted.'));
+
+            return;
+        }
 
         if ($this->editingStatementId === $statementId) {
             $this->cancelEditing();
