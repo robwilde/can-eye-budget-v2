@@ -37,6 +37,7 @@ use App\Services\ExchangeRateLookup;
 use App\Services\PendingMergeService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\RecentCategoryPicks;
+use App\Services\RulePromptGate;
 use App\Services\Tags\TransactionTagger;
 use App\Services\TransactionIdempotency;
 use App\Services\Transactions\TransactionDeleter;
@@ -98,6 +99,17 @@ final class TransactionModal extends Component
 
     #[Locked]
     public bool $categoryPicked = false;
+
+    #[Locked]
+    public ?int $openedCategoryId = null;
+
+    /**
+     * The "Create rule" offer left on screen after a hand-picked category change saved.
+     *
+     * @var array{transactionId: int, categoryId: int, categoryName: string}|null
+     */
+    #[Locked]
+    public ?array $rulePrompt = null;
 
     public ?int $merchantId = null;
 
@@ -320,6 +332,7 @@ final class TransactionModal extends Component
         }
 
         $this->categoryId = $transaction->category_id;
+        $this->openedCategoryId = $transaction->category_id;
         $this->categoryPicked = false;
         $this->merchantId = $transaction->merchant_id;
         $this->date = $transaction->post_date->format('Y-m-d');
@@ -481,9 +494,62 @@ final class TransactionModal extends Component
             app(RecentCategoryPicks::class)->record($this->authenticatedUser(), $this->categoryId);
         }
 
+        $this->offerRulePrompt();
+
         $this->showModal = false;
         $this->resetForm();
         $this->dispatch('transaction-saved');
+    }
+
+    /**
+     * Hide the prompt for 24 hours.
+     */
+    public function hideRulePromptForToday(): void
+    {
+        $this->authenticatedUser()->updatePreferences(['rulePromptHiddenUntil' => CarbonImmutable::now()->addDay()->toIso8601String()]);
+        $this->rulePrompt = null;
+    }
+
+    /**
+     * Stop offering rules until the user turns the suggestion back on in preferences.
+     */
+    public function disableRulePrompts(): void
+    {
+        $this->authenticatedUser()->updatePreferences(['rulePromptEnabled' => false]);
+        $this->rulePrompt = null;
+    }
+
+    public function dismissRulePrompt(): void
+    {
+        $this->rulePrompt = null;
+    }
+
+    /**
+     * Open the rule form on the Rules page, prefilled with "description contains <match>" and
+     * a set-category action for the category just chosen.
+     */
+    public function createRuleFromPrompt(CategoryRuleGenerator $generator): void
+    {
+        $prompt = $this->rulePrompt;
+
+        if ($prompt === null) {
+            return;
+        }
+
+        $user = $this->authenticatedUser();
+        $transaction = Transaction::findCurrentVersion($prompt['transactionId'], $user->id);
+
+        if (! $transaction instanceof Transaction) {
+            $this->rulePrompt = null;
+
+            return;
+        }
+
+        $match = $generator->preview($transaction, $prompt['categoryId'], $generator->suggestMatchValue($transaction), [$transaction->id])->matchValue;
+        $group = $generator->group($user->id);
+
+        $this->rulePrompt = null;
+        $this->redirect(route('rules', ['rule_group' => $group->id, 'rule_match' => $match, 'rule_category' => $prompt['categoryId']]), navigate: true);
     }
 
     /**
@@ -2118,6 +2184,40 @@ final class TransactionModal extends Component
     }
 
     /**
+     * After a saved edit that a person made to the category, offer to turn it into a rule.
+     * Transfers, splits and plans never get the offer; a rule the "categorise matching" flow
+     * just created already sets the category, so the gate withholds it then.
+     */
+    private function offerRulePrompt(): void
+    {
+        $this->rulePrompt = null;
+
+        if ($this->editingTransactionId === null
+            || $this->mode !== 'enter'
+            || $this->transactionType === 'transfer'
+            || ! $this->categoryPicked
+            || $this->categoryId === null
+            || $this->categoryId === $this->openedCategoryId) {
+            return;
+        }
+
+        $user = $this->authenticatedUser();
+        $transaction = Transaction::findCurrentVersion($this->editingTransactionId, $user->id);
+        $category = Category::query()->where('user_id', $user->id)->visible()->find($this->categoryId);
+
+        if (! $transaction instanceof Transaction
+            || ! $category instanceof Category
+            || $transaction->transfer_pair_id !== null
+            || $transaction->isSplit()
+            || $transaction->isSplitParent()
+            || ! app(RulePromptGate::class)->shouldOffer($user, $transaction, $category->id)) {
+            return;
+        }
+
+        $this->rulePrompt = ['transactionId' => $transaction->id, 'categoryId' => $category->id, 'categoryName' => $category->fullPath()];
+    }
+
+    /**
      * @throws Throwable
      */
     private function applyCategoriseMatching(Transaction $source): void
@@ -2741,6 +2841,7 @@ final class TransactionModal extends Component
         $this->descriptionInput = '';
         $this->accountId = null;
         $this->categoryId = null;
+        $this->openedCategoryId = null;
         $this->categoryPicked = false;
         $this->merchantId = null;
         $this->newMerchantName = '';
