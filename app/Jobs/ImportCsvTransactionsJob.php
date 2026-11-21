@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Enums\BankImportStatus;
+use App\Enums\CategorySource;
 use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Models\BankImport;
 use App\Models\Transaction;
 use App\Services\CsvImport\CsvParserService;
+use App\Services\FeedCategoryMatcher;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\TransactionIngestor;
 use App\Support\Audit\AttributeJobToUser;
@@ -75,6 +77,8 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
         $rowCount = 0;
         $rowErrors = [];
         $mapping = $bankImport->column_mapping ?? [];
+        $categoryMatcher = app(FeedCategoryMatcher::class);
+        $unresolved = [];
         $path = Storage::disk('local')->path($bankImport->stored_path);
         $earliest = null;
         $touch = static function (mixed $date) use (&$earliest): void {
@@ -95,6 +99,16 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
                 $rowCount++;
 
                 try {
+                    $categoryId = null;
+
+                    if ($row->category !== null) {
+                        $categoryId = $categoryMatcher->match($bankImport->user_id, $row->category);
+
+                        if ($categoryId === null) {
+                            $unresolved[$row->category] = ($unresolved[$row->category] ?? 0) + 1;
+                        }
+                    }
+
                     $existing = Transaction::withTrashed()
                         ->where('account_id', $bankImport->account_id)
                         ->where('csv_hash', $row->csvHash)
@@ -117,6 +131,7 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
                             'account_id' => $bankImport->account_id,
                             'csv_hash' => $row->csvHash,
                             ...$values,
+                            ...($categoryId === null ? [] : ['category_id' => $categoryId, 'category_source' => CategorySource::Feed]),
                         ]), rebuildHistory: false);
                         $imported++;
 
@@ -131,6 +146,7 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
                         }
 
                         $existing->fill($values);
+                        self::fillEmptyCategory($existing, $categoryId);
                         $existing->restore();
                         $touch($previousDate);
                         $touch($row->postDate);
@@ -139,7 +155,9 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
                         continue;
                     }
 
-                    $existing->fill($values)->save();
+                    $existing->fill($values);
+                    self::fillEmptyCategory($existing, $categoryId);
+                    $existing->save();
 
                     if ($existing->wasChanged()) {
                         $touch($previousDate);
@@ -182,6 +200,7 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
                 'skipped_count' => $skipped,
                 'restored_count' => $restored,
                 'row_errors' => $rowErrors !== [] ? $rowErrors : null,
+                'unresolved_categories' => self::unresolvedReport($unresolved),
                 'completed_at' => now(),
             ]);
 
@@ -201,6 +220,7 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
             'skipped_count' => $skipped,
             'restored_count' => $restored,
             'row_errors' => $rowErrors !== [] ? $rowErrors : null,
+            'unresolved_categories' => self::unresolvedReport($unresolved),
             'error_summary' => $rowErrors === []
                 ? null
                 : sprintf('%d row(s) failed; see details.', count($rowErrors)),
@@ -233,6 +253,32 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
             'bankImportId' => $this->bankImport->id,
             'exception' => $exception,
         ]);
+    }
+
+    private static function fillEmptyCategory(Transaction $transaction, ?int $categoryId): void
+    {
+        if ($categoryId !== null && $transaction->category_id === null) {
+            $transaction->fillUnlocked(['category_id' => $categoryId, 'category_source' => CategorySource::Feed]);
+        }
+    }
+
+    /**
+     * @param  array<string, int>  $unresolved
+     * @return list<array{value: string, rows: int}>|null
+     */
+    private static function unresolvedReport(array $unresolved): ?array
+    {
+        if ($unresolved === []) {
+            return null;
+        }
+
+        $report = [];
+
+        foreach ($unresolved as $value => $rows) {
+            $report[] = ['value' => (string) $value, 'rows' => $rows];
+        }
+
+        return $report;
     }
 
     private static function userSafeRowError(Throwable $e): string
