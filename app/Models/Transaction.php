@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Casts\MoneyCast;
 use App\Enums\CategorySource;
 use App\Enums\CleanDescriptionSource;
+use App\Enums\ExclusionSource;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionKind;
 use App\Enums\TransactionSource;
@@ -63,6 +64,7 @@ use Illuminate\Support\Facades\DB;
  * @property int|null $transfer_fee_for_id
  * @property string|null $notes
  * @property bool $excluded
+ * @property ExclusionSource|null $excluded_source
  * @property string|null $idempotency_key
  * @property string|null $idempotency_fingerprint
  * @property list<string>|null $locked_fields
@@ -165,6 +167,7 @@ final class Transaction extends Model
         'transfer_fee_for_id',
         'notes',
         'excluded',
+        'excluded_source',
         'idempotency_key',
         'idempotency_fingerprint',
         'locked_fields',
@@ -844,6 +847,7 @@ final class Transaction extends Model
             'transaction_date' => 'date',
             'enrich_data' => 'array',
             'excluded' => 'boolean',
+            'excluded_source' => ExclusionSource::class,
             'locked_fields' => 'array',
             'exchange_rate' => 'float',
         ];
