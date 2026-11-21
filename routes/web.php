@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\StatementDownloadController;
 use App\Http\Controllers\TransactionAttachmentController;
 use App\Http\Middleware\EnsureGoalsEnabled;
 use App\Http\Middleware\EnsureInsightsEnabled;
@@ -21,6 +22,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('import-bank', 'import-bank')->name('import-bank');
     Route::view('transactions', 'transactions')->name('transactions');
     Route::get('transactions/attachments/{attachment}', TransactionAttachmentController::class)->where('attachment', '[0-9]{1,18}')->name('transactions.attachments.download');
+    Route::view('statements', 'statements')->name('statements');
+    Route::get('statements/{statement}/download', StatementDownloadController::class)->where('statement', '[0-9]{1,18}')->name('statements.download');
     Route::view('transfers/review', 'transfers-review')->name('transfers.review');
     Route::view('calendar', 'calendar')->name('calendar');
     Route::view('reports', 'reports')->name('reports');
