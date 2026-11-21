@@ -4,8 +4,13 @@
 
 declare(strict_types=1);
 
+use App\Actions\Redbark\SaveSimpleFinAccessUrl;
+use App\Enums\RedbarkTransport;
 use App\Enums\StatementReviewStatus;
+use App\Exceptions\Redbark\RedbarkRequestException;
 use App\Models\Account;
+use App\Models\RedbarkAccount;
+use App\Models\RedbarkFeed;
 use App\Models\Statement;
 use App\Models\StatementReconciliation;
 use App\Models\User;
@@ -221,4 +226,31 @@ it('rolls the statements migration back and forward again', function () {
     expect($rolledBack)->toBeFalse()
         ->and(Schema::hasTable('statements'))->toBeTrue()
         ->and(Schema::hasColumn('statement_reconciliations', 'statement_id'))->toBeTrue();
+});
+
+it('leaves a linked statement linked when a bank connection switch deletes discovered rows', function () {
+    $account = Account::factory()->for(User::factory()->create())->create();
+    $user = $account->user;
+    $feed = RedbarkFeed::factory()->for($user)->create(['transport' => RedbarkTransport::Rest]);
+    RedbarkAccount::factory()->for($feed, 'feed')->count(2)->create();
+    $statement = Statement::factory()->for($user)->create(['account_id' => $account->id]);
+
+    app(SaveSimpleFinAccessUrl::class)->handle($user, 'https://user:pass@bridge.example/simplefin');
+
+    expect(RedbarkAccount::query()->where('redbark_feed_id', $feed->id)->count())->toBe(0)
+        ->and($statement->fresh()->account_id)->toBe($account->id)
+        ->and($statement->fresh()->review_status)->toBe(StatementReviewStatus::Linked);
+});
+
+it('refuses a bank connection switch while an account is linked and keeps statements as they are', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $feed = RedbarkFeed::factory()->for($user)->create(['transport' => RedbarkTransport::Rest]);
+    RedbarkAccount::factory()->for($feed, 'feed')->linked($account)->create();
+    $statement = Statement::factory()->for($user)->create(['account_id' => $account->id]);
+
+    expect(fn () => app(SaveSimpleFinAccessUrl::class)->handle($user, 'https://user:pass@bridge.example/simplefin'))
+        ->toThrow(RedbarkRequestException::class)
+        ->and(Account::query()->whereKey($account->id)->exists())->toBeTrue()
+        ->and($statement->fresh()->review_status)->toBe(StatementReviewStatus::Linked);
 });
