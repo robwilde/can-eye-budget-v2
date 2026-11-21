@@ -289,6 +289,8 @@
                                 </flux:select>
                             @elseif(isset($action['type']) && $action['type'] === RuleActionType::FoldIntoParent->value)
                                 <flux:text size="sm" class="mt-2">Finds the matching parent purchase (same day, same account, matching reference) and folds this fee into it.</flux:text>
+                            @elseif(isset($action['type']) && $action['type'] === RuleActionType::ExcludeFromReports->value)
+                                <flux:text size="sm" class="mt-2">Leaves matching transactions out of budgets and reports. An exclusion you set by hand is never changed by an automatic run.</flux:text>
                             @else
                                 <flux:input wire:model="actions.{{ $index }}.value" size="sm" placeholder="Value" />
                             @endif
