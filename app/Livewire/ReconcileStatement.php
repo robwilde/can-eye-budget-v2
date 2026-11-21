@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Livewire;
 
+use App\DTOs\CsvFormat;
 use App\Enums\StatementLineKind;
 use App\Exceptions\Statement\StatementFileUnreadable;
 use App\Exceptions\Statement\StatementLineAlreadyFolded;
@@ -216,7 +217,7 @@ final class ReconcileStatement extends Component
                     'column_mapping' => $this->mapping,
                 ])->save();
 
-                $this->account->update(['column_mapping' => $this->mapping]);
+                $this->account->update(['column_mapping' => [...CsvFormat::keepFormat($this->account->column_mapping ?? []), ...$this->mapping]]);
 
                 $reconciler->build($reconciliation);
             });
