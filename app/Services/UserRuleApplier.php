@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\Transaction;
 use App\Models\UserRule;
 use Illuminate\Database\Eloquent\Builder;
+use Throwable;
 
 /**
  * Applies one rule to a user's whole current history, outside the analysis
@@ -47,11 +48,14 @@ final readonly class UserRuleApplier
      * @param  bool  $overrideLocks  Only a user-initiated re-apply passes true: it replaces a
      *                               hand-set category or exclusion. Split and transfer rows
      *                               stay protected.
+     * @param  RuleFieldClaims|null  $claims  Shared across rules applied in order: a field a
+     *                                        higher rule claimed on a row is left alone, and this
+     *                                        rule claims its own for the rules below.
      * @return int Rows the executor reported handled. That includes a matched
      *             row whose category a person set: the executor leaves it
      *             untouched but reports it handled, as the pipeline does.
      */
-    public function applyToHistory(UserRule $rule, bool $overrideLocks = false): int
+    public function applyToHistory(UserRule $rule, bool $overrideLocks = false, ?RuleFieldClaims $claims = null): int
     {
         $applied = 0;
 
@@ -59,7 +63,7 @@ final readonly class UserRuleApplier
         // on the (unchanging) id keeps paging stable even though we mutate rows.
         $this->eligible($rule->user_id)
             ->lazyById()
-            ->each(function (Transaction $transaction) use ($rule, $overrideLocks, &$applied): void {
+            ->each(function (Transaction $transaction) use ($rule, $overrideLocks, $claims, &$applied): void {
                 if (! $this->evaluator->matches($transaction, $rule)) {
                     return;
                 }
@@ -70,9 +74,19 @@ final readonly class UserRuleApplier
                 // applyCategoryToSelection() opts out for the same reason.
                 $transaction->propagateCategoryChange = false;
 
-                if ($this->executor->execute($transaction, $rule->actions, overrideLocks: $overrideLocks)) {
-                    $applied++;
+                $actions = $claims?->unclaimed($transaction->id, $rule->actions) ?? $rule->actions;
+
+                try {
+                    if ($actions !== [] && $this->executor->execute($transaction, $actions, overrideLocks: $overrideLocks)) {
+                        $applied++;
+                    }
+                } catch (Throwable $exception) {
+                    rescue(fn () => $claims?->claim($transaction->id, $rule->actions, fn (array $action): bool => $this->executor->canAct($transaction, $action)), report: false);
+
+                    throw $exception;
                 }
+
+                $claims?->claim($transaction->id, $rule->actions, fn (array $action): bool => $this->executor->canAct($transaction, $action));
             });
 
         return $applied;

@@ -164,7 +164,13 @@ final class CategoryRuleMiner
         $order = (int) UserRule::query()->where('user_rule_group_id', $group->id)->max('order');
         $rules = [];
 
-        foreach ($entries as $entry) {
+        // Rule order is priority, so a guarded entry (credit only, one account, an amount floor)
+        // runs before a broad one and is not shadowed by it.
+        $priority = array_keys($entries);
+        usort($priority, static fn (int $x, int $y): int => [count($entries[$y]['extra_triggers'] ?? []), $x] <=> [count($entries[$x]['extra_triggers'] ?? []), $y]);
+        $position = array_flip($priority);
+
+        foreach ($entries as $index => $entry) {
             $rules[] = UserRule::query()->create([
                 'user_id' => $user->id,
                 'user_rule_group_id' => $group->id,
@@ -177,7 +183,7 @@ final class CategoryRuleMiner
                 'strict_mode' => true,
                 'is_auto_apply' => true,
                 'is_active' => true,
-                'order' => ++$order,
+                'order' => $order + $position[$index] + 1,
             ]);
         }
 

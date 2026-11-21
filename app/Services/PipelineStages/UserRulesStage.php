@@ -16,7 +16,10 @@ use App\Models\UserRule;
 use App\Models\UserRuleGroup;
 use App\Services\RuleActionExecutor;
 use App\Services\RuleEvaluator;
+use App\Services\RuleFieldClaims;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Throwable;
 
 final readonly class UserRulesStage implements PipelineStageContract
 {
@@ -70,12 +73,15 @@ final readonly class UserRulesStage implements PipelineStageContract
         $appliedRules = $this->loadPreviouslyAppliedRules($context);
         $suggestionIds = [];
         $blocked = [];
+        $failed = [];
+        $claims = new RuleFieldClaims;
 
         foreach ($transactions as $transaction) {
-            $this->processTransaction($transaction, $groups, $context, $suggestionIds, $appliedRules, $blocked);
+            $this->processTransaction($transaction, $groups, $context, $suggestionIds, $appliedRules, $blocked, $failed, $claims);
         }
 
         $this->recordBlocked($context, $blocked);
+        $this->recordFailed($context, $failed);
 
         return new StageResult(success: true, stage: self::STAGE_KEY, suggestionIds: $suggestionIds);
     }
@@ -85,6 +91,7 @@ final readonly class UserRulesStage implements PipelineStageContract
      * @param  list<int>  $suggestionIds
      * @param  array<string, bool>  $appliedRules
      * @param  array<string, int>  $blocked
+     * @param  array<int, array{rule: UserRule, count: int, exception: class-string<Throwable>}>  $failed
      */
     private function processTransaction(
         Transaction $transaction,
@@ -93,9 +100,11 @@ final readonly class UserRulesStage implements PipelineStageContract
         array &$suggestionIds,
         array $appliedRules,
         array &$blocked,
+        array &$failed,
+        RuleFieldClaims $claims,
     ): void {
         foreach ($groups as $group) {
-            $matched = $this->processGroup($transaction, $group, $context, $suggestionIds, $appliedRules, $blocked);
+            $matched = $this->processGroup($transaction, $group, $context, $suggestionIds, $appliedRules, $blocked, $failed, $claims);
 
             if ($matched && $group->stop_processing) {
                 break;
@@ -107,6 +116,7 @@ final readonly class UserRulesStage implements PipelineStageContract
      * @param  list<int>  $suggestionIds
      * @param  array<string, bool>  $appliedRules
      * @param  array<string, int>  $blocked
+     * @param  array<int, array{rule: UserRule, count: int, exception: class-string<Throwable>}>  $failed
      */
     private function processGroup(
         Transaction $transaction,
@@ -115,6 +125,8 @@ final readonly class UserRulesStage implements PipelineStageContract
         array &$suggestionIds,
         array $appliedRules,
         array &$blocked,
+        array &$failed,
+        RuleFieldClaims $claims,
     ): bool {
         $matched = false;
 
@@ -126,7 +138,7 @@ final readonly class UserRulesStage implements PipelineStageContract
             $matched = true;
 
             if ($rule->is_auto_apply) {
-                $this->autoApplyRule($transaction, $rule, $context, $appliedRules, $blocked);
+                $this->autoApplyRule($transaction, $rule, $context, $appliedRules, $blocked, $failed, $claims);
             } else {
                 $suggestionIds[] = $this->createRuleSuggestion($transaction, $rule, $context);
             }
@@ -138,6 +150,7 @@ final readonly class UserRulesStage implements PipelineStageContract
     /**
      * @param  array<string, bool>  $appliedRules
      * @param  array<string, int>  $blocked
+     * @param  array<int, array{rule: UserRule, count: int, exception: class-string<Throwable>}>  $failed
      */
     private function autoApplyRule(
         Transaction $transaction,
@@ -145,15 +158,64 @@ final readonly class UserRulesStage implements PipelineStageContract
         PipelineContext $context,
         array $appliedRules,
         array &$blocked,
+        array &$failed,
+        RuleFieldClaims $claims,
+    ): void {
+        $actions = $claims->unclaimed($transaction->id, $rule->actions);
+
+        try {
+            if (! isset($appliedRules[$rule->id.':'.$transaction->id]) && $actions !== []) {
+                $this->applyActions($transaction, $rule, $actions, $context, $blocked);
+            }
+        } catch (Throwable $exception) {
+            report($exception);
+
+            // The failed rule's unsaved changes must not leak into the next rule's save.
+            rescue(static fn (): Transaction => $transaction->refresh(), report: false);
+
+            $failed[$rule->id] = [
+                'rule' => $rule,
+                'count' => ($failed[$rule->id]['count'] ?? 0) + 1,
+                'exception' => $exception::class,
+            ];
+        }
+
+        $claims->claim($transaction->id, $rule->actions, fn (array $action): bool => $this->executor->canAct($transaction, $action));
+    }
+
+    /**
+     * @param  array<int, array<string, string>>  $actions
+     * @param  array<string, int>  $blocked
+     */
+    private function applyActions(
+        Transaction $transaction,
+        UserRule $rule,
+        array $actions,
+        PipelineContext $context,
+        array &$blocked,
+    ): void {
+        // One transaction per rule and row: a rule that fails part-way, say a later action
+        // after an earlier one saved, leaves nothing half applied.
+        DB::transaction(function () use ($transaction, $rule, $actions, $context, &$blocked): void {
+            $this->applyActionsInTransaction($transaction, $rule, $actions, $context, $blocked);
+        });
+    }
+
+    /**
+     * @param  array<int, array<string, string>>  $actions
+     * @param  array<string, int>  $blocked
+     */
+    private function applyActionsInTransaction(
+        Transaction $transaction,
+        UserRule $rule,
+        array $actions,
+        PipelineContext $context,
+        array &$blocked,
     ): void {
         $key = $rule->id.':'.$transaction->id;
 
-        if (isset($appliedRules[$key])) {
-            return;
-        }
-
-        $lockedOut = $this->executor->blockedByLocks($transaction, $rule->actions);
-        $applied = $this->executor->execute($transaction, $rule->actions, overwriteCleanDescription: false);
+        $lockedOut = $this->executor->blockedByLocks($transaction, $actions);
+        $applied = $this->executor->execute($transaction, $actions, overwriteCleanDescription: false);
 
         if ($lockedOut) {
             $blocked[$key] = $transaction->id;
@@ -177,6 +239,29 @@ final readonly class UserRulesStage implements PipelineStageContract
                 'actions' => $rule->actions,
             ],
         ]);
+    }
+
+    /**
+     * A failed rule is recorded once per run, with how many transactions it failed on and the
+     * exception class only. It still claimed its fields, and the rules below it ran.
+     *
+     * @param  array<int, array{rule: UserRule, count: int, exception: class-string<Throwable>}>  $failed
+     */
+    private function recordFailed(PipelineContext $context, array $failed): void
+    {
+        foreach ($failed as $ruleId => $failure) {
+            PipelineAuditEntry::create([
+                'pipeline_run_id' => $context->pipelineRun->id,
+                'stage' => self::STAGE_KEY,
+                'action' => 'rule_failed',
+                'metadata' => [
+                    'rule_id' => $ruleId,
+                    'rule_name' => $failure['rule']->name,
+                    'transactions' => $failure['count'],
+                    'exception' => $failure['exception'],
+                ],
+            ]);
+        }
     }
 
     /** @param  array<string, int>  $blocked */

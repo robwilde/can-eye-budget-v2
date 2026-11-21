@@ -78,6 +78,21 @@ final readonly class RuleActionExecutor
     }
 
     /**
+     * Whether this action could act on the transaction at all: a category that is gone or not
+     * the user's, or a transfer target that is not one of their active accounts, cannot.
+     *
+     * @param  array<string, string>  $action
+     */
+    public function canAct(Transaction $transaction, array $action): bool
+    {
+        return match (RuleActionType::tryFrom($action['type'] ?? '')) {
+            RuleActionType::SetCategory => Category::visible()->where('user_id', $transaction->user_id)->whereKey((int) ($action['value'] ?? 0))->exists(),
+            RuleActionType::MarkAsTransfer => $this->transferTarget($transaction, $action['value'] ?? '') instanceof Account,
+            default => true,
+        };
+    }
+
+    /**
      * The category these actions would assign to this transaction, or null if
      * they would leave it alone.
      *
