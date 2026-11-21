@@ -355,7 +355,7 @@ final class CategoryRuleMiner
     /** The trigger-comparable string form of a direction or account id. */
     private function fieldValue(Transaction $transaction, RuleTriggerField $field): string
     {
-        $raw = $transaction->{$field->value};
+        $raw = $transaction->getAttribute($field->value);
 
         return $raw instanceof BackedEnum ? (string) $raw->value : (string) $raw;
     }
