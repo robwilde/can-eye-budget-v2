@@ -21,6 +21,7 @@ use App\Models\UserRuleGroup;
 use App\Services\RuleTester;
 use App\Services\UserRuleApplier;
 use App\Support\Rules\RegexPattern;
+use App\Support\Rules\RuleTriggers;
 use Closure;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
@@ -351,6 +352,37 @@ final class UserRuleManager extends Component
         $this->ruleTestResult = null;
     }
 
+    public function addGroup(): void
+    {
+        if (array_any($this->triggers, RuleTriggers::isGroup(...))) {
+            return;
+        }
+
+        $this->triggers[] = ['type' => RuleTriggers::GROUP, 'match' => RuleTriggers::MATCH_ANY, 'conditions' => [['field' => '', 'operator' => '', 'value' => '']]];
+        $this->ruleTestResult = null;
+    }
+
+    public function addGroupCondition(int $index): void
+    {
+        if (! RuleTriggers::isGroup($this->triggers[$index] ?? null)) {
+            return;
+        }
+
+        $this->triggers[$index]['conditions'][] = ['field' => '', 'operator' => '', 'value' => ''];
+        $this->ruleTestResult = null;
+    }
+
+    public function removeGroupCondition(int $index, int $conditionIndex): void
+    {
+        if (! RuleTriggers::isGroup($this->triggers[$index] ?? null)) {
+            return;
+        }
+
+        unset($this->triggers[$index]['conditions'][$conditionIndex]);
+        $this->triggers[$index]['conditions'] = array_values($this->triggers[$index]['conditions']);
+        $this->ruleTestResult = null;
+    }
+
     public function removeTrigger(int $index): void
     {
         unset($this->triggers[$index]);
@@ -611,7 +643,10 @@ final class UserRuleManager extends Component
     /** @return array<string, string> */
     protected function messages(): array
     {
-        return ['triggers.*.value.required' => 'The value field is required for the selected operator.'];
+        return [
+            'triggers.*.value.required' => 'The value field is required for the selected operator.',
+            'triggers.*.conditions.*.value.required' => 'The value field is required for the selected operator.',
+        ];
     }
 
     // ─── Private ─────────────────────────────────────────
@@ -663,23 +698,41 @@ final class UserRuleManager extends Component
     private function draftRuleRules(): array
     {
         $rules = [
-            'triggers' => ['required', 'array', 'min:1'],
-            'triggers.*.field' => ['required', Rule::in(array_column(RuleTriggerField::cases(), 'value'))],
-            'triggers.*.operator' => ['required', Rule::in(array_column(RuleTriggerOperator::cases(), 'value'))],
+            'triggers' => ['required', 'array', 'min:1', $this->hasCondition()],
             'ruleEffectiveFrom' => ['nullable', 'date_format:Y-m-d'],
             'actions' => ['required', 'array', 'min:1', $this->distinctActionTypes()],
             'actions.*.type' => ['required', Rule::in(array_column(RuleActionType::cases(), 'value'))],
         ];
 
-        foreach (array_keys($this->triggers) as $index) {
-            $operatorValue = $this->triggers[$index]['operator'] ?? '';
-            $operator = is_string($operatorValue) ? RuleTriggerOperator::tryFrom($operatorValue) : null;
+        $groupsSeen = 0;
 
-            $rules["triggers.{$index}.value"] = match (true) {
-                $operator === RuleTriggerOperator::MatchesRegex => ['required', 'string', $this->noNullBytes(), $this->safeRegexPattern()],
-                $operator?->requiresValue() === true => ['required', 'string', $this->noNullBytes()],
-                default => ['nullable', 'string', $this->noNullBytes()],
-            };
+        foreach (array_keys($this->triggers) as $index) {
+            $entry = $this->triggers[$index];
+
+            if (! RuleTriggers::isGroup($entry)) {
+                $rules = [...$rules, ...$this->conditionRules("triggers.{$index}", $entry)];
+
+                continue;
+            }
+
+            if (++$groupsSeen > 1) {
+                $rules["triggers.{$index}"] = [$this->failing('Only one condition group is allowed.')];
+            }
+
+            $rules["triggers.{$index}.match"] = ['required', Rule::in([RuleTriggers::MATCH_ALL, RuleTriggers::MATCH_ANY])];
+            $rules["triggers.{$index}.conditions"] = ['array'];
+
+            foreach (array_keys(is_array($entry['conditions'] ?? null) ? $entry['conditions'] : []) as $conditionIndex) {
+                $condition = $entry['conditions'][$conditionIndex];
+
+                if (RuleTriggers::isGroup($condition)) {
+                    $rules["triggers.{$index}.conditions.{$conditionIndex}"] = [$this->failing('Compound conditions cannot be nested')];
+
+                    continue;
+                }
+
+                $rules = [...$rules, ...$this->conditionRules("triggers.{$index}.conditions.{$conditionIndex}", is_array($condition) ? $condition : [])];
+            }
         }
 
         // Build the value rule per action index: value-requiring types must have
@@ -698,6 +751,42 @@ final class UserRuleManager extends Component
         }
 
         return $rules;
+    }
+
+    /**
+     * @param  array<string, mixed>  $condition
+     * @return array<string, array<int, mixed>>
+     */
+    private function conditionRules(string $prefix, array $condition): array
+    {
+        $operatorValue = $condition['operator'] ?? '';
+        $operator = is_string($operatorValue) ? RuleTriggerOperator::tryFrom($operatorValue) : null;
+
+        return [
+            "{$prefix}.field" => ['required', Rule::in(array_column(RuleTriggerField::cases(), 'value'))],
+            "{$prefix}.operator" => ['required', Rule::in(array_column(RuleTriggerOperator::cases(), 'value'))],
+            "{$prefix}.value" => match (true) {
+                $operator === RuleTriggerOperator::MatchesRegex => ['required', 'string', $this->noNullBytes(), $this->safeRegexPattern()],
+                $operator?->requiresValue() === true => ['required', 'string', $this->noNullBytes()],
+                default => ['nullable', 'string', $this->noNullBytes()],
+            },
+        ];
+    }
+
+    private function failing(string $message): Closure
+    {
+        return static function (string $attribute, mixed $value, Closure $fail) use ($message): void {
+            $fail($message);
+        };
+    }
+
+    private function hasCondition(): Closure
+    {
+        return static function (string $attribute, mixed $value, Closure $fail): void {
+            if (is_array($value) && RuleTriggers::flatten($value) === []) {
+                $fail('Add at least one condition.');
+            }
+        };
     }
 
     private function noNullBytes(): Closure
