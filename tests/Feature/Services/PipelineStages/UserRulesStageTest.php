@@ -476,3 +476,20 @@ test('orphan fee writes no audit entry and folds on a later run once the parent 
     expect(Transaction::withTrashed()->find($fee->id)->trashed())->toBeTrue()
         ->and(Transaction::where('parent_transaction_id', $parent->id)->value('amount'))->toBe(-1436);
 });
+
+test('a rule with an effective date ignores earlier transactions', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    createRuleWithGroup(
+        $this->user,
+        [['field' => 'description', 'operator' => 'contains', 'value' => 'NETFLIX']],
+        [['type' => 'set_category', 'value' => (string) $category->id]],
+        ruleOverrides: ['is_auto_apply' => true, 'effective_from' => '2026-03-01'],
+    );
+    $before = createStageTransaction($this->user, $this->account, ['post_date' => '2026-02-28']);
+    $onDate = createStageTransaction($this->user, $this->account, ['post_date' => '2026-03-01']);
+
+    $this->stage->execute($this->context);
+
+    expect($before->fresh()->category_id)->toBeNull()
+        ->and($onDate->fresh()->category_id)->toBe($category->id);
+});

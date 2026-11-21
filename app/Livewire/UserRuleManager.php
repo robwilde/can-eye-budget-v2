@@ -18,10 +18,12 @@ use App\Models\UserRule;
 use App\Models\UserRuleGroup;
 use App\Services\RuleTester;
 use App\Services\UserRuleApplier;
+use App\Support\Rules\RegexPattern;
 use Closure;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Locked;
@@ -77,6 +79,10 @@ final class UserRuleManager extends Component
     public bool $ruleIsAutoApply = false;
 
     public bool $ruleIsActive = true;
+
+    public string $ruleEffectiveFrom = '';
+
+    public bool $showDeleteAllRulesModal = false;
 
     public bool $showDeleteRuleModal = false;
 
@@ -244,6 +250,7 @@ final class UserRuleManager extends Component
         $this->ruleStrictMode = $rule->strict_mode;
         $this->ruleIsAutoApply = $rule->is_auto_apply;
         $this->ruleIsActive = $rule->is_active;
+        $this->ruleEffectiveFrom = $rule->effective_from?->toDateString() ?? '';
         $this->showRuleModal = true;
     }
 
@@ -265,6 +272,7 @@ final class UserRuleManager extends Component
                     'strict_mode' => $this->ruleStrictMode,
                     'is_auto_apply' => $this->ruleIsAutoApply,
                     'is_active' => $this->ruleIsActive,
+                    'effective_from' => $this->ruleEffectiveFrom ?: null,
                 ]);
 
                 Flux::toast(text: 'Rule updated', variant: 'success');
@@ -290,6 +298,7 @@ final class UserRuleManager extends Component
                 'strict_mode' => $this->ruleStrictMode,
                 'is_auto_apply' => $this->ruleIsAutoApply,
                 'is_active' => $this->ruleIsActive,
+                'effective_from' => $this->ruleEffectiveFrom ?: null,
                 'order' => $maxOrder + 1,
             ]);
 
@@ -337,12 +346,18 @@ final class UserRuleManager extends Component
 
         abort_unless($user instanceof User, 403);
 
-        $this->ruleTestResult = $tester->test($user->id, $this->triggers, $this->ruleStrictMode, $this->actions);
+        $this->ruleTestResult = $tester->test(
+            $user->id,
+            $this->triggers,
+            $this->ruleStrictMode,
+            $this->actions,
+            $this->ruleEffectiveFrom ?: null,
+        );
     }
 
     public function updated(string $property): void
     {
-        if (in_array(Str::before($property, '.'), ['triggers', 'actions', 'ruleStrictMode', 'showRuleModal'], true)) {
+        if (in_array(Str::before($property, '.'), ['triggers', 'actions', 'ruleStrictMode', 'ruleEffectiveFrom', 'showRuleModal'], true)) {
             $this->ruleTestResult = null;
         }
     }
@@ -380,6 +395,24 @@ final class UserRuleManager extends Component
 
         $this->showDeleteRuleModal = false;
         $this->deletingRuleId = null;
+    }
+
+    public function confirmDeleteAllRules(): void
+    {
+        $this->showDeleteAllRulesModal = true;
+    }
+
+    public function deleteAllRules(): void
+    {
+        if (! $this->showDeleteAllRulesModal) {
+            return;
+        }
+
+        $deleted = DB::transaction(fn (): int => UserRule::where('user_id', auth()->id())->delete());
+
+        $this->showDeleteAllRulesModal = false;
+
+        Flux::toast(text: "Deleted {$deleted} ".Str::plural('rule', $deleted), variant: 'success');
     }
 
     public function toggleRuleActive(int $ruleId): void
@@ -519,6 +552,7 @@ final class UserRuleManager extends Component
         $matchesSearch = $this->searchConstraint();
 
         return view('livewire.user-rule-manager', [
+            'ruleCount' => UserRule::where('user_id', auth()->id())->count(),
             'hasActiveRules' => UserRule::where('user_id', auth()->id())
                 ->active()
                 ->whereHas('group', fn (Builder $q) => $q->where('is_active', true))
@@ -577,6 +611,7 @@ final class UserRuleManager extends Component
         $this->ruleStrictMode = true;
         $this->ruleIsAutoApply = false;
         $this->ruleIsActive = true;
+        $this->ruleEffectiveFrom = '';
         $this->ruleTestResult = null;
     }
 
@@ -593,7 +628,8 @@ final class UserRuleManager extends Component
             'triggers' => ['required', 'array', 'min:1'],
             'triggers.*.field' => ['required', Rule::in(array_column(RuleTriggerField::cases(), 'value'))],
             'triggers.*.operator' => ['required', Rule::in(array_column(RuleTriggerOperator::cases(), 'value'))],
-            'actions' => ['required', 'array', 'min:1'],
+            'ruleEffectiveFrom' => ['nullable', 'date_format:Y-m-d'],
+            'actions' => ['required', 'array', 'min:1', $this->distinctActionTypes()],
             'actions.*.type' => ['required', Rule::in(array_column(RuleActionType::cases(), 'value'))],
         ];
 
@@ -601,9 +637,11 @@ final class UserRuleManager extends Component
             $operatorValue = $this->triggers[$index]['operator'] ?? '';
             $operator = is_string($operatorValue) ? RuleTriggerOperator::tryFrom($operatorValue) : null;
 
-            $rules["triggers.{$index}.value"] = $operator?->requiresValue()
-                ? ['required', 'string']
-                : ['nullable', 'string'];
+            $rules["triggers.{$index}.value"] = match (true) {
+                $operator === RuleTriggerOperator::MatchesRegex => ['required', 'string', $this->noNullBytes(), $this->safeRegexPattern()],
+                $operator?->requiresValue() === true => ['required', 'string', $this->noNullBytes()],
+                default => ['nullable', 'string', $this->noNullBytes()],
+            };
         }
 
         // Build the value rule per action index: value-requiring types must have
@@ -614,13 +652,54 @@ final class UserRuleManager extends Component
             $type = RuleActionType::tryFrom($this->actions[$index]['type'] ?? '');
 
             $rules["actions.{$index}.value"] = match (true) {
-                $type !== null && ! $type->requiresValue() => ['nullable', 'string'],
-                $type === RuleActionType::SetCleanDescription => ['required', 'string', 'max:255'],
-                default => ['required', 'string'],
+                $type !== null && ! $type->requiresValue() => ['nullable', 'string', $this->noNullBytes()],
+                $type === RuleActionType::SetCleanDescription => ['required', 'string', 'max:255', $this->noNullBytes()],
+                default => ['required', 'string', $this->noNullBytes()],
             };
         }
 
         return $rules;
+    }
+
+    private function noNullBytes(): Closure
+    {
+        return static function (string $attribute, mixed $value, Closure $fail): void {
+            if (is_string($value) && str_contains($value, "\0")) {
+                $fail('The value cannot contain null bytes.');
+            }
+        };
+    }
+
+    private function safeRegexPattern(): Closure
+    {
+        return static function (string $attribute, mixed $value, Closure $fail): void {
+            if (! is_string($value)) {
+                return;
+            }
+
+            if (mb_strlen($value) > RegexPattern::MAX_LENGTH) {
+                $fail('The pattern may not be longer than '.RegexPattern::MAX_LENGTH.' characters.');
+            } elseif (RegexPattern::hasBackReference($value)) {
+                $fail('The pattern cannot use back-references.');
+            } elseif (! RegexPattern::compiles($value)) {
+                $fail('The pattern is not a valid regular expression.');
+            }
+        };
+    }
+
+    private function distinctActionTypes(): Closure
+    {
+        return static function (string $attribute, mixed $value, Closure $fail): void {
+            if (! is_array($value)) {
+                return;
+            }
+
+            $types = array_filter(array_column($value, 'type'), static fn (mixed $type): bool => is_string($type) && $type !== '');
+
+            if (count($types) !== count(array_unique($types))) {
+                $fail('A rule cannot have two actions of the same type.');
+            }
+        };
     }
 
     private function swapOrder(UserRuleGroup|UserRule $a, UserRuleGroup|UserRule $b): void

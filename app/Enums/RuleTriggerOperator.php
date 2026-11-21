@@ -12,6 +12,7 @@ enum RuleTriggerOperator: string
     case NotEquals = 'not_equals';
     case StartsWith = 'starts_with';
     case EndsWith = 'ends_with';
+    case MatchesRegex = 'matches_regex';
     case GreaterThan = 'greater_than';
     case LessThan = 'less_than';
     case GreaterThanOrEqual = 'greater_than_or_equal';
@@ -30,6 +31,7 @@ enum RuleTriggerOperator: string
             self::NotEquals => 'Does Not Equal',
             self::StartsWith => 'Starts With',
             self::EndsWith => 'Ends With',
+            self::MatchesRegex => 'Matches Regex',
             self::GreaterThan => 'Greater Than',
             self::LessThan => 'Less Than',
             self::GreaterThanOrEqual => 'Greater Than or Equal',

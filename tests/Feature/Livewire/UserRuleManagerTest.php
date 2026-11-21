@@ -915,3 +915,161 @@ test('saving a trigger with a non-string operator fails validation instead of er
 
     expect(UserRule::count())->toBe(0);
 });
+
+// ─── Effective date, regex, save guards, delete all ───────
+
+test('rejects invalid, overlong or back-referencing regex patterns', function (string $pattern) {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+
+    openedDraft($this->user, $category, $pattern)
+        ->set('triggers.0.operator', RuleTriggerOperator::MatchesRegex->value)
+        ->set('ruleName', 'Regex rule')
+        ->call('saveRule')
+        ->assertHasErrors(['triggers.0.value']);
+
+    expect(UserRule::count())->toBe(0);
+})->with([
+    'does not compile' => ['(unclosed'],
+    'is 201 characters long' => [str_repeat('a', 201)],
+    'uses a numbered back-reference' => ['(a)\1'],
+    'uses a named back-reference' => ['(?P<n>a)(?P=n)'],
+]);
+
+test('saves a regex pattern of exactly 200 characters', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+
+    openedDraft($this->user, $category, str_repeat('a', 200))
+        ->set('triggers.0.operator', RuleTriggerOperator::MatchesRegex->value)
+        ->set('ruleName', 'Regex rule')
+        ->call('saveRule')
+        ->assertHasNoErrors();
+
+    expect(UserRule::count())->toBe(1);
+});
+
+test('rejects a rule with two actions of the same type', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $other = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+
+    openedDraft($this->user, $category)
+        ->call('addAction')
+        ->set('actions.1.type', RuleActionType::SetCategory->value)
+        ->set('actions.1.value', (string) $other->id)
+        ->set('ruleName', 'Two categories')
+        ->call('saveRule')
+        ->assertHasErrors(['actions']);
+
+    expect(UserRule::count())->toBe(0);
+});
+
+test('saves a rule with two actions of different types', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+
+    openedDraft($this->user, $category)
+        ->call('addAction')
+        ->set('actions.1.type', RuleActionType::SetNotes->value)
+        ->set('actions.1.value', 'Reviewed')
+        ->set('ruleName', 'Category and notes')
+        ->call('saveRule')
+        ->assertHasNoErrors();
+
+    expect(UserRule::count())->toBe(1);
+});
+
+test('rejects null bytes in trigger and action values', function (string $field) {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+
+    openedDraft($this->user, $category)
+        ->call('addAction')
+        ->set('actions.1.type', RuleActionType::SetNotes->value)
+        ->set($field, "bad\0value")
+        ->set('ruleName', 'Null byte')
+        ->call('saveRule')
+        ->assertHasErrors([$field]);
+
+    expect(UserRule::count())->toBe(0);
+})->with([
+    'trigger value' => ['triggers.0.value'],
+    'action value' => ['actions.1.value'],
+]);
+
+test('saves and reloads a rule effective date', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+
+    $component = openedDraft($this->user, $category)
+        ->set('ruleName', 'Dated rule')
+        ->set('ruleEffectiveFrom', '2026-03-01')
+        ->call('saveRule')
+        ->assertHasNoErrors();
+
+    $rule = UserRule::where('user_id', $this->user->id)->sole();
+
+    expect($rule->effective_from->toDateString())->toBe('2026-03-01');
+
+    $component->call('openEditRuleModal', $rule->id)->assertSet('ruleEffectiveFrom', '2026-03-01');
+});
+
+test('rejects a malformed effective date', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+
+    openedDraft($this->user, $category)
+        ->set('ruleName', 'Bad date')
+        ->set('ruleEffectiveFrom', 'next tuesday')
+        ->call('saveRule')
+        ->assertHasErrors(['ruleEffectiveFrom']);
+
+    expect(UserRule::count())->toBe(0);
+});
+
+test('the rule list says which transactions a rule covers', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    UserRule::factory()->for($this->user)->for($group, 'group')->create(['name' => 'Everything rule']);
+    UserRule::factory()->for($this->user)->for($group, 'group')->create(['name' => 'Dated rule', 'effective_from' => '2026-03-01']);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->assertSee('all past and future transactions')
+        ->assertSee('on or after 1 Mar 2026');
+});
+
+test('testing a draft with an effective date skips earlier transactions', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    testRuleSeed($this->user, ['post_date' => '2026-02-28']);
+    testRuleSeed($this->user, ['post_date' => '2026-03-01']);
+
+    $component = openedDraft($this->user, $category)
+        ->set('ruleEffectiveFrom', '2026-03-01')
+        ->call('testRule');
+
+    expect($component->get('ruleTestResult')->totalMatches())->toBe(1);
+});
+
+test('deletes every rule of the current user only', function () {
+    $other = User::factory()->create();
+    UserRule::factory()->count(2)->for($this->user)->for(UserRuleGroup::factory()->for($this->user), 'group')->create();
+    $theirs = UserRule::factory()->for($other)->for(UserRuleGroup::factory()->for($other), 'group')->create();
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->call('confirmDeleteAllRules')
+        ->assertSet('showDeleteAllRulesModal', true)
+        ->call('deleteAllRules')
+        ->assertSet('showDeleteAllRulesModal', false);
+
+    $event = AuditEvent::query()->where('action', 'livewire.user-rule-manager.deleteAllRules')->sole();
+
+    expect(UserRule::where('user_id', $this->user->id)->count())->toBe(0)
+        ->and(UserRule::find($theirs->id))->not->toBeNull()
+        ->and(UserRule::where('user_id', $other->id)->count())->toBe(1)
+        ->and($event->user_id)->toBe($this->user->id);
+});
+
+test('delete all does nothing until the confirmation is opened', function () {
+    UserRule::factory()->for($this->user)->for(UserRuleGroup::factory()->for($this->user), 'group')->create();
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->call('deleteAllRules');
+
+    expect(UserRule::where('user_id', $this->user->id)->count())->toBe(1);
+});
