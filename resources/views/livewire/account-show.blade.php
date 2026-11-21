@@ -16,7 +16,9 @@
         <x-cib.filter-toggle :options="$tabs" :selected="$tab" wire-model="tab" data-test="account-tabs"/>
     @endif
 
-    @if ($tab === 'schedule')
+    @if ($tab === 'statements')
+        <livewire:statement-coverage :account="$account" :key="'statement-coverage-'.$account->id"/>
+    @elseif ($tab === 'schedule')
         <x-cib.card data-test="account-schedule">
             @if ($schedule === null)
                 <flux:text data-test="account-schedule-empty">{{ __('Add the original principal, rate, term and start date to see a repayment schedule.') }}</flux:text>

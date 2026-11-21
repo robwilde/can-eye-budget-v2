@@ -49,7 +49,8 @@ it('does not offer a schedule for a savings account', function () {
     Livewire::actingAs($user)->test(AccountShow::class, ['account' => $account])
         ->set('tab', 'schedule')
         ->assertSet('tab', 'overview')
-        ->assertDontSeeHtml('data-test="account-tabs"');
+        ->assertDontSee('Schedule')
+        ->assertSee('Statements');
 });
 
 it('shows card details for a credit card but not once it becomes a savings account', function () {

@@ -30,6 +30,8 @@ final class AccountShow extends Component
 
     private const string TAB_SCHEDULE = 'schedule';
 
+    private const string TAB_STATEMENTS = 'statements';
+
     private const array PERIOD_DAYS = [30, 90, 365];
 
     #[Locked]
@@ -108,14 +110,16 @@ final class AccountShow extends Component
             $tabs[] = ['value' => self::TAB_SCHEDULE, 'label' => __('Schedule')];
         }
 
+        $tabs[] = ['value' => self::TAB_STATEMENTS, 'label' => __('Statements')];
+
         return view('livewire.account-show', ['tabs' => $tabs, 'periods' => self::PERIOD_DAYS]);
     }
 
     private function normaliseTab(): void
     {
         $allowed = $this->account->type->amortises()
-            ? [self::TAB_OVERVIEW, self::TAB_SCHEDULE]
-            : [self::TAB_OVERVIEW];
+            ? [self::TAB_OVERVIEW, self::TAB_SCHEDULE, self::TAB_STATEMENTS]
+            : [self::TAB_OVERVIEW, self::TAB_STATEMENTS];
 
         if (! in_array($this->tab, $allowed, true)) {
             $this->tab = self::TAB_OVERVIEW;
