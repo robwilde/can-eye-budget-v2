@@ -31,12 +31,12 @@ final class PdfImportReadyNotification extends Notification
         if ($lines === 0) {
             return $message
                 ->line(__(':name was read, but it holds no transactions to import.', ['name' => $name]))
-                ->action(__('Open your statements'), route('statements'));
+                ->action(__('Review the import'), route('imports.pdf.review', $this->import->id));
         }
 
         return $message
             ->line(trans_choice(':name was read: :count transaction was found.|:name was read: :count transactions were found.', $lines, ['name' => $name]))
             ->line(__('Review them, choose the account and publish to add them to your ledger.'))
-            ->action(__('Open your statements'), route('statements'));
+            ->action(__('Review the import'), route('imports.pdf.review', $this->import->id));
     }
 }
