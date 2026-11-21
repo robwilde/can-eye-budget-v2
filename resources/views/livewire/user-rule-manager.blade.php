@@ -15,6 +15,9 @@
             </div>
             <div class="flex shrink-0 flex-wrap items-center gap-2">
                 <flux:button size="sm" icon="play" wire:click="runRules" :disabled="! $hasActiveRules">Run rules now</flux:button>
+                @if($ruleCount > 0)
+                    <flux:button variant="danger" size="sm" icon="trash" wire:click="confirmDeleteAllRules" data-testid="rules-delete-all">Delete all rules</flux:button>
+                @endif
                 <flux:button variant="primary" size="sm" wire:click="openAddGroupModal">Add Group</flux:button>
             </div>
         </div>
@@ -86,6 +89,9 @@
                                         @if($rule->description)
                                             <flux:text size="sm" class="text-zinc-500">{{ $rule->description }}</flux:text>
                                         @endif
+                                        <flux:text size="sm" class="text-zinc-500" data-testid="rule-effective">
+                                            {{ $rule->effective_from ? 'on or after '.$rule->effective_from->format('j M Y') : 'all past and future transactions' }}
+                                        </flux:text>
                                     </div>
                                     <div class="flex flex-wrap items-center gap-1.5">
                                         <flux:badge size="sm" color="blue">{{ count($rule->triggers) }} {{ Str::plural('trigger', count($rule->triggers)) }}</flux:badge>
@@ -304,13 +310,20 @@
                 <flux:checkbox wire:model="ruleIsActive" label="Active" />
             </flux:field>
 
+            <flux:field>
+                <flux:label>Effective from</flux:label>
+                <flux:input type="date" wire:model="ruleEffectiveFrom" size="sm" data-testid="rule-effective-from" />
+                <flux:description>Leave empty to apply to all past and future transactions.</flux:description>
+                <flux:error name="ruleEffectiveFrom" />
+            </flux:field>
+
             @if($ruleTestResult)
                 @php($testSections = [
                     ['key' => 'not-yet', 'title' => 'Not yet applied', 'hint' => 'Apply now would change these.', 'color' => 'amber', 'count' => $ruleTestResult->notYetAppliedCount, 'rows' => $ruleTestResult->notYetApplied],
                     ['key' => 'skipped', 'title' => 'Skipped', 'hint' => 'Apply now leaves these alone.', 'color' => 'zinc', 'count' => $ruleTestResult->skippedCount, 'rows' => $ruleTestResult->skipped],
                     ['key' => 'already', 'title' => 'Already applied', 'hint' => 'The actions would change nothing here.', 'color' => 'green', 'count' => $ruleTestResult->alreadyAppliedCount, 'rows' => $ruleTestResult->alreadyApplied],
                 ])
-                <div wire:dirty.remove wire:target="triggers,actions,ruleStrictMode" class="w-full space-y-3 rounded-lg border border-neutral-200 p-3 dark:border-neutral-700" data-testid="rule-test-result">
+                <div wire:dirty.remove wire:target="triggers,actions,ruleStrictMode,ruleEffectiveFrom" class="w-full space-y-3 rounded-lg border border-neutral-200 p-3 dark:border-neutral-700" data-testid="rule-test-result">
                     <flux:text data-testid="rule-test-total">
                         Matches <strong>{{ $ruleTestResult->totalMatches() }}</strong>
                         {{ Str::plural('transaction', $ruleTestResult->totalMatches()) }}.
@@ -368,6 +381,21 @@
                 <flux:button variant="primary" wire:click="saveRule">
                     {{ $editingRuleId ? 'Update' : 'Create' }}
                 </flux:button>
+            </div>
+        </div>
+    </flux:modal>
+
+    {{-- Delete All Rules Confirmation Modal --}}
+    <flux:modal wire:model="showDeleteAllRulesModal" class="max-w-sm">
+        <div class="space-y-4">
+            <flux:heading size="lg">Delete all rules</flux:heading>
+            <flux:text>
+                This permanently deletes all {{ $ruleCount }} {{ Str::plural('rule', $ruleCount) }}. Your rule groups are kept. This cannot be undone.
+            </flux:text>
+
+            <div class="flex justify-end gap-2">
+                <flux:button variant="ghost" wire:click="$set('showDeleteAllRulesModal', false)">Cancel</flux:button>
+                <flux:button variant="danger" wire:click="deleteAllRules" data-testid="rules-delete-all-confirm">Delete all rules</flux:button>
             </div>
         </div>
     </flux:modal>
