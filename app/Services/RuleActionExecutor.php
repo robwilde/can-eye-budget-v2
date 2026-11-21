@@ -181,6 +181,7 @@ final readonly class RuleActionExecutor
                 RuleActionType::FoldIntoParent => $this->feeFolder->foldableParent($draft) instanceof Transaction,
                 RuleActionType::ExcludeFromReports => $this->excludeFromReports($draft, $overrideLocks),
                 RuleActionType::MarkAsTransfer => $this->canMarkAsTransfer($draft, $value),
+                RuleActionType::EmailDigest => false,
             };
 
             if (in_array($type, [RuleActionType::FoldIntoParent, RuleActionType::MarkAsTransfer], true) && $effect) {
@@ -271,6 +272,7 @@ final readonly class RuleActionExecutor
                 RuleActionType::FoldIntoParent => $this->feeFolder->fold($transaction) instanceof Transaction,
                 RuleActionType::ExcludeFromReports => $this->excludeFromReports($transaction, $overrideLocks),
                 RuleActionType::MarkAsTransfer => $this->deferTransfer($transferActions, $value),
+                RuleActionType::EmailDigest => true,
             };
 
             if ($type === RuleActionType::FoldIntoParent && ! $effect) {
