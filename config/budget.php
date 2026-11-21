@@ -25,6 +25,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Bank-statement PDF Import
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, and services.statement_ai.api_key is set, an uploaded statement
+    | PDF can be sent to the configured AI provider to extract its transactions
+    | for review. The whole PDF leaves the app. Off by default.
+    |
+    */
+
+    'pdf_import' => [
+        'enabled' => (bool) env('BUDGET_PDF_IMPORT_ENABLED', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | AI Categorise Rule Action
     |--------------------------------------------------------------------------
     |

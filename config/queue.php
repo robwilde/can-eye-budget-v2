@@ -75,6 +75,18 @@ return [
             'after_commit' => false,
         ],
 
+        // For jobs that wait on a slow provider (statement PDF extraction can run for
+        // several minutes). retry_after must stay above the job's timeout, or a second
+        // worker picks up a job that is still running.
+        'redis_long' => [
+            'driver' => 'redis',
+            'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
+            'queue' => env('REDIS_LONG_QUEUE', 'statements'),
+            'retry_after' => (int) env('REDIS_LONG_QUEUE_RETRY_AFTER', 1200),
+            'block_for' => null,
+            'after_commit' => false,
+        ],
+
         'deferred' => [
             'driver' => 'deferred',
         ],

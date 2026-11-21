@@ -37,6 +37,17 @@ return [
         'daily_credit_cap' => (int) env('CONTEXT_DEV_DAILY_CREDIT_CAP', 500),
     ],
 
+    'statement_ai' => [
+        // Provider for reading uploaded statement PDFs (Anthropic Messages API). The full PDF
+        // bytes are sent to this provider, and only while budget.pdf_import.enabled is on and
+        // a key is set.
+        'api_key' => env('STATEMENT_AI_API_KEY'),
+        'base_url' => env('STATEMENT_AI_BASE_URL') ?: 'https://api.anthropic.com/v1',
+        'model' => env('STATEMENT_AI_MODEL') ?: 'claude-sonnet-4-5',
+        'max_pdf_bytes' => (int) (env('STATEMENT_AI_MAX_PDF_BYTES') ?: 20 * 1024 * 1024),
+        'max_tokens' => (int) (env('STATEMENT_AI_MAX_TOKENS') ?: 16000),
+    ],
+
     'typesafe' => [
         // Server-side secret for TypeSafe System One (Jev). Only the offline
         // categories:jev-eval command (#505) calls it; nothing in the request path does.
