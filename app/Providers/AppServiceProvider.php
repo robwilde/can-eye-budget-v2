@@ -30,6 +30,7 @@ use App\Services\PipelineStages\SetPayCycleStage;
 use App\Services\PipelineStages\TransferDetectionStage;
 use App\Services\PipelineStages\UserRulesStage;
 use App\Services\RedbarkClientFactory;
+use App\Services\RuleAiCategorisationQueue;
 use App\Services\SimpleFinClaimer;
 use App\Services\TransactionAnalysisPipeline;
 use App\Services\TypeSafeService;
@@ -69,6 +70,8 @@ final class AppServiceProvider extends ServiceProvider
         });
 
         $this->app->alias(ContextDevServiceContract::class, ContextDevService::class);
+
+        $this->app->scoped(RuleAiCategorisationQueue::class);
 
         $this->app->singleton(TypeSafeServiceContract::class, function (): TypeSafeService {
             $apiKey = (string) config('services.typesafe.api_key');
