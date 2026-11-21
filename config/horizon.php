@@ -235,6 +235,21 @@ return [
             'timeout' => 150,
             'nice' => 10,
         ],
+
+        // Statement PDF extraction waits minutes on the AI provider, so it has its own
+        // connection (retry_after 1200) and a worker timeout above the job's.
+        'supervisor-statements' => [
+            'connection' => 'redis_long',
+            'queue' => ['statements'],
+            'balance' => 'simple',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 256,
+            'tries' => 1,
+            'timeout' => 1100,
+            'nice' => 10,
+        ],
     ],
 
     'environments' => [
