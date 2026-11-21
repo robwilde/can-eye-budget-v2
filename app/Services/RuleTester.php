@@ -29,13 +29,14 @@ final readonly class RuleTester
      * @param  array<int, array<string, string>>  $triggers
      * @param  array<int, array<string, string>>  $actions
      */
-    public function test(int $userId, array $triggers, bool $strictMode, array $actions): RuleTestResult
+    public function test(int $userId, array $triggers, bool $strictMode, array $actions, ?string $effectiveFrom = null): RuleTestResult
     {
         $draft = new UserRule([
             'user_id' => $userId,
             'triggers' => $triggers,
             'strict_mode' => $strictMode,
             'actions' => $actions,
+            'effective_from' => $effectiveFrom,
         ]);
 
         $target = $this->executor->targetCategory($actions, $userId);

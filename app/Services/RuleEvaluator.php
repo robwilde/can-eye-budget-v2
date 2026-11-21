@@ -8,6 +8,7 @@ use App\Enums\RuleTriggerField;
 use App\Enums\RuleTriggerOperator;
 use App\Models\Transaction;
 use App\Models\UserRule;
+use App\Support\Rules\RegexPattern;
 use BackedEnum;
 
 final readonly class RuleEvaluator
@@ -17,6 +18,10 @@ final readonly class RuleEvaluator
         $triggers = $rule->triggers;
 
         if ($triggers === []) {
+            return false;
+        }
+
+        if ($rule->effective_from !== null && $transaction->post_date->toDateString() < $rule->effective_from->toDateString()) {
             return false;
         }
 
@@ -86,6 +91,7 @@ final readonly class RuleEvaluator
             RuleTriggerOperator::NotEquals, RuleTriggerOperator::IsNot => mb_strtolower($actualStr) !== mb_strtolower($expected),
             RuleTriggerOperator::StartsWith => str_starts_with(mb_strtolower($actualStr), mb_strtolower($expected)),
             RuleTriggerOperator::EndsWith => str_ends_with(mb_strtolower($actualStr), mb_strtolower($expected)),
+            RuleTriggerOperator::MatchesRegex => RegexPattern::matches($expected, $actualStr),
             default => false,
         };
     }
