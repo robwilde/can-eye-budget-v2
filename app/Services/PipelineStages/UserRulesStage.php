@@ -69,10 +69,13 @@ final readonly class UserRulesStage implements PipelineStageContract
 
         $appliedRules = $this->loadPreviouslyAppliedRules($context);
         $suggestionIds = [];
+        $blocked = [];
 
         foreach ($transactions as $transaction) {
-            $this->processTransaction($transaction, $groups, $context, $suggestionIds, $appliedRules);
+            $this->processTransaction($transaction, $groups, $context, $suggestionIds, $appliedRules, $blocked);
         }
+
+        $this->recordBlocked($context, $blocked);
 
         return new StageResult(success: true, stage: self::STAGE_KEY, suggestionIds: $suggestionIds);
     }
@@ -81,6 +84,7 @@ final readonly class UserRulesStage implements PipelineStageContract
      * @param  Collection<int, UserRuleGroup>  $groups
      * @param  list<int>  $suggestionIds
      * @param  array<string, bool>  $appliedRules
+     * @param  array<string, int>  $blocked
      */
     private function processTransaction(
         Transaction $transaction,
@@ -88,9 +92,10 @@ final readonly class UserRulesStage implements PipelineStageContract
         PipelineContext $context,
         array &$suggestionIds,
         array $appliedRules,
+        array &$blocked,
     ): void {
         foreach ($groups as $group) {
-            $matched = $this->processGroup($transaction, $group, $context, $suggestionIds, $appliedRules);
+            $matched = $this->processGroup($transaction, $group, $context, $suggestionIds, $appliedRules, $blocked);
 
             if ($matched && $group->stop_processing) {
                 break;
@@ -101,6 +106,7 @@ final readonly class UserRulesStage implements PipelineStageContract
     /**
      * @param  list<int>  $suggestionIds
      * @param  array<string, bool>  $appliedRules
+     * @param  array<string, int>  $blocked
      */
     private function processGroup(
         Transaction $transaction,
@@ -108,6 +114,7 @@ final readonly class UserRulesStage implements PipelineStageContract
         PipelineContext $context,
         array &$suggestionIds,
         array $appliedRules,
+        array &$blocked,
     ): bool {
         $matched = false;
 
@@ -119,7 +126,7 @@ final readonly class UserRulesStage implements PipelineStageContract
             $matched = true;
 
             if ($rule->is_auto_apply) {
-                $this->autoApplyRule($transaction, $rule, $context, $appliedRules);
+                $this->autoApplyRule($transaction, $rule, $context, $appliedRules, $blocked);
             } else {
                 $suggestionIds[] = $this->createRuleSuggestion($transaction, $rule, $context);
             }
@@ -128,12 +135,16 @@ final readonly class UserRulesStage implements PipelineStageContract
         return $matched;
     }
 
-    /** @param  array<string, bool>  $appliedRules */
+    /**
+     * @param  array<string, bool>  $appliedRules
+     * @param  array<string, int>  $blocked
+     */
     private function autoApplyRule(
         Transaction $transaction,
         UserRule $rule,
         PipelineContext $context,
         array $appliedRules,
+        array &$blocked,
     ): void {
         $key = $rule->id.':'.$transaction->id;
 
@@ -141,7 +152,12 @@ final readonly class UserRulesStage implements PipelineStageContract
             return;
         }
 
+        $lockedOut = $this->executor->blockedByLocks($transaction, $rule->actions);
         $applied = $this->executor->execute($transaction, $rule->actions, overwriteCleanDescription: false);
+
+        if ($lockedOut) {
+            $blocked[$key] = $transaction->id;
+        }
 
         // Only record the audit entry when the rule actually took effect. An
         // ineffective auto-apply (e.g. an orphan fee whose parent has not been
@@ -159,6 +175,24 @@ final readonly class UserRulesStage implements PipelineStageContract
                 'rule_name' => $rule->name,
                 'transaction_id' => $transaction->id,
                 'actions' => $rule->actions,
+            ],
+        ]);
+    }
+
+    /** @param  array<string, int>  $blocked */
+    private function recordBlocked(PipelineContext $context, array $blocked): void
+    {
+        if ($blocked === []) {
+            return;
+        }
+
+        PipelineAuditEntry::create([
+            'pipeline_run_id' => $context->pipelineRun->id,
+            'stage' => self::STAGE_KEY,
+            'action' => 'blocked_by_lock',
+            'metadata' => [
+                'count' => count(array_unique($blocked)),
+                'transaction_ids' => array_values(array_unique($blocked)),
             ],
         ]);
     }

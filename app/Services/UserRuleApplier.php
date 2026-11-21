@@ -44,11 +44,14 @@ final readonly class UserRuleApplier
     }
 
     /**
+     * @param  bool  $overrideLocks  Only a user-initiated re-apply passes true: it replaces a
+     *                               hand-set category or exclusion. Split and transfer rows
+     *                               stay protected.
      * @return int Rows the executor reported handled. That includes a matched
      *             row whose category a person set: the executor leaves it
      *             untouched but reports it handled, as the pipeline does.
      */
-    public function applyToHistory(UserRule $rule): int
+    public function applyToHistory(UserRule $rule, bool $overrideLocks = false): int
     {
         $applied = 0;
 
@@ -56,7 +59,7 @@ final readonly class UserRuleApplier
         // on the (unchanging) id keeps paging stable even though we mutate rows.
         $this->eligible($rule->user_id)
             ->lazyById()
-            ->each(function (Transaction $transaction) use ($rule, &$applied): void {
+            ->each(function (Transaction $transaction) use ($rule, $overrideLocks, &$applied): void {
                 if (! $this->evaluator->matches($transaction, $rule)) {
                     return;
                 }
@@ -67,7 +70,7 @@ final readonly class UserRuleApplier
                 // applyCategoryToSelection() opts out for the same reason.
                 $transaction->propagateCategoryChange = false;
 
-                if ($this->executor->execute($transaction, $rule->actions)) {
+                if ($this->executor->execute($transaction, $rule->actions, overrideLocks: $overrideLocks)) {
                     $applied++;
                 }
             });

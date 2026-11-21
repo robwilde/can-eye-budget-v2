@@ -10,6 +10,7 @@ use App\DTOs\TransactionSplitLine;
 use App\Enums\AccountClass;
 use App\Enums\AccountStatus;
 use App\Enums\CleanDescriptionSource;
+use App\Enums\ExclusionSource;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionKind;
@@ -1788,6 +1789,7 @@ final class TransactionModal extends Component
                     'merchant_id' => $this->merchantId,
                     'notes' => $this->notes !== '' ? $this->notes : null,
                     'excluded' => $this->excluded,
+                    ...$this->exclusionSourceFor($transaction),
                     ...$this->editedDescriptors($transaction),
                     ...$this->kindOverride(),
                 ]));
@@ -1816,6 +1818,7 @@ final class TransactionModal extends Component
                     'post_date' => $this->date,
                     'notes' => $this->notes !== '' ? $this->notes : null,
                     'excluded' => $this->excluded,
+                    ...$this->exclusionSourceFor($transaction),
                     ...$this->currencyAttributes($transaction),
                     ...$this->kindOverride(),
                 ]));
@@ -2390,6 +2393,7 @@ final class TransactionModal extends Component
             'source' => TransactionSource::Manual,
             'notes' => $this->notes !== '' ? $this->notes : null,
             'excluded' => $this->excluded,
+            'excluded_source' => $this->excluded ? ExclusionSource::Manual : null,
             ...$this->currencyAttributes(),
             'planned_transaction_id' => $plannedTransactionId,
         ];
@@ -2515,6 +2519,12 @@ final class TransactionModal extends Component
     private function kindChanged(): bool
     {
         return $this->kind !== $this->openedKind;
+    }
+
+    /** @return array{excluded_source?: ExclusionSource} */
+    private function exclusionSourceFor(Transaction $transaction): array
+    {
+        return $this->excluded === $transaction->excluded ? [] : ['excluded_source' => ExclusionSource::Manual];
     }
 
     /** @return array{kind?: TransactionKind} */

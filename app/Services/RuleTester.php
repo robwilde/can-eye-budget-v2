@@ -29,7 +29,7 @@ final readonly class RuleTester
      * @param  array<int, array<string, string>>  $triggers
      * @param  array<int, array<string, string>>  $actions
      */
-    public function test(int $userId, array $triggers, bool $strictMode, array $actions, ?string $effectiveFrom = null): RuleTestResult
+    public function test(int $userId, array $triggers, bool $strictMode, array $actions, ?string $effectiveFrom = null, bool $overrideLocks = false): RuleTestResult
     {
         $draft = new UserRule([
             'user_id' => $userId,
@@ -58,6 +58,7 @@ final readonly class RuleTester
                 $target,
                 $folds,
                 $lookups,
+                $overrideLocks,
                 &$notYetApplied,
                 &$skipped,
                 &$alreadyApplied,
@@ -69,11 +70,12 @@ final readonly class RuleTester
                     return;
                 }
 
-                $keptByHand = $target !== null
+                $keptByHand = ! $overrideLocks
+                    && $target !== null
                     && $transaction->categoryProtectedFromRules()
                     && $transaction->category_id !== $target;
 
-                if ($this->executor->wouldChange($transaction, $actions, $lookups)) {
+                if ($this->executor->wouldChange($transaction, $actions, $lookups, $overrideLocks)) {
                     $notYetAppliedCount++;
                     $this->keep($notYetApplied, $this->row($transaction, categoryKept: $keptByHand));
                 } elseif ($keptByHand) {

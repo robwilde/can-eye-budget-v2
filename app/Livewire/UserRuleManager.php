@@ -352,6 +352,7 @@ final class UserRuleManager extends Component
             $this->ruleStrictMode,
             $this->actions,
             $this->ruleEffectiveFrom ?: null,
+            overrideLocks: true,
         );
     }
 
@@ -458,7 +459,7 @@ final class UserRuleManager extends Component
             return;
         }
 
-        $count = $applier->applyToHistory($rule);
+        $count = $applier->applyToHistory($rule, overrideLocks: true);
 
         Flux::toast(text: "Applied to {$count} transactions", variant: 'success');
     }

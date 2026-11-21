@@ -7,6 +7,7 @@
 declare(strict_types=1);
 
 use App\Enums\AuditOutcome;
+use App\Enums\ExclusionSource;
 use App\Enums\ImportSource;
 use App\Enums\TransactionDirection;
 use App\Livewire\CategoryEditor;
@@ -434,4 +435,48 @@ it('still moves the account balance for an excluded transaction', function () {
     app(AccountBalanceHistoryBuilder::class)->rebuild($account);
 
     expect($account->dailyBalances()->whereDate('balance_date', '2026-10-05')->sole()->end_balance)->toBe(95000);
+});
+
+it('records a hand exclusion as manual', function () {
+    $transaction = excludableRow($this->user, $this->account);
+
+    $list = Livewire::actingAs($this->user)->test(TransactionList::class);
+    $list->call('toggleExcluded', $transaction->id, true);
+
+    expect(Transaction::findCurrentVersion($transaction->id, $this->user->id)->excluded_source)->toBe(ExclusionSource::Manual);
+
+    $current = Transaction::findCurrentVersion($transaction->id, $this->user->id);
+    $list->call('toggleExcluded', $current->id, false);
+
+    $included = Transaction::findCurrentVersion($transaction->id, $this->user->id);
+
+    expect($included->excluded)->toBeFalse()
+        ->and($included->excluded_source)->toBe(ExclusionSource::Manual);
+});
+
+it('records the exclusion source as manual only when the modal changes it', function () {
+    $transaction = excludableRow($this->user, $this->account, ['excluded' => true, 'excluded_source' => ExclusionSource::Rule]);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('notes', 'edited')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $edited = Transaction::findCurrentVersion($transaction->id, $this->user->id);
+
+    expect($edited->excluded_source)->toBe(ExclusionSource::Rule);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $edited->id)
+        ->set('excluded', false)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $included = Transaction::findCurrentVersion($transaction->id, $this->user->id);
+
+    expect($included->excluded)->toBeFalse()
+        ->and($included->excluded_source)->toBe(ExclusionSource::Manual);
 });

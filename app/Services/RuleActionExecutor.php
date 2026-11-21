@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Enums\CategorySource;
 use App\Enums\CleanDescriptionSource;
+use App\Enums\ExclusionSource;
 use App\Enums\RuleActionType;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
@@ -29,23 +30,49 @@ final readonly class RuleActionExecutor
      *                                           row, so an overwrite there
      *                                           would revert a person's later
      *                                           rename.
+     * @param  bool  $overrideLocks  True lets a user-initiated re-apply replace a
+     *                               hand-set category or exclusion. Pipeline runs
+     *                               never pass it. Split and transfer rows stay
+     *                               protected either way.
      * @return bool Whether the rule fully applied. Returns false when a fold
      *              action was requested but did not fold (e.g. an orphan fee
      *              whose parent is not yet imported), so the caller leaves it
      *              unaudited for the next pipeline run to retry — even if other
      *              actions in the same rule took effect.
      */
-    public function execute(Transaction $transaction, array $actions, bool $overwriteCleanDescription = true): bool
+    public function execute(Transaction $transaction, array $actions, bool $overwriteCleanDescription = true, bool $overrideLocks = false): bool
     {
         if ($overwriteCleanDescription || ! $transaction->exists || ! $this->setsCleanDescription($actions)) {
-            return $this->run($transaction, $actions, $overwriteCleanDescription);
+            return $this->run($transaction, $actions, $overwriteCleanDescription, $overrideLocks);
         }
 
-        return DB::transaction(function () use ($transaction, $actions): bool {
+        return DB::transaction(function () use ($transaction, $actions, $overrideLocks): bool {
             $this->syncPersistedCleanDescription($transaction);
 
-            return $this->run($transaction, $actions, false);
+            return $this->run($transaction, $actions, false, $overrideLocks);
         });
+    }
+
+    /**
+     * Whether a lock stops these actions from changing this row when a pipeline
+     * run applies them: the same actions staged with and without overrideLocks
+     * leave the category, exclusion or clean description different.
+     *
+     * Read-only: the actions are staged on clones that are never saved.
+     *
+     * @param  array<int, array<string, string>>  $actions
+     */
+    public function blockedByLocks(Transaction $transaction, array $actions): bool
+    {
+        $pipeline = clone $transaction;
+        $override = clone $transaction;
+
+        $this->stage($pipeline, $actions, false, false);
+        $this->stage($override, $actions, true, true);
+
+        return $pipeline->category_id !== $override->category_id
+            || $pipeline->excluded !== $override->excluded
+            || $pipeline->clean_description !== $override->clean_description;
     }
 
     /**
@@ -62,9 +89,9 @@ final readonly class RuleActionExecutor
      *
      * @param  array<int, array<string, string>>  $actions
      */
-    public function categoryItWouldSet(Transaction $transaction, array $actions): ?int
+    public function categoryItWouldSet(Transaction $transaction, array $actions, bool $overrideLocks = false): ?int
     {
-        return $this->maySetCategory($transaction) ? $this->targetCategory($actions, $transaction->user_id) : null;
+        return $this->maySetCategory($transaction, $overrideLocks) ? $this->targetCategory($actions, $transaction->user_id) : null;
     }
 
     /**
@@ -114,7 +141,7 @@ final readonly class RuleActionExecutor
      *                                           once per key across many rows; null
      *                                           queries live, as execute() does
      */
-    public function wouldChange(Transaction $transaction, array $actions, ?RuleActionLookups $lookups = null): bool
+    public function wouldChange(Transaction $transaction, array $actions, ?RuleActionLookups $lookups = null, bool $overrideLocks = false): bool
     {
         $draft = clone $transaction;
 
@@ -128,13 +155,14 @@ final readonly class RuleActionExecutor
             $value = $action['value'] ?? '';
 
             $effect = match ($type) {
-                RuleActionType::SetCategory => $this->setCategory($draft, $value, $lookups),
+                RuleActionType::SetCategory => $this->setCategory($draft, $value, $overrideLocks, $lookups),
                 RuleActionType::SetDescription => $this->setDescription($draft, $value),
                 RuleActionType::SetCleanDescription => $this->setCleanDescription($draft, $value, true),
                 RuleActionType::AppendNotes => $this->appendNotes($draft, $value),
                 RuleActionType::SetNotes => $this->setNotes($draft, $value),
                 RuleActionType::LinkToPlannedTransaction => $this->linkToPlannedTransaction($draft, $value, $lookups),
                 RuleActionType::FoldIntoParent => $this->feeFolder->foldableParent($draft) instanceof Transaction,
+                RuleActionType::ExcludeFromReports => $this->excludeFromReports($draft, $overrideLocks),
             };
 
             if ($type === RuleActionType::FoldIntoParent && $effect) {
@@ -145,6 +173,23 @@ final readonly class RuleActionExecutor
         $draft->clearBlankCleanDescription();
 
         return $draft->isDirty();
+    }
+
+    /**
+     * @param  array<int, array<string, string>>  $actions
+     */
+    private function stage(Transaction $draft, array $actions, bool $overwriteCleanDescription, bool $overrideLocks): void
+    {
+        foreach ($actions as $action) {
+            $value = $action['value'] ?? '';
+
+            match (RuleActionType::tryFrom($action['type'] ?? '')) {
+                RuleActionType::SetCategory => $this->setCategory($draft, $value, $overrideLocks),
+                RuleActionType::SetCleanDescription => $this->setCleanDescription($draft, $value, $overwriteCleanDescription),
+                RuleActionType::ExcludeFromReports => $this->excludeFromReports($draft, $overrideLocks),
+                default => null,
+            };
+        }
     }
 
     /**
@@ -183,7 +228,7 @@ final readonly class RuleActionExecutor
     /**
      * @param  array<int, array<string, string>>  $actions
      */
-    private function run(Transaction $transaction, array $actions, bool $overwriteCleanDescription): bool
+    private function run(Transaction $transaction, array $actions, bool $overwriteCleanDescription, bool $overrideLocks): bool
     {
         $applied = false;
         $foldPending = false;
@@ -198,13 +243,14 @@ final readonly class RuleActionExecutor
             $value = $action['value'] ?? '';
 
             $effect = match ($type) {
-                RuleActionType::SetCategory => $this->setCategory($transaction, $value),
+                RuleActionType::SetCategory => $this->setCategory($transaction, $value, $overrideLocks),
                 RuleActionType::SetDescription => $this->setDescription($transaction, $value),
                 RuleActionType::SetCleanDescription => $this->setCleanDescription($transaction, $value, $overwriteCleanDescription),
                 RuleActionType::AppendNotes => $this->appendNotes($transaction, $value),
                 RuleActionType::SetNotes => $this->setNotes($transaction, $value),
                 RuleActionType::LinkToPlannedTransaction => $this->linkToPlannedTransaction($transaction, $value),
                 RuleActionType::FoldIntoParent => $this->feeFolder->fold($transaction) instanceof Transaction,
+                RuleActionType::ExcludeFromReports => $this->excludeFromReports($transaction, $overrideLocks),
             };
 
             if ($type === RuleActionType::FoldIntoParent && ! $effect) {
@@ -226,17 +272,29 @@ final readonly class RuleActionExecutor
      * transfer. A categorised row that never declared a source counts as a
      * person's: saving() would default it to Manual.
      */
-    private function maySetCategory(Transaction $transaction): bool
+    private function maySetCategory(Transaction $transaction, bool $overrideLocks = false): bool
     {
-        if ($transaction->categoryProtectedFromRules()) {
+        if (! $overrideLocks && $transaction->categoryProtectedFromRules()) {
             return false;
         }
 
-        if ($transaction->isSplit()) {
-            return false;
-        }
+        return ! $this->isStructurallyProtected($transaction);
+    }
 
-        return $transaction->transfer_pair_id === null;
+    /**
+     * Split rows and transfer legs are never rewritten by a rule, whoever asked.
+     */
+    private function isStructurallyProtected(Transaction $transaction): bool
+    {
+        return $transaction->transfer_pair_id !== null
+            || $transaction->isSplit()
+            || $transaction->isSplitParent()
+            || $transaction->isSplitChild();
+    }
+
+    private function splitIsInFlux(Transaction $transaction): bool
+    {
+        return $transaction->isSplit() || $transaction->isSplitParent();
     }
 
     /**
@@ -250,12 +308,12 @@ final readonly class RuleActionExecutor
      * converting away from a transfer mints a new row id, so the audit cannot
      * strand it.
      */
-    private function setCategory(Transaction $transaction, string $value, ?RuleActionLookups $lookups = null): bool
+    private function setCategory(Transaction $transaction, string $value, bool $overrideLocks, ?RuleActionLookups $lookups = null): bool
     {
-        if (! $this->maySetCategory($transaction)) {
+        if (! $this->maySetCategory($transaction, $overrideLocks)) {
             // Precedence mirrors maySetCategory(): protection is decided before
             // the split test, so a protected split still reports handled.
-            return $transaction->categoryProtectedFromRules() || ! $transaction->isSplit();
+            return (! $overrideLocks && $transaction->categoryProtectedFromRules()) || ! $this->splitIsInFlux($transaction);
         }
 
         $categoryId = (int) $value;
@@ -264,6 +322,31 @@ final readonly class RuleActionExecutor
             $transaction->category_id = $categoryId;
             $transaction->category_source = CategorySource::Rule;
         }
+
+        return true;
+    }
+
+    /**
+     * Reports handled when a hand-set exclusion or a protected row keeps the
+     * row as it is, so the pipeline audits it and stops retrying it. A split
+     * in flux reports not-applied, as setCategory() does.
+     */
+    private function excludeFromReports(Transaction $transaction, bool $overrideLocks): bool
+    {
+        if ($this->isStructurallyProtected($transaction)) {
+            return ! $this->splitIsInFlux($transaction);
+        }
+
+        if ($transaction->excluded) {
+            return true;
+        }
+
+        if (! $overrideLocks && $transaction->excluded_source === ExclusionSource::Manual) {
+            return true;
+        }
+
+        $transaction->excluded = true;
+        $transaction->excluded_source = ExclusionSource::Rule;
 
         return true;
     }

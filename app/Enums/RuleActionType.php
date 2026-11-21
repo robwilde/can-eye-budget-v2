@@ -13,6 +13,7 @@ enum RuleActionType: string
     case SetNotes = 'set_notes';
     case LinkToPlannedTransaction = 'link_to_planned_transaction';
     case FoldIntoParent = 'fold_into_parent';
+    case ExcludeFromReports = 'exclude_from_reports';
 
     public function label(): string
     {
@@ -24,6 +25,7 @@ enum RuleActionType: string
             self::SetNotes => 'Set Notes',
             self::LinkToPlannedTransaction => 'Link to Planned Transaction',
             self::FoldIntoParent => 'Fold into parent transaction',
+            self::ExcludeFromReports => 'Exclude from budgets and reports',
         };
     }
 
@@ -36,12 +38,12 @@ enum RuleActionType: string
             self::AppendNotes => 'notes',
             self::SetNotes => 'notes',
             self::LinkToPlannedTransaction => 'planned_transaction_id',
-            self::FoldIntoParent => '',
+            self::FoldIntoParent, self::ExcludeFromReports => '',
         };
     }
 
     public function requiresValue(): bool
     {
-        return $this !== self::FoldIntoParent;
+        return ! in_array($this, [self::FoldIntoParent, self::ExcludeFromReports], true);
     }
 }
