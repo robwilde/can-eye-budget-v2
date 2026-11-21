@@ -17,6 +17,7 @@ enum RuleActionType: string
     case MarkAsTransfer = 'mark_as_transfer';
     case EmailDigest = 'email_digest';
     case AddTags = 'add_tags';
+    case SuggestCategoryWithAi = 'suggest_category_with_ai';
 
     public function label(): string
     {
@@ -32,6 +33,7 @@ enum RuleActionType: string
             self::MarkAsTransfer => 'Mark as Transfer',
             self::EmailDigest => 'Email me new matches',
             self::AddTags => 'Add Tags',
+            self::SuggestCategoryWithAi => 'Categorise with AI (Jev)',
         };
     }
 
@@ -44,7 +46,7 @@ enum RuleActionType: string
             self::AppendNotes => 'notes',
             self::SetNotes => 'notes',
             self::LinkToPlannedTransaction => 'planned_transaction_id',
-            self::FoldIntoParent, self::ExcludeFromReports, self::EmailDigest => '',
+            self::FoldIntoParent, self::ExcludeFromReports, self::EmailDigest, self::SuggestCategoryWithAi => '',
             self::AddTags => 'tag_ids',
             self::MarkAsTransfer => 'account_id',
         };
@@ -52,6 +54,6 @@ enum RuleActionType: string
 
     public function requiresValue(): bool
     {
-        return ! in_array($this, [self::FoldIntoParent, self::ExcludeFromReports, self::EmailDigest, self::AddTags], true);
+        return ! in_array($this, [self::FoldIntoParent, self::ExcludeFromReports, self::EmailDigest, self::AddTags, self::SuggestCategoryWithAi], true);
     }
 }
