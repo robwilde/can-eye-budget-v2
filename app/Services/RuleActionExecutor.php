@@ -8,15 +8,17 @@ use App\Enums\CategorySource;
 use App\Enums\CleanDescriptionSource;
 use App\Enums\ExclusionSource;
 use App\Enums\RuleActionType;
+use App\Models\Account;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
+use App\Services\Transfers\TransferDetector;
 use App\Support\CleanDescriptionDeriver;
 use Illuminate\Support\Facades\DB;
 
 final readonly class RuleActionExecutor
 {
-    public function __construct(private TransactionFeeFolder $feeFolder) {}
+    public function __construct(private TransactionFeeFolder $feeFolder, private TransferDetector $transfers) {}
 
     /**
      * @param  array<int, array<string, string>>  $actions
@@ -163,9 +165,10 @@ final readonly class RuleActionExecutor
                 RuleActionType::LinkToPlannedTransaction => $this->linkToPlannedTransaction($draft, $value, $lookups),
                 RuleActionType::FoldIntoParent => $this->feeFolder->foldableParent($draft) instanceof Transaction,
                 RuleActionType::ExcludeFromReports => $this->excludeFromReports($draft, $overrideLocks),
+                RuleActionType::MarkAsTransfer => $this->canMarkAsTransfer($draft, $value),
             };
 
-            if ($type === RuleActionType::FoldIntoParent && $effect) {
+            if (in_array($type, [RuleActionType::FoldIntoParent, RuleActionType::MarkAsTransfer], true) && $effect) {
                 return true;
             }
         }
@@ -231,7 +234,8 @@ final readonly class RuleActionExecutor
     private function run(Transaction $transaction, array $actions, bool $overwriteCleanDescription, bool $overrideLocks): bool
     {
         $applied = false;
-        $foldPending = false;
+        $pending = false;
+        $transferActions = [];
 
         foreach ($actions as $action) {
             $type = RuleActionType::tryFrom($action['type'] ?? '');
@@ -251,10 +255,11 @@ final readonly class RuleActionExecutor
                 RuleActionType::LinkToPlannedTransaction => $this->linkToPlannedTransaction($transaction, $value),
                 RuleActionType::FoldIntoParent => $this->feeFolder->fold($transaction) instanceof Transaction,
                 RuleActionType::ExcludeFromReports => $this->excludeFromReports($transaction, $overrideLocks),
+                RuleActionType::MarkAsTransfer => $this->deferTransfer($transferActions, $value),
             };
 
             if ($type === RuleActionType::FoldIntoParent && ! $effect) {
-                $foldPending = true;
+                $pending = true;
             }
 
             $applied = $effect || $applied;
@@ -264,7 +269,56 @@ final readonly class RuleActionExecutor
             $transaction->save();
         }
 
-        return $applied && ! $foldPending;
+        foreach ($transferActions as $accountId) {
+            if ($this->markAsTransfer($transaction, $accountId)) {
+                $applied = true;
+            } else {
+                $pending = true;
+            }
+        }
+
+        return $applied && ! $pending;
+    }
+
+    /**
+     * The link writes through TransferLinker under its own locks, so it runs after the row's
+     * other changes are saved and its refresh cannot discard them.
+     *
+     * @param  list<string>  $queue
+     */
+    private function deferTransfer(array &$queue, string $value): bool
+    {
+        $queue[] = $value;
+
+        return false;
+    }
+
+    /**
+     * A row already in a transfer, or aimed at its own, an inactive, a deleted or a foreign account,
+     * is left alone and reported handled. A tracked target with no single real opposite row leaves the row
+     * unlinked and not handled, so a later run can pair it once that row arrives.
+     */
+    private function markAsTransfer(Transaction $transaction, string $value): bool
+    {
+        $target = $this->transferTarget($transaction, $value);
+
+        if (! $target instanceof Account || $transaction->transfer_pair_id !== null || $target->id === $transaction->account_id) {
+            return true;
+        }
+
+        return $this->transfers->linkToCounterpart($transaction, $target);
+    }
+
+    private function canMarkAsTransfer(Transaction $transaction, string $value): bool
+    {
+        $target = $this->transferTarget($transaction, $value);
+
+        return $target instanceof Account && $this->transfers->canLinkToCounterpart($transaction, $target);
+    }
+
+    private function transferTarget(Transaction $transaction, string $value): ?Account
+    {
+        return Account::query()->where('user_id', $transaction->user_id)->active()->find((int) $value);
     }
 
     /**

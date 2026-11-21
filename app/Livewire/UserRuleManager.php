@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\DTOs\RuleTestResult;
+use App\Enums\AccountStatus;
 use App\Enums\PipelineTrigger;
 use App\Enums\RuleActionType;
 use App\Enums\RuleTriggerField;
 use App\Enums\RuleTriggerOperator;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Livewire\Attributes\NotAudited;
+use App\Models\Account;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\User;
@@ -598,6 +600,7 @@ final class UserRuleManager extends Component
                 ->with(['rules' => fn ($q) => $q->when($matchesSearch !== null, $matchesSearch)->ordered()])
                 ->get(),
             'categories' => Category::visibleSortedByFullPath((int) auth()->id()),
+            'transferAccounts' => Account::where('user_id', auth()->id())->active()->orderBy('name')->get(),
             'plannedTransactions' => PlannedTransaction::where('user_id', auth()->id())
                 ->where('is_active', true)
                 ->orderBy('description')
@@ -689,6 +692,7 @@ final class UserRuleManager extends Component
             $rules["actions.{$index}.value"] = match (true) {
                 $type !== null && ! $type->requiresValue() => ['nullable', 'string', $this->noNullBytes()],
                 $type === RuleActionType::SetCleanDescription => ['required', 'string', 'max:255', $this->noNullBytes()],
+                $type === RuleActionType::MarkAsTransfer => ['required', 'string', Rule::exists('accounts', 'id')->where('user_id', auth()->id())->whereIn('status', [AccountStatus::Active->value, AccountStatus::Available->value])],
                 default => ['required', 'string', $this->noNullBytes()],
             };
         }

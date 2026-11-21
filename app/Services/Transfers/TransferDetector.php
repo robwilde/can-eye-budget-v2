@@ -22,6 +22,60 @@ final readonly class TransferDetector
     public function __construct(private TransferLinker $linker, private TransferExchange $exchange) {}
 
     /**
+     * Marks $row as a transfer with the chosen counterpart account, as a rule action does. Real
+     * rows always win: an untracked counterpart gets a mirror leg only when no real opposite
+     * row exists anywhere, and a tracked counterpart pairs only with its single real opposite
+     * row; nothing is ever created on a tracked account.
+     *
+     * @return bool whether the row is now paired; false leaves everything unchanged
+     *
+     * @throws Throwable
+     */
+    public function linkToCounterpart(Transaction $row, Account $counterpart, TransferLinkSource $source = TransferLinkSource::Rule): bool
+    {
+        if (! $this->mayLinkTo($row, $counterpart)) {
+            return false;
+        }
+
+        if (! $counterpart->is_tracked) {
+            if ($this->linker->candidatesFor($row, crossCurrency: true)->isNotEmpty()) {
+                return false;
+            }
+
+            try {
+                $this->linker->linkToUntrackedAccount($row, $counterpart, $source);
+            } catch (TransferLinkRefusedException) {
+                return false;
+            }
+
+            return true;
+        }
+
+        $opposite = $this->realOppositeRow($row, $counterpart);
+
+        return $opposite instanceof Transaction && $this->linker->link($row, $opposite, $source);
+    }
+
+    /**
+     * Whether linkToCounterpart() would pair $row right now. Reads only.
+     *
+     * @throws Throwable
+     */
+    public function canLinkToCounterpart(Transaction $row, Account $counterpart): bool
+    {
+        if (! $this->mayLinkTo($row, $counterpart)) {
+            return false;
+        }
+
+        if (! $counterpart->is_tracked) {
+            return $this->linker->candidatesFor($row, crossCurrency: true)->isEmpty()
+                && $this->exchange->incoming($row->user_id, abs($row->amount), $row->currency, $counterpart->currency, $row->post_date) !== null;
+        }
+
+        return $this->realOppositeRow($row, $counterpart) instanceof Transaction;
+    }
+
+    /**
      * Rules first (a remembered transfer links automatically), then strict suggestions.
      *
      * @return array{rule: int, suggested: int, pairs: list<array{debit: int, credit: int, source: string}>}
@@ -62,6 +116,25 @@ final readonly class TransferDetector
         }
 
         return ['rule' => count($pairs), 'suggested' => 0, 'pairs' => $pairs];
+    }
+
+    private function mayLinkTo(Transaction $row, Account $counterpart): bool
+    {
+        return $counterpart->user_id === $row->user_id
+            && $counterpart->id !== $row->account_id
+            && $row->transfer_pair_id === null
+            && $row->transfer_link_source !== TransferLinkSource::Unlinked
+            && $row->split_parent_id === null
+            && ! $row->isSplitParent()
+            && ! $row->isSplit();
+    }
+
+    private function realOppositeRow(Transaction $row, Account $counterpart): ?Transaction
+    {
+        $candidates = $this->linker->candidatesFor($row)
+            ->filter(fn (Transaction $candidate): bool => $candidate->account_id === $counterpart->id);
+
+        return $candidates->count() === 1 ? $candidates->first() : null;
     }
 
     /**
