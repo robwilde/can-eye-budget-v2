@@ -312,3 +312,12 @@ it('clears the queued files when too many are picked and lets them be cleared', 
 it('lets temporary uploads reach the statement size limit', function () {
     expect(config('livewire.temporary_file_upload.rules'))->toContain('max:25600');
 });
+
+it('refuses to delete a statement that has pdf imports and says why', function () {
+    $statement = Statement::factory()->for($this->user)->create();
+    App\Models\PdfImport::factory()->create(['user_id' => $this->user->id, 'statement_id' => $statement->id]);
+
+    vaultFor($this->user)->call('delete', $statement->id)->assertHasErrors('statement')->assertSee('has PDF imports');
+
+    expect(Statement::query()->whereKey($statement->id)->exists())->toBeTrue();
+});
