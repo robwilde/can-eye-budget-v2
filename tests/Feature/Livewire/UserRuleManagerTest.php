@@ -1161,3 +1161,124 @@ test('rejects a transfer action targeting a closed account and leaves it out of 
 
     $component->set('actions.0.value', (string) $hidden->id)->call('saveRule')->assertHasNoErrors();
 });
+
+// ─── Condition groups ─────────────────────────────────────
+
+function groupedDraft(User $user, Category $category): Testable
+{
+    return openedDraft($user, $category)
+        ->call('addGroup')
+        ->set('triggers.1.match', 'any')
+        ->set('triggers.1.conditions.0.field', RuleTriggerField::Description->value)
+        ->set('triggers.1.conditions.0.operator', RuleTriggerOperator::Contains->value)
+        ->set('triggers.1.conditions.0.value', 'WALMART');
+}
+
+test('saves a rule with one condition group and reloads it for editing', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+
+    $component = groupedDraft($this->user, $category)
+        ->call('addGroupCondition', 1)
+        ->set('triggers.1.conditions.1.field', RuleTriggerField::Description->value)
+        ->set('triggers.1.conditions.1.operator', RuleTriggerOperator::Contains->value)
+        ->set('triggers.1.conditions.1.value', 'TARGET')
+        ->set('ruleName', 'Big box')
+        ->call('saveRule')
+        ->assertHasNoErrors();
+
+    $rule = UserRule::sole();
+
+    expect($rule->triggers[1]['type'])->toBe('group')
+        ->and($rule->triggers[1]['match'])->toBe('any')
+        ->and($rule->triggers[1]['conditions'])->toHaveCount(2)
+        ->and($rule->conditionSummary())->toContain('and 2 more');
+
+    $component->call('openEditRuleModal', $rule->id)->assertSet('triggers.1.conditions.1.value', 'TARGET');
+});
+
+it('rejects a group inside a group', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+
+    $component = groupedDraft($this->user, $category)
+        ->set('triggers.1.conditions.1', ['type' => 'group', 'match' => 'all', 'conditions' => []])
+        ->set('ruleName', 'Nested')
+        ->call('saveRule')
+        ->assertHasErrors(['triggers.1.conditions.1']);
+
+    expect($component->errors()->get('triggers.1.conditions.1'))->toBe(['Compound conditions cannot be nested'])
+        ->and(UserRule::count())->toBe(0);
+});
+
+test('rejects a second condition group', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+
+    groupedDraft($this->user, $category)
+        ->set('triggers.2', ['type' => 'group', 'match' => 'all', 'conditions' => []])
+        ->set('ruleName', 'Two groups')
+        ->call('saveRule')
+        ->assertHasErrors(['triggers.2']);
+
+    expect(UserRule::count())->toBe(0);
+});
+
+test('addGroup offers one group only', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+
+    $component = openedDraft($this->user, $category)->call('addGroup')->call('addGroup');
+
+    expect(collect($component->get('triggers'))->filter(fn (array $t): bool => ($t['type'] ?? null) === 'group')->count())->toBe(1);
+});
+
+test('validates the conditions inside a group like top-level ones', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+
+    groupedDraft($this->user, $category)
+        ->set('triggers.1.conditions.0.value', '')
+        ->set('triggers.1.match', 'sometimes')
+        ->set('ruleName', 'Bad group')
+        ->call('saveRule')
+        ->assertHasErrors(['triggers.1.conditions.0.value', 'triggers.1.match']);
+
+    expect(UserRule::count())->toBe(0);
+});
+
+test('a rule needs at least one condition outside an empty group', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+
+    openedDraft($this->user, $category)
+        ->set('triggers', [['type' => 'group', 'match' => 'all', 'conditions' => []]])
+        ->set('ruleName', 'Only a group')
+        ->call('saveRule')
+        ->assertHasErrors(['triggers']);
+
+    expect(UserRule::count())->toBe(0);
+});
+
+test('the list summarises the first condition and how many more follow', function () {
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    UserRule::factory()->for($this->user)->for($group, 'group')->create([
+        'name' => 'Grouped',
+        'triggers' => [
+            ['field' => 'description', 'operator' => 'contains', 'value' => 'WALMART'],
+            ['type' => 'group', 'match' => 'any', 'conditions' => [
+                ['field' => 'amount', 'operator' => 'greater_than', 'value' => '50'],
+                ['field' => 'amount', 'operator' => 'less_than', 'value' => '5'],
+            ]],
+        ],
+    ]);
+
+    Livewire::actingAs($this->user)->test(UserRuleManager::class)->assertSee('IF Description Contains WALMART and 2 more');
+});
+
+it('audits saving a rule with a condition group', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $other = User::factory()->create();
+
+    groupedDraft($this->user, $category)->set('ruleName', 'Grouped')->call('saveRule')->assertHasNoErrors();
+
+    $event = AuditEvent::query()->where('action', 'livewire.user-rule-manager.saveRule')->sole();
+
+    expect($event->user_id)->toBe($this->user->id)
+        ->and(UserRule::sole()->user_id)->toBe($this->user->id)
+        ->and(UserRule::where('user_id', $other->id)->count())->toBe(0);
+});
