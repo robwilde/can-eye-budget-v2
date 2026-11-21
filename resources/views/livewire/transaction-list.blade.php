@@ -112,6 +112,12 @@
                 :selected="$groupMode"
                 wire-model="groupMode"
             />
+
+            @if($triage)
+                <flux:button size="sm" variant="ghost" wire:click="stopTriage" data-testid="triage-stop">Stop triage</flux:button>
+            @else
+                <flux:button size="sm" variant="primary" icon="forward" wire:click="startTriage" data-testid="triage-start">Guided triage</flux:button>
+            @endif
         @endif
 
         {{-- Provenance filter. Only meaningful once rows have categories, and
@@ -319,6 +325,17 @@
             </div>
 
             @if($inMerchantMode)
+                @if($triageRemaining !== null)
+                    <div class="flex flex-wrap items-center gap-3 px-4 py-2" data-testid="triage-remaining">
+                        <span class="text-sm font-medium">
+                            {{ $triageRemaining['rows'] }} {{ Str::plural('transaction', $triageRemaining['rows']) }} left to categorise · {{ $formatMoney($triageRemaining['total']) }}
+                        </span>
+                        @if($triage)
+                            <flux:button size="sm" variant="ghost" icon="arrow-right" wire:click="nextCluster" data-testid="triage-next">Next group</flux:button>
+                        @endif
+                    </div>
+                @endif
+
                 <div class="flex items-center gap-4 px-4 py-2">
                     <span class="cib-label flex min-w-0 flex-1 items-center gap-1">Merchant</span>
                     <span class="cib-label w-32">Spread</span>
@@ -512,6 +529,10 @@
                             dropdown="up"
                         />
                     </div>
+
+                    @if(($bulkScope['merchantKey'] ?? null) !== null)
+                        <flux:checkbox wire:model.live="createRule" label="Create rule" data-testid="triage-create-rule" />
+                    @endif
 
                     <flux:button variant="primary" size="sm"
                                  wire:click="applyCategoryToSelection"
@@ -762,6 +783,10 @@
                 @endif
             </x-cib.card>
         </div>
+    @endif
+
+    @if($triageAlert)
+        <div class="mt-3 text-sm text-amber-700 dark:text-amber-400" role="alert" data-testid="triage-alert">{{ $triageAlert }}</div>
     @endif
 
     @if($bulkNotice)

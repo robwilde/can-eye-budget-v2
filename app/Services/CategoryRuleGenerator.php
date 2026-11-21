@@ -9,6 +9,7 @@ use App\Enums\CategorySource;
 use App\Enums\RuleActionType;
 use App\Enums\RuleTriggerField;
 use App\Enums\RuleTriggerOperator;
+use App\Enums\TransactionDirection;
 use App\Models\Transaction;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
@@ -74,6 +75,60 @@ final readonly class CategoryRuleGenerator
         $this->applier->applyToHistory($rule);
 
         return $rule;
+    }
+
+    /**
+     * Saves an active auto-apply rule for one triage group, named after it: the merchant key
+     * contains the group's key, and, when a direction was chosen, the direction matches. It
+     * does not sweep history; the caller has just categorised the group's rows itself.
+     *
+     * @return UserRule|null null when the key is blank or a rule with the same conditions
+     *                       already exists, so nothing is created
+     */
+    public function createGroupRule(int $userId, string $merchantKey, int $categoryId, ?TransactionDirection $direction = null): ?UserRule
+    {
+        $key = mb_trim($merchantKey);
+
+        if ($key === '') {
+            return null;
+        }
+
+        $triggers = [[
+            'field' => RuleTriggerField::MerchantKey->value,
+            'operator' => RuleTriggerOperator::Contains->value,
+            'value' => $key,
+        ]];
+
+        if ($direction !== null) {
+            $triggers[] = [
+                'field' => RuleTriggerField::Direction->value,
+                'operator' => RuleTriggerOperator::Equals->value,
+                'value' => $direction->value,
+            ];
+        }
+
+        $exists = UserRule::query()
+            ->where('user_id', $userId)
+            ->get(['triggers'])
+            ->contains(fn (UserRule $rule): bool => $rule->triggers === $triggers);
+
+        if ($exists) {
+            return null;
+        }
+
+        $group = $this->group($userId);
+
+        return UserRule::query()->create([
+            'user_id' => $userId,
+            'user_rule_group_id' => $group->id,
+            'name' => mb_substr($key, 0, 255),
+            'triggers' => $triggers,
+            'actions' => [['type' => RuleActionType::SetCategory->value, 'value' => (string) $categoryId]],
+            'strict_mode' => true,
+            'is_auto_apply' => true,
+            'is_active' => true,
+            'order' => $this->nextRuleOrder($group->id),
+        ]);
     }
 
     /**

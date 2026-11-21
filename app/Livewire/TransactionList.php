@@ -328,6 +328,24 @@ final class TransactionList extends Component
     public bool $rulePanelOpen = false;
 
     /**
+     * Guided triage: after each group is categorised the next one opens, until none is
+     * left. Server state, never part of the URL.
+     */
+    #[Locked]
+    public bool $triage = false;
+
+    /**
+     * Whether applying a category to a whole merchant group also saves a rule for it.
+     */
+    public bool $createRule = false;
+
+    /**
+     * Shown when the categorisation went through but the group's rule was not created.
+     */
+    #[Locked]
+    public ?string $triageAlert = null;
+
+    /**
      * The dry-run shown in the panel. Held rather than computed in render():
      * it walks the user's whole history, so it is recomputed only when one of
      * its inputs moves — the match value, the category, or the selection, and
@@ -588,6 +606,43 @@ final class TransactionList extends Component
         $this->bulkCategoryPicked = false;
     }
 
+    /**
+     * Start the guided triage: uncategorised rows, one merchant group at a time, the biggest
+     * first. Nothing is selected for the user beyond opening the first group.
+     */
+    public function startTriage(): void
+    {
+        $this->categorised = 'uncategorised';
+        $this->groupMode = 'merchant';
+        $this->source = 'all';
+        $this->triage = true;
+        $this->triageAlert = null;
+        $this->clearSelection();
+        $this->bulkNotice = null;
+
+        $this->openTriageGroup(0);
+    }
+
+    /**
+     * Skip the open group without categorising it and open the one after it.
+     */
+    public function nextCluster(): void
+    {
+        $keys = $this->triageKeys();
+        $position = $this->expandedKey === null ? false : array_search($this->expandedKey, $keys, true);
+
+        $this->openTriageGroup($position === false ? 0 : $position + 1, $keys);
+    }
+
+    public function stopTriage(): void
+    {
+        $this->triage = false;
+        $this->triageAlert = null;
+        $this->createRule = false;
+        $this->clearSelection();
+        $this->expandedKey = null;
+    }
+
     public function updatedClusterIntent(): void
     {
         $options = $this->narrowedByIntent(Category::visibleSortedByFullPath($this->authenticatedUser()->id));
@@ -637,10 +692,11 @@ final class TransactionList extends Component
      *
      * @throws Throwable
      */
-    public function applyCategoryToSelection(PayeeConfirmer $payeeConfirmer): void
+    public function applyCategoryToSelection(PayeeConfirmer $payeeConfirmer, CategoryRuleGenerator $generator): void
     {
         $this->bulkError = null;
         $this->bulkNotice = null;
+        $this->triageAlert = null;
 
         $categoryId = $this->chosenBulkCategoryId();
 
@@ -657,6 +713,14 @@ final class TransactionList extends Component
         }
 
         $clusterPayee = $this->wholeClusterPayee($query);
+        $groupKey = $this->bulkScope['merchantKey'] ?? null;
+        $ruleKey = $this->createRule ? $groupKey : null;
+        $ruleDirection = match ($this->bulkScope['filters']['direction'] ?? 'all') {
+            'incoming' => TransactionDirection::Credit,
+            'outgoing' => TransactionDirection::Debit,
+            default => null,
+        };
+        $ruleCreated = false;
         $skipped = ($this->selectionQuery()?->count() ?? 0) - (clone $query)->count();
 
         // Counted from the database before the write rather than tallied in
@@ -684,7 +748,7 @@ final class TransactionList extends Component
         // chunkById is a keyset cursor (id > lastId), not an offset, so rows
         // dropping out of the filter predicate as the loop writes them stay
         // behind the cursor and cannot be skipped.
-        DB::transaction(static function () use ($query, $categoryId): void {
+        DB::transaction(function () use ($query, $categoryId, $generator, $ruleKey, $ruleDirection, &$ruleCreated): void {
             $query->chunkById(200, function (EloquentCollection $chunk) use ($categoryId): void {
                 foreach ($chunk as $transaction) {
                     $transaction->category_id = $categoryId;
@@ -705,6 +769,10 @@ final class TransactionList extends Component
                     $transaction->save();
                 }
             });
+
+            if (is_string($ruleKey)) {
+                $ruleCreated = $this->createGroupRuleSafely($generator, $ruleKey, $categoryId, $ruleDirection);
+            }
         });
 
         if ($this->bulkCategoryPicked) {
@@ -725,6 +793,14 @@ final class TransactionList extends Component
             ? 'Categorised 1 transaction.'
             : sprintf('Categorised %d transactions.', $updated))
             .($skipped > 0 ? sprintf(' Skipped %d that are transfers or splits.', $skipped) : '');
+
+        if (is_string($ruleKey) && ! $ruleCreated) {
+            $this->triageAlert = 'Transactions categorized, but the rule could not be created (it may already exist).';
+        }
+
+        if ($this->triage && $groupKey !== null) {
+            $this->advanceTriage();
+        }
 
         $this->dispatch('transaction-saved');
     }
@@ -1794,6 +1870,7 @@ final class TransactionList extends Component
             'identifiableIds' => $identifiableIds,
             'identifiableKeys' => $identifiableKeys,
             'creditSummary' => $this->creditSummary(),
+            'triageRemaining' => $inMerchantMode ? $this->triageRemaining() : null,
         ]);
     }
 
@@ -2685,7 +2762,7 @@ final class TransactionList extends Component
             // Merchant mode renders clusters, and a NULL merchant_key can never
             // be one, so a count or a bulk write taken in that mode must not
             // reach rows the page is incapable of showing.
-            ->when(($filters['clusterableOnly'] ?? false) === true, fn ($q) => $q->whereNotNull('merchant_key'))
+            ->when(($filters['clusterableOnly'] ?? false) === true, fn ($q) => $q->whereNotNull('merchant_key')->whereDoesntHave('splitChildren'))
             ->when(is_scalar($filters['account'] ?? null) ? $filters['account'] : null, fn ($q, $id) => $q->where('account_id', $id))
             ->when($categoryIds !== null, fn ($q) => $categoryIds === []
                 ? $q->whereRaw('1 = 0')
@@ -2962,6 +3039,98 @@ final class TransactionList extends Component
             ->orderByDesc('post_date')
             ->orderByDesc('id')
             ->get();
+    }
+
+    /**
+     * One savepoint around the rule insert: a rule that cannot be saved is skipped and the
+     * categorisation around it still commits.
+     */
+    private function createGroupRuleSafely(CategoryRuleGenerator $generator, string $key, int $categoryId, ?TransactionDirection $direction): bool
+    {
+        try {
+            return DB::transaction(fn (): bool => $generator->createGroupRule($this->authenticatedUser()->id, $key, $categoryId, $direction) !== null);
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * Merchant keys of the groups still to triage, in the order the list shows them.
+     *
+     * @return list<string>
+     */
+    private function triageKeys(): array
+    {
+        return $this->queryFor($this->currentFilters())
+            ->whereNotNull('merchant_key')
+            ->selectRaw('merchant_key, COUNT(*) as row_count')
+            ->groupBy('merchant_key')
+            ->orderByDesc('row_count')
+            ->orderBy('merchant_key')
+            ->pluck('merchant_key')
+            ->map(static fn (mixed $key): string => (string) $key)
+            ->all();
+    }
+
+    /**
+     * Open the group at $position, or leave triage when none is left. A direction filter that
+     * hides the last groups is lifted first, so "nothing left" never means "nothing left in
+     * one direction".
+     *
+     * @param  list<string>|null  $keys
+     */
+    private function openTriageGroup(int $position, ?array $keys = null): void
+    {
+        $keys ??= $this->triageKeys();
+
+        if ($keys === [] && $this->direction !== 'all') {
+            $this->direction = 'all';
+            $keys = $this->triageKeys();
+        }
+
+        if ($keys === []) {
+            $this->finishTriage();
+
+            return;
+        }
+
+        $position = $position >= count($keys) ? 0 : $position;
+
+        $this->expandedKey = $keys[$position];
+        $this->setPage(intdiv($position, self::CLUSTERS_PER_PAGE) + 1);
+        $this->selectCluster($keys[$position]);
+    }
+
+    private function advanceTriage(): void
+    {
+        $this->openTriageGroup(0);
+    }
+
+    private function finishTriage(): void
+    {
+        $this->triage = false;
+        $this->createRule = false;
+        $this->categorised = 'all';
+        $this->groupMode = 'date';
+        $this->expandedKey = null;
+        $this->clearSelection();
+        $this->resetPage();
+        $this->bulkNotice = 'All transactions are categorized';
+    }
+
+    /**
+     * What is left to triage under the current filters: rows and the money they hold.
+     *
+     * @return array{rows: int, total: int}
+     */
+    private function triageRemaining(): array
+    {
+        $row = $this->queryFor($this->currentFilters())
+            ->toBase()
+            ->selectRaw('COUNT(*) as row_count, COALESCE(SUM(CASE WHEN excluded = 0 THEN ABS(amount) ELSE 0 END), 0) as total_amount')
+            ->first();
+
+        return ['rows' => (int) ($row->row_count ?? 0), 'total' => (int) ($row->total_amount ?? 0)];
     }
 
     private function closeSplitPanel(): void
