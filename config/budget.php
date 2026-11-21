@@ -90,4 +90,19 @@ return [
 
     'insights_enabled' => (bool) env('BUDGET_INSIGHTS_ENABLED', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Feed Category Matching
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, the category a Redbark feed supplies is matched onto the
+    | account owner's existing categories (FeedCategoryMatcher) for accounts
+    | whose category matcher is on, and the matcher switch shows in the
+    | Redbark account setup. Nothing is ever created and an existing category
+    | is never overwritten. Off by default.
+    |
+    */
+
+    'feed_category_matching' => (bool) env('BUDGET_FEED_CATEGORY_MATCHING', false),
+
 ];
