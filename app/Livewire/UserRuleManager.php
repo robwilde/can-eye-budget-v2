@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\DTOs\RuleTestResult;
-use App\Enums\AccountStatus;
 use App\Enums\PipelineTrigger;
 use App\Enums\RuleActionType;
 use App\Enums\RuleTriggerField;
 use App\Enums\RuleTriggerOperator;
 use App\Exceptions\RuleBaselineTimedOutException;
+use App\Exceptions\RuleImportException;
 use App\Jobs\ApplyUserRulesJob;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Livewire\Attributes\NotAudited;
@@ -21,9 +21,11 @@ use App\Models\Tag;
 use App\Models\User;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
+use App\Services\RuleDefinitionExporter;
+use App\Services\RuleDefinitionImporter;
 use App\Services\RuleEmailBaseline;
+use App\Services\RuleFormRules;
 use App\Services\RuleTester;
-use App\Support\Rules\RegexPattern;
 use App\Support\Rules\RuleAiCategorisation;
 use App\Support\Rules\RuleTriggers;
 use Closure;
@@ -35,18 +37,17 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url;
+use Livewire\Attributes\Validate;
 use Livewire\Component;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
+use Livewire\WithFileUploads;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 final class UserRuleManager extends Component
 {
-    private const string BASELINE_WARNING = 'This rule is still off: recording the transactions it already matches took too long. Try switching it on again in a moment.';
+    use WithFileUploads;
 
-    private const array TAG_OPERATORS = [
-        RuleTriggerOperator::Equals,
-        RuleTriggerOperator::NotEquals,
-        RuleTriggerOperator::IsEmpty,
-        RuleTriggerOperator::IsNotEmpty,
-    ];
+    private const string BASELINE_WARNING = 'This rule is still off: recording the transactions it already matches took too long. Try switching it on again in a moment.';
 
     #[Locked]
     public ?RuleTestResult $ruleTestResult = null;
@@ -102,6 +103,19 @@ final class UserRuleManager extends Component
 
     public ?string $ruleWarning = null;
 
+    public bool $showImportModal = false;
+
+    #[Validate('nullable|file|extensions:json,txt|max:1024')]
+    public ?TemporaryUploadedFile $importFile = null;
+
+    /** @var array{groups_created: int, rules_created: int, rules_updated: int, skipped: list<string>}|null */
+    #[Locked]
+    public ?array $importSummary = null;
+
+    /** @var list<string> */
+    #[Locked]
+    public array $importErrors = [];
+
     public bool $showDeleteRuleModal = false;
 
     public ?int $deletingRuleId = null;
@@ -143,6 +157,55 @@ final class UserRuleManager extends Component
     }
 
     // ─── Group Modal ─────────────────────────────────────
+
+    public function exportRules(RuleDefinitionExporter $exporter): StreamedResponse
+    {
+        $user = auth()->user();
+
+        abort_unless($user instanceof User, 403);
+
+        return response()->streamDownload(
+            static function () use ($exporter, $user): void {
+                echo $exporter->toJson($user);
+            },
+            'rules-'.now()->format('Y-m-d').'.json',
+            ['Content-Type' => 'application/json'],
+        );
+    }
+
+    public function openImportModal(): void
+    {
+        $this->resetImport();
+        $this->showImportModal = true;
+    }
+
+    public function importRules(RuleDefinitionImporter $importer): void
+    {
+        $this->importSummary = null;
+        $this->importErrors = [];
+
+        $this->validate(['importFile' => ['required', 'file', 'extensions:json,txt', 'max:1024']]);
+
+        $user = auth()->user();
+
+        abort_unless($user instanceof User && $this->importFile instanceof TemporaryUploadedFile, 403);
+
+        try {
+            $result = $importer->import($user, (string) $this->importFile->get());
+        } catch (RuleImportException $exception) {
+            $this->importErrors = $exception->errors;
+
+            return;
+        }
+
+        $this->importFile = null;
+        $this->importSummary = [
+            'groups_created' => $result->groupsCreated,
+            'rules_created' => $result->rulesCreated,
+            'rules_updated' => $result->rulesUpdated,
+            'skipped' => $result->skipped,
+        ];
+    }
 
     public function openAddGroupModal(): void
     {
@@ -666,10 +729,7 @@ final class UserRuleManager extends Component
     /** @return array<string, string> */
     protected function messages(): array
     {
-        return [
-            'triggers.*.value.required' => 'The value field is required for the selected operator.',
-            'triggers.*.conditions.*.value.required' => 'The value field is required for the selected operator.',
-        ];
+        return app(RuleFormRules::class)->messages();
     }
 
     /**
@@ -760,6 +820,12 @@ final class UserRuleManager extends Component
             ->orWhere('description', 'like', "%{$term}%"));
     }
 
+    private function resetImport(): void
+    {
+        $this->reset('importFile', 'importSummary', 'importErrors');
+        $this->resetValidation();
+    }
+
     private function resetGroupForm(): void
     {
         $this->editingGroupId = null;
@@ -793,89 +859,9 @@ final class UserRuleManager extends Component
     /** @return array<string, array<int, mixed>> */
     private function draftRuleRules(): array
     {
-        $rules = [
-            'triggers' => ['required', 'array', 'min:1', $this->hasCondition()],
-            'ruleEffectiveFrom' => ['nullable', 'date_format:Y-m-d'],
-            'actions' => ['required', 'array', 'min:1', $this->distinctActionTypes()],
-            'actions.*.type' => ['required', Rule::in(array_column(RuleActionType::cases(), 'value')), $this->aiActionAllowed()],
-        ];
-
-        $groupsSeen = 0;
-
-        foreach (array_keys($this->triggers) as $index) {
-            $entry = $this->triggers[$index];
-
-            if (! RuleTriggers::isGroup($entry)) {
-                $rules = [...$rules, ...$this->conditionRules("triggers.{$index}", $entry)];
-
-                continue;
-            }
-
-            if (++$groupsSeen > 1) {
-                $rules["triggers.{$index}"] = [$this->failing('Only one condition group is allowed.')];
-            }
-
-            $rules["triggers.{$index}.match"] = ['required', Rule::in([RuleTriggers::MATCH_ALL, RuleTriggers::MATCH_ANY])];
-            $rules["triggers.{$index}.conditions"] = ['array'];
-
-            foreach (array_keys(is_array($entry['conditions'] ?? null) ? $entry['conditions'] : []) as $conditionIndex) {
-                $condition = $entry['conditions'][$conditionIndex];
-
-                if (RuleTriggers::isGroup($condition)) {
-                    $rules["triggers.{$index}.conditions.{$conditionIndex}"] = [$this->failing('Compound conditions cannot be nested')];
-
-                    continue;
-                }
-
-                $rules = [...$rules, ...$this->conditionRules("triggers.{$index}.conditions.{$conditionIndex}", is_array($condition) ? $condition : [])];
-            }
-        }
-
-        // Build the value rule per action index: value-requiring types must have
-        // a non-empty value (required is implicit so it catches empty strings),
-        // while valueless actions (e.g. fold into parent) accept an empty value.
-        // A clean description is written to a 255-character column.
-        foreach (array_keys($this->actions) as $index) {
-            $type = RuleActionType::tryFrom($this->actions[$index]['type'] ?? '');
-
-            if ($type === RuleActionType::AddTags) {
-                $rules["actions.{$index}.tag_ids"] = ['required', 'array', 'min:1'];
-                $rules["actions.{$index}.tag_ids.*"] = ['distinct', Rule::exists('tags', 'id')->where('user_id', auth()->id())];
-            }
-
-            $rules["actions.{$index}.value"] = match (true) {
-                $type !== null && ! $type->requiresValue() => ['nullable', 'string', $this->noNullBytes()],
-                $type === RuleActionType::SetCleanDescription => ['required', 'string', 'max:255', $this->noNullBytes()],
-                $type === RuleActionType::MarkAsTransfer => ['required', 'string', Rule::exists('accounts', 'id')->where('user_id', auth()->id())->whereIn('status', [AccountStatus::Active->value, AccountStatus::Available->value])],
-                default => ['required', 'string', $this->noNullBytes()],
-            };
-        }
-
-        return $rules;
-    }
-
-    /**
-     * @param  array<string, mixed>  $condition
-     * @return array<string, array<int, mixed>>
-     */
-    private function conditionRules(string $prefix, array $condition): array
-    {
-        $operatorValue = $condition['operator'] ?? '';
-        $operator = is_string($operatorValue) ? RuleTriggerOperator::tryFrom($operatorValue) : null;
-        $isTag = ($condition['field'] ?? null) === RuleTriggerField::Tag->value;
-
         return [
-            "{$prefix}.field" => ['required', Rule::in(array_column(RuleTriggerField::cases(), 'value'))],
-            "{$prefix}.operator" => ['required', $isTag
-                ? Rule::in(array_map(static fn (RuleTriggerOperator $o): string => $o->value, self::TAG_OPERATORS))
-                : Rule::in(array_column(RuleTriggerOperator::cases(), 'value'))],
-            "{$prefix}.value" => match (true) {
-                $isTag && $operator?->requiresValue() === true => ['required', 'string', Rule::exists('tags', 'id')->where('user_id', auth()->id())],
-                $isTag => ['nullable', 'string'],
-                $operator === RuleTriggerOperator::MatchesRegex => ['required', 'string', $this->noNullBytes(), $this->safeRegexPattern()],
-                $operator?->requiresValue() === true => ['required', 'string', $this->noNullBytes()],
-                default => ['nullable', 'string', $this->noNullBytes()],
-            },
+            ...app(RuleFormRules::class)->forDraft($this->triggers, $this->actions, (int) auth()->id(), $this->aiActionAllowed()),
+            'ruleEffectiveFrom' => ['nullable', 'date_format:Y-m-d'],
         ];
     }
 
@@ -928,63 +914,6 @@ final class UserRuleManager extends Component
         return function (string $attribute, mixed $value, Closure $fail): void {
             if ($value === RuleActionType::SuggestCategoryWithAi->value && ! RuleAiCategorisation::available() && ! $this->formHasAiAction()) {
                 $fail('The AI categorise action is not available.');
-            }
-        };
-    }
-
-    private function failing(string $message): Closure
-    {
-        return static function (string $attribute, mixed $value, Closure $fail) use ($message): void {
-            $fail($message);
-        };
-    }
-
-    private function hasCondition(): Closure
-    {
-        return static function (string $attribute, mixed $value, Closure $fail): void {
-            if (is_array($value) && RuleTriggers::flatten($value) === []) {
-                $fail('Add at least one condition.');
-            }
-        };
-    }
-
-    private function noNullBytes(): Closure
-    {
-        return static function (string $attribute, mixed $value, Closure $fail): void {
-            if (is_string($value) && str_contains($value, "\0")) {
-                $fail('The value cannot contain null bytes.');
-            }
-        };
-    }
-
-    private function safeRegexPattern(): Closure
-    {
-        return static function (string $attribute, mixed $value, Closure $fail): void {
-            if (! is_string($value)) {
-                return;
-            }
-
-            if (mb_strlen($value) > RegexPattern::MAX_LENGTH) {
-                $fail('The pattern may not be longer than '.RegexPattern::MAX_LENGTH.' characters.');
-            } elseif (RegexPattern::hasBackReference($value)) {
-                $fail('The pattern cannot use back-references.');
-            } elseif (! RegexPattern::compiles($value)) {
-                $fail('The pattern is not a valid regular expression.');
-            }
-        };
-    }
-
-    private function distinctActionTypes(): Closure
-    {
-        return static function (string $attribute, mixed $value, Closure $fail): void {
-            if (! is_array($value)) {
-                return;
-            }
-
-            $types = array_filter(array_column($value, 'type'), static fn (mixed $type): bool => is_string($type) && $type !== '');
-
-            if (count($types) !== count(array_unique($types))) {
-                $fail('A rule cannot have two actions of the same type.');
             }
         };
     }

@@ -1,0 +1,21 @@
+{
+  "format": "can-eye-budget.rules",
+  "version": 1,
+  "groups": [
+    {
+      "name": "Spending",
+      "rules": [
+        {
+          "name": "Fine",
+          "triggers": [{"field": "description", "operator": "contains", "value": "Y"}],
+          "actions": [{"type": "set_notes", "value": "ok"}]
+        },
+        {
+          "name": "Broken",
+          "triggers": [{"field": "description", "operator": "contains", "value": "Z"}],
+          "actions": []
+        }
+      ]
+    }
+  ]
+}

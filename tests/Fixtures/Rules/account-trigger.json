@@ -1,0 +1,16 @@
+{
+  "format": "can-eye-budget.rules",
+  "version": 1,
+  "groups": [
+    {
+      "name": "Accounts",
+      "rules": [
+        {
+          "name": "Everyday spend",
+          "triggers": [{"field": "account_id", "operator": "equals", "value": "Everyday"}],
+          "actions": [{"type": "set_notes", "value": "everyday"}]
+        }
+      ]
+    }
+  ]
+}
