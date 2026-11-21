@@ -339,12 +339,11 @@ test('applyRule renames every matching transaction, replacing an existing clean 
         ->and($named->fresh()->description)->toBe('ACME SOFTWARE PTY LTD 1902');
 });
 
-test('applyRule ignores another user\'s rule and an inactive rule', function (bool $foreign) {
-    $owner = $foreign ? User::factory()->create() : $this->user;
+test('applyRule ignores another user\'s rule', function () {
+    $owner = User::factory()->create();
     $category = Category::factory()->for($owner)->create(['is_hidden' => false]);
     $group = UserRuleGroup::factory()->for($owner)->create();
     $rule = UserRule::factory()->for($owner)->for($group, 'group')->create([
-        'is_active' => $foreign,
         'triggers' => [['field' => RuleTriggerField::Description->value, 'operator' => RuleTriggerOperator::Contains->value, 'value' => 'NETFLIX']],
         'actions' => [['type' => RuleActionType::SetCategory->value, 'value' => (string) $category->id]],
     ]);
@@ -359,7 +358,29 @@ test('applyRule ignores another user\'s rule and an inactive rule', function (bo
         ->call('applyRule', $rule->id);
 
     expect($txn->fresh()->category_id)->toBeNull();
-})->with(['another user\'s rule' => true, 'an inactive rule' => false]);
+});
+
+test('applyRule switches an inactive rule on and applies it', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    $rule = UserRule::factory()->for($this->user)->for($group, 'group')->create([
+        'is_active' => false,
+        'triggers' => [['field' => RuleTriggerField::Description->value, 'operator' => RuleTriggerOperator::Contains->value, 'value' => 'NETFLIX']],
+        'actions' => [['type' => RuleActionType::SetCategory->value, 'value' => (string) $category->id]],
+    ]);
+    $txn = Transaction::factory()->for($this->user)->for(Account::factory()->for($this->user))->create([
+        'description' => 'NETFLIX.COM',
+        'category_id' => null,
+        'transfer_pair_id' => null,
+    ]);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->call('applyRule', $rule->id);
+
+    expect($rule->fresh()->is_active)->toBeTrue()
+        ->and($txn->fresh()->category_id)->toBe($category->id);
+});
 
 test('cannot save rule without at least one trigger and one action', function () {
     $group = UserRuleGroup::factory()->for($this->user)->create();
