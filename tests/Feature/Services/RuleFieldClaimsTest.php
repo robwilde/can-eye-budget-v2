@@ -261,6 +261,7 @@ it('claims every field the actions now on develop can set', function () {
         'append_notes' => null,
         'link_to_planned_transaction' => null,
         'fold_into_parent' => null,
+        'email_digest' => null,
     ];
 
     foreach (RuleActionType::cases() as $type) {
@@ -307,4 +308,14 @@ it('reports whether an action could act through the executor', function () {
         ->and($executor->canAct($transaction, ['type' => RuleActionType::SetCategory->value, 'value' => '999999']))->toBeFalse()
         ->and($executor->canAct($transaction, ['type' => RuleActionType::MarkAsTransfer->value, 'value' => '999999']))->toBeFalse()
         ->and($executor->canAct($transaction, ['type' => RuleActionType::SetNotes->value, 'value' => 'x']))->toBeTrue();
+});
+
+it('lets a lower rule act while a higher rule only emails a digest', function () {
+    claimsRule($this->user, [['type' => RuleActionType::EmailDigest->value, 'value' => '']], 1);
+    claimsRule($this->user, claimsCategory($this->a), 2);
+    $transaction = claimsTxn($this->user, $this->account);
+
+    claimsRun($this->user);
+
+    expect($transaction->fresh()->category_id)->toBe($this->a->id);
 });
