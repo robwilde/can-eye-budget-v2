@@ -102,6 +102,12 @@ final class User extends Authenticatable
         return $this->hasMany(Account::class);
     }
 
+    /** @return HasMany<Statement, $this> */
+    public function statements(): HasMany
+    {
+        return $this->hasMany(Statement::class);
+    }
+
     /** @return HasMany<Transaction, $this> */
     public function transactions(): HasMany
     {
@@ -398,17 +404,19 @@ final class User extends Authenticatable
     }
 
     /**
-     * Deleting a user cascades their accounts, transactions and receipts in SQL, which fires no
-     * Transaction events, so the receipt files are collected first and removed after the delete.
+     * Deleting a user cascades their accounts, transactions, receipts and statements in SQL, which fires no
+     * Transaction or Statement events, so the stored files are collected first and removed after the delete.
      */
     protected static function booted(): void
     {
         self::deleting(static function (self $user): void {
             TransactionAttachment::remember($user, TransactionAttachment::query()->forUser($user)->get(['disk', 'path']));
+            Statement::remember($user, Statement::query()->forUser($user)->pluck('stored_path'));
         });
 
         self::deleted(static function (self $user): void {
             TransactionAttachment::purgeRemembered($user);
+            Statement::purgeRemembered($user);
         });
     }
 
