@@ -1,4 +1,4 @@
-@php use App\Enums\BankImportStatus; @endphp
+@php use App\Enums\BankImportStatus; use Illuminate\Support\Str; @endphp
 <div class="space-y-6"
      @if($step === 3 && $bankImport && ! $bankImport->status->isTerminal())
          wire:poll.2s="pollStatus"
@@ -276,6 +276,18 @@
                                 {{ $rowError['description'] ?? '(unknown)' }}:
                                 {{ $rowError['message'] }}
                             </li>
+                        @endforeach
+                    </ul>
+                </flux:callout>
+            @endif
+
+            @if(! empty($bankImport->unresolved_categories))
+                <flux:callout variant="warning" class="mt-3" data-testid="import-bank-result-unresolved-categories">
+                    <flux:callout.heading>{{ count($bankImport->unresolved_categories) }} category value(s) did not match one of your categories</flux:callout.heading>
+                    <flux:callout.text>{{ __('Those rows were imported uncategorised.') }}</flux:callout.text>
+                    <ul class="mt-2 list-disc pl-5 text-sm">
+                        @foreach($bankImport->unresolved_categories as $unresolved)
+                            <li>{{ $unresolved['value'] }} ({{ $unresolved['rows'] }} {{ Str::plural('row', $unresolved['rows']) }})</li>
                         @endforeach
                     </ul>
                 </flux:callout>

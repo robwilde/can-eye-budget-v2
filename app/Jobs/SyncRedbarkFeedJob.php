@@ -8,6 +8,7 @@ use App\Contracts\RedbarkServiceContract;
 use App\DTOs\RedbarkBalanceData;
 use App\DTOs\RedbarkConnectionData;
 use App\DTOs\RedbarkTransactionData;
+use App\Enums\CategorySource;
 use App\Enums\CleanDescriptionSource;
 use App\Enums\ImportSource;
 use App\Enums\RedbarkFeedStatus;
@@ -23,6 +24,7 @@ use App\Models\RedbarkAccount;
 use App\Models\RedbarkFeed;
 use App\Models\RedbarkSyncLog;
 use App\Models\Transaction;
+use App\Services\FeedCategoryMatcher;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\RedbarkClientFactory;
 use App\Services\RedbarkTransactionMatcher;
@@ -719,6 +721,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
      */
     private function applyToAccounts(TransactionIngestor $ingestor, RedbarkTransactionMatcher $matcher): array
     {
+        $categoryMatcher = app(FeedCategoryMatcher::class);
         $created = 0;
         $updated = 0;
         $matched = 0;
@@ -736,7 +739,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
                 continue;
             }
 
-            $account->getConnection()->transaction(function () use ($ingestor, $matcher, $redbarkAccount, $account, &$created, &$updated, &$matched): void {
+            $account->getConnection()->transaction(function () use ($ingestor, $matcher, $categoryMatcher, $redbarkAccount, $account, &$created, &$updated, &$matched): void {
                 $link = RedbarkAccount::query()->whereKey($redbarkAccount->id)->lockForUpdate()->first();
 
                 if (! $link instanceof RedbarkAccount || $link->account_id !== $account->id || $link->ignored) {
@@ -754,7 +757,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
                 $rowsChanged = false;
 
                 foreach ($rows as $row) {
-                    $result = $this->applyRow($ingestor, $matcher, $redbarkAccount, $row, $payloadIds);
+                    $result = $this->applyRow($ingestor, $matcher, $categoryMatcher, $redbarkAccount, $row, $payloadIds);
 
                     if ($result === 'created') {
                         $created++;
@@ -838,6 +841,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
     /**
      * @param  TransactionIngestor  $ingestor
      * @param  RedbarkTransactionMatcher  $matcher
+     * @param  FeedCategoryMatcher  $categoryMatcher
      * @param  RedbarkAccount  $redbarkAccount
      * @param  array<string, mixed>  $row
      * @param  list<string>  $payloadIds
@@ -846,6 +850,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
     private function applyRow(
         TransactionIngestor $ingestor,
         RedbarkTransactionMatcher $matcher,
+        FeedCategoryMatcher $categoryMatcher,
         RedbarkAccount $redbarkAccount,
         array $row,
         array $payloadIds,
@@ -897,6 +902,8 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             ],
         ];
 
+        $feedCategoryId = $this->feedCategoryId($categoryMatcher, $redbarkAccount, $row['category'] ?? null);
+
         $names = [
             'feed' => CleanDescriptionDeriver::tidy($row['merchantName'] ?? null),
             'derived' => CleanDescriptionDeriver::fromDescription($row['description'] ?? null),
@@ -913,6 +920,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
                 }
 
                 $this->applyValues($existing, $values);
+                $this->fillFeedCategory($existing, $feedCategoryId);
                 $existing->restore();
                 $this->persistNames($existing, $names);
 
@@ -926,6 +934,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             }
 
             $this->applyValues($current, $values);
+            $this->fillFeedCategory($current, $feedCategoryId);
             $current->save();
             $this->persistNames($existing, $names);
 
@@ -938,6 +947,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             $originalPostDate = $claimed->post_date;
 
             $this->applyValues($claimed, $values);
+            $this->fillFeedCategory($claimed, $feedCategoryId);
 
             // Keep the original post_date: the pending row is the same purchase, and
             // moving it would make the user's calendar jump.
@@ -972,6 +982,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             }
 
             $this->applyValues($adopted, $values);
+            $this->fillFeedCategory($adopted, $feedCategoryId);
             $adopted->save();
             $this->persistNames($adopted, $names);
 
@@ -985,11 +996,30 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             'source' => TransactionSource::Redbark,
             ...$values,
         ]);
+        $this->fillFeedCategory($created, $feedCategoryId);
         $this->offerNames($created, $names);
 
         $ingestor->ingest($created, rebuildHistory: false);
 
         return 'created';
+    }
+
+    private function feedCategoryId(FeedCategoryMatcher $categoryMatcher, RedbarkAccount $redbarkAccount, mixed $category): ?int
+    {
+        if (config('budget.feed_category_matching') !== true
+            || ! $redbarkAccount->category_matcher_enabled
+            || ! is_string($category)) {
+            return null;
+        }
+
+        return $categoryMatcher->match($this->feed->user_id, $category);
+    }
+
+    private function fillFeedCategory(Transaction $transaction, ?int $categoryId): void
+    {
+        if ($categoryId !== null && $transaction->category_id === null) {
+            $transaction->fillUnlocked(['category_id' => $categoryId, 'category_source' => CategorySource::Feed]);
+        }
     }
 
     /**

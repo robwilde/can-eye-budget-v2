@@ -72,3 +72,9 @@ test('debit / credit headers do not collide with balance', function () {
         ->and($mapping[CsvColumnMapper::FIELD_CREDIT])->toBe('Money In')
         ->and($mapping[CsvColumnMapper::FIELD_BALANCE])->toBe('Running Balance');
 });
+
+test('a category header maps to the category field', function () {
+    $mapping = new CsvColumnMapper()->suggest(['Date', 'Description', 'Amount', 'Category']);
+
+    expect($mapping[CsvColumnMapper::FIELD_CATEGORY])->toBe('Category');
+});

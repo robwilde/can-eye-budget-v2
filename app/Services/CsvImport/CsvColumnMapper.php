@@ -18,6 +18,8 @@ final class CsvColumnMapper
 
     public const string FIELD_BALANCE = 'balance';
 
+    public const string FIELD_CATEGORY = 'category';
+
     /**
      * Canonical fields → keyword fragments that commonly appear in headers.
      * Order matters: more-specific patterns should win.
@@ -31,6 +33,7 @@ final class CsvColumnMapper
         self::FIELD_DEBIT => ['debit amount', 'debit', 'withdrawal', 'money out'],
         self::FIELD_CREDIT => ['credit amount', 'credit', 'deposit', 'money in'],
         self::FIELD_BALANCE => ['running balance', 'balance', 'closing balance'],
+        self::FIELD_CATEGORY => ['category'],
     ];
 
     /**

@@ -476,3 +476,68 @@ test('a fanned-out bnpl debit stays split when the csv is re-imported', function
         ->and(Transaction::query()->current()->where('user_id', $user->id)->pluck('id')->sort()->values()->all())->toBe($childIds)
         ->and((int) Transaction::query()->current()->where('user_id', $user->id)->sum('amount'))->toBe(-5583);
 });
+
+function makeCategoryCsvImport(string $csv): BankImport
+{
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create();
+    $storedPath = 'bank-imports/category-'.bin2hex(random_bytes(8)).'.csv';
+    Storage::disk('local')->put($storedPath, $csv);
+
+    return BankImport::factory()->for($user)->for($account)->create([
+        'original_filename' => 'categories.csv',
+        'stored_path' => $storedPath,
+        'column_mapping' => [
+            CsvColumnMapper::FIELD_DATE => 'Date',
+            CsvColumnMapper::FIELD_DESCRIPTION => 'Description',
+            CsvColumnMapper::FIELD_AMOUNT => 'Amount',
+            CsvColumnMapper::FIELD_CATEGORY => 'Category',
+        ],
+    ]);
+}
+
+it('categorises an imported row by Parent:Child path', function () {
+    Queue::fake([RunTransactionAnalysisJob::class]);
+
+    $bankImport = makeCategoryCsvImport("Date,Description,Amount,Category\n2026-08-10,TAP WASHER,-12.50,Home:Repairs\n");
+    $home = Category::factory()->for($bankImport->user)->create(['name' => 'Home', 'is_hidden' => false]);
+    $repairs = Category::factory()->for($bankImport->user)->withParent($home)->create(['name' => 'Repairs', 'is_hidden' => false]);
+
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService, app(TransactionIngestor::class));
+
+    $transaction = Transaction::query()->where('account_id', $bankImport->account_id)->sole();
+
+    expect($transaction->category_id)->toBe($repairs->id)
+        ->and($transaction->category?->fullPath())->toBe('Home / Repairs')
+        ->and($bankImport->fresh()->unresolved_categories)->toBeNull();
+});
+
+it('imports rows with unresolved category values uncategorised and reports them', function () {
+    Queue::fake([RunTransactionAnalysisJob::class]);
+
+    $bankImport = makeCategoryCsvImport("Date,Description,Amount,Category\n2026-08-10,ONE,-1.00,Spaceships\n2026-08-11,TWO,-2.00,Spaceships\n2026-08-12,THREE,-3.00,\n");
+    Category::factory()->for($bankImport->user)->create(['name' => 'Groceries', 'is_hidden' => false]);
+    $before = Category::query()->count();
+
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService, app(TransactionIngestor::class));
+
+    expect(Transaction::query()->where('account_id', $bankImport->account_id)->whereNotNull('category_id')->count())->toBe(0)
+        ->and(Transaction::query()->where('account_id', $bankImport->account_id)->count())->toBe(3)
+        ->and($bankImport->fresh()->unresolved_categories)->toBe([['value' => 'Spaceships', 'rows' => 2]])
+        ->and(Category::query()->count())->toBe($before);
+});
+
+it('keeps the category of an existing transaction when the file supplies another', function () {
+    Queue::fake([RunTransactionAnalysisJob::class]);
+
+    $bankImport = makeCategoryCsvImport("Date,Description,Amount,Category\n2026-08-10,TAP WASHER,-12.50,Home\n");
+    $home = Category::factory()->for($bankImport->user)->create(['name' => 'Home', 'is_hidden' => false]);
+    $mine = Category::factory()->for($bankImport->user)->create(['name' => 'Mine', 'is_hidden' => false]);
+
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService, app(TransactionIngestor::class));
+    Transaction::query()->where('account_id', $bankImport->account_id)->update(['category_id' => $mine->id, 'category_source' => 'manual']);
+    new ImportCsvTransactionsJob($bankImport)->handle(new CsvParserService, app(TransactionIngestor::class));
+
+    expect(Transaction::query()->where('account_id', $bankImport->account_id)->sole()->category_id)->toBe($mine->id)
+        ->and($home->id)->not->toBe($mine->id);
+});

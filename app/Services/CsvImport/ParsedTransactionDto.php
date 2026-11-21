@@ -20,5 +20,6 @@ final readonly class ParsedTransactionDto
         public ?int $balance,
         public array $rawRow,
         public string $csvHash,
+        public ?string $category = null,
     ) {}
 }

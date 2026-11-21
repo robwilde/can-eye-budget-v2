@@ -306,6 +306,7 @@ final class ImportBank extends Component
                 CsvColumnMapper::FIELD_DEBIT => 'Debit (out)',
                 CsvColumnMapper::FIELD_CREDIT => 'Credit (in)',
                 CsvColumnMapper::FIELD_BALANCE => 'Balance',
+                CsvColumnMapper::FIELD_CATEGORY => 'Category',
             ],
         ]);
     }
