@@ -1105,3 +1105,59 @@ test('testing a draft treats a hand-set category as one Apply now would change',
     expect($result->notYetAppliedCount)->toBe(1)
         ->and($result->skippedCount)->toBe(0);
 });
+
+test('saves a transfer action targeting one of the user accounts', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $account = Account::factory()->for($this->user)->untracked()->create();
+
+    openedDraft($this->user, $category)
+        ->set('actions.0.type', RuleActionType::MarkAsTransfer->value)
+        ->set('actions.0.value', (string) $account->id)
+        ->set('ruleName', 'To savings')
+        ->call('saveRule')
+        ->assertHasNoErrors();
+
+    expect(UserRule::sole()->actions[0]['value'])->toBe((string) $account->id);
+});
+
+test('rejects a transfer action targeting another user account', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $foreign = Account::factory()->for(User::factory()->create())->create();
+
+    openedDraft($this->user, $category)
+        ->set('actions.0.type', RuleActionType::MarkAsTransfer->value)
+        ->set('actions.0.value', (string) $foreign->id)
+        ->set('ruleName', 'To someone else')
+        ->call('saveRule')
+        ->assertHasErrors(['actions.0.value']);
+
+    expect(UserRule::count())->toBe(0);
+});
+
+test('rejects a transfer action with no account or a missing one', function (string $value) {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+
+    openedDraft($this->user, $category)
+        ->set('actions.0.type', RuleActionType::MarkAsTransfer->value)
+        ->set('actions.0.value', $value)
+        ->set('ruleName', 'Nowhere')
+        ->call('saveRule')
+        ->assertHasErrors(['actions.0.value']);
+})->with(['empty' => '', 'missing' => '999999']);
+
+test('rejects a transfer action targeting a closed account and leaves it out of the picker', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $closed = Account::factory()->for($this->user)->create(['name' => 'Old Savings', 'status' => App\Enums\AccountStatus::Closed]);
+    $hidden = Account::factory()->for($this->user)->untracked()->create(['name' => 'Pot']);
+
+    $component = openedDraft($this->user, $category)
+        ->set('actions.0.type', RuleActionType::MarkAsTransfer->value)
+        ->set('actions.0.value', (string) $closed->id)
+        ->set('ruleName', 'To closed')
+        ->call('saveRule')
+        ->assertHasErrors(['actions.0.value'])
+        ->assertDontSee('Old Savings')
+        ->assertSee('Pot');
+
+    $component->set('actions.0.value', (string) $hidden->id)->call('saveRule')->assertHasNoErrors();
+});
