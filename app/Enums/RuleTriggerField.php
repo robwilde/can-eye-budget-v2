@@ -17,6 +17,7 @@ enum RuleTriggerField: string
     case Source = 'source';
     case AnzsicCode = 'anzsic_code';
     case Notes = 'notes';
+    case Tag = 'tag';
 
     public function label(): string
     {
@@ -32,6 +33,7 @@ enum RuleTriggerField: string
             self::Source => 'Source',
             self::AnzsicCode => 'ANZSIC Code',
             self::Notes => 'Notes',
+            self::Tag => 'Tag',
         };
     }
 }

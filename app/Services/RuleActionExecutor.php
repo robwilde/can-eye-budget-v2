@@ -12,6 +12,7 @@ use App\Models\Account;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
+use App\Services\Tags\TransactionTagger;
 use App\Services\Transfers\TransferDetector;
 use App\Support\CleanDescriptionDeriver;
 use Illuminate\Support\Facades\DB;
@@ -182,9 +183,10 @@ final readonly class RuleActionExecutor
                 RuleActionType::ExcludeFromReports => $this->excludeFromReports($draft, $overrideLocks),
                 RuleActionType::MarkAsTransfer => $this->canMarkAsTransfer($draft, $value),
                 RuleActionType::EmailDigest => false,
+                RuleActionType::AddTags => $this->tagger()->missing($draft, $this->tagIds($action)) !== [],
             };
 
-            if (in_array($type, [RuleActionType::FoldIntoParent, RuleActionType::MarkAsTransfer], true) && $effect) {
+            if (in_array($type, [RuleActionType::FoldIntoParent, RuleActionType::MarkAsTransfer, RuleActionType::AddTags], true) && $effect) {
                 return true;
             }
         }
@@ -252,6 +254,7 @@ final readonly class RuleActionExecutor
         $applied = false;
         $pending = false;
         $transferActions = [];
+        $tagActions = [];
 
         foreach ($actions as $action) {
             $type = RuleActionType::tryFrom($action['type'] ?? '');
@@ -273,6 +276,7 @@ final readonly class RuleActionExecutor
                 RuleActionType::ExcludeFromReports => $this->excludeFromReports($transaction, $overrideLocks),
                 RuleActionType::MarkAsTransfer => $this->deferTransfer($transferActions, $value),
                 RuleActionType::EmailDigest => true,
+                RuleActionType::AddTags => $this->deferTags($tagActions, $action),
             };
 
             if ($type === RuleActionType::FoldIntoParent && ! $effect) {
@@ -294,7 +298,49 @@ final readonly class RuleActionExecutor
             }
         }
 
+        foreach ($tagActions as $tagIds) {
+            $this->tagger()->add($transaction, $tagIds);
+        }
+
+        if ($tagActions !== []) {
+            $transaction->unsetRelation('tags');
+        }
+
         return $applied && ! $pending;
+    }
+
+    /**
+     * Resolved when an add-tags action runs, so nothing else that builds the executor needs the
+     * tagger.
+     */
+    private function tagger(): TransactionTagger
+    {
+        return app(TransactionTagger::class);
+    }
+
+    /**
+     * Tags are links, not columns, so they are added after the row's own changes are saved. The
+     * action is handled whatever it finds: a deleted tag is skipped and the rule stays.
+     *
+     * @param  list<list<int>>  $queue
+     * @param  array<string, mixed>  $action
+     */
+    private function deferTags(array &$queue, array $action): bool
+    {
+        $queue[] = $this->tagIds($action);
+
+        return true;
+    }
+
+    /**
+     * @param  array<string, mixed>  $action
+     * @return list<int>
+     */
+    private function tagIds(array $action): array
+    {
+        $ids = is_array($action['tag_ids'] ?? null) ? $action['tag_ids'] : [];
+
+        return array_values(array_unique(array_map(intval(...), array_filter($ids, is_scalar(...)))));
     }
 
     /**

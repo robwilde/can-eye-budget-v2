@@ -16,6 +16,7 @@ enum RuleActionType: string
     case ExcludeFromReports = 'exclude_from_reports';
     case MarkAsTransfer = 'mark_as_transfer';
     case EmailDigest = 'email_digest';
+    case AddTags = 'add_tags';
 
     public function label(): string
     {
@@ -30,6 +31,7 @@ enum RuleActionType: string
             self::ExcludeFromReports => 'Exclude from budgets and reports',
             self::MarkAsTransfer => 'Mark as Transfer',
             self::EmailDigest => 'Email me new matches',
+            self::AddTags => 'Add Tags',
         };
     }
 
@@ -43,12 +45,13 @@ enum RuleActionType: string
             self::SetNotes => 'notes',
             self::LinkToPlannedTransaction => 'planned_transaction_id',
             self::FoldIntoParent, self::ExcludeFromReports, self::EmailDigest => '',
+            self::AddTags => 'tag_ids',
             self::MarkAsTransfer => 'account_id',
         };
     }
 
     public function requiresValue(): bool
     {
-        return ! in_array($this, [self::FoldIntoParent, self::ExcludeFromReports, self::EmailDigest], true);
+        return ! in_array($this, [self::FoldIntoParent, self::ExcludeFromReports, self::EmailDigest, self::AddTags], true);
     }
 }

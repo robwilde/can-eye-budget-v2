@@ -16,6 +16,7 @@ use App\Livewire\Attributes\NotAudited;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
+use App\Models\Tag;
 use App\Models\User;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
@@ -38,6 +39,13 @@ use Livewire\Component;
 final class UserRuleManager extends Component
 {
     private const string BASELINE_WARNING = 'This rule is still off: recording the transactions it already matches took too long. Try switching it on again in a moment.';
+
+    private const array TAG_OPERATORS = [
+        RuleTriggerOperator::Equals,
+        RuleTriggerOperator::NotEquals,
+        RuleTriggerOperator::IsEmpty,
+        RuleTriggerOperator::IsNotEmpty,
+    ];
 
     #[Locked]
     public ?RuleTestResult $ruleTestResult = null;
@@ -78,7 +86,7 @@ final class UserRuleManager extends Component
     /** @var array<int, array<string, mixed>> */
     public array $triggers = [];
 
-    /** @var array<int, array<string, string>> */
+    /** @var array<int, array<string, mixed>> */
     public array $actions = [];
 
     public bool $ruleStrictMode = true;
@@ -636,6 +644,7 @@ final class UserRuleManager extends Component
                 ->with(['rules' => fn ($q) => $q->when($matchesSearch !== null, $matchesSearch)->ordered()])
                 ->get(),
             'categories' => Category::visibleSortedByFullPath((int) auth()->id()),
+            'userTags' => Tag::where('user_id', auth()->id())->orderBy('name')->get(['id', 'name']),
             'transferAccounts' => Account::where('user_id', auth()->id())->active()->orderBy('name')->get(),
             'plannedTransactions' => PlannedTransaction::where('user_id', auth()->id())
                 ->where('is_active', true)
@@ -683,7 +692,7 @@ final class UserRuleManager extends Component
                 'name' => $this->ruleName,
                 'description' => $this->ruleDescription ?: null,
                 'triggers' => $this->triggers,
-                'actions' => $this->actions,
+                'actions' => $this->normalisedActions(),
                 'strict_mode' => $this->ruleStrictMode,
                 'is_auto_apply' => $this->ruleIsAutoApply,
                 'is_active' => $isActive,
@@ -713,7 +722,7 @@ final class UserRuleManager extends Component
             'name' => $this->ruleName,
             'description' => $this->ruleDescription ?: null,
             'triggers' => $this->triggers,
-            'actions' => $this->actions,
+            'actions' => $this->normalisedActions(),
             'strict_mode' => $this->ruleStrictMode,
             'is_auto_apply' => $this->ruleIsAutoApply,
             'is_active' => $isActive,
@@ -819,6 +828,11 @@ final class UserRuleManager extends Component
         foreach (array_keys($this->actions) as $index) {
             $type = RuleActionType::tryFrom($this->actions[$index]['type'] ?? '');
 
+            if ($type === RuleActionType::AddTags) {
+                $rules["actions.{$index}.tag_ids"] = ['required', 'array', 'min:1'];
+                $rules["actions.{$index}.tag_ids.*"] = ['distinct', Rule::exists('tags', 'id')->where('user_id', auth()->id())];
+            }
+
             $rules["actions.{$index}.value"] = match (true) {
                 $type !== null && ! $type->requiresValue() => ['nullable', 'string', $this->noNullBytes()],
                 $type === RuleActionType::SetCleanDescription => ['required', 'string', 'max:255', $this->noNullBytes()],
@@ -838,16 +852,39 @@ final class UserRuleManager extends Component
     {
         $operatorValue = $condition['operator'] ?? '';
         $operator = is_string($operatorValue) ? RuleTriggerOperator::tryFrom($operatorValue) : null;
+        $isTag = ($condition['field'] ?? null) === RuleTriggerField::Tag->value;
 
         return [
             "{$prefix}.field" => ['required', Rule::in(array_column(RuleTriggerField::cases(), 'value'))],
-            "{$prefix}.operator" => ['required', Rule::in(array_column(RuleTriggerOperator::cases(), 'value'))],
+            "{$prefix}.operator" => ['required', $isTag
+                ? Rule::in(array_map(static fn (RuleTriggerOperator $o): string => $o->value, self::TAG_OPERATORS))
+                : Rule::in(array_column(RuleTriggerOperator::cases(), 'value'))],
             "{$prefix}.value" => match (true) {
+                $isTag && $operator?->requiresValue() === true => ['required', 'string', Rule::exists('tags', 'id')->where('user_id', auth()->id())],
+                $isTag => ['nullable', 'string'],
                 $operator === RuleTriggerOperator::MatchesRegex => ['required', 'string', $this->noNullBytes(), $this->safeRegexPattern()],
                 $operator?->requiresValue() === true => ['required', 'string', $this->noNullBytes()],
                 default => ['nullable', 'string', $this->noNullBytes()],
             },
         ];
+    }
+
+    /**
+     * The actions as stored: an add-tags action keeps its tag ids as integers.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalisedActions(): array
+    {
+        return array_map(static function (array $action): array {
+            if (($action['type'] ?? null) !== RuleActionType::AddTags->value) {
+                return $action;
+            }
+
+            $ids = is_array($action['tag_ids'] ?? null) ? $action['tag_ids'] : [];
+
+            return ['type' => RuleActionType::AddTags->value, 'value' => '', 'tag_ids' => array_values(array_unique(array_map(intval(...), $ids)))];
+        }, $this->actions);
     }
 
     private function failing(string $message): Closure

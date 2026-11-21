@@ -8,6 +8,7 @@ use App\Contracts\PipelineStageContract;
 use App\DTOs\PipelineContext;
 use App\DTOs\StageResult;
 use App\Enums\RuleActionType;
+use App\Enums\RuleTriggerField;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
 use App\Jobs\SendRuleMatchDigestJob;
@@ -19,6 +20,7 @@ use App\Models\UserRuleGroup;
 use App\Services\RuleActionExecutor;
 use App\Services\RuleEvaluator;
 use App\Services\RuleFieldClaims;
+use App\Support\Rules\RuleTriggers;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -63,9 +65,16 @@ final readonly class UserRulesStage implements PipelineStageContract
         // Transactions are loaded once, upfront. A merged child created mid-run
         // (by a fold action) is therefore not rule-processed until the next
         // pipeline run — an accepted limitation.
+        // Tag conditions read each transaction's tags, so they are loaded in one query rather than
+        // one per transaction and rule.
+        $usesTags = $groups->contains(static fn (UserRuleGroup $group): bool => $group->rules->contains(
+            static fn (UserRule $rule): bool => RuleTriggers::usesField($rule->triggers, RuleTriggerField::Tag->value),
+        ));
+
         $transactions = Transaction::query()
             ->where('user_id', $context->user->id)
             ->current()
+            ->when($usesTags, static fn ($query) => $query->with('tags'))
             ->get();
 
         if ($transactions->isEmpty()) {

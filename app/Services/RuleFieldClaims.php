@@ -40,7 +40,7 @@ final class RuleFieldClaims
             RuleActionType::SetNotes => self::NOTES,
             RuleActionType::ExcludeFromReports => self::EXCLUDED,
             RuleActionType::MarkAsTransfer => self::TRANSFER,
-            RuleActionType::AppendNotes, RuleActionType::LinkToPlannedTransaction, RuleActionType::FoldIntoParent, RuleActionType::EmailDigest => null,
+            RuleActionType::AppendNotes, RuleActionType::LinkToPlannedTransaction, RuleActionType::FoldIntoParent, RuleActionType::EmailDigest, RuleActionType::AddTags => null,
         };
     }
 

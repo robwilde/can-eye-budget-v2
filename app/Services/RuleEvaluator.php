@@ -67,14 +67,38 @@ final readonly class RuleEvaluator
             return false;
         }
 
+        if ($field === RuleTriggerField::Tag) {
+            return $this->compareTag($transaction, $operator, $expected);
+        }
+
         $actual = $this->resolveFieldValue($transaction, $field);
 
         return $this->compare($actual, $operator, $expected, $field);
     }
 
+    /**
+     * A tag condition reads "has this tag": equals needs the tag on the transaction, not equals is
+     * true without it (so an untagged transaction matches), and the empty operators test for any
+     * tag at all. One answer per transaction, so a transaction carrying several tags is never
+     * counted twice by an any group.
+     */
+    private function compareTag(Transaction $transaction, RuleTriggerOperator $operator, string $expected): bool
+    {
+        $tagIds = $transaction->loadMissing('tags')->tags->pluck('id')->all();
+        $has = $expected !== '' && in_array((int) $expected, $tagIds, true);
+
+        return match ($operator) {
+            RuleTriggerOperator::Equals, RuleTriggerOperator::Is => $has,
+            RuleTriggerOperator::NotEquals, RuleTriggerOperator::IsNot => ! $has,
+            RuleTriggerOperator::IsEmpty => $tagIds === [],
+            RuleTriggerOperator::IsNotEmpty => $tagIds !== [],
+            default => false,
+        };
+    }
+
     private function resolveFieldValue(Transaction $transaction, RuleTriggerField $field): mixed
     {
-        $raw = $transaction->{$field->value};
+        $raw = $transaction->getAttribute($field->value);
 
         if ($raw instanceof BackedEnum) {
             return $raw->value;

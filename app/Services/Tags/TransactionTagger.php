@@ -88,6 +88,54 @@ final readonly class TransactionTagger
     }
 
     /**
+     * The requested tags the user owns and the transaction does not yet carry. Reads only.
+     *
+     * @param  list<int|string>  $requested
+     * @return list<int>
+     */
+    public function missing(Transaction $transaction, array $requested): array
+    {
+        $owned = $this->resolve($transaction->user_id, $requested) ?? [];
+
+        if ($owned === []) {
+            return [];
+        }
+
+        $present = $transaction->tags()->whereIn('tags.id', $owned)->pluck('tags.id')->map(static fn (mixed $id): int => (int) $id)->all();
+
+        return array_values(array_diff($owned, $present));
+    }
+
+    /**
+     * Adds the tags the user owns to the transaction and, for a transfer, its other leg, keeping
+     * every tag already there. A rule adds tags, so unlike a change made by hand it does not lock
+     * the field. Tag ids that are gone or not the user's are skipped.
+     *
+     * @param  list<int|string>  $requested
+     * @return bool whether any tag link was added
+     *
+     * @throws Throwable
+     */
+    public function add(Transaction $transaction, array $requested): bool
+    {
+        $tagIds = $this->resolve($transaction->user_id, $requested) ?? [];
+
+        if ($tagIds === []) {
+            return false;
+        }
+
+        return DB::transaction(function () use ($transaction, $tagIds): bool {
+            $changed = false;
+
+            foreach ($this->lockedLegs($transaction) as $leg) {
+                $changed = $leg->tags()->syncWithoutDetaching($tagIds)['attached'] !== [] || $changed;
+            }
+
+            return $changed;
+        });
+    }
+
+    /**
      * Adds the tag when the transaction does not carry it and removes it when it does.
      *
      * @throws Throwable

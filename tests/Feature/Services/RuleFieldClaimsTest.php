@@ -262,6 +262,7 @@ it('claims every field the actions now on develop can set', function () {
         'link_to_planned_transaction' => null,
         'fold_into_parent' => null,
         'email_digest' => null,
+        'add_tags' => null,
     ];
 
     foreach (RuleActionType::cases() as $type) {
@@ -318,4 +319,16 @@ it('lets a lower rule act while a higher rule only emails a digest', function ()
     claimsRun($this->user);
 
     expect($transaction->fresh()->category_id)->toBe($this->a->id);
+});
+
+it('lets a lower rule add tags when a higher rule also added tags', function () {
+    $first = App\Models\Tag::factory()->for($this->user)->create();
+    $second = App\Models\Tag::factory()->for($this->user)->create();
+    claimsRule($this->user, [['type' => RuleActionType::AddTags->value, 'value' => '', 'tag_ids' => [$first->id]]], 1);
+    claimsRule($this->user, [['type' => RuleActionType::AddTags->value, 'value' => '', 'tag_ids' => [$second->id]]], 2);
+    $transaction = claimsTxn($this->user, $this->account);
+
+    claimsRun($this->user);
+
+    expect($transaction->fresh()->tags()->orderBy('tags.id')->pluck('tags.id')->all())->toBe([$first->id, $second->id]);
 });
