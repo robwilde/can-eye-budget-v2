@@ -751,7 +751,7 @@ test('test reflects the unsaved edits of an existing rule, not the saved trigger
         ->and($rule->fresh()->triggers[0]['value'])->toBe('NETFLIX');
 });
 
-test('test shows the three sections, their counts and the hand-categorised marker', function () {
+test('test shows the sections that have rows and counts a hand-categorised row as one Apply now would change', function () {
     $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $other = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     testRuleSeed($this->user, ['description' => 'NETFLIX NEW']);
@@ -761,12 +761,11 @@ test('test shows the three sections, their counts and the hand-categorised marke
     openedDraft($this->user, $category)
         ->call('testRule')
         ->assertSeeHtml('data-testid="rule-test-not-yet"')
-        ->assertSeeHtml('data-testid="rule-test-skipped"')
+        ->assertDontSeeHtml('data-testid="rule-test-skipped"')
         ->assertSeeHtml('data-testid="rule-test-already"')
         ->assertSee('Not yet applied')
-        ->assertSee('Skipped')
         ->assertSee('Already applied')
-        ->assertSee('Categorised by hand')
+        ->assertDontSee('Categorised by hand')
         ->assertSeeHtml('<strong>3</strong>');
 });
 
@@ -1072,4 +1071,37 @@ test('delete all does nothing until the confirmation is opened', function () {
         ->call('deleteAllRules');
 
     expect(UserRule::where('user_id', $this->user->id)->count())->toBe(1);
+});
+
+test('applyRule replaces a hand-set category because the user asked for the re-apply', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $handSet = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $group = UserRuleGroup::factory()->for($this->user)->create();
+    $rule = UserRule::factory()->for($this->user)->for($group, 'group')->create([
+        'triggers' => [['field' => RuleTriggerField::Description->value, 'operator' => RuleTriggerOperator::Contains->value, 'value' => 'NETFLIX']],
+        'actions' => [['type' => RuleActionType::SetCategory->value, 'value' => (string) $category->id]],
+    ]);
+    $transaction = Transaction::factory()->for($this->user)->for(Account::factory()->for($this->user)->create())->create([
+        'description' => 'NETFLIX.COM',
+        'category_id' => $handSet->id,
+        'category_source' => CategorySource::Manual,
+        'transfer_pair_id' => null,
+    ]);
+
+    Livewire::actingAs($this->user)
+        ->test(UserRuleManager::class)
+        ->call('applyRule', $rule->id);
+
+    expect($transaction->fresh()->category_id)->toBe($category->id);
+});
+
+test('testing a draft treats a hand-set category as one Apply now would change', function () {
+    $category = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    $handSet = Category::factory()->for($this->user)->create(['is_hidden' => false]);
+    testRuleSeed($this->user, ['category_id' => $handSet->id, 'category_source' => CategorySource::Manual]);
+
+    $result = openedDraft($this->user, $category)->call('testRule')->get('ruleTestResult');
+
+    expect($result->notYetAppliedCount)->toBe(1)
+        ->and($result->skippedCount)->toBe(0);
 });
