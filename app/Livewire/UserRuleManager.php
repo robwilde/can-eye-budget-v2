@@ -24,6 +24,7 @@ use App\Services\RuleEmailBaseline;
 use App\Services\RuleTester;
 use App\Services\UserRuleApplier;
 use App\Support\Rules\RegexPattern;
+use App\Support\Rules\RuleAiCategorisation;
 use App\Support\Rules\RuleTriggers;
 use Closure;
 use Flux\Flux;
@@ -645,6 +646,7 @@ final class UserRuleManager extends Component
                 ->get(),
             'categories' => Category::visibleSortedByFullPath((int) auth()->id()),
             'userTags' => Tag::where('user_id', auth()->id())->orderBy('name')->get(['id', 'name']),
+            'actionTypes' => $this->offeredActionTypes(),
             'transferAccounts' => Account::where('user_id', auth()->id())->active()->orderBy('name')->get(),
             'plannedTransactions' => PlannedTransaction::where('user_id', auth()->id())
                 ->where('is_active', true)
@@ -787,7 +789,7 @@ final class UserRuleManager extends Component
             'triggers' => ['required', 'array', 'min:1', $this->hasCondition()],
             'ruleEffectiveFrom' => ['nullable', 'date_format:Y-m-d'],
             'actions' => ['required', 'array', 'min:1', $this->distinctActionTypes()],
-            'actions.*.type' => ['required', Rule::in(array_column(RuleActionType::cases(), 'value'))],
+            'actions.*.type' => ['required', Rule::in(array_column(RuleActionType::cases(), 'value')), $this->aiActionAllowed()],
         ];
 
         $groupsSeen = 0;
@@ -885,6 +887,41 @@ final class UserRuleManager extends Component
 
             return ['type' => RuleActionType::AddTags->value, 'value' => '', 'tag_ids' => array_values(array_unique(array_map(intval(...), $ids)))];
         }, $this->actions);
+    }
+
+    /**
+     * The AI categorise action is offered only while the feature is available, or when the rule
+     * being edited already has it.
+     *
+     * @return list<RuleActionType>
+     */
+    private function offeredActionTypes(): array
+    {
+        $hasAi = RuleAiCategorisation::available() || $this->formHasAiAction();
+
+        return collect(RuleActionType::cases())
+            ->reject(static fn (RuleActionType $type): bool => $type === RuleActionType::SuggestCategoryWithAi && ! $hasAi)
+            ->values()
+            ->all();
+    }
+
+    private function formHasAiAction(): bool
+    {
+        return array_any($this->actions, static fn (array $action): bool => ($action['type'] ?? null) === RuleActionType::SuggestCategoryWithAi->value)
+            && $this->editingRuleId !== null
+            && array_any(
+                UserRule::query()->where('user_id', auth()->id())->whereKey($this->editingRuleId)->value('actions') ?? [],
+                static fn (array $action): bool => ($action['type'] ?? null) === RuleActionType::SuggestCategoryWithAi->value,
+            );
+    }
+
+    private function aiActionAllowed(): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail): void {
+            if ($value === RuleActionType::SuggestCategoryWithAi->value && ! RuleAiCategorisation::available() && ! $this->formHasAiAction()) {
+                $fail('The AI categorise action is not available.');
+            }
+        };
     }
 
     private function failing(string $message): Closure

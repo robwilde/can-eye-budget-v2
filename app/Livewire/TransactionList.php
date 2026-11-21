@@ -95,7 +95,7 @@ final class TransactionList extends Component
      * Provenance filter. 'rule' surfaces everything automation decided, which
      * is what makes accepting automation reversible rather than a one-way door.
      */
-    private const array VALID_SOURCE_FILTERS = ['all', 'manual', 'rule'];
+    private const array VALID_SOURCE_FILTERS = ['all', 'manual', 'rule', 'suggested'];
 
     private const array VALID_TRANSFER_FILTERS = ['all', 'suggested'];
 
@@ -830,7 +830,7 @@ final class TransactionList extends Component
         $reverted = 0;
 
         DB::transaction(function () use ($query, &$reverted): void {
-            $query->where('category_source', CategorySource::Rule->value)
+            $query->whereIn('category_source', [CategorySource::Rule->value, CategorySource::Suggested->value])
                 ->chunkById(200, function (EloquentCollection $chunk) use (&$reverted): void {
                     foreach ($chunk as $transaction) {
                         // Clearing category_id nulls category_source through the
@@ -852,8 +852,8 @@ final class TransactionList extends Component
         // later page may now be past the end. Start again from page one.
         $this->resetPage();
         $this->bulkNotice = $reverted === 1
-            ? 'Reverted 1 rule-set category.'
-            : sprintf('Reverted %d rule-set categories.', $reverted);
+            ? 'Reverted 1 machine-set category.'
+            : sprintf('Reverted %d machine-set categories.', $reverted);
 
         $this->dispatch('transaction-saved');
     }
@@ -2801,6 +2801,8 @@ final class TransactionList extends Component
                 ->where('category_source', CategorySource::Manual->value))
             ->when(($filters['source'] ?? null) === 'rule', fn ($q) => $q
                 ->where('category_source', CategorySource::Rule->value))
+            ->when(($filters['source'] ?? null) === 'suggested', fn ($q) => $q
+                ->where('category_source', CategorySource::Suggested->value))
             ->when(($filters['transfers'] ?? null) === 'suggested', fn ($q) => $q->possibleTransfer())
             ->when(($filters['attachments'] ?? null) === 'with', fn ($q) => $q->whereHas('attachments'))
             ->when(($filters['merchant'] ?? null) === 'none', fn ($q) => $q->whereNull('merchant_id'))
