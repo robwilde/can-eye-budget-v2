@@ -292,3 +292,25 @@ test('a zero in one debit/credit column does not mask a non-zero value in the ot
     expect($rows[1]->amount)->toBe(150000)
         ->and($rows[1]->direction)->toBe(TransactionDirection::Credit);
 });
+
+test('reads the mapped category column and leaves it null when unmapped or blank', function () {
+    $path = tempnam(sys_get_temp_dir(), 'csv');
+    file_put_contents($path, "Date,Description,Amount,Category\n2026-08-10,ONE,-1.00,Home:Repairs\n2026-08-11,TWO,-2.00,\n");
+
+    $mapped = [
+        CsvColumnMapper::FIELD_DATE => 'Date',
+        CsvColumnMapper::FIELD_DESCRIPTION => 'Description',
+        CsvColumnMapper::FIELD_AMOUNT => 'Amount',
+        CsvColumnMapper::FIELD_CATEGORY => 'Category',
+    ];
+    $parser = new CsvParserService;
+
+    $withColumn = $parser->preview($path, $mapped);
+    $withoutColumn = $parser->preview($path, array_diff_key($mapped, [CsvColumnMapper::FIELD_CATEGORY => true]));
+
+    unlink($path);
+
+    expect($withColumn[0]->category)->toBe('Home:Repairs')
+        ->and($withColumn[1]->category)->toBeNull()
+        ->and($withoutColumn[0]->category)->toBeNull();
+});

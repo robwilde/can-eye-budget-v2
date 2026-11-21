@@ -10,10 +10,12 @@ use App\Enums\RefreshStatus;
 use App\Jobs\SyncRedbarkFeedJob;
 use App\Livewire\RedbarkAccountSetup;
 use App\Models\Account;
+use App\Models\AuditEvent;
 use App\Models\RedbarkAccount;
 use App\Models\RedbarkFeed;
 use App\Models\RedbarkSyncLog;
 use App\Models\User;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
@@ -461,3 +463,35 @@ test('step 2 keeps the empty message when a later sync fails after the accounts 
         ->assertDontSeeHtml('data-testid="redbark-sync-errors"')
         ->assertSee('Nothing left to set up');
 });
+
+test('toggles the category matcher on the user own account and audits it', function () {
+    [$user, , $redbarkAccount] = wizardFixture();
+
+    Livewire::actingAs($user)
+        ->test(RedbarkAccountSetup::class)
+        ->call('toggleCategoryMatcher', $redbarkAccount->id);
+
+    $event = AuditEvent::query()->where('action', 'livewire.redbark-account-setup.toggleCategoryMatcher')->sole();
+
+    expect($redbarkAccount->fresh()->category_matcher_enabled)->toBeFalse()
+        ->and($event->user_id)->toBe($user->id);
+});
+
+it('refuses to toggle the matcher on another user account', function () {
+    [$user] = wizardFixture();
+    [, , $theirs] = wizardFixture();
+
+    $component = Livewire::actingAs($user)->test(RedbarkAccountSetup::class);
+
+    expect(fn () => $component->call('toggleCategoryMatcher', $theirs->id))->toThrow(ModelNotFoundException::class)
+        ->and($theirs->fresh()->category_matcher_enabled)->toBeTrue();
+});
+
+test('the matcher switch shows only while the feature flag is on', function (bool $flag) {
+    config(['budget.feed_category_matching' => $flag]);
+    [$user] = wizardFixture();
+
+    $component = Livewire::actingAs($user)->test(RedbarkAccountSetup::class);
+
+    $flag ? $component->assertSee('Match bank categories to my categories') : $component->assertDontSee('Match bank categories to my categories');
+})->with([true, false]);
