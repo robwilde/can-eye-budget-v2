@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Http\Middleware\AttributeRequestToUser;
+use App\Jobs\CategoriseRuleMatchesJob;
 use App\Jobs\EnrichMerchantBrandsJob;
 use App\Jobs\GenerateInsightsJob;
 use App\Jobs\ImportCsvTransactionsJob;
@@ -192,6 +193,7 @@ test('every queued job is in the inventory and carries the audit middleware as d
         SyncRedbarkFeedJob::class => [new SyncRedbarkFeedJob(RedbarkFeed::factory()->create()), true],
         MaintainGoalsJob::class => [new MaintainGoalsJob($user), false],
         SendRuleMatchDigestJob::class => [new SendRuleMatchDigestJob($user), true],
+        CategoriseRuleMatchesJob::class => [new CategoriseRuleMatchesJob($user, []), true],
     ];
 
     $discovered = collect(File::allFiles(app_path('Jobs')))
@@ -249,4 +251,16 @@ it('pins SendRuleMatchDigestJob in the user action inventory', function () {
     $attribution->handle($job, fn () => null);
 
     expect(AuditEvent::query()->where('action', 'job.SendRuleMatchDigestJob')->where('user_id', $user->id)->exists())->toBeTrue();
+});
+
+it('pins CategoriseRuleMatchesJob in the user action inventory', function () {
+    $user = User::factory()->create();
+    $job = new CategoriseRuleMatchesJob($user, []);
+    $attribution = collect($job->middleware())->first(fn (object $middleware): bool => $middleware instanceof AttributeJobToUser);
+
+    expect($attribution)->toBeInstanceOf(AttributeJobToUser::class);
+
+    $attribution->handle($job, fn () => null);
+
+    expect(AuditEvent::query()->where('action', 'job.CategoriseRuleMatchesJob')->where('user_id', $user->id)->exists())->toBeTrue();
 });

@@ -120,7 +120,7 @@ it('reports how many categories were reverted', function () {
         ->set('selected', [$a->id => true, $b->id => true])
         ->call('revertMachineCategories');
 
-    expect($component->get('bulkNotice'))->toBe('Reverted 2 rule-set categories.');
+    expect($component->get('bulkNotice'))->toBe('Reverted 2 machine-set categories.');
 });
 
 it('reverts a whole filter-wide scope of machine-set rows', function () {
@@ -236,4 +236,39 @@ it('refuses a source filter while uncategorised is selected', function () {
         ->set('categorised', 'uncategorised')
         ->set('source', 'manual')
         ->assertSet('source', 'all');
+});
+
+it('reverts AI-suggested categories but keeps manual ones', function () {
+    $suggested = provenanceRow($this->user, $this->account, [
+        'category_id' => $this->category->id,
+        'category_source' => CategorySource::Suggested,
+    ]);
+    $manual = provenanceRow($this->user, $this->account, [
+        'category_id' => $this->category->id,
+        'category_source' => CategorySource::Manual,
+    ]);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('selected', [$suggested->id => true, $manual->id => true])
+        ->call('revertMachineCategories');
+
+    expect($suggested->fresh()->category_id)->toBeNull()
+        ->and($suggested->fresh()->category_source)->toBeNull()
+        ->and($manual->fresh()->category_id)->toBe($this->category->id)
+        ->and($manual->fresh()->category_source)->toBe(CategorySource::Manual);
+});
+
+it('filters the list to categories suggested by Jev', function () {
+    $suggested = provenanceRow($this->user, $this->account, ['category_id' => $this->category->id, 'category_source' => CategorySource::Suggested]);
+    provenanceRow($this->user, $this->account, ['category_id' => $this->category->id, 'category_source' => CategorySource::Rule]);
+
+    $ids = Livewire::actingAs($this->user)
+        ->test(TransactionList::class)
+        ->set('source', 'suggested')
+        ->viewData('transactions')
+        ->pluck('id')
+        ->all();
+
+    expect($ids)->toBe([$suggested->id]);
 });

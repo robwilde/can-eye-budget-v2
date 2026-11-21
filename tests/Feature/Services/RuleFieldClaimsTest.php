@@ -263,6 +263,7 @@ it('claims every field the actions now on develop can set', function () {
         'fold_into_parent' => null,
         'email_digest' => null,
         'add_tags' => null,
+        'suggest_category_with_ai' => null,
     ];
 
     foreach (RuleActionType::cases() as $type) {
@@ -331,4 +332,16 @@ it('lets a lower rule add tags when a higher rule also added tags', function () 
     claimsRun($this->user);
 
     expect($transaction->fresh()->tags()->orderBy('tags.id')->pluck('tags.id')->all())->toBe([$first->id, $second->id]);
+});
+
+it('lets a lower rule set a category while a higher rule only queues AI categorisation', function () {
+    config(['services.typesafe.api_key' => 'ts_test', 'budget.rule_ai_categorisation' => true]);
+    Illuminate\Support\Facades\Queue::fake();
+    claimsRule($this->user, [['type' => RuleActionType::SuggestCategoryWithAi->value, 'value' => '']], 1);
+    claimsRule($this->user, claimsCategory($this->a), 2);
+    $transaction = claimsTxn($this->user, $this->account, ['merchant_name' => 'Corner Store']);
+
+    claimsRun($this->user);
+
+    expect($transaction->fresh()->category_id)->toBe($this->a->id);
 });
