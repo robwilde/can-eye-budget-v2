@@ -22,6 +22,10 @@
             </div>
             <div class="flex shrink-0 flex-wrap items-center gap-2">
                 <flux:button size="sm" icon="play" wire:click="runRules" :disabled="! $hasActiveRules">Run rules now</flux:button>
+                @if($groups->isNotEmpty() || $ruleCount > 0)
+                    <flux:button size="sm" icon="arrow-down-tray" wire:click="exportRules" data-testid="rules-export">Export</flux:button>
+                @endif
+                <flux:button size="sm" icon="arrow-up-tray" wire:click="openImportModal" data-testid="rules-import">Import</flux:button>
                 @if($ruleCount > 0)
                     <flux:button variant="danger" size="sm" icon="trash" wire:click="confirmDeleteAllRules" data-testid="rules-delete-all">Delete all rules</flux:button>
                 @endif
@@ -413,6 +417,54 @@
                 <flux:button variant="primary" wire:click="saveRule">
                     {{ $editingRuleId ? 'Update' : 'Create' }}
                 </flux:button>
+            </div>
+        </div>
+    </flux:modal>
+
+    {{-- Import Rules Modal --}}
+    <flux:modal wire:model="showImportModal" class="md:w-[32rem]">
+        <div class="space-y-4" data-testid="rules-import-modal">
+            <flux:heading size="lg">Import rules</flux:heading>
+            <flux:text size="sm">
+                Choose a rules file you exported from here. A rule with the same name in a group of the same name is replaced; every other rule is added after the group's existing ones. Categories, accounts, tags and planned transactions are matched by name against your own; a rule that names one you do not have is skipped and listed. Nothing is created to make a rule fit.
+            </flux:text>
+
+            <div>
+                <input type="file" wire:model="importFile" accept=".json,application/json" data-testid="rules-import-file" class="block w-full text-sm" />
+                @error('importFile') <flux:text class="text-cib-red-600 mt-1 text-sm">{{ $message }}</flux:text> @enderror
+            </div>
+
+            @if($importErrors !== [])
+                <flux:callout variant="danger" icon="exclamation-circle" data-testid="rules-import-errors">
+                    <flux:callout.heading>Nothing was imported</flux:callout.heading>
+                    <flux:callout.text>
+                        <ul class="list-disc space-y-1 pl-4">
+                            @foreach($importErrors as $error)
+                                <li>{{ $error }}</li>
+                            @endforeach
+                        </ul>
+                    </flux:callout.text>
+                </flux:callout>
+            @endif
+
+            @if($importSummary !== null)
+                <flux:callout variant="success" icon="check-circle" data-testid="rules-import-summary">
+                    <flux:callout.text>
+                        {{ $importSummary['rules_created'] }} {{ Str::plural('rule', $importSummary['rules_created']) }} added, {{ $importSummary['rules_updated'] }} replaced, {{ $importSummary['groups_created'] }} {{ Str::plural('group', $importSummary['groups_created']) }} created, {{ count($importSummary['skipped']) }} skipped.
+                    </flux:callout.text>
+                </flux:callout>
+                @if($importSummary['skipped'] !== [])
+                    <ul class="list-disc space-y-1 pl-4 text-sm" data-testid="rules-import-skipped">
+                        @foreach($importSummary['skipped'] as $line)
+                            <li>{{ $line }}</li>
+                        @endforeach
+                    </ul>
+                @endif
+            @endif
+
+            <div class="flex justify-end gap-2">
+                <flux:button variant="ghost" wire:click="$set('showImportModal', false)">Close</flux:button>
+                <flux:button variant="primary" wire:click="importRules" wire:loading.attr="disabled" data-testid="rules-import-submit">Import</flux:button>
             </div>
         </div>
     </flux:modal>
