@@ -760,4 +760,17 @@
             </div>
         </form>
     </flux:modal>
+    @if($rulePrompt !== null)
+        <div class="fixed bottom-4 left-1/2 z-50 w-full max-w-md -translate-x-1/2 px-4" data-testid="rule-prompt" role="status">
+            <div class="rounded-lg border border-zinc-200 bg-white p-4 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+                <flux:text>{{ __('Filed under :category. Create a rule so similar transactions follow?', ['category' => $rulePrompt['categoryName']]) }}</flux:text>
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                    <flux:button size="sm" variant="primary" wire:click="createRuleFromPrompt" data-testid="rule-prompt-create">{{ __('Create rule') }}</flux:button>
+                    <flux:button size="sm" variant="ghost" wire:click="hideRulePromptForToday" data-testid="rule-prompt-hide">{{ __('Hide for today') }}</flux:button>
+                    <flux:button size="sm" variant="ghost" wire:click="disableRulePrompts" data-testid="rule-prompt-disable">{{ __("Don't show this again") }}</flux:button>
+                    <flux:button size="sm" variant="subtle" icon="x-mark" wire:click="dismissRulePrompt" data-testid="rule-prompt-dismiss" aria-label="{{ __('Dismiss') }}" />
+                </div>
+            </div>
+        </div>
+    @endif
 </div>

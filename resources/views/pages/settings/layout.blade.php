@@ -8,6 +8,7 @@
             @endif
             <flux:navlist.item :href="route('pay-cycle.edit')" wire:navigate>{{ __('Pay cycle') }}</flux:navlist.item>
             <flux:navlist.item :href="route('currency.edit')" wire:navigate>{{ __('Currency') }}</flux:navlist.item>
+            <flux:navlist.item :href="route('preferences.edit')" wire:navigate>{{ __('Preferences') }}</flux:navlist.item>
             <flux:navlist.item :href="route('providers.edit')" wire:navigate>{{ __('Providers') }}</flux:navlist.item>
         </flux:navlist>
     </div>
