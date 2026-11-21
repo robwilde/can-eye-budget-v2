@@ -214,6 +214,7 @@ final class CsvParserService
             balance: $balance,
             rawRow: $row,
             csvHash: $hash,
+            category: $this->parseCategory($row, $mapping),
         );
     }
 
@@ -354,6 +355,23 @@ final class CsvParserService
         }
 
         return $this->normalizeAmount($row[$col] ?? '');
+    }
+
+    /**
+     * @param  array<string, string>  $row
+     * @param  array<string, string|null>  $mapping
+     */
+    private function parseCategory(array $row, array $mapping): ?string
+    {
+        $col = $mapping[CsvColumnMapper::FIELD_CATEGORY] ?? null;
+
+        if ($col === null) {
+            return null;
+        }
+
+        $value = $row[$col] ?? '';
+
+        return $value === '' ? null : $value;
     }
 
     private function hashRow(CarbonImmutable $date, int $amountCents, string $description): string
