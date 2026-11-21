@@ -8,6 +8,12 @@
     use Illuminate\Support\Str;
 @endphp
 <div class="space-y-6">
+    @if($ruleWarning)
+        <flux:callout variant="warning" icon="exclamation-triangle" data-testid="rule-warning">
+            <flux:callout.text>{{ $ruleWarning }}</flux:callout.text>
+        </flux:callout>
+    @endif
+
     <div class="flex flex-col gap-4">
         <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div class="max-w-2xl">
@@ -300,6 +306,8 @@
                                 </flux:select>
                             @elseif(isset($action['type']) && $action['type'] === RuleActionType::FoldIntoParent->value)
                                 <flux:text size="sm" class="mt-2">Finds the matching parent purchase (same day, same account, matching reference) and folds this fee into it.</flux:text>
+                            @elseif(isset($action['type']) && $action['type'] === RuleActionType::EmailDigest->value)
+                                <flux:text size="sm" class="mt-2">Emails you the transactions that newly match this rule. What it already matches when you switch it on is not emailed.</flux:text>
                             @elseif(isset($action['type']) && $action['type'] === RuleActionType::ExcludeFromReports->value)
                                 <flux:text size="sm" class="mt-2">Leaves matching transactions out of budgets and reports. An exclusion you set by hand is never changed by an automatic run.</flux:text>
                             @else
