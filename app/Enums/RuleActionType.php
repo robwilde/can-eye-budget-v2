@@ -15,6 +15,7 @@ enum RuleActionType: string
     case FoldIntoParent = 'fold_into_parent';
     case ExcludeFromReports = 'exclude_from_reports';
     case MarkAsTransfer = 'mark_as_transfer';
+    case EmailDigest = 'email_digest';
 
     public function label(): string
     {
@@ -28,6 +29,7 @@ enum RuleActionType: string
             self::FoldIntoParent => 'Fold into parent transaction',
             self::ExcludeFromReports => 'Exclude from budgets and reports',
             self::MarkAsTransfer => 'Mark as Transfer',
+            self::EmailDigest => 'Email me new matches',
         };
     }
 
@@ -40,13 +42,13 @@ enum RuleActionType: string
             self::AppendNotes => 'notes',
             self::SetNotes => 'notes',
             self::LinkToPlannedTransaction => 'planned_transaction_id',
-            self::FoldIntoParent, self::ExcludeFromReports => '',
+            self::FoldIntoParent, self::ExcludeFromReports, self::EmailDigest => '',
             self::MarkAsTransfer => 'account_id',
         };
     }
 
     public function requiresValue(): bool
     {
-        return ! in_array($this, [self::FoldIntoParent, self::ExcludeFromReports], true);
+        return ! in_array($this, [self::FoldIntoParent, self::ExcludeFromReports, self::EmailDigest], true);
     }
 }

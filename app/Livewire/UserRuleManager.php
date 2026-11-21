@@ -10,6 +10,7 @@ use App\Enums\PipelineTrigger;
 use App\Enums\RuleActionType;
 use App\Enums\RuleTriggerField;
 use App\Enums\RuleTriggerOperator;
+use App\Exceptions\RuleBaselineTimedOutException;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Livewire\Attributes\NotAudited;
 use App\Models\Account;
@@ -18,6 +19,7 @@ use App\Models\PlannedTransaction;
 use App\Models\User;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
+use App\Services\RuleEmailBaseline;
 use App\Services\RuleTester;
 use App\Services\UserRuleApplier;
 use App\Support\Rules\RegexPattern;
@@ -35,6 +37,8 @@ use Livewire\Component;
 
 final class UserRuleManager extends Component
 {
+    private const string BASELINE_WARNING = 'This rule is still off: recording the transactions it already matches took too long. Try switching it on again in a moment.';
+
     #[Locked]
     public ?RuleTestResult $ruleTestResult = null;
 
@@ -86,6 +90,8 @@ final class UserRuleManager extends Component
     public string $ruleEffectiveFrom = '';
 
     public bool $showDeleteAllRulesModal = false;
+
+    public ?string $ruleWarning = null;
 
     public bool $showDeleteRuleModal = false;
 
@@ -236,7 +242,24 @@ final class UserRuleManager extends Component
             ->where('user_id', auth()->id())
             ->first();
 
-        $group?->update(['is_active' => ! $group->is_active]);
+        if (! $group) {
+            return;
+        }
+
+        try {
+            DB::transaction(function () use ($group): void {
+                $locked = UserRuleGroup::where('id', $group->id)->where('user_id', auth()->id())->lockForUpdate()->firstOrFail();
+                $locked->update(['is_active' => ! $locked->is_active]);
+
+                if ($locked->is_active) {
+                    $locked->rules()->where('is_active', true)->orderBy('id')->lockForUpdate()->get()->each(fn (UserRule $rule) => $this->recordBaseline($rule));
+                }
+            });
+
+            $this->ruleWarning = null;
+        } catch (RuleBaselineTimedOutException) {
+            $this->ruleWarning = self::BASELINE_WARNING;
+        }
     }
 
     public function toggleGroupStopProcessing(int $groupId): void
@@ -295,52 +318,19 @@ final class UserRuleManager extends Component
     {
         $this->validate($this->ruleFormRules());
 
-        if ($this->editingRuleId) {
-            $rule = UserRule::where('id', $this->editingRuleId)
-                ->where('user_id', auth()->id())
-                ->first();
-
-            if ($rule) {
-                $rule->update([
-                    'name' => $this->ruleName,
-                    'description' => $this->ruleDescription ?: null,
-                    'triggers' => $this->triggers,
-                    'actions' => $this->actions,
-                    'strict_mode' => $this->ruleStrictMode,
-                    'is_auto_apply' => $this->ruleIsAutoApply,
-                    'is_active' => $this->ruleIsActive,
-                    'effective_from' => $this->ruleEffectiveFrom ?: null,
-                ]);
-
-                Flux::toast(text: 'Rule updated', variant: 'success');
-            }
-        } else {
-            $group = UserRuleGroup::where('id', $this->ruleGroupId)
-                ->where('user_id', auth()->id())
-                ->first();
-
-            if (! $group) {
-                return;
-            }
-
-            $maxOrder = UserRule::where('user_rule_group_id', $group->id)->max('order') ?? -1;
-
-            UserRule::create([
-                'user_id' => auth()->id(),
-                'user_rule_group_id' => $group->id,
-                'name' => $this->ruleName,
-                'description' => $this->ruleDescription ?: null,
-                'triggers' => $this->triggers,
-                'actions' => $this->actions,
-                'strict_mode' => $this->ruleStrictMode,
-                'is_auto_apply' => $this->ruleIsAutoApply,
-                'is_active' => $this->ruleIsActive,
-                'effective_from' => $this->ruleEffectiveFrom ?: null,
-                'order' => $maxOrder + 1,
-            ]);
-
-            Flux::toast(text: 'Rule created', variant: 'success');
+        try {
+            $outcome = DB::transaction(fn (): ?string => $this->persistRule(forceInactive: false));
+            $this->ruleWarning = null;
+        } catch (RuleBaselineTimedOutException) {
+            $outcome = DB::transaction(fn (): ?string => $this->persistRule(forceInactive: true));
+            $this->ruleWarning = self::BASELINE_WARNING;
         }
+
+        if ($outcome === null) {
+            return;
+        }
+
+        Flux::toast(text: $outcome === 'created' ? 'Rule created' : 'Rule updated', variant: 'success');
 
         $this->showRuleModal = false;
         $this->resetRuleForm();
@@ -490,7 +480,21 @@ final class UserRuleManager extends Component
             ->where('user_id', auth()->id())
             ->first();
 
-        $rule?->update(['is_active' => ! $rule->is_active]);
+        if (! $rule) {
+            return;
+        }
+
+        try {
+            DB::transaction(function () use ($rule): void {
+                $locked = UserRule::where('id', $rule->id)->where('user_id', auth()->id())->lockForUpdate()->firstOrFail();
+                $locked->update(['is_active' => ! $locked->is_active]);
+                $this->recordBaseline($locked);
+            });
+
+            $this->ruleWarning = null;
+        } catch (RuleBaselineTimedOutException) {
+            $this->ruleWarning = self::BASELINE_WARNING;
+        }
     }
 
     public function toggleRuleAutoApply(int $ruleId): void
@@ -647,6 +651,79 @@ final class UserRuleManager extends Component
             'triggers.*.value.required' => 'The value field is required for the selected operator.',
             'triggers.*.conditions.*.value.required' => 'The value field is required for the selected operator.',
         ];
+    }
+
+    /**
+     * Saves the rule form. The rule row stays locked until the transaction commits, and an email
+     * rule that starts listening records its baseline in that same transaction, so a rule is never
+     * active without its baseline. A baseline that times out aborts the transaction; the caller
+     * then saves again with the rule left off.
+     *
+     * @return 'created'|'updated'|null null when the rule or its group is not the user's
+     *
+     * @throws RuleBaselineTimedOutException
+     */
+    private function persistRule(bool $forceInactive): ?string
+    {
+        $isActive = $forceInactive ? false : $this->ruleIsActive;
+
+        if ($this->editingRuleId) {
+            $rule = UserRule::where('id', $this->editingRuleId)
+                ->where('user_id', auth()->id())
+                ->lockForUpdate()
+                ->first();
+
+            if (! $rule) {
+                return null;
+            }
+
+            $wasListening = $rule->is_active && $this->hasEmailAction($rule->actions);
+
+            $rule->update([
+                'name' => $this->ruleName,
+                'description' => $this->ruleDescription ?: null,
+                'triggers' => $this->triggers,
+                'actions' => $this->actions,
+                'strict_mode' => $this->ruleStrictMode,
+                'is_auto_apply' => $this->ruleIsAutoApply,
+                'is_active' => $isActive,
+                'effective_from' => $this->ruleEffectiveFrom ?: null,
+            ]);
+
+            if (! $wasListening) {
+                $this->recordBaseline($rule);
+            }
+
+            return 'updated';
+        }
+
+        $group = UserRuleGroup::where('id', $this->ruleGroupId)
+            ->where('user_id', auth()->id())
+            ->first();
+
+        if (! $group) {
+            return null;
+        }
+
+        $maxOrder = UserRule::where('user_rule_group_id', $group->id)->max('order') ?? -1;
+
+        $created = UserRule::create([
+            'user_id' => auth()->id(),
+            'user_rule_group_id' => $group->id,
+            'name' => $this->ruleName,
+            'description' => $this->ruleDescription ?: null,
+            'triggers' => $this->triggers,
+            'actions' => $this->actions,
+            'strict_mode' => $this->ruleStrictMode,
+            'is_auto_apply' => $this->ruleIsAutoApply,
+            'is_active' => $isActive,
+            'effective_from' => $this->ruleEffectiveFrom ?: null,
+            'order' => $maxOrder + 1,
+        ]);
+
+        $this->recordBaseline($created);
+
+        return 'created';
     }
 
     // ─── Private ─────────────────────────────────────────
@@ -828,6 +905,28 @@ final class UserRuleManager extends Component
                 $fail('A rule cannot have two actions of the same type.');
             }
         };
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $actions
+     */
+    private function hasEmailAction(array $actions): bool
+    {
+        return array_any($actions, static fn (array $action): bool => ($action['type'] ?? null) === RuleActionType::EmailDigest->value);
+    }
+
+    /**
+     * A rule that is listening records the transactions it already matches as delivered, so its
+     * first email covers only new ones. Called inside the transaction that switched it on, so a
+     * timeout rolls the activation back instead of emailing the backlog.
+     *
+     * @throws RuleBaselineTimedOutException
+     */
+    private function recordBaseline(UserRule $rule): void
+    {
+        if ($rule->is_active && $this->hasEmailAction($rule->actions)) {
+            app(RuleEmailBaseline::class)->record($rule);
+        }
     }
 
     private function swapOrder(UserRuleGroup|UserRule $a, UserRuleGroup|UserRule $b): void

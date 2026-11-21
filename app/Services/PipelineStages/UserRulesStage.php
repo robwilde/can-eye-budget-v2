@@ -7,8 +7,10 @@ namespace App\Services\PipelineStages;
 use App\Contracts\PipelineStageContract;
 use App\DTOs\PipelineContext;
 use App\DTOs\StageResult;
+use App\Enums\RuleActionType;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
+use App\Jobs\SendRuleMatchDigestJob;
 use App\Models\AnalysisSuggestion;
 use App\Models\PipelineAuditEntry;
 use App\Models\Transaction;
@@ -82,6 +84,7 @@ final readonly class UserRulesStage implements PipelineStageContract
 
         $this->recordBlocked($context, $blocked);
         $this->recordFailed($context, $failed);
+        $this->dispatchDigests($context, $groups);
 
         return new StageResult(success: true, stage: self::STAGE_KEY, suggestionIds: $suggestionIds);
     }
@@ -261,6 +264,23 @@ final readonly class UserRulesStage implements PipelineStageContract
                     'exception' => $failure['exception'],
                 ],
             ]);
+        }
+    }
+
+    /**
+     * Rules with the email digest action send their digest once the run has finished, so it sees
+     * every change the run made.
+     *
+     * @param  Collection<int, UserRuleGroup>  $groups
+     */
+    private function dispatchDigests(PipelineContext $context, Collection $groups): void
+    {
+        $hasEmailRule = $groups->contains(static fn (UserRuleGroup $group): bool => $group->rules->contains(
+            static fn (UserRule $rule): bool => array_any($rule->actions, static fn (array $action): bool => ($action['type'] ?? null) === RuleActionType::EmailDigest->value),
+        ));
+
+        if ($hasEmailRule) {
+            SendRuleMatchDigestJob::dispatch($context->user);
         }
     }
 
