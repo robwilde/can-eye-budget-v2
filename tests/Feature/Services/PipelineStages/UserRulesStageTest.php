@@ -283,7 +283,7 @@ test('suggestion creates audit entry', function () {
 
 // ─── Group Ordering ────────────────────────────────────────────────────
 
-test('groups are processed in order', function () {
+test('groups are processed in order and the first group wins a field', function () {
     $category1 = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $category2 = Category::factory()->for($this->user)->create(['is_hidden' => false]);
     $transaction = createStageTransaction($this->user, $this->account);
@@ -302,7 +302,7 @@ test('groups are processed in order', function () {
 
     $this->stage->execute($this->context);
 
-    expect($transaction->fresh()->category_id)->toBe($category2->id);
+    expect($transaction->fresh()->category_id)->toBe($category1->id);
 });
 
 // ─── Stop Processing ───────────────────────────────────────────────────

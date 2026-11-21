@@ -403,3 +403,16 @@ it('filters irrelevant entries before subsumption so they cannot erase a kept en
 
     expect(collect($candidates)->pluck('value')->all())->toBe(['NETFLIX.COM']);
 });
+
+it('orders a guarded mined rule before a broad one so rule priority does not shadow it', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
+
+    $rules = app(CategoryRuleMiner::class)->createRuleModels($user, [
+        ['value' => 'WOOLWORTHS', 'category_id' => $category->id, 'source' => 'seed'],
+        ['value' => 'WOOLWORTHS PAYROLL', 'category_id' => $category->id, 'source' => 'income', 'extra_triggers' => [['field' => 'direction', 'operator' => 'is', 'value' => 'credit']]],
+    ]);
+
+    expect($rules[0]->name)->toBe('Categorise WOOLWORTHS')
+        ->and($rules[1]->order)->toBeLessThan($rules[0]->order);
+});
