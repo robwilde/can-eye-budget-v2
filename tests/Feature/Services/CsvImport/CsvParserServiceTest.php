@@ -187,17 +187,21 @@ test('ISO YYYY-MM-DD date format parses', function () {
     expect($rows[0]->postDate->format('Y-m-d'))->toBe('2026-12-31');
 });
 
-test('csv hash is deterministic for same logical row', function () {
+test('csv hash is deterministic across parses and separates identical rows by occurrence', function () {
     $path = tmpCsv("Date,Description,Amount\n01/01/2026,COFFEE,-4.50\n01/01/2026,COFFEE,-4.50\n");
-
-    $parser = new CsvParserService();
-    $rows = $parser->preview($path, [
+    $mapping = [
         CsvColumnMapper::FIELD_DATE => 'Date',
         CsvColumnMapper::FIELD_DESCRIPTION => 'Description',
         CsvColumnMapper::FIELD_AMOUNT => 'Amount',
-    ]);
+    ];
 
-    expect($rows[0]->csvHash)->toBe($rows[1]->csvHash);
+    $parser = new CsvParserService();
+    $rows = $parser->preview($path, $mapping);
+    $again = $parser->preview($path, $mapping);
+
+    expect($rows[0]->csvHash)->not->toBe($rows[1]->csvHash)
+        ->and($again[0]->csvHash)->toBe($rows[0]->csvHash)
+        ->and($again[1]->csvHash)->toBe($rows[1]->csvHash);
 });
 
 test('rows missing date are skipped', function () {
