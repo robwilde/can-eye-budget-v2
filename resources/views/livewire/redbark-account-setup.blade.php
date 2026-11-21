@@ -92,6 +92,17 @@
 
                         <flux:select.option value="skip">{{ __('Skip this account') }}</flux:select.option>
                     </flux:select>
+
+                    @if (config('budget.feed_category_matching') === true)
+                        <flux:switch
+                            class="mt-3"
+                            :label="__('Match bank categories to my categories')"
+                            :description="__('Uses the category your bank supplies to categorise uncategorised transactions. Categories you set are never changed.')"
+                            :checked="$redbarkAccount->category_matcher_enabled"
+                            wire:click="toggleCategoryMatcher({{ $redbarkAccount->id }})"
+                            data-test="redbark-category-matcher-{{ $redbarkAccount->id }}"
+                        />
+                    @endif
                 </div>
             @endforeach
 
