@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace App\Services\CsvImport;
 
+use App\DTOs\CsvFormat;
+use App\Enums\CsvSignConvention;
 use App\Enums\TransactionDirection;
 use Carbon\CarbonImmutable;
 use Generator;
+use InvalidArgumentException;
 use League\Csv\Exception;
 use League\Csv\Reader;
 use League\Csv\SyntaxError;
@@ -19,9 +22,9 @@ final class CsvParserService
      *
      * @throws SyntaxError|Exception
      */
-    public function headers(string $path): array
+    public function headers(string $path, ?CsvFormat $format = null): array
     {
-        $reader = $this->reader($path);
+        $reader = $this->reader($path, $format);
 
         return array_values(array_map(
             static fn (string $h): string => mb_trim($h),
@@ -60,12 +63,15 @@ final class CsvParserService
      */
     public function eachRow(string $path, array $mapping): Generator
     {
-        $reader = $this->reader($path);
-        $records = $reader->getRecords();
+        $format = CsvFormat::fromMapping($mapping);
+        $occurrences = [];
 
-        foreach ($records as $offset => $record) {
-            $row = $this->normalizeRow($record);
-            $parsed = $this->parseRow($row, $mapping);
+        foreach ($this->records($path, $format) as $offset => $record) {
+            try {
+                $parsed = $this->parseRow($this->normalizeRow($record), $mapping, $format, $occurrences);
+            } catch (InvalidArgumentException) {
+                continue;
+            }
 
             if ($parsed === null) {
                 continue;
@@ -88,17 +94,17 @@ final class CsvParserService
         $debitTotal = 0;
         $creditTotal = 0;
         $errors = [];
-        $seen = [];
         $duplicateCount = 0;
         $closingBalance = null;
         $closingDate = null;
 
-        $reader = $this->reader($path);
+        $format = CsvFormat::fromMapping($mapping);
+        $occurrences = [];
 
-        foreach ($reader->getRecords() as $offset => $record) {
+        foreach ($this->records($path, $format) as $offset => $record) {
             try {
                 $row = $this->normalizeRow($record);
-                $parsed = $this->parseRow($row, $mapping);
+                $parsed = $this->parseRow($row, $mapping, $format, $occurrences);
             } catch (Throwable $e) {
                 $errors[] = ['row' => (int) $offset, 'error' => $e->getMessage()];
 
@@ -132,11 +138,6 @@ final class CsvParserService
                 $creditTotal += $parsed->amount;
             }
 
-            if (isset($seen[$parsed->csvHash])) {
-                $duplicateCount++;
-            } else {
-                $seen[$parsed->csvHash] = true;
-            }
         }
 
         return new PreviewSummary(
@@ -152,14 +153,72 @@ final class CsvParserService
     }
 
     /**
+     * How many lines the file has, headers and skipped rows included.
+     *
+     * @throws Exception
+     */
+    public function lineCount(string $path, ?CsvFormat $format = null): int
+    {
+        $reader = Reader::from($path);
+        $reader->setDelimiter($format->delimiter ?? ',');
+        $reader->skipInputBOM();
+
+        return iterator_count($reader->getRecords());
+    }
+
+    /**
+     * Up to $limit non-empty values of one column, for detecting formats.
+     *
+     * @return list<string>
+     *
+     * @throws Exception
+     */
+    public function sampleValues(string $path, string $column, ?CsvFormat $format = null, int $limit = 50): array
+    {
+        $values = [];
+
+        foreach ($this->records($path, $format) as $record) {
+            $value = mb_trim((string) ($this->normalizeRow($record)[$column] ?? ''));
+
+            if ($value !== '') {
+                $values[] = $value;
+            }
+
+            if (count($values) >= $limit) {
+                break;
+            }
+        }
+
+        return $values;
+    }
+
+    /**
+     * The data rows. With a header offset League CSV still returns the lines above the header,
+     * matched against the headers, so they are dropped here.
+     *
+     * @return Generator<int, array<string, string|null>>
+     */
+    private function records(string $path, ?CsvFormat $format): Generator
+    {
+        $skip = $format->skipRows ?? 0;
+
+        foreach ($this->reader($path, $format)->getRecords() as $offset => $record) {
+            if ($offset > $skip || $skip === 0) {
+                yield $offset => $record;
+            }
+        }
+    }
+
+    /**
      * @return Reader<array<string, string|null>>
      *
      * @throws Exception
      */
-    private function reader(string $path): Reader
+    private function reader(string $path, ?CsvFormat $format = null): Reader
     {
         $reader = Reader::from($path);
-        $reader->setHeaderOffset(0);
+        $reader->setDelimiter($format->delimiter ?? ',');
+        $reader->setHeaderOffset($format->skipRows ?? 0);
         $reader->skipInputBOM();
 
         return $reader;
@@ -183,8 +242,11 @@ final class CsvParserService
     /**
      * @param  array<string, string>  $row
      * @param  array<string, string|null>  $mapping
+     * @param  array<string, int>  $occurrences  how many rows with the same date, amount and description came before
+     *
+     * @throws InvalidArgumentException when a format was chosen and the row does not fit it
      */
-    private function parseRow(array $row, array $mapping): ?ParsedTransactionDto
+    private function parseRow(array $row, array $mapping, ?CsvFormat $format, array &$occurrences): ?ParsedTransactionDto
     {
         $dateColumn = $mapping[CsvColumnMapper::FIELD_DATE] ?? null;
         $rawDate = $dateColumn !== null ? ($row[$dateColumn] ?? '') : '';
@@ -193,18 +255,20 @@ final class CsvParserService
             return null;
         }
 
-        $postDate = $this->parseDate($rawDate);
+        $postDate = $format === null ? $this->parseDate($rawDate) : $this->parseDateIn($rawDate, $format);
 
-        [$amountCents, $direction] = $this->parseAmount($row, $mapping);
+        [$amountCents, $direction] = $this->parseAmount($row, $mapping, $format);
 
         if ($amountCents === null) {
             return null;
         }
 
         $description = $this->parseDescription($row, $mapping);
-        $balance = $this->parseBalance($row, $mapping);
+        $balance = $this->parseBalance($row, $mapping, $format);
 
-        $hash = $this->hashRow($postDate, $amountCents, $description);
+        $base = $this->hashRow($postDate, $amountCents, $description);
+        $index = $occurrences[$base] ?? 0;
+        $occurrences[$base] = $index + 1;
 
         return new ParsedTransactionDto(
             postDate: $postDate,
@@ -213,9 +277,26 @@ final class CsvParserService
             description: $description,
             balance: $balance,
             rawRow: $row,
-            csvHash: $hash,
+            csvHash: $index === 0 ? $base : hash('sha256', $base.'|'.$index),
             category: $this->parseCategory($row, $mapping),
         );
+    }
+
+    private function parseDateIn(string $raw, CsvFormat $format): CarbonImmutable
+    {
+        $raw = mb_trim($raw);
+
+        if (! app(CsvFormatDetector::class)->parses($raw, $format->dateFormat)) {
+            throw new InvalidArgumentException(sprintf('Date "%s" does not match the format %s', $raw, CsvFormat::DATE_FORMATS[$format->dateFormat] ?? $format->dateFormat));
+        }
+
+        $date = CarbonImmutable::createFromFormat('!'.$format->dateFormat, $raw);
+
+        if ($date->greaterThan(CarbonImmutable::today())) {
+            throw new InvalidArgumentException(sprintf('Date "%s" is in the future', $raw));
+        }
+
+        return $date->startOfDay();
     }
 
     private function parseDate(string $raw): CarbonImmutable
@@ -252,15 +333,25 @@ final class CsvParserService
      * @param  array<string, string|null>  $mapping
      * @return array{0: int|null, 1: TransactionDirection}
      */
-    private function parseAmount(array $row, array $mapping): array
+    private function parseAmount(array $row, array $mapping, ?CsvFormat $format = null): array
     {
         $amountCol = $mapping[CsvColumnMapper::FIELD_AMOUNT] ?? null;
         $debitCol = $mapping[CsvColumnMapper::FIELD_DEBIT] ?? null;
         $creditCol = $mapping[CsvColumnMapper::FIELD_CREDIT] ?? null;
 
         if ($debitCol !== null || $creditCol !== null) {
-            $debit = $this->normalizeAmount($row[$debitCol] ?? '');
-            $credit = $this->normalizeAmount($row[$creditCol] ?? '');
+            $debit = $this->amount($row[$debitCol] ?? '', $format);
+            $credit = $this->amount($row[$creditCol] ?? '', $format);
+
+            if ($format !== null) {
+                foreach ([[$debitCol, $debit], [$creditCol, $credit]] as [$column, $value]) {
+                    $cell = $column === null ? '' : mb_trim($row[$column] ?? '');
+
+                    if ($cell !== '' && $value === null) {
+                        throw new InvalidArgumentException(sprintf('Amount "%s" is not a number in the format %s', $cell, $format->numberFormat->label()));
+                    }
+                }
+            }
 
             if ($credit !== null && $credit !== 0) {
                 return [$credit, TransactionDirection::Credit];
@@ -281,16 +372,45 @@ final class CsvParserService
             return [null, TransactionDirection::Debit];
         }
 
-        $signed = $this->normalizeAmount($row[$amountCol] ?? '');
+        $raw = $row[$amountCol] ?? '';
+        $signed = $this->amount($raw, $format);
+
+        if ($signed === null && $format !== null && mb_trim($raw) !== '') {
+            throw new InvalidArgumentException(sprintf('Amount "%s" is not a number in the format %s', $raw, $format->numberFormat->label()));
+        }
 
         if ($signed === null) {
             return [null, TransactionDirection::Debit];
+        }
+
+        if ($format !== null) {
+            $signed = $this->applySign($signed, $row, $mapping, $format);
         }
 
         return [
             $signed,
             $signed < 0 ? TransactionDirection::Debit : TransactionDirection::Credit,
         ];
+    }
+
+    private function amount(string $raw, ?CsvFormat $format): ?int
+    {
+        return $format === null ? $this->normalizeAmount($raw) : app(CsvNumberParser::class)->parse($raw, $format->numberFormat);
+    }
+
+    /**
+     * @param  array<string, string>  $row
+     * @param  array<string, string|null>  $mapping
+     */
+    private function applySign(int $signed, array $row, array $mapping, CsvFormat $format): int
+    {
+        return match ($format->signConvention) {
+            CsvSignConvention::NegativeIsDebit => $signed,
+            CsvSignConvention::NegativeIsCredit => -$signed,
+            CsvSignConvention::TypeColumn => mb_strtolower(mb_trim($row[$mapping[CsvFormat::TYPE_COLUMN] ?? ''] ?? '')) === mb_strtolower($format->typeInflowValue)
+                ? abs($signed)
+                : -abs($signed),
+        };
     }
 
     private function normalizeAmount(string $raw): ?int
@@ -346,7 +466,7 @@ final class CsvParserService
      * @param  array<string, string>  $row
      * @param  array<string, string|null>  $mapping
      */
-    private function parseBalance(array $row, array $mapping): ?int
+    private function parseBalance(array $row, array $mapping, ?CsvFormat $format = null): ?int
     {
         $col = $mapping[CsvColumnMapper::FIELD_BALANCE] ?? null;
 
@@ -354,7 +474,7 @@ final class CsvParserService
             return null;
         }
 
-        return $this->normalizeAmount($row[$col] ?? '');
+        return $this->amount($row[$col] ?? '', $format);
     }
 
     /**
