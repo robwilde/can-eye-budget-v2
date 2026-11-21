@@ -275,7 +275,7 @@
                         <flux:field class="flex-1">
                             <flux:select wire:model.live="actions.{{ $index }}.type" size="sm">
                                 <flux:select.option value="">Action...</flux:select.option>
-                                @foreach(RuleActionType::cases() as $actionType)
+                                @foreach($actionTypes as $actionType)
                                     <flux:select.option value="{{ $actionType->value }}">{{ $actionType->label() }}</flux:select.option>
                                 @endforeach
                             </flux:select>
@@ -317,6 +317,8 @@
                                 <flux:text size="sm" class="mt-2">Finds the matching parent purchase (same day, same account, matching reference) and folds this fee into it.</flux:text>
                             @elseif(isset($action['type']) && $action['type'] === RuleActionType::EmailDigest->value)
                                 <flux:text size="sm" class="mt-2">Emails you the transactions that newly match this rule. What it already matches when you switch it on is not emailed.</flux:text>
+                            @elseif(isset($action['type']) && $action['type'] === RuleActionType::SuggestCategoryWithAi->value)
+                                <flux:text size="sm" class="mt-2">Asks Jev, in the background, which category a merchant belongs to, once per merchant. Only expense rows are considered; income, merchants already decided, and rows another rule categorises are skipped. A confident answer is applied as a suggestion, anything less goes to payee review. Nothing is sent when you preview or apply a rule.</flux:text>
                             @elseif(isset($action['type']) && $action['type'] === RuleActionType::ExcludeFromReports->value)
                                 <flux:text size="sm" class="mt-2">Leaves matching transactions out of budgets and reports. An exclusion you set by hand is never changed by an automatic run.</flux:text>
                             @else

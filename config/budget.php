@@ -25,6 +25,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | AI Categorise Rule Action
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, and services.typesafe.api_key is set, rules can use the
+    | "Categorise with AI" action. It only queues a background job; previews and
+    | in-request applies never call TypeSafe. Off by default.
+    |
+    */
+
+    'rule_ai_categorisation' => (bool) env('BUDGET_RULE_AI_CATEGORISATION', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | BNPL Email Import
     |--------------------------------------------------------------------------
     |

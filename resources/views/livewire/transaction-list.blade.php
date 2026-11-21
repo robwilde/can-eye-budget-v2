@@ -129,6 +129,7 @@
                     ['value' => 'all', 'label' => 'Any source'],
                     ['value' => 'manual', 'label' => 'Set by you'],
                     ['value' => 'rule', 'label' => 'Set by a rule'],
+                    ['value' => 'suggested', 'label' => 'Suggested by Jev'],
                 ]"
                 :selected="$source"
                 wire-model="source"
@@ -551,13 +552,13 @@
                     {{-- Shown while reviewing machine-set categories, which
                          is the only context where reverting is the action
                          you want. --}}
-                    @if($source === 'rule')
+                    @if(in_array($source, ['rule', 'suggested'], true))
                         <flux:button variant="ghost" size="sm"
                                      wire:click="revertMachineCategories"
                                      wire:loading.attr="disabled" wire:target="revertMachineCategories"
                                      :disabled="$categorisableCount === 0"
                                      data-testid="bulk-revert">
-                            Undo rule-set categories
+                            Undo machine-set categories
                         </flux:button>
                     @endif
 
