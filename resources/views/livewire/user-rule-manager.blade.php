@@ -117,7 +117,7 @@
                                 <div class="px-2">
                                     <flux:switch label="Auto-apply" :checked="$rule->is_auto_apply" wire:click="toggleRuleAutoApply({{ $rule->id }})" />
                                 </div>
-                                <flux:button variant="ghost" size="sm" wire:click="applyRule({{ $rule->id }})" :disabled="! $rule->is_active">
+                                <flux:button variant="ghost" size="sm" wire:click="applyRule({{ $rule->id }})" data-testid="rule-apply-now">
                                     Apply now
                                 </flux:button>
                                 <flux:button variant="ghost" size="sm" wire:click="openEditRuleModal({{ $rule->id }})">
