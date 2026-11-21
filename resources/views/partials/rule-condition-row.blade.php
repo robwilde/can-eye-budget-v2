@@ -25,7 +25,16 @@
 
     @if(! isset($condition['operator']) || $condition['operator'] === '' || RuleTriggerOperator::tryFrom($condition['operator'])?->requiresValue() !== false)
         <flux:field class="flex-1">
-            <flux:input wire:model="{{ $path }}.value" size="sm" placeholder="Value" />
+            @if(($condition['field'] ?? '') === RuleTriggerField::Tag->value)
+                <flux:select wire:model="{{ $path }}.value" size="sm" data-testid="rule-tag-picker">
+                    <flux:select.option value="">Tag...</flux:select.option>
+                    @foreach($userTags as $tag)
+                        <flux:select.option value="{{ $tag->id }}">{{ $tag->name }}</flux:select.option>
+                    @endforeach
+                </flux:select>
+            @else
+                <flux:input wire:model="{{ $path }}.value" size="sm" placeholder="Value" />
+            @endif
             <flux:error name="{{ $path }}.value" />
         </flux:field>
     @endif

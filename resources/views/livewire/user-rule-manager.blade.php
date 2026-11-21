@@ -243,7 +243,7 @@
 
                             @foreach($trigger['conditions'] ?? [] as $conditionIndex => $condition)
                                 <div wire:key="trigger-{{ $index }}-{{ $conditionIndex }}">
-                                    @include('partials.rule-condition-row', ['path' => "triggers.{$index}.conditions.{$conditionIndex}", 'condition' => $condition, 'remove' => "removeGroupCondition({$index}, {$conditionIndex})"])
+                                    @include('partials.rule-condition-row', ['path' => "triggers.{$index}.conditions.{$conditionIndex}", 'condition' => $condition, 'userTags' => $userTags, 'remove' => "removeGroupCondition({$index}, {$conditionIndex})"])
                                     <flux:error name="triggers.{{ $index }}.conditions.{{ $conditionIndex }}" />
                                 </div>
                             @endforeach
@@ -252,7 +252,7 @@
                         </div>
                     @else
                         <div wire:key="trigger-{{ $index }}">
-                            @include('partials.rule-condition-row', ['path' => "triggers.{$index}", 'condition' => $trigger, 'remove' => "removeTrigger({$index})"])
+                            @include('partials.rule-condition-row', ['path' => "triggers.{$index}", 'condition' => $trigger, 'userTags' => $userTags, 'remove' => "removeTrigger({$index})"])
                         </div>
                     @endif
                 @endforeach
@@ -304,6 +304,15 @@
                                         <flux:select.option value="{{ $transferAccount->id }}">{{ $transferAccount->name }}{{ $transferAccount->is_tracked ? '' : ' (hidden)' }}</flux:select.option>
                                     @endforeach
                                 </flux:select>
+                            @elseif(isset($action['type']) && $action['type'] === RuleActionType::AddTags->value)
+                                <flux:checkbox.group wire:model="actions.{{ $index }}.tag_ids" data-testid="rule-tag-ids">
+                                    @forelse($userTags as $tag)
+                                        <flux:checkbox value="{{ $tag->id }}" label="{{ $tag->name }}" />
+                                    @empty
+                                        <flux:text size="sm">You have no tags yet.</flux:text>
+                                    @endforelse
+                                </flux:checkbox.group>
+                                <flux:error name="actions.{{ $index }}.tag_ids" />
                             @elseif(isset($action['type']) && $action['type'] === RuleActionType::FoldIntoParent->value)
                                 <flux:text size="sm" class="mt-2">Finds the matching parent purchase (same day, same account, matching reference) and folds this fee into it.</flux:text>
                             @elseif(isset($action['type']) && $action['type'] === RuleActionType::EmailDigest->value)
