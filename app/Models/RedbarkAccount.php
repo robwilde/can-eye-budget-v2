@@ -27,6 +27,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $account_type
  * @property string|null $institution_name
  * @property bool $ignored
+ * @property bool $category_matcher_enabled
  * @property CarbonImmutable|null $sync_start_date
  * @property CarbonImmutable|null $transactions_synced_at
  * @property array<int, array<string, mixed>>|null $raw_transactions_payload
@@ -53,6 +54,7 @@ final class RedbarkAccount extends Model
         'account_type',
         'institution_name',
         'ignored',
+        'category_matcher_enabled',
         'sync_start_date',
         'transactions_synced_at',
         'raw_transactions_payload',
@@ -108,6 +110,7 @@ final class RedbarkAccount extends Model
             'sync_start_date' => 'immutable_date',
             'transactions_synced_at' => 'immutable_datetime',
             'ignored' => 'boolean',
+            'category_matcher_enabled' => 'boolean',
         ];
     }
 }
