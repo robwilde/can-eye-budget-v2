@@ -90,6 +90,40 @@ final class UserRuleManager extends Component
 
     public string $deletingRuleName = '';
 
+    /**
+     * The transaction modal's "Create rule" prompt links here with the group, match value and
+     * category in the query string. Nothing is written; the form opens prefilled.
+     */
+    public function mount(): void
+    {
+        $match = request()->query('rule_match');
+        $groupId = request()->query('rule_group');
+        $categoryId = request()->query('rule_category');
+
+        if (! is_string($match) || mb_trim($match) === '' || ! is_string($groupId) || ! ctype_digit($groupId) || ! is_string($categoryId) || ! ctype_digit($categoryId)) {
+            return;
+        }
+
+        $visible = Category::visible()->where('user_id', auth()->id())->whereKey((int) $categoryId)->exists();
+
+        if (! $visible) {
+            return;
+        }
+
+        $this->openAddRuleModal((int) $groupId);
+
+        if (! $this->showRuleModal) {
+            return;
+        }
+
+        $this->triggers = [[
+            'field' => RuleTriggerField::Description->value,
+            'operator' => RuleTriggerOperator::Contains->value,
+            'value' => mb_substr(mb_trim($match), 0, 255),
+        ]];
+        $this->actions = [['type' => RuleActionType::SetCategory->value, 'value' => $categoryId]];
+    }
+
     // ─── Group Modal ─────────────────────────────────────
 
     public function openAddGroupModal(): void

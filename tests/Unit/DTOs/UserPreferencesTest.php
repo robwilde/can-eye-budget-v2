@@ -59,3 +59,15 @@ test('keeps at most four distinct positive recent category ids and drops malform
     expect($preferences->categoriesLocked)->toBeTrue()
         ->and($preferences->recentCategoryIds)->toBe([3, 4, 6, 7]);
 });
+
+test('a paused rule prompt time survives the stored round trip and a bad value is dropped', function () {
+    $cast = new UserPreferencesCast;
+    $model = new class extends Model {};
+
+    $stored = $cast->set($model, 'preferences', UserPreferences::from(['rulePromptHiddenUntil' => '2026-06-16T09:00:00+00:00']), []);
+    $read = $cast->get($model, 'preferences', $stored, []);
+    $bad = $cast->get($model, 'preferences', json_encode(['rulePromptHiddenUntil' => 'not a date']), []);
+
+    expect($read->rulePromptHiddenUntil?->toIso8601String())->toBe('2026-06-16T09:00:00+00:00')
+        ->and($bad->rulePromptHiddenUntil)->toBeNull();
+});

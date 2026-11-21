@@ -10,7 +10,10 @@ use App\Enums\Theme;
 use App\Enums\TransactionPeriod;
 use App\Support\Currencies;
 use BackedEnum;
+use Carbon\CarbonImmutable;
+use DateTimeInterface;
 use Spatie\LaravelData\Dto;
+use Throwable;
 
 final class UserPreferences extends Dto
 {
@@ -25,6 +28,7 @@ final class UserPreferences extends Dto
         public readonly ?SupportedLocale $locale = null,
         public readonly TransactionPeriod $defaultPeriod = TransactionPeriod::ThisMonth,
         public readonly bool $rulePromptEnabled = true,
+        public readonly ?CarbonImmutable $rulePromptHiddenUntil = null,
         public readonly AccountOrder $accountOrder = AccountOrder::NameAsc,
         public readonly bool $previewFeatures = false,
         public readonly array $allowedCurrencies = [],
@@ -46,6 +50,7 @@ final class UserPreferences extends Dto
             locale: is_string($stored['locale'] ?? null) ? SupportedLocale::tryFrom($stored['locale']) : $defaults->locale,
             defaultPeriod: is_string($stored['defaultPeriod'] ?? null) ? TransactionPeriod::tryFrom($stored['defaultPeriod']) ?? $defaults->defaultPeriod : $defaults->defaultPeriod,
             rulePromptEnabled: is_bool($stored['rulePromptEnabled'] ?? null) ? $stored['rulePromptEnabled'] : $defaults->rulePromptEnabled,
+            rulePromptHiddenUntil: self::moment($stored['rulePromptHiddenUntil'] ?? null),
             accountOrder: is_string($stored['accountOrder'] ?? null) ? AccountOrder::tryFrom($stored['accountOrder']) ?? $defaults->accountOrder : $defaults->accountOrder,
             previewFeatures: is_bool($stored['previewFeatures'] ?? null) ? $stored['previewFeatures'] : $defaults->previewFeatures,
             allowedCurrencies: is_array($stored['allowedCurrencies'] ?? null) ? Currencies::normaliseList($stored['allowedCurrencies']) : $defaults->allowedCurrencies,
@@ -58,9 +63,26 @@ final class UserPreferences extends Dto
     public function toArray(): array
     {
         return array_map(
-            static fn (mixed $value): mixed => $value instanceof BackedEnum ? $value->value : $value,
+            static fn (mixed $value): mixed => match (true) {
+                $value instanceof BackedEnum => $value->value,
+                $value instanceof DateTimeInterface => CarbonImmutable::instance($value)->toIso8601String(),
+                default => $value,
+            },
             get_object_vars($this),
         );
+    }
+
+    private static function moment(mixed $value): ?CarbonImmutable
+    {
+        if (! is_string($value) || $value === '') {
+            return null;
+        }
+
+        try {
+            return CarbonImmutable::parse($value);
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**
