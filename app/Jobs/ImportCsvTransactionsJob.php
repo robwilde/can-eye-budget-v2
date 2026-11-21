@@ -130,6 +130,7 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
                         $ingestor->ingest(new Transaction([
                             'account_id' => $bankImport->account_id,
                             'csv_hash' => $row->csvHash,
+                            'bank_import_id' => $bankImport->id,
                             ...$values,
                             ...($categoryId === null ? [] : ['category_id' => $categoryId, 'category_source' => CategorySource::Feed]),
                         ]), rebuildHistory: false);
@@ -146,6 +147,7 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
                         }
 
                         $existing->fill($values);
+                        $existing->restored_by_bank_import_id = $bankImport->id;
                         self::fillEmptyCategory($existing, $categoryId);
                         $existing->restore();
                         $touch($previousDate);
@@ -157,6 +159,11 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
 
                     $existing->fill($values);
                     self::fillEmptyCategory($existing, $categoryId);
+
+                    if ($existing->bank_import_id === $bankImport->id) {
+                        $existing->restored_by_bank_import_id = null;
+                    }
+
                     $existing->save();
 
                     if ($existing->wasChanged()) {

@@ -545,3 +545,55 @@ test('a csv upload that succeeds is audited as a success', function () {
     expect(AuditEvent::query()->where('action', 'livewire.import-bank.uploadAndDetectHeaders')->sole()->outcome)
         ->toBe(AuditOutcome::Success);
 });
+
+test('records an audit event when an import is reverted', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create();
+    $bankImport = BankImport::factory()->for($user)->for($account)->completed()->create();
+    $row = Transaction::factory()->for($user)->for($account)->create(['bank_import_id' => $bankImport->id]);
+
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('bankImportId', $bankImport->id)
+        ->set('step', 3)
+        ->assertSeeHtml('import-bank-revert')
+        ->call('revertImport')
+        ->assertSet('step', 2);
+
+    $event = AuditEvent::query()->where('action', 'livewire.import-bank.revertImport')->sole();
+
+    expect($bankImport->fresh()->status)->toBe(BankImportStatus::Previewing)
+        ->and($row->fresh()->deleted_at)->not->toBeNull()
+        ->and($event->user_id)->toBe($user->id);
+});
+
+test('refuses to revert another user\'s import', function () {
+    $owner = User::factory()->create();
+    $intruder = User::factory()->create();
+    $foreign = BankImport::factory()->for($owner)->for(Account::factory()->for($owner)->csvImport()->create())->completed()->create();
+    $row = Transaction::factory()->for($owner)->create(['bank_import_id' => $foreign->id, 'account_id' => $foreign->account_id]);
+
+    expect(fn () => Livewire::actingAs($intruder)->test(ImportBank::class)->set('bankImportId', $foreign->id)->call('revertImport'))
+        ->toThrow(ModelNotFoundException::class);
+
+    expect($foreign->fresh()->status)->toBe(BankImportStatus::Completed)
+        ->and($row->fresh()->deleted_at)->toBeNull();
+});
+
+test('a failed revert keeps the import and shows a retry message', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->csvImport()->create();
+    $bankImport = BankImport::factory()->for($user)->for($account)->completed()->create();
+    Transaction::factory()->for($user)->for($account)->create(['bank_import_id' => $bankImport->id]);
+    Illuminate\Support\Facades\Event::listen('eloquent.deleting: '.Transaction::class, fn () => throw new RuntimeException('boom'));
+
+    Livewire::actingAs($user)
+        ->test(ImportBank::class)
+        ->set('bankImportId', $bankImport->id)
+        ->set('step', 3)
+        ->call('revertImport')
+        ->assertSee('Nothing was changed')
+        ->assertSet('step', 3);
+
+    expect($bankImport->fresh()->status)->toBe(BankImportStatus::Completed);
+});

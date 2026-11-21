@@ -309,6 +309,11 @@
 
             @if($bankImport->status->isTerminal())
                 <div class="mt-4 flex items-center gap-3">
+                    @if($bankImport->status === BankImportStatus::Completed)
+                        <flux:button wire:click="revertImport" wire:confirm="{{ __('Remove the transactions this import created or restored?') }}" data-testid="import-bank-revert">
+                            {{ __('Revert import') }}
+                        </flux:button>
+                    @endif
                     <flux:button wire:click="startOver" variant="primary" data-testid="import-bank-import-another">
                         {{ __('Import another') }}
                     </flux:button>

@@ -6,6 +6,7 @@ namespace App\Livewire;
 
 use App\Enums\BankImportStatus;
 use App\Enums\ImportSource;
+use App\Exceptions\BankImportRevertRefused;
 use App\Exceptions\Statement\PdfImportRefused;
 use App\Jobs\ImportCsvTransactionsJob;
 use App\Livewire\Attributes\NotAudited;
@@ -13,6 +14,7 @@ use App\Livewire\Concerns\ReportsFailure;
 use App\Models\Account;
 use App\Models\BankImport;
 use App\Models\Transaction;
+use App\Services\CsvImport\BankImportReverter;
 use App\Services\CsvImport\CsvColumnMapper;
 use App\Services\CsvImport\CsvParserService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
@@ -221,6 +223,32 @@ final class ImportBank extends Component
         ImportCsvTransactionsJob::dispatch($bankImport);
 
         $this->step = 3;
+    }
+
+    /**
+     * Undoes the completed import and returns to the preview, so it can be confirmed again
+     * from its stored file. A failure changes nothing and can be retried.
+     */
+    public function revertImport(BankImportReverter $reverter): void
+    {
+        $this->clearFailure();
+
+        $bankImport = BankImport::query()->where('user_id', auth()->id())->findOrFail($this->bankImportId);
+
+        try {
+            $reverter->revert($bankImport);
+        } catch (BankImportRevertRefused $exception) {
+            $this->fail($exception->getMessage());
+
+            return;
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->fail(__('The import could not be reverted. Nothing was changed; please try again.'));
+
+            return;
+        }
+
+        $this->step = 2;
     }
 
     #[NotAudited]
