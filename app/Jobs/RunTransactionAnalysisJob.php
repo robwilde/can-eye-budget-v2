@@ -19,7 +19,9 @@ final class RunTransactionAnalysisJob implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
-    public int $tries = 1;
+    public int $tries = 30;
+
+    public int $maxExceptions = 1;
 
     public int $timeout = 300;
 
@@ -40,7 +42,7 @@ final class RunTransactionAnalysisJob implements ShouldBeUnique, ShouldQueue
     {
         return [
             new AttributeJobToUser($this->user->id),
-            new WithoutOverlapping("analysis-user-{$this->user->id}"),
+            new WithoutOverlapping("analysis-user-{$this->user->id}")->releaseAfter(30),
         ];
     }
 
