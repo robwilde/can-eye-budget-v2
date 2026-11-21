@@ -13,6 +13,7 @@ use App\DTOs\EmailSearchResult;
 use App\Enums\AccountStatus;
 use App\Enums\BudgetTag;
 use App\Enums\CategorySource;
+use App\Enums\ExclusionSource;
 use App\Enums\MerchantBrandStatus;
 use App\Enums\PayeeStatus;
 use App\Enums\TransactionDirection;
@@ -1215,7 +1216,7 @@ final class TransactionList extends Component
                 return false;
             }
 
-            $child = $current->createChild(['excluded' => $excluded]);
+            $child = $current->createChild(['excluded' => $excluded, 'excluded_source' => ExclusionSource::Manual]);
 
             foreach ($current->splits as $split) {
                 $split->replicate()->fill(['transaction_id' => $child->id])->save();
