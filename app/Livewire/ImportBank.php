@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Livewire;
 
+use App\DTOs\CsvFormat;
 use App\Enums\BankImportStatus;
+use App\Enums\CsvNumberFormat;
+use App\Enums\CsvSignConvention;
 use App\Enums\ImportSource;
 use App\Exceptions\BankImportRevertRefused;
 use App\Exceptions\Statement\PdfImportRefused;
@@ -16,6 +19,7 @@ use App\Models\BankImport;
 use App\Models\Transaction;
 use App\Services\CsvImport\BankImportReverter;
 use App\Services\CsvImport\CsvColumnMapper;
+use App\Services\CsvImport\CsvFormatDetector;
 use App\Services\CsvImport\CsvParserService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\Statement\PdfImportStarter;
@@ -124,12 +128,31 @@ final class ImportBank extends Component
         $storedPath = $this->file->store('bank-imports', 'local');
         $absolutePath = Storage::disk('local')->path($storedPath);
 
-        $this->headers = $parser->headers($absolutePath);
-
         $existingMapping = $account->column_mapping ?? [];
-        $this->mapping = $existingMapping !== []
+        $detector = app(CsvFormatDetector::class);
+        $first = fopen($absolutePath, 'rb');
+        $firstLine = $first === false ? '' : (string) fgets($first);
+
+        if ($first !== false) {
+            fclose($first);
+        }
+
+        $format = CsvFormat::fromMapping($existingMapping) ?? new CsvFormat(delimiter: $detector->delimiter($firstLine));
+
+        try {
+            $this->headers = $parser->headers($absolutePath, $format);
+        } catch (Throwable) {
+            Storage::disk('local')->delete($storedPath);
+            $this->fail(__('That file could not be read with its saved format settings. Check the delimiter and rows to skip.'));
+
+            return;
+        }
+
+        $mapping = $existingMapping !== []
             ? array_merge($mapper->suggest($this->headers), $existingMapping)
             : $mapper->suggest($this->headers);
+
+        $this->mapping = array_merge($this->formatDefaults($parser, $absolutePath, $mapping, $format), $mapping);
 
         $this->bankImportId = BankImport::query()->create([
             'user_id' => auth()->id(),
@@ -143,12 +166,47 @@ final class ImportBank extends Component
         $this->step = 2;
     }
 
+    /**
+     * Changing the delimiter or the rows to skip changes the file's headers, so they are read
+     * again; changing a column or the date format only re-checks the date format on offer.
+     */
+    public function updatedMapping(mixed $value = null, ?string $key = null): void
+    {
+        $parser = app(CsvParserService::class);
+        $path = $this->storedPath();
+
+        if ($path === null) {
+            return;
+        }
+
+        if ($key !== null && in_array($key, [CsvFormat::KEY_DELIMITER, CsvFormat::KEY_SKIP], true)) {
+            $format = CsvFormat::fromMapping($this->mapping);
+
+            try {
+                $this->headers = $parser->headers($path, $format);
+            } catch (Throwable) {
+                return;
+            }
+
+            $kept = array_intersect_key($this->mapping, array_flip([
+                CsvFormat::KEY_DATE, CsvFormat::KEY_NUMBER, CsvFormat::KEY_SIGN, CsvFormat::KEY_SKIP, CsvFormat::KEY_DELIMITER, CsvFormat::KEY_INFLOW,
+            ]));
+            $this->mapping = array_merge(app(CsvColumnMapper::class)->suggest($this->headers), $kept);
+        }
+
+        $options = $this->dateFormatOptions($parser, $path);
+
+        if ($key !== CsvFormat::KEY_DATE && $options !== [] && ! in_array($this->mapping[CsvFormat::KEY_DATE] ?? null, $options, true)) {
+            $this->mapping[CsvFormat::KEY_DATE] = $options[0];
+        }
+    }
+
     public function refreshPreview(): void
     {
         // Preview/summary are recomputed in render() — this hook just triggers a re-render.
     }
 
-    public function confirmImport(): void
+    public function confirmImport(CsvParserService $parser): void
     {
         $this->clearFailure();
 
@@ -177,6 +235,12 @@ final class ImportBank extends Component
             'mapping.debit' => ['nullable', 'string'],
             'mapping.credit' => ['nullable', 'string'],
             'currentBalance' => ['nullable', 'numeric'],
+            'mapping.'.CsvFormat::KEY_DATE => ['nullable', Rule::in(array_keys(CsvFormat::DATE_FORMATS))],
+            'mapping.'.CsvFormat::KEY_NUMBER => ['nullable', Rule::enum(CsvNumberFormat::class)],
+            'mapping.'.CsvFormat::KEY_SIGN => ['nullable', Rule::enum(CsvSignConvention::class)],
+            'mapping.'.CsvFormat::KEY_SKIP => ['nullable', 'integer', 'min:0'],
+            'mapping.'.CsvFormat::KEY_DELIMITER => ['nullable', Rule::in(CsvFormat::DELIMITERS)],
+            'mapping.'.CsvFormat::TYPE_COLUMN => [Rule::requiredIf(($this->mapping[CsvFormat::KEY_SIGN] ?? null) === CsvSignConvention::TypeColumn->value), 'nullable', 'string'],
         ]);
 
         if (! empty($this->mapping['amount']) && (! empty($this->mapping['debit']) || ! empty($this->mapping['credit']))) {
@@ -188,6 +252,10 @@ final class ImportBank extends Component
         $bankImport = BankImport::query()
             ->where('user_id', auth()->id())
             ->findOrFail($this->bankImportId);
+
+        if (! $this->formatAllowsImport($parser, $bankImport)) {
+            return;
+        }
 
         // accountId is a mutable Livewire property: the persisted import must belong to the
         // very (tracked) account being confirmed, or a forged swap could redirect it.
@@ -360,6 +428,10 @@ final class ImportBank extends Component
             'previewRows' => $previewRows,
             'summary' => $summary,
             'continuity' => $continuity,
+            'format' => CsvFormat::fromMapping($this->mapping),
+            'dateFormatOptions' => $this->step === 2 && $bankImport !== null
+                ? $this->dateFormatOptions($parser, Storage::disk('local')->path($bankImport->stored_path))
+                : [],
             'fields' => [
                 CsvColumnMapper::FIELD_DATE => 'Date',
                 CsvColumnMapper::FIELD_DESCRIPTION => 'Description',
@@ -370,6 +442,97 @@ final class ImportBank extends Component
                 CsvColumnMapper::FIELD_CATEGORY => 'Category',
             ],
         ]);
+    }
+
+    /**
+     * With a chosen format, the rows to skip must leave at least one line and every row must fit
+     * the format, so a wrong date or number format is fixed before anything is imported.
+     */
+    private function formatAllowsImport(CsvParserService $parser, BankImport $bankImport): bool
+    {
+        $format = CsvFormat::fromMapping($this->mapping);
+
+        if ($format === null) {
+            return true;
+        }
+
+        $path = Storage::disk('local')->path($bankImport->stored_path);
+
+        try {
+            $lines = $parser->lineCount($path, $format);
+
+            if ($format->skipRows >= $lines) {
+                $this->addError('mapping.'.CsvFormat::KEY_SKIP, __('Rows to skip must be fewer than the :count lines in the file.', ['count' => $lines]));
+
+                return false;
+            }
+
+            $summary = $parser->summarize($path, $this->mapping);
+        } catch (Throwable) {
+            $this->addError('mapping.'.CsvFormat::KEY_DATE, __('The file could not be read with these format settings.'));
+
+            return false;
+        }
+
+        if ($summary->errorRows !== []) {
+            $this->addError('mapping.'.CsvFormat::KEY_DATE, trans_choice(':count row does not fit these formats. Fix the formats before importing.|:count rows do not fit these formats. Fix the formats before importing.', count($summary->errorRows)));
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @param  array<string, string|null>  $mapping
+     * @return array<string, string>
+     */
+    private function formatDefaults(CsvParserService $parser, string $path, array $mapping, CsvFormat $format): array
+    {
+        $dateColumn = $mapping[CsvColumnMapper::FIELD_DATE] ?? null;
+        try {
+            $options = $dateColumn === null ? [] : app(CsvFormatDetector::class)->dateFormats($parser->sampleValues($path, $dateColumn, $format));
+        } catch (Throwable) {
+            $options = [];
+        }
+
+        return new CsvFormat(
+            dateFormat: $options[0] ?? $format->dateFormat,
+            numberFormat: $format->numberFormat,
+            signConvention: $format->signConvention,
+            skipRows: $format->skipRows,
+            delimiter: $format->delimiter,
+            typeInflowValue: $format->typeInflowValue,
+        )->toMapping();
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function dateFormatOptions(CsvParserService $parser, string $path): array
+    {
+        $dateColumn = $this->mapping[CsvColumnMapper::FIELD_DATE] ?? null;
+
+        if ($dateColumn === null || $dateColumn === '') {
+            return [];
+        }
+
+        try {
+            return app(CsvFormatDetector::class)->dateFormats($parser->sampleValues($path, $dateColumn, CsvFormat::fromMapping($this->mapping)));
+        } catch (Throwable) {
+            return [];
+        }
+    }
+
+    private function storedPath(): ?string
+    {
+        if ($this->bankImportId === null) {
+            return null;
+        }
+
+        $bankImport = BankImport::query()->where('user_id', auth()->id())->find($this->bankImportId);
+
+        return $bankImport === null ? null : Storage::disk('local')->path($bankImport->stored_path);
     }
 
     private function resolveOrCreateAccount(): ?Account
