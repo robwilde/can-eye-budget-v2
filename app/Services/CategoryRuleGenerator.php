@@ -317,6 +317,29 @@ final readonly class CategoryRuleGenerator
     }
 
     /**
+     * The user's "Auto-categorisation" rule group, created on first use.
+     */
+    public function group(int $userId): UserRuleGroup
+    {
+        $existing = UserRuleGroup::query()
+            ->where('user_id', $userId)
+            ->where('name', self::GROUP_NAME)
+            ->first();
+
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        return UserRuleGroup::query()->create([
+            'user_id' => $userId,
+            'name' => self::GROUP_NAME,
+            'order' => (int) UserRuleGroup::query()->where('user_id', $userId)->max('order') + 1,
+            'is_active' => true,
+            'stop_processing' => false,
+        ]);
+    }
+
+    /**
      * The trigger and actions a generated rule carries. Shared by the commit
      * path and the preview so the two cannot diverge.
      *
@@ -426,26 +449,6 @@ final readonly class CategoryRuleGenerator
             ?? $source->description;
 
         return mb_substr('Categorise '.$label, 0, 255);
-    }
-
-    private function group(int $userId): UserRuleGroup
-    {
-        $existing = UserRuleGroup::query()
-            ->where('user_id', $userId)
-            ->where('name', self::GROUP_NAME)
-            ->first();
-
-        if ($existing !== null) {
-            return $existing;
-        }
-
-        return UserRuleGroup::query()->create([
-            'user_id' => $userId,
-            'name' => self::GROUP_NAME,
-            'order' => (int) UserRuleGroup::query()->where('user_id', $userId)->max('order') + 1,
-            'is_active' => true,
-            'stop_processing' => false,
-        ]);
     }
 
     private function nextRuleOrder(int $groupId): int
