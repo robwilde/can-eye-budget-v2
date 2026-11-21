@@ -205,6 +205,17 @@ final class RedbarkAccountSetup extends Component
         $this->redirect(route('accounts'), navigate: true);
     }
 
+    public function toggleCategoryMatcher(int $redbarkAccountId): void
+    {
+        $redbarkAccount = RedbarkAccount::query()
+            ->whereHas('feed', fn ($query) => $query->where('user_id', Auth::id()))
+            ->findOrFail($redbarkAccountId);
+
+        $redbarkAccount->update(['category_matcher_enabled' => ! $redbarkAccount->category_matcher_enabled]);
+
+        unset($this->redbarkAccounts); // @phpstan-ignore property.notFound
+    }
+
     public function render(): View
     {
         $this->seedChoices();
