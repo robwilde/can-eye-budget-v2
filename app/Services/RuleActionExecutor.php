@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\DB;
 
 final readonly class RuleActionExecutor
 {
-    public function __construct(private TransactionFeeFolder $feeFolder, private TransferDetector $transfers) {}
+    public function __construct(private TransactionFeeFolder $feeFolder, private TransferDetector $transfers, private RuleAiCategorisationQueue $aiQueue) {}
 
     /**
      * @param  array<int, array<string, string>>  $actions
@@ -184,6 +184,7 @@ final readonly class RuleActionExecutor
                 RuleActionType::MarkAsTransfer => $this->canMarkAsTransfer($draft, $value),
                 RuleActionType::EmailDigest => false,
                 RuleActionType::AddTags => $this->tagger()->missing($draft, $this->tagIds($action)) !== [],
+                RuleActionType::SuggestCategoryWithAi => false,
             };
 
             if (in_array($type, [RuleActionType::FoldIntoParent, RuleActionType::MarkAsTransfer, RuleActionType::AddTags], true) && $effect) {
@@ -277,6 +278,7 @@ final readonly class RuleActionExecutor
                 RuleActionType::MarkAsTransfer => $this->deferTransfer($transferActions, $value),
                 RuleActionType::EmailDigest => true,
                 RuleActionType::AddTags => $this->deferTags($tagActions, $action),
+                RuleActionType::SuggestCategoryWithAi => $this->queueForAi($transaction),
             };
 
             if ($type === RuleActionType::FoldIntoParent && ! $effect) {
@@ -464,6 +466,18 @@ final readonly class RuleActionExecutor
 
         $transaction->excluded = true;
         $transaction->excluded_source = ExclusionSource::Rule;
+
+        return true;
+    }
+
+    /**
+     * Only queues the background categoriser. Reports handled either way: the action has nothing
+     * more to do in this request, and a row it could not queue (no merchant key, feature off)
+     * would not be queued on a retry either.
+     */
+    private function queueForAi(Transaction $transaction): bool
+    {
+        $this->aiQueue->queue($transaction);
 
         return true;
     }
