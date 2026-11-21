@@ -11,6 +11,7 @@ use App\Enums\RuleActionType;
 use App\Enums\RuleTriggerField;
 use App\Enums\RuleTriggerOperator;
 use App\Exceptions\RuleBaselineTimedOutException;
+use App\Jobs\ApplyUserRulesJob;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Livewire\Attributes\NotAudited;
 use App\Models\Account;
@@ -22,7 +23,6 @@ use App\Models\UserRule;
 use App\Models\UserRuleGroup;
 use App\Services\RuleEmailBaseline;
 use App\Services\RuleTester;
-use App\Services\UserRuleApplier;
 use App\Support\Rules\RegexPattern;
 use App\Support\Rules\RuleAiCategorisation;
 use App\Support\Rules\RuleTriggers;
@@ -530,19 +530,27 @@ final class UserRuleManager extends Component
         Flux::toast(text: 'Rules queued — results will show in Suggestions shortly', variant: 'success');
     }
 
-    public function applyRule(int $ruleId, UserRuleApplier $applier): void
+    /**
+     * Queues the apply: the active rules above this one run first, then this rule, which a queued
+     * job also switches on. Nothing is changed in the request.
+     */
+    public function applyRule(int $ruleId): void
     {
+        $user = auth()->user();
+
+        abort_unless($user instanceof User, 403);
+
         $rule = UserRule::where('id', $ruleId)
-            ->where('user_id', auth()->id())
+            ->where('user_id', $user->id)
             ->first();
 
-        if (! $rule || ! $rule->is_active) {
+        if (! $rule) {
             return;
         }
 
-        $count = $applier->applyToHistory($rule, overrideLocks: true);
+        ApplyUserRulesJob::dispatch($user, $rule->id);
 
-        Flux::toast(text: "Applied to {$count} transactions", variant: 'success');
+        Flux::toast(text: 'Applying in the background — the rules above run first', variant: 'success');
     }
 
     // ─── Reorder ─────────────────────────────────────────
