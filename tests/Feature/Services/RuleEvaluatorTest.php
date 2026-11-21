@@ -360,3 +360,91 @@ test('is_empty works without value key', function () {
 
     expect($this->evaluator->matches($transaction, $rule))->toBeTrue();
 });
+
+// ─── Regex Operator ────────────────────────────────────────────────────
+
+it('matches regex conditions without regard to case', function () {
+    $transaction = createTestTransaction($this->user, $this->account, ['description' => 'AMZN Mktp']);
+    $rule = createTestRule($this->user, $this->group, [
+        ['field' => 'description', 'operator' => 'matches_regex', 'value' => '^amzn'],
+    ]);
+
+    expect($this->evaluator->matches($transaction, $rule))->toBeTrue();
+});
+
+it('does not match a regex condition that the text fails', function () {
+    $transaction = createTestTransaction($this->user, $this->account, ['description' => 'Not AMZN Mktp']);
+    $rule = createTestRule($this->user, $this->group, [
+        ['field' => 'description', 'operator' => 'matches_regex', 'value' => '^amzn'],
+    ]);
+
+    expect($this->evaluator->matches($transaction, $rule))->toBeFalse();
+});
+
+it('matches a regex containing a forward slash', function () {
+    $transaction = createTestTransaction($this->user, $this->account, ['description' => 'Pay A/B Ltd']);
+    $rule = createTestRule($this->user, $this->group, [
+        ['field' => 'description', 'operator' => 'matches_regex', 'value' => 'a/b ltd$'],
+    ]);
+
+    expect($this->evaluator->matches($transaction, $rule))->toBeTrue();
+});
+
+it('treats a regex backtrack limit error as no match', function () {
+    $subject = str_repeat('a', 30).'b';
+    $pattern = '(a+)+b';
+    $transaction = createTestTransaction($this->user, $this->account, ['description' => $subject]);
+    $rule = createTestRule($this->user, $this->group, [
+        ['field' => 'description', 'operator' => 'matches_regex', 'value' => $pattern],
+    ]);
+
+    expect(preg_match('/'.$pattern.'/iu', $subject))->toBe(1);
+
+    $limit = ini_set('pcre.backtrack_limit', '1');
+
+    try {
+        $matched = $this->evaluator->matches($transaction, $rule);
+        $error = preg_last_error();
+    } finally {
+        ini_set('pcre.backtrack_limit', (string) $limit);
+    }
+
+    expect($error)->toBe(PREG_BACKTRACK_LIMIT_ERROR)
+        ->and($matched)->toBeFalse();
+});
+
+it('treats a stored regex that does not compile as no match', function () {
+    $transaction = createTestTransaction($this->user, $this->account);
+    $rule = createTestRule($this->user, $this->group, [
+        ['field' => 'description', 'operator' => 'matches_regex', 'value' => '(unclosed'],
+    ]);
+
+    expect($this->evaluator->matches($transaction, $rule))->toBeFalse();
+});
+
+// ─── Effective Date ────────────────────────────────────────────────────
+
+it('matches only transactions on or after the effective date', function (string $postDate, bool $expected) {
+    $transaction = createTestTransaction($this->user, $this->account, ['post_date' => $postDate]);
+    $rule = createTestRule(
+        $this->user,
+        $this->group,
+        [['field' => 'description', 'operator' => 'contains', 'value' => 'netflix']],
+        ['effective_from' => '2026-03-01'],
+    );
+
+    expect($this->evaluator->matches($transaction, $rule))->toBe($expected);
+})->with([
+    'the day before' => ['2026-02-28', false],
+    'the effective day' => ['2026-03-01', true],
+    'after' => ['2026-03-02', true],
+]);
+
+it('matches transactions of any date when the rule has no effective date', function () {
+    $transaction = createTestTransaction($this->user, $this->account, ['post_date' => '2020-01-01']);
+    $rule = createTestRule($this->user, $this->group, [
+        ['field' => 'description', 'operator' => 'contains', 'value' => 'netflix'],
+    ]);
+
+    expect($this->evaluator->matches($transaction, $rule))->toBeTrue();
+});

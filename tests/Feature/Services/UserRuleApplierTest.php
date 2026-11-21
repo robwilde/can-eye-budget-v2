@@ -124,3 +124,16 @@ it('only touches the rule owner\'s transactions', function () {
     expect($applied)->toBe(0)
         ->and($theirs->fresh()->category_id)->toBeNull();
 });
+
+it('leaves transactions before the rule effective date untouched', function () {
+    $rule = applierRule($this->user, $this->category->id, 'NETFLIX');
+    $rule->update(['effective_from' => '2026-03-01']);
+    $before = applierTxn($this->user, $this->account, ['post_date' => CarbonImmutable::parse('2026-02-28')]);
+    $onDate = applierTxn($this->user, $this->account, ['post_date' => CarbonImmutable::parse('2026-03-01')]);
+
+    $applied = $this->applier->applyToHistory($rule->fresh());
+
+    expect($applied)->toBe(1)
+        ->and($before->fresh()->category_id)->toBeNull()
+        ->and($onDate->fresh()->category_id)->toBe($this->category->id);
+});

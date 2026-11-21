@@ -348,3 +348,13 @@ test('a broad rule checks each category and plan once, not once per matching row
         ->and($queries->filter(fn (string $sql): bool => str_contains($sql, 'categories') && str_contains($sql, 'is_hidden'))->count())->toBeLessThanOrEqual(2)
         ->and($queries->filter(fn (string $sql): bool => str_contains($sql, 'planned_transactions'))->count())->toBeLessThanOrEqual(1);
 });
+
+test('a draft with an effective date does not count earlier transactions', function () {
+    testerTxn($this->user, $this->account, ['post_date' => CarbonImmutable::parse('2026-02-28')]);
+    $onDate = testerTxn($this->user, $this->account, ['post_date' => CarbonImmutable::parse('2026-03-01')]);
+
+    $result = $this->tester->test($this->user->id, testerTrigger(), true, testerCategoryAction($this->category->id), '2026-03-01');
+
+    expect($result->totalMatches())->toBe(1)
+        ->and(testerIds($result->notYetApplied))->toBe([$onDate->id]);
+});
