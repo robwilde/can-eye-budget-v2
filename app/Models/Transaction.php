@@ -58,6 +58,8 @@ use Illuminate\Support\Facades\DB;
  * @property TransferLinkSource|null $transfer_link_source
  * @property int|null $suggested_pair_id
  * @property int|null $planned_transaction_id
+ * @property int|null $pdf_import_id
+ * @property int|null $reconciled_statement_id
  * @property int|null $parent_transaction_id
  * @property int|null $split_parent_id
  * @property int|null $folded_into_transaction_id
@@ -161,6 +163,8 @@ final class Transaction extends Model
         'transfer_link_source',
         'suggested_pair_id',
         'planned_transaction_id',
+        'pdf_import_id',
+        'reconciled_statement_id',
         'parent_transaction_id',
         'split_parent_id',
         'folded_into_transaction_id',

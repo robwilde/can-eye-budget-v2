@@ -10,6 +10,7 @@ enum TransactionSource: string
     case Planned = 'planned';
     case Csv = 'csv';
     case Redbark = 'redbark';
+    case Pdf = 'pdf';
 
     /**
      * Bank-statement sources eligible for pattern analysis (primary account,
@@ -20,7 +21,7 @@ enum TransactionSource: string
      */
     public static function forAnalysis(): array
     {
-        return [self::Csv, self::Redbark];
+        return [self::Csv, self::Redbark, self::Pdf];
     }
 
     /**
@@ -42,6 +43,7 @@ enum TransactionSource: string
             self::Planned => 'Planned',
             self::Csv => 'CSV import',
             self::Redbark => 'Redbark',
+            self::Pdf => 'PDF import',
         };
     }
 
@@ -53,7 +55,7 @@ enum TransactionSource: string
     {
         return match ($this) {
             self::Redbark => true,
-            self::Manual, self::Planned, self::Csv => false,
+            self::Manual, self::Planned, self::Csv, self::Pdf => false,
         };
     }
 }

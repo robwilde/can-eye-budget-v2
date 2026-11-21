@@ -7,6 +7,7 @@ use App\Http\Controllers\TransactionAttachmentController;
 use App\Http\Middleware\EnsureGoalsEnabled;
 use App\Http\Middleware\EnsureInsightsEnabled;
 use App\Livewire\AccountShow;
+use App\Livewire\PdfImportReview;
 use App\Livewire\ReconcileStatement;
 use Illuminate\Support\Facades\Route;
 
@@ -37,6 +38,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('insights', 'insights')->middleware(EnsureInsightsEnabled::class)->name('insights');
     // Transient page reached from the providers panel, so deliberately not in the sidebar.
     Route::view('redbark/setup', 'redbark-setup')->name('redbark.setup');
+    Route::get('imports/pdf/{pdfImport}', PdfImportReview::class)->whereNumber('pdfImport')->name('imports.pdf.review');
     Route::get('accounts/{account}/reconcile', ReconcileStatement::class)->name('accounts.reconcile');
     Route::get('accounts/{account}', AccountShow::class)->whereNumber('account')->name('accounts.show');
 });

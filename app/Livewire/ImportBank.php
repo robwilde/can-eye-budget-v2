@@ -6,6 +6,7 @@ namespace App\Livewire;
 
 use App\Enums\BankImportStatus;
 use App\Enums\ImportSource;
+use App\Exceptions\Statement\PdfImportRefused;
 use App\Jobs\ImportCsvTransactionsJob;
 use App\Livewire\Attributes\NotAudited;
 use App\Livewire\Concerns\ReportsFailure;
@@ -15,6 +16,7 @@ use App\Models\Transaction;
 use App\Services\CsvImport\CsvColumnMapper;
 use App\Services\CsvImport\CsvParserService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
+use App\Services\Statement\PdfImportStarter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -37,6 +39,8 @@ final class ImportBank extends Component
 
     #[Validate('nullable|file|mimes:csv,txt|max:10240')]
     public ?TemporaryUploadedFile $file = null;
+
+    public ?TemporaryUploadedFile $pdfFile = null;
 
     public ?int $accountId = null;
 
@@ -65,6 +69,35 @@ final class ImportBank extends Component
     public array $mapping = [];
 
     public ?int $bankImportId = null;
+
+    public static function maxPdfKilobytes(): int
+    {
+        return min(25600, intdiv((int) config('services.statement_ai.max_pdf_bytes'), 1024));
+    }
+
+    /**
+     * Files a statement PDF in the vault and queues its AI extraction, then opens the review.
+     */
+    public function startPdfImport(PdfImportStarter $starter): void
+    {
+        $this->clearFailure();
+
+        $this->validate(['pdfFile' => ['required', 'file', 'mimes:pdf', 'max:'.self::maxPdfKilobytes()]]);
+
+        $account = $this->accountChoice === 'existing' && $this->accountId !== null
+            ? Account::query()->where('user_id', auth()->id())->find($this->accountId)
+            : null;
+
+        try {
+            $import = $starter->start(auth()->user(), $this->pdfFile, $account);
+        } catch (PdfImportRefused $exception) {
+            $this->fail($exception->getMessage());
+
+            return;
+        }
+
+        $this->redirectRoute('imports.pdf.review', ['pdfImport' => $import->id], navigate: true);
+    }
 
     /**
      * @throws SyntaxError
