@@ -12,6 +12,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
+use App\Support\Rules\RuleTriggers;
 use App\Support\Transactions\MerchantMatchValue;
 use BackedEnum;
 use Closure;
@@ -362,8 +363,8 @@ final class CategoryRuleMiner
         $values = [];
 
         foreach ($activeRules as $rule) {
-            foreach ($rule->triggers as $trigger) {
-                $value = $trigger['value'] ?? '';
+            foreach (RuleTriggers::flatten($rule->triggers) as $trigger) {
+                $value = is_scalar($trigger['value'] ?? null) ? (string) $trigger['value'] : '';
 
                 if ($value !== '') {
                     $values[mb_strtolower($value)] = true;
