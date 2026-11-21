@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property bool $strict_mode
  * @property bool $is_auto_apply
  * @property bool $is_active
+ * @property CarbonImmutable|null $effective_from
  * @property int $order
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
@@ -42,6 +43,7 @@ final class UserRule extends Model
         'strict_mode',
         'is_auto_apply',
         'is_active',
+        'effective_from',
         'order',
     ];
 
@@ -84,6 +86,7 @@ final class UserRule extends Model
             'strict_mode' => 'boolean',
             'is_auto_apply' => 'boolean',
             'is_active' => 'boolean',
+            'effective_from' => 'date',
         ];
     }
 }
