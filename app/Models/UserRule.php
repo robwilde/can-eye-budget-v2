@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\RuleActionType;
 use App\Enums\RuleTriggerField;
 use App\Enums\RuleTriggerOperator;
 use App\Support\Rules\RuleTriggers;
@@ -49,6 +50,11 @@ final class UserRule extends Model
         'effective_from',
         'order',
     ];
+
+    public function hasAction(RuleActionType $type): bool
+    {
+        return array_any($this->actions, static fn (array $action): bool => ($action['type'] ?? null) === $type->value);
+    }
 
     /**
      * The first condition and how many more follow, whether top-level or inside the group.

@@ -10,7 +10,9 @@ use App\Models\PipelineRun;
 use App\Models\User;
 use App\Services\TransactionAnalysisPipeline;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
+use Illuminate\Pipeline\Pipeline;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 test('job implements ShouldBeUnique with user-scoped uniqueId', function () {
@@ -38,7 +40,8 @@ test('job has correct tries and timeout configuration', function () {
     $user = User::factory()->create();
     $job = new RunTransactionAnalysisJob($user);
 
-    expect($job->tries)->toBe(1)
+    expect($job->tries)->toBe(30)
+        ->and($job->maxExceptions)->toBe(1)
         ->and($job->timeout)->toBe(300);
 });
 
@@ -78,4 +81,23 @@ test('failed method logs the exception with user context', function () {
         ));
 
     $job->failed($exception);
+});
+
+test('an overlap with another job for the same user releases the job instead of failing it', function () {
+    $user = User::factory()->create();
+    $job = new RunTransactionAnalysisJob($user)->withFakeQueueInteractions();
+    $lock = Cache::lock('laravel-queue-overlap:'.RunTransactionAnalysisJob::class.':analysis-user-'.$user->id, 60);
+    expect($lock->get())->toBeTrue();
+    $ran = false;
+
+    new Pipeline(app())->send($job)->through($job->middleware())->then(function () use (&$ran): void {
+        $ran = true;
+    });
+
+    $lock->release();
+
+    expect($ran)->toBeFalse()
+        ->and($job->tries)->toBeGreaterThan(1);
+    $job->assertReleased(delay: 30);
+    $job->assertNotFailed();
 });

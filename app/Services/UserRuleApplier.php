@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\DTOs\RuleApplyResult;
 use App\Models\Transaction;
 use App\Models\UserRule;
+use App\Support\Rules\RuleRunScope;
 use Illuminate\Database\Eloquent\Builder;
 use Throwable;
 
@@ -57,16 +59,35 @@ final readonly class UserRuleApplier
      */
     public function applyToHistory(UserRule $rule, bool $overrideLocks = false, ?RuleFieldClaims $claims = null): int
     {
+        return $this->apply($rule, $overrideLocks, $claims)->handled;
+    }
+
+    /**
+     * As applyToHistory(), but reports how many rows the rule matched and how many it changed.
+     *
+     * @param  bool  $overrideLocks  see applyToHistory()
+     * @param  RuleFieldClaims|null  $claims  see applyToHistory()
+     * @param  RuleRunScope|null  $scope  Rows a higher stop-processing group matched are skipped, and
+     *                                    this rule's matches are noted for the groups below.
+     */
+    public function apply(UserRule $rule, bool $overrideLocks = false, ?RuleFieldClaims $claims = null, ?RuleRunScope $scope = null): RuleApplyResult
+    {
         $applied = 0;
+        $processed = 0;
+        $modified = 0;
 
         // Stream by id rather than loading the whole history into memory. Keying
         // on the (unchanging) id keeps paging stable even though we mutate rows.
         $this->eligible($rule->user_id)
             ->lazyById()
-            ->each(function (Transaction $transaction) use ($rule, $overrideLocks, $claims, &$applied): void {
-                if (! $this->evaluator->matches($transaction, $rule)) {
+            ->each(function (Transaction $transaction) use ($rule, $overrideLocks, $claims, $scope, &$applied, &$processed, &$modified): void {
+                if ($scope?->isStopped($transaction->id) || ! $this->evaluator->matches($transaction, $rule)) {
                     return;
                 }
+
+                $scope?->noteMatch($transaction->id);
+
+                $processed++;
 
                 // Write exactly the matched row. The planned-group fan-out
                 // would rewrite siblings the rule does not match, including
@@ -75,6 +96,10 @@ final readonly class UserRuleApplier
                 $transaction->propagateCategoryChange = false;
 
                 $actions = $claims?->unclaimed($transaction->id, $rule->actions) ?? $rule->actions;
+
+                if ($actions !== [] && $this->executor->wouldChange($transaction, $actions, null, $overrideLocks)) {
+                    $modified++;
+                }
 
                 try {
                     if ($actions !== [] && $this->executor->execute($transaction, $actions, overrideLocks: $overrideLocks)) {
@@ -89,6 +114,21 @@ final readonly class UserRuleApplier
                 $claims?->claim($transaction->id, $rule->actions, fn (array $action): bool => $this->executor->canAct($transaction, $action));
             });
 
-        return $applied;
+        return new RuleApplyResult(processed: $processed, modified: $modified, handled: $applied);
+    }
+
+    /**
+     * Notes the rows a rule matches without acting on them, for a suggestion-only rule: it neither
+     * applies nor claims in a sync, but a match still counts when its group stops processing.
+     */
+    public function observe(UserRule $rule, RuleRunScope $scope): void
+    {
+        $this->eligible($rule->user_id)
+            ->lazyById()
+            ->each(function (Transaction $transaction) use ($rule, $scope): void {
+                if (! $scope->isStopped($transaction->id) && $this->evaluator->matches($transaction, $rule)) {
+                    $scope->noteMatch($transaction->id);
+                }
+            });
     }
 }
