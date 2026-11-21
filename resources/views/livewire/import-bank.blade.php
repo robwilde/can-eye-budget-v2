@@ -151,6 +151,49 @@
             </div>
         </x-cib.card>
 
+        @if($format !== null)
+            <x-cib.card data-testid="import-bank-format">
+                <flux:heading size="lg">{{ __('How is this file written?') }}</flux:heading>
+                <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <flux:select wire:model.live="mapping.date_format" :label="__('Date format')" data-testid="import-bank-date-format">
+                        @foreach($dateFormatOptions === [] ? array_keys(\App\DTOs\CsvFormat::DATE_FORMATS) : $dateFormatOptions as $option)
+                            <option value="{{ $option }}">{{ \App\DTOs\CsvFormat::DATE_FORMATS[$option] ?? $option }}</option>
+                        @endforeach
+                        @if($dateFormatOptions !== [] && ! in_array($format->dateFormat, $dateFormatOptions, true))
+                            <option value="{{ $format->dateFormat }}">{{ \App\DTOs\CsvFormat::DATE_FORMATS[$format->dateFormat] ?? $format->dateFormat }} ({{ __('does not fit this file') }})</option>
+                        @endif
+                    </flux:select>
+                    <flux:select wire:model.live="mapping.number_format" :label="__('Number format')" data-testid="import-bank-number-format">
+                        @foreach(\App\Enums\CsvNumberFormat::cases() as $case)
+                            <option value="{{ $case->value }}">{{ $case->label() }}</option>
+                        @endforeach
+                    </flux:select>
+                    <flux:select wire:model.live="mapping.sign_convention" :label="__('Money in and out')" data-testid="import-bank-sign-convention">
+                        @foreach(\App\Enums\CsvSignConvention::cases() as $case)
+                            <option value="{{ $case->value }}">{{ $case->label() }}</option>
+                        @endforeach
+                    </flux:select>
+                    <flux:select wire:model.live="mapping.delimiter" :label="__('Delimiter')" data-testid="import-bank-delimiter">
+                        <option value=",">{{ __('Comma') }}</option>
+                        <option value=";">{{ __('Semicolon') }}</option>
+                    </flux:select>
+                    <flux:input wire:model.live.debounce.500ms="mapping.skip_rows" type="number" min="0" :label="__('Rows to skip before the headers')" data-testid="import-bank-skip-rows"/>
+                    @if($format->signConvention === \App\Enums\CsvSignConvention::TypeColumn)
+                        <flux:select wire:model.live="mapping.type" :label="__('Type column')" data-testid="import-bank-type-column">
+                            <option value="">— unmapped —</option>
+                            @foreach($headers as $header)
+                                <option value="{{ $header }}">{{ $header }}</option>
+                            @endforeach
+                        </flux:select>
+                        <flux:input wire:model.live.debounce.500ms="mapping.type_inflow_value" :label="__('Value meaning money in')" data-testid="import-bank-inflow-value"/>
+                    @endif
+                </div>
+                @error('mapping.skip_rows') <flux:text class="mt-2 text-sm text-cib-red-600" data-testid="import-bank-format-error">{{ $message }}</flux:text> @enderror
+                @error('mapping.date_format') <flux:text class="mt-2 text-sm text-cib-red-600" data-testid="import-bank-format-error">{{ $message }}</flux:text> @enderror
+                @error('mapping.type') <flux:text class="mt-2 text-sm text-cib-red-600">{{ $message }}</flux:text> @enderror
+            </x-cib.card>
+        @endif
+
         @if($summary)
             <x-cib.card>
                 <flux:heading size="lg">Preview summary</flux:heading>
@@ -163,14 +206,22 @@
                     @endif
                     <x-cib.stat-pill tone="posted">−${{ number_format($summary->totalDebits / 100, 2) }} debits</x-cib.stat-pill>
                     <x-cib.stat-pill tone="income">+${{ number_format($summary->totalCredits / 100, 2) }} credits</x-cib.stat-pill>
-                    @if($summary->duplicateCount > 0)
-                        <x-cib.stat-pill tone="planned">{{ $summary->duplicateCount }} in-source duplicates</x-cib.stat-pill>
-                    @endif
                 </div>
                 @if($summary->errorRows !== [])
-                    <flux:text size="sm" class="mt-3 text-cib-red-600">
-                        {{ count($summary->errorRows) }} rows could not be parsed and will be skipped.
-                    </flux:text>
+                    @if($format !== null)
+                        <flux:text size="sm" class="mt-3 text-cib-red-600" data-testid="import-bank-invalid-rows">
+                            {{ trans_choice(':count row is invalid and blocks the import.|:count rows are invalid and block the import.', count($summary->errorRows)) }}
+                        </flux:text>
+                        <ul class="mt-1 list-disc pl-5 text-xs text-cib-red-600">
+                            @foreach(array_slice($summary->errorRows, 0, 5) as $errorRow)
+                                <li>{{ __('Row :row', ['row' => $errorRow['row']]) }}: {{ $errorRow['error'] }}</li>
+                            @endforeach
+                        </ul>
+                    @else
+                        <flux:text size="sm" class="mt-3 text-cib-red-600">
+                            {{ count($summary->errorRows) }} rows could not be parsed and will be skipped.
+                        </flux:text>
+                    @endif
                 @endif
             </x-cib.card>
         @endif
