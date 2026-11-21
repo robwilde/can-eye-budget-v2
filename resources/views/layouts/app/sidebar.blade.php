@@ -44,6 +44,9 @@
                                :class="$navItem">
                 {{ __('Import Bank') }}
             </flux:sidebar.item>
+            <flux:sidebar.item icon="document-text" :href="route('statements')" :current="request()->routeIs('statements')" wire:navigate :class="$navItem">
+                {{ __('Statements') }}
+            </flux:sidebar.item>
             <flux:sidebar.item icon="funnel" :href="route('rules')" :current="request()->routeIs('rules')" wire:navigate :class="$navItem">
                 {{ __('Rules') }}
                 <livewire:bnpl-pending-badge />

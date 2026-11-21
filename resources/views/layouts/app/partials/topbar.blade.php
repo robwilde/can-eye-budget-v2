@@ -6,6 +6,7 @@
         'accounts' => ['Accounts', 'Connected banks'],
         'connect-bank' => ['Connect', 'Link your bank'],
         'import-bank' => ['Import', 'Upload a CSV statement'],
+        'statements' => ['Statements', 'Your statement vault'],
         'rules' => ['Rules', 'Automations'],
         'tags' => ['Tags', 'Organise transactions'],
         'merchants' => ['Merchants', 'Where you spend'],
