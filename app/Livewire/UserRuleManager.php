@@ -21,10 +21,12 @@ use App\Models\Tag;
 use App\Models\User;
 use App\Models\UserRule;
 use App\Models\UserRuleGroup;
+use App\Services\RuleApplyPreview;
 use App\Services\RuleDefinitionExporter;
 use App\Services\RuleDefinitionImporter;
 use App\Services\RuleEmailBaseline;
 use App\Services\RuleFormRules;
+use App\Services\RuleRunHistory;
 use App\Services\RuleTester;
 use App\Support\Rules\RuleAiCategorisation;
 use App\Support\Rules\RuleTriggers;
@@ -115,6 +117,15 @@ final class UserRuleManager extends Component
     /** @var list<string> */
     #[Locked]
     public array $importErrors = [];
+
+    public bool $showApplyModal = false;
+
+    #[Locked]
+    public ?int $applyingRuleId = null;
+
+    /** @var array{rule: string|null, matches: int, would_change: int, rules_first: int, suggest_only_first: int, transactions: int, rules: int, skipped: list<string>}|null */
+    #[Locked]
+    public ?array $applyPreview = null;
 
     public bool $showDeleteRuleModal = false;
 
@@ -594,6 +605,73 @@ final class UserRuleManager extends Component
     }
 
     /**
+     * Opens the apply confirmation for one rule with the counts it would work on. Counting only
+     * reads, so it is not audited; applyRule() is what is audited.
+     */
+    #[NotAudited]
+    public function confirmApplyRule(int $ruleId, RuleApplyPreview $preview): void
+    {
+        $user = auth()->user();
+
+        abort_unless($user instanceof User, 403);
+
+        $rule = UserRule::where('id', $ruleId)->where('user_id', $user->id)->first();
+
+        if (! $rule) {
+            return;
+        }
+
+        $this->applyingRuleId = $rule->id;
+        $this->applyPreview = [
+            'rule' => $rule->name,
+            'transactions' => 0,
+            'rules' => 0,
+            'skipped' => [],
+            ...$preview->forRule($user, $rule),
+        ];
+        $this->showApplyModal = true;
+    }
+
+    /**
+     * Opens the "Apply all" confirmation with the number of different transactions the rules
+     * would work on.
+     */
+    #[NotAudited]
+    public function confirmApplyAll(RuleApplyPreview $preview): void
+    {
+        $user = auth()->user();
+
+        abort_unless($user instanceof User, 403);
+
+        $this->applyingRuleId = null;
+        $this->applyPreview = [
+            'rule' => null,
+            'matches' => 0,
+            'would_change' => 0,
+            'rules_first' => 0,
+            'suggest_only_first' => 0,
+            ...$preview->forAll($user),
+        ];
+        $this->showApplyModal = true;
+    }
+
+    /**
+     * Queues every active auto-apply rule, in order, in one run.
+     */
+    public function applyAllRules(): void
+    {
+        $user = auth()->user();
+
+        abort_unless($user instanceof User, 403);
+
+        ApplyUserRulesJob::dispatch($user);
+
+        $this->closeApplyModal();
+
+        Flux::toast(text: 'Applying all rules in the background', variant: 'success');
+    }
+
+    /**
      * Queues the apply: the active rules above this one run first, then this rule, which a queued
      * job also switches on. Nothing is changed in the request.
      */
@@ -612,6 +690,8 @@ final class UserRuleManager extends Component
         }
 
         ApplyUserRulesJob::dispatch($user, $rule->id);
+
+        $this->closeApplyModal();
 
         Flux::toast(text: 'Applying in the background — the rules above run first', variant: 'success');
     }
@@ -715,6 +795,7 @@ final class UserRuleManager extends Component
                 ->when($matchesSearch !== null, fn (Builder $q) => $q->whereHas('rules', $matchesSearch))
                 ->with(['rules' => fn ($q) => $q->when($matchesSearch !== null, $matchesSearch)->ordered()])
                 ->get(),
+            'runHistory' => app(RuleRunHistory::class)->forUser((int) auth()->id()),
             'categories' => Category::visibleSortedByFullPath((int) auth()->id()),
             'userTags' => Tag::where('user_id', auth()->id())->orderBy('name')->get(['id', 'name']),
             'actionTypes' => $this->offeredActionTypes(),
@@ -824,6 +905,13 @@ final class UserRuleManager extends Component
     {
         $this->reset('importFile', 'importSummary', 'importErrors');
         $this->resetValidation();
+    }
+
+    private function closeApplyModal(): void
+    {
+        $this->showApplyModal = false;
+        $this->applyingRuleId = null;
+        $this->applyPreview = null;
     }
 
     private function resetGroupForm(): void

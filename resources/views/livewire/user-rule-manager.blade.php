@@ -22,6 +22,7 @@
             </div>
             <div class="flex shrink-0 flex-wrap items-center gap-2">
                 <flux:button size="sm" icon="play" wire:click="runRules" :disabled="! $hasActiveRules">Run rules now</flux:button>
+                <flux:button size="sm" icon="bolt" wire:click="confirmApplyAll" :disabled="! $hasActiveRules" data-testid="rules-apply-all">Apply all</flux:button>
                 @if($groups->isNotEmpty() || $ruleCount > 0)
                     <flux:button size="sm" icon="arrow-down-tray" wire:click="exportRules" data-testid="rules-export">Export</flux:button>
                 @endif
@@ -121,7 +122,7 @@
                                 <div class="px-2">
                                     <flux:switch label="Auto-apply" :checked="$rule->is_auto_apply" wire:click="toggleRuleAutoApply({{ $rule->id }})" />
                                 </div>
-                                <flux:button variant="ghost" size="sm" wire:click="applyRule({{ $rule->id }})" data-testid="rule-apply-now">
+                                <flux:button variant="ghost" size="sm" wire:click="confirmApplyRule({{ $rule->id }})" data-testid="rule-apply-now">
                                     Apply now
                                 </flux:button>
                                 <flux:button variant="ghost" size="sm" wire:click="openEditRuleModal({{ $rule->id }})">
@@ -467,6 +468,94 @@
                 <flux:button variant="primary" wire:click="importRules" wire:loading.attr="disabled" data-testid="rules-import-submit">Import</flux:button>
             </div>
         </div>
+    </flux:modal>
+
+    {{-- Run history --}}
+    <x-cib.card data-testid="rules-run-history">
+        <div @if($runHistory !== [] && $runHistory[0]['is_running']) wire:poll.3s @endif>
+        <flux:heading size="md">Run history</flux:heading>
+        <flux:text size="sm" class="mt-1 text-zinc-500">Your recent Apply now and Apply all runs. Blocked is what a rule matched but did not change.</flux:text>
+
+        @forelse($runHistory as $run)
+            <div class="mt-4 border-t border-zinc-200 pt-3 dark:border-zinc-700" wire:key="run-{{ $run['id'] }}">
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                    <span class="font-medium">{{ $run['started_at']->format('j M Y H:i') }}</span>
+                    <flux:badge size="sm">{{ $run['trigger'] }}</flux:badge>
+                    <flux:badge size="sm" :color="$run['status'] === 'Completed' ? 'green' : 'amber'">{{ $run['status'] }}</flux:badge>
+                    @if($run['queued_at'])
+                        <span class="text-zinc-500">Queued {{ $run['queued_at']->format('H:i:s') }}</span>
+                    @endif
+                </div>
+                <table class="mt-2 w-full text-left text-sm">
+                    <thead class="text-zinc-500">
+                        <tr><th class="font-normal">Rule</th><th class="font-normal">Processed</th><th class="font-normal">Modified</th><th class="font-normal">Blocked</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach($run['rules'] as $line)
+                            <tr>
+                                <td>{{ $line['name'] }}</td>
+                                @if($line['failed'])
+                                    <td colspan="3" class="text-red-600">Failed</td>
+                                @else
+                                    <td>{{ $line['processed'] }}</td>
+                                    <td>{{ $line['modified'] }}</td>
+                                    <td data-testid="run-blocked">{{ $line['blocked'] }}</td>
+                                @endif
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @empty
+            <flux:text size="sm" class="mt-3 text-zinc-500" data-testid="rules-run-history-empty">No runs yet. Apply now and Apply all show up here.</flux:text>
+        @endforelse
+        </div>
+    </x-cib.card>
+
+    {{-- Apply Confirmation Modal --}}
+    <flux:modal wire:model="showApplyModal" class="max-w-md">
+        @if($applyPreview !== null)
+            <div class="space-y-4" data-testid="rules-apply-modal">
+                @if($applyPreview['rule'] !== null)
+                    <flux:heading size="lg">Apply {{ $applyPreview['rule'] }}</flux:heading>
+                    <flux:text data-testid="rules-apply-count">
+                        This applies to {{ $applyPreview['matches'] }} {{ Str::plural('transaction', $applyPreview['matches']) }}; {{ $applyPreview['would_change'] }} would change.
+                    </flux:text>
+                    <flux:text data-testid="rules-apply-first">
+                        @if($applyPreview['rules_first'] === 0)
+                            No other rules run first.
+                        @else
+                            {{ $applyPreview['rules_first'] }} active {{ Str::plural('rule', $applyPreview['rules_first']) }} run first.
+                            @if($applyPreview['suggest_only_first'] > 0)
+                                {{ $applyPreview['suggest_only_first'] }} of them only suggest, so they change nothing.
+                            @endif
+                        @endif
+                        If this rule is off, applying it switches it on.
+                    </flux:text>
+                @else
+                    <flux:heading size="lg">Apply all rules</flux:heading>
+                    <flux:text data-testid="rules-apply-count">
+                        {{ $applyPreview['rules'] }} auto-apply {{ Str::plural('rule', $applyPreview['rules']) }} would work on {{ $applyPreview['transactions'] }} {{ Str::plural('transaction', $applyPreview['transactions']) }}. A transaction several rules match is counted once.
+                    </flux:text>
+                    @if($applyPreview['skipped'] !== [])
+                        <flux:callout variant="warning" icon="exclamation-triangle" data-testid="rules-apply-skipped">
+                            <flux:callout.text>
+                                Counting stopped before these rules were fully checked: {{ implode(', ', $applyPreview['skipped']) }}. The number above covers only the transactions checked in time. They still run when you apply.
+                            </flux:callout.text>
+                        </flux:callout>
+                    @endif
+                @endif
+
+                <div class="flex justify-end gap-2">
+                    <flux:button variant="ghost" wire:click="$set('showApplyModal', false)">Cancel</flux:button>
+                    @if($applyPreview['rule'] !== null)
+                        <flux:button variant="primary" wire:click="applyRule({{ $applyingRuleId }})" data-testid="rules-apply-confirm">Apply</flux:button>
+                    @else
+                        <flux:button variant="primary" wire:click="applyAllRules" data-testid="rules-apply-all-confirm">Apply all</flux:button>
+                    @endif
+                </div>
+            </div>
+        @endif
     </flux:modal>
 
     {{-- Delete All Rules Confirmation Modal --}}

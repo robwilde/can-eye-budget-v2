@@ -12,11 +12,11 @@ use App\Models\PipelineAuditEntry;
 use App\Models\PipelineRun;
 use App\Models\User;
 use App\Models\UserRule;
-use App\Models\UserRuleGroup;
 use App\Services\RuleEmailBaseline;
 use App\Services\RuleFieldClaims;
 use App\Services\UserRuleApplier;
 use App\Support\Audit\AttributeJobToUser;
+use App\Support\Rules\RuleRunOrder;
 use App\Support\Rules\RuleRunScope;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -50,7 +50,12 @@ final class ApplyUserRulesJob implements ShouldQueue
 
     public int $timeout = 600;
 
-    public function __construct(public readonly User $user, public readonly ?int $ruleId = null) {}
+    public readonly int $queuedAt;
+
+    public function __construct(public readonly User $user, public readonly ?int $ruleId = null)
+    {
+        $this->queuedAt = now()->getTimestamp();
+    }
 
     /** @return array<int, object> */
     public function middleware(): array
@@ -84,6 +89,13 @@ final class ApplyUserRulesJob implements ShouldQueue
             'started_at' => now(),
         ]);
 
+        PipelineAuditEntry::create([
+            'pipeline_run_id' => $run->id,
+            'stage' => self::STAGE_KEY,
+            'action' => 'queued',
+            'metadata' => ['queued_at' => $this->queuedAt, 'rule_id' => $target?->id],
+        ]);
+
         if ($target instanceof UserRule && ! $target->is_active) {
             try {
                 $this->switchOn($target);
@@ -105,7 +117,7 @@ final class ApplyUserRulesJob implements ShouldQueue
         $failed = [];
         $targetFailed = false;
 
-        $rules = $this->rulesToRun($target);
+        $rules = RuleRunOrder::forUser($this->user->id, $target);
 
         foreach ($rules as $rule) {
             $isTarget = $target instanceof UserRule && $rule->id === $target->id;
@@ -168,43 +180,6 @@ final class ApplyUserRulesJob implements ShouldQueue
 
             $rule->setRawAttributes($locked->getAttributes(), true);
         });
-    }
-
-    /**
-     * The rules to run, in priority order: every active rule above the target in an active group,
-     * then the target; or every active rule when there is no target. Rules other than the target
-     * act only when auto-apply, as in a sync; the rest are only observed for stop-processing.
-     *
-     * @return list<UserRule>
-     */
-    private function rulesToRun(?UserRule $target): array
-    {
-        $rules = [];
-
-        $groups = UserRuleGroup::query()
-            ->where('user_id', $this->user->id)
-            ->ordered()
-            ->with(['rules' => fn ($query) => $query->ordered()->orderBy('id')])
-            ->orderBy('id')
-            ->get();
-
-        foreach ($groups as $group) {
-            foreach ($group->rules as $rule) {
-                if ($target instanceof UserRule && $rule->id === $target->id) {
-                    $rule->setRelation('group', $group);
-                    $rules[] = $rule;
-
-                    return $rules;
-                }
-
-                if ($group->is_active && $rule->is_active) {
-                    $rule->setRelation('group', $group);
-                    $rules[] = $rule;
-                }
-            }
-        }
-
-        return $rules;
     }
 
     /**
