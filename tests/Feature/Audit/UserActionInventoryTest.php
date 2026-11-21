@@ -109,6 +109,8 @@ test('every callable Livewire method, in class and view-based components, is aud
         'App\\Livewire\\ImportBank::pollStatus',
         'App\\Livewire\\InsightFeed::pollRefresh',
         'App\\Livewire\\TransactionList::pollMerchantBrands',
+        'App\\Livewire\\UserRuleManager::confirmApplyAll',
+        'App\\Livewire\\UserRuleManager::confirmApplyRule',
         'App\\Livewire\\UserRuleManager::testRule',
     ]);
 });
