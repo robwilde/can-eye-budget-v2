@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Casts\MoneyCast;
 use App\Enums\StatementFileType;
 use App\Enums\StatementReviewStatus;
+use App\Exceptions\Statement\StatementHasPdfImports;
 use Carbon\CarbonImmutable;
 use Database\Factories\StatementFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -129,6 +130,12 @@ final class Statement extends Model
         return $this->belongsTo(Account::class, 'suggested_account_id');
     }
 
+    /** @return HasMany<PdfImport, $this> */
+    public function pdfImports(): HasMany
+    {
+        return $this->hasMany(PdfImport::class);
+    }
+
     /** @return HasMany<StatementReconciliation, $this> */
     public function reconciliations(): HasMany
     {
@@ -165,6 +172,12 @@ final class Statement extends Model
     {
         self::saving(static function (self $statement): void {
             $statement->syncReviewStatus();
+        });
+
+        self::deleting(static function (self $statement): void {
+            if ($statement->pdfImports()->exists()) {
+                throw new StatementHasPdfImports('This statement still has PDF imports.');
+            }
         });
 
         self::deleted(static function (self $statement): void {
