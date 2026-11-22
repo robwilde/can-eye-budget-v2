@@ -913,6 +913,10 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
         $existing = Transaction::withTrashed()->where('redbark_id', $id)->first();
 
         if ($existing !== null) {
+            if ($this->belongsToAnotherLinkedAccount($existing, $redbarkAccount)) {
+                return 'skipped';
+            }
+
             if ($existing->trashed()) {
                 // Folded fee: the parent purchase already carries this amount.
                 if ($existing->folded_into_transaction_id !== null) {
@@ -1158,5 +1162,18 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
         $trimmed = mb_trim($value);
 
         return $trimmed === '' ? null : $trimmed;
+    }
+
+    /**
+     * Another connection of the same user can report the same bank transaction. Once the row sits
+     * on an account that another Redbark account feeds, this feed leaves it where it is.
+     */
+    private function belongsToAnotherLinkedAccount(Transaction $existing, RedbarkAccount $redbarkAccount): bool
+    {
+        return $existing->account_id !== $redbarkAccount->account_id
+            && RedbarkAccount::query()
+                ->where('account_id', $existing->account_id)
+                ->whereKeyNot($redbarkAccount->id)
+                ->exists();
     }
 }
