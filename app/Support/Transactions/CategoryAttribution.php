@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support\Transactions;
 
+use App\Enums\TransactionStatus;
 use App\Models\Transaction;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
@@ -26,12 +27,13 @@ use Illuminate\Support\Facades\DB;
  */
 final class CategoryAttribution
 {
-    public static function atoms(int $userId, bool $forMoney = false, bool $forReports = false): Builder
+    public static function atoms(int $userId, bool $forMoney = false, bool $forReports = false, bool $postedOnly = false): Builder
     {
         $unsplit = Transaction::query()
             ->current()
             ->where('transactions.user_id', $userId)
             ->when($forMoney, fn ($q) => $q->where('transactions.excluded', false))
+            ->when($postedOnly, fn ($q) => $q->where('transactions.status', TransactionStatus::Posted))
             ->toBase()
             ->whereNotExists(static function (Builder $query): void {
                 $query->select(DB::raw('1'))
@@ -55,6 +57,7 @@ final class CategoryAttribution
             ->current()
             ->where('transactions.user_id', $userId)
             ->when($forMoney, fn ($q) => $q->where('transactions.excluded', false))
+            ->when($postedOnly, fn ($q) => $q->where('transactions.status', TransactionStatus::Posted))
             ->toBase()
             ->join('transaction_splits as s', 's.transaction_id', '=', 'transactions.id')
             ->when($forMoney, fn (Builder $q): Builder => $q->whereNotExists(self::untrackedAccount(...)))
@@ -80,10 +83,12 @@ final class CategoryAttribution
      *                          their lists.
      * @param  bool  $forReports  Reports also leave out rows on accounts the user flagged
      *                            exclude-from-reports; lists and counts never pass it.
+     * @param  bool  $postedOnly  Report totals also leave out pending rows until they post;
+     *                            budget spend and lists keep them.
      */
-    public static function query(int $userId, bool $forMoney = false, bool $forReports = false): Builder
+    public static function query(int $userId, bool $forMoney = false, bool $forReports = false, bool $postedOnly = false): Builder
     {
-        return DB::query()->fromSub(self::atoms($userId, $forMoney, $forReports), 'atoms');
+        return DB::query()->fromSub(self::atoms($userId, $forMoney, $forReports, $postedOnly), 'atoms');
     }
 
     private static function excludedFromReportsAccount(Builder $query): void

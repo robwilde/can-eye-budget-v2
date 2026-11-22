@@ -74,7 +74,7 @@ final class CountableFlow
     {
         $transferCategoryIds = self::transferCategoryIds($userId);
 
-        return CategoryAttribution::query($userId, forMoney: true, forReports: true)
+        return CategoryAttribution::query($userId, forMoney: true, forReports: true, postedOnly: true)
             ->where(fn (Builder $counted): Builder => $counted
                 ->where(fn (Builder $ordinary): Builder => $ordinary
                     ->whereNull('transfer_pair_id')
