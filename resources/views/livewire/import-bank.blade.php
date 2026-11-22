@@ -207,7 +207,13 @@
                     <x-cib.stat-pill tone="posted">−${{ number_format($summary->totalDebits / 100, 2) }} debits</x-cib.stat-pill>
                     <x-cib.stat-pill tone="income">+${{ number_format($summary->totalCredits / 100, 2) }} credits</x-cib.stat-pill>
                 </div>
-                @if($summary->errorRows !== [])
+                @if($storedInvalid !== null)
+                    @if($storedInvalid > 0)
+                        <flux:text size="sm" class="mt-3 text-cib-red-600" data-testid="import-bank-invalid-rows">
+                            {{ trans_choice(':count row is invalid and blocks the import.|:count rows are invalid and block the import.', $storedInvalid) }}
+                        </flux:text>
+                    @endif
+                @elseif($summary->errorRows !== [])
                     @if($format !== null)
                         <flux:text size="sm" class="mt-3 text-cib-red-600" data-testid="import-bank-invalid-rows">
                             {{ trans_choice(':count row is invalid and blocks the import.|:count rows are invalid and block the import.', count($summary->errorRows)) }}
@@ -259,7 +265,7 @@
             </x-cib.card>
         @endif
 
-        @if(! empty($previewRows))
+        @if(! empty($previewRows) && $clean === null)
             <x-cib.card>
                 <flux:heading size="lg">First 10 rows</flux:heading>
                 <div class="mt-3 overflow-x-auto">
@@ -287,8 +293,105 @@
             </x-cib.card>
         @endif
 
+        @if($clean !== null)
+            <x-cib.card data-testid="import-bank-clean">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <flux:heading size="lg">{{ __('Check your rows') }}</flux:heading>
+                    <div class="flex items-center gap-3">
+                        <flux:text size="sm" data-testid="import-bank-clean-counts">
+                            {{ trans_choice(':count row|:count rows', $clean['total']) }},
+                            <span class="{{ $clean['invalid'] > 0 ? 'font-bold text-cib-red-600' : '' }}">{{ trans_choice(':count invalid|:count invalid', $clean['invalid']) }}</span>
+                        </flux:text>
+                        <flux:checkbox wire:model.live="errorsOnly" :label="__('Errors only')" data-testid="import-bank-errors-only"/>
+                        <flux:button size="sm" variant="ghost" wire:click="closeRows">{{ __('Close') }}</flux:button>
+                    </div>
+                </div>
+                @error('rows') <flux:text class="mt-2 text-sm text-cib-red-600">{{ $message }}</flux:text> @enderror
+
+                <div class="mt-3 overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-xs font-bold uppercase">
+                                <th class="py-2 pr-3">#</th>
+                                <th class="py-2 pr-3">{{ __('Date') }}</th>
+                                <th class="py-2 pr-3">{{ __('Description') }}</th>
+                                <th class="py-2 pr-3">{{ __('Amount (negative is money out)') }}</th>
+                                <th class="py-2 pr-3">{{ __('Category') }}</th>
+                                <th class="py-2 pr-3">{{ __('Tags') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($clean['rows'] as $importRow)
+                                @php
+                                    $cells = [
+                                        'date' => $importRow->date?->format($format?->dateFormat ?? 'd/m/Y') ?? $importRow->raw_date,
+                                        'description' => $importRow->description,
+                                        'amount' => $importRow->amount === null ? $importRow->raw_amount : app(\App\Services\CsvImport\CsvNumberParser::class)->format($importRow->amount, ($format ?? new \App\DTOs\CsvFormat)->numberFormat),
+                                        'category_value' => $importRow->category_value,
+                                        'tag_value' => $importRow->tag_value,
+                                    ];
+                                @endphp
+                                <tr wire:key="import-row-{{ $importRow->id }}" class="border-t border-cib-black/10" data-testid="import-row-{{ $importRow->id }}" data-valid="{{ $importRow->isValid() ? 'true' : 'false' }}">
+                                    <td class="py-2 pr-3">{{ $importRow->row_number }}</td>
+                                    @foreach($cells as $field => $cellValue)
+                                        <td class="py-1 pr-3">
+                                            <input type="text" value="{{ $cellValue }}"
+                                                   wire:change="updateRow({{ $importRow->id }}, '{{ $field }}', $event.target.value)"
+                                                   data-testid="import-row-{{ $importRow->id }}-{{ $field }}"
+                                                   aria-label="{{ __('Row :row :field', ['row' => $importRow->row_number, 'field' => $field]) }}"
+                                                   @isset($importRow->errors[$field]) aria-describedby="import-row-{{ $importRow->id }}-{{ $field }}-error" @endisset
+                                                   aria-invalid="{{ isset($importRow->errors[$field]) ? 'true' : 'false' }}"
+                                                   class="w-full rounded border px-2 py-1 {{ isset($importRow->errors[$field]) ? 'border-cib-red-600 bg-red-50' : 'border-cib-black/20' }}"/>
+                                            @isset($importRow->errors[$field])
+                                                <div id="import-row-{{ $importRow->id }}-{{ $field }}-error" class="text-xs text-cib-red-600" data-testid="import-row-{{ $importRow->id }}-{{ $field }}-error">{{ $importRow->errors[$field] }}</div>
+                                            @endisset
+                                        </td>
+                                    @endforeach
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+                {{ $clean['rows']->links() }}
+
+                @if($clean['categoryValues'] !== [] || $clean['tagValues'] !== [])
+                    <div class="mt-6 space-y-4" data-testid="import-bank-value-mapping">
+                        <flux:heading size="md">{{ __('Match the file\'s categories and tags') }}</flux:heading>
+                        @error('value_mapping') <flux:text class="text-sm text-cib-red-600">{{ $message }}</flux:text> @enderror
+
+                        @foreach($clean['categoryValues'] as $value)
+                            <div class="flex flex-wrap items-center gap-3" wire:key="category-map-{{ \App\Services\CsvImport\BankImportValueMapping::key($value) }}">
+                                <span class="w-48 truncate font-bold">{{ $value }}</span>
+                                <flux:select wire:change="mapCategory('{{ \App\Services\CsvImport\BankImportValueMapping::key($value) }}', $event.target.value)" aria-label="{{ $value }}" class="max-w-xs" data-testid="map-category-{{ \App\Services\CsvImport\BankImportValueMapping::key($value) }}">
+                                    <option value="">{{ __('Leave empty') }}</option>
+                                    @foreach($clean['categories'] as $category)
+                                        <option value="{{ $category->id }}" @selected(($clean['mapping']['categories'][$value] ?? null) === $category->id)>{{ $category->name }}</option>
+                                    @endforeach
+                                </flux:select>
+                            </div>
+                        @endforeach
+
+                        @foreach($clean['tagValues'] as $value)
+                            @php($choice = $clean['mapping']['tags'][$value] ?? null)
+                            <div class="flex flex-wrap items-center gap-3" wire:key="tag-map-{{ \App\Services\CsvImport\BankImportValueMapping::key($value) }}">
+                                <span class="w-48 truncate font-bold">{{ $value }}</span>
+                                <flux:select wire:change="mapTag('{{ \App\Services\CsvImport\BankImportValueMapping::key($value) }}', $event.target.value)" aria-label="{{ $value }}" class="max-w-xs" data-testid="map-tag-{{ \App\Services\CsvImport\BankImportValueMapping::key($value) }}">
+                                    <option value="">{{ __('Leave empty') }}</option>
+                                    <option value="new" @selected(($choice['type'] ?? null) === 'new')>{{ __('Create a new tag') }}</option>
+                                    @foreach($clean['tags'] as $tag)
+                                        <option value="{{ $tag->id }}" @selected(($choice['type'] ?? null) === 'existing' && ($choice['id'] ?? null) === $tag->id)>{{ $tag->name }}</option>
+                                    @endforeach
+                                </flux:select>
+                            </div>
+                        @endforeach
+                    </div>
+                @endif
+            </x-cib.card>
+        @endif
+
         <div class="flex items-center gap-3">
             <flux:button wire:click="startOver" variant="ghost" data-testid="import-bank-back">{{ __('Start over') }}</flux:button>
+            <flux:button wire:click="reviewRows" variant="ghost" data-testid="import-bank-review-rows">{{ __('Review rows') }}</flux:button>
             <flux:button
                 variant="primary"
                 wire:click="confirmImport"
