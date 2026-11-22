@@ -76,6 +76,15 @@ return [
         'api_key' => env('EXCHANGE_RATES_API_KEY'),
     ],
 
+    'security_prices' => [
+        // Price and ticker-search provider for investments (#701). Off unless opted in; while off no
+        // request is made and the stored prices are kept. The client speaks the Twelve Data API:
+        // GET {base_url}/time_series and /symbol_search, with the key in the Authorization header.
+        'enabled' => (bool) env('SECURITY_PRICES_ENABLED', false),
+        'base_url' => env('SECURITY_PRICES_BASE_URL') ?: 'https://api.twelvedata.com',
+        'api_key' => env('SECURITY_PRICES_API_KEY'),
+    ],
+
     'redbark' => [
         'base_url' => env('REDBARK_BASE_URL') ?: 'https://api.redbark.com/v1',
         'include_pending' => (bool) env('REDBARK_INCLUDE_PENDING', false),
