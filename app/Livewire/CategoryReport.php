@@ -14,15 +14,19 @@ use App\Models\Tag;
 use App\Models\User;
 use App\Services\Budgets\BudgetPlanCalculator;
 use App\Services\Reports\ReportAggregator;
+use App\Services\Reports\ReportCsv;
 use App\Services\Reports\ReportFilters;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Exception;
 use Illuminate\View\View;
+use League\Csv\Writer;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use RuntimeException;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 final class CategoryReport extends Component
 {
@@ -81,6 +85,9 @@ final class CategoryReport extends Component
 
     public bool $rangeSwapped = false;
 
+    #[Locked]
+    public bool $print = false;
+
     /** @var list<int> */
     public array $expanded = [];
 
@@ -109,8 +116,10 @@ final class CategoryReport extends Component
     /** @var array<string, array{buckets: list<array{id: int|null, name: string, icon: string|null, color: string, total: int, count: int, pct: float, perMonth: int, bar: int, expandable: bool, children: list<array{id: int, path: string, total: int, count: int, pct: float, perMonth: int, bar: int}>}>, sum: int, max: int}> */
     private array $bucketsCache = [];
 
-    public function mount(): void
+    public function mount(bool $print = false): void
     {
+        $this->print = $print;
+
         if (! TransactionPeriod::tryFrom($this->period)) {
             $this->period = 'this-month';
         }
@@ -208,6 +217,27 @@ final class CategoryReport extends Component
         $this->to = $newEnd->toDateString();
         $this->rangeSwapped = false;
         $this->refreshCharts();
+    }
+
+    /**
+     * Downloads the report as CSV: one row per root category with a column for each month
+     * and a total, in income and expense sections, then a net row. It honours the period,
+     * mode and filters on the page, and its totals are the page's totals.
+     */
+    public function exportCsv(): StreamedResponse
+    {
+        $bounds = $this->bounds();
+        $months = $this->aggregator()->monthKeys($bounds['start'], $bounds['end']);
+        $rows = ReportCsv::rows(
+            $months,
+            $this->csvSection(TransactionDirection::Credit->value),
+            $this->csvSection(TransactionDirection::Debit->value),
+        );
+
+        return response()->streamDownload(static function () use ($rows): void {
+            $csv = Writer::createFromPath('php://output', 'w');
+            $csv->insertAll($rows);
+        }, 'report-'.$bounds['start']->format('Y-m').'-to-'.$bounds['end']->format('Y-m').'.csv', ['Content-Type' => 'text/csv']);
     }
 
     public function toggleExpand(int $categoryId): void
@@ -393,7 +423,7 @@ final class CategoryReport extends Component
     {
         $periodEnum = TransactionPeriod::tryFrom($this->period) ?? TransactionPeriod::ThisMonth;
 
-        return view('livewire.category-report', [
+        return view($this->print ? 'livewire.category-report-print' : 'livewire.category-report', [
             'formatMoney' => MoneyCast::format(...),
             'periodLabel' => $periodEnum->label(),
             'hasPayCycle' => $this->user()->hasPayCycleConfigured(),
@@ -403,7 +433,88 @@ final class CategoryReport extends Component
             'canStepForward' => $this->canStepForward(),
             'accounts' => Account::query()->where('user_id', $this->user()->id)->orderBy('name')->get(['id', 'name']),
             'tags' => Tag::query()->where('user_id', $this->user()->id)->orderBy('name')->get(['id', 'name']),
+            'reportQuery' => $this->reportQuery(),
+            'accountName' => $this->print && $this->mode === 'real' && $this->filters()->accountId !== null ? Account::query()->where('user_id', $this->user()->id)->whereKey($this->filters()->accountId)->value('name') : null,
+            'tagName' => $this->print && $this->mode === 'real' && $this->filters()->tagId !== null ? Tag::query()->where('user_id', $this->user()->id)->whereKey($this->filters()->tagId)->value('name') : null,
+            'filters' => $this->mode === 'real' ? $this->filters() : new ReportFilters,
+            'window' => $this->window(),
         ]);
+    }
+
+    /**
+     * The page's state as query parameters, so the print view shows the same report.
+     *
+     * @return array<string, string|int>
+     */
+    private function reportQuery(): array
+    {
+        return array_filter([
+            'period' => $this->period,
+            'from' => $this->from,
+            'to' => $this->to,
+            'mode' => $this->mode,
+            'account' => $this->account,
+            'tag' => $this->tag,
+            'min' => $this->min,
+            'max' => $this->max,
+            'sort' => $this->sort,
+            'topOnly' => $this->topOnly ? 1 : null,
+            'showSubcategories' => $this->showSubcategories ? 1 : null,
+        ], static fn (string|int|null $value): bool => $value !== null && $value !== '');
+    }
+
+    /**
+     * One direction of the export: root category rows with their monthly amounts. A category
+     * sits in the section its whole-range net falls in, as on the page, and a month that ran
+     * the other way (a refund after the spend) counts negative there, so each row's months
+     * add up to its total.
+     *
+     * @return array{rows: list<array{name: string, total: int, months: array<string, int>}>, total: int, months: array<string, int>}
+     */
+    private function csvSection(string $direction): array
+    {
+        $byRoot = [];
+        $sectionMonths = [];
+        $netDirection = [];
+
+        foreach ($this->atoms() as $atom) {
+            if ($atom['category_id'] !== null) {
+                $netDirection[$atom['category_id']] = $atom['direction'];
+            }
+        }
+
+        foreach ($this->rawAtoms() as $atom) {
+            $section = $atom['category_id'] === null ? $atom['direction'] : ($netDirection[$atom['category_id']] ?? null);
+
+            if ($section !== $direction) {
+                continue;
+            }
+
+            $amount = $atom['direction'] === $direction ? $atom['total'] : -$atom['total'];
+            $key = $this->rootOf($atom['category_id']) ?? 'uncat';
+            $byRoot[$key][$atom['ym']] = ($byRoot[$key][$atom['ym']] ?? 0) + $amount;
+            $sectionMonths[$atom['ym']] = ($sectionMonths[$atom['ym']] ?? 0) + $amount;
+        }
+
+        $buckets = $this->buckets($direction);
+        $rows = [];
+
+        foreach ($buckets['buckets'] as $bucket) {
+            $rows[] = ['name' => $bucket['name'], 'total' => $bucket['total'], 'months' => $byRoot[$bucket['id'] ?? 'uncat'] ?? []];
+        }
+
+        return ['rows' => $rows, 'total' => $buckets['sum'], 'months' => $sectionMonths];
+    }
+
+    private function rootOf(?int $categoryId): ?int
+    {
+        if ($categoryId === null || ! isset($this->categoryMap()[$categoryId])) {
+            return null;
+        }
+
+        $chain = $this->ancestorChain($categoryId);
+
+        return $chain === [] ? null : $chain[array_key_last($chain)];
     }
 
     private function refreshCharts(): void
@@ -697,17 +808,8 @@ final class CategoryReport extends Component
 
         foreach ($totals as $entry) {
             $categoryId = $entry['id'];
-            $rootId = null;
-            $memberId = null;
-
-            if ($categoryId !== null && isset($map[$categoryId])) {
-                $chain = $this->ancestorChain($categoryId);
-
-                if ($chain !== []) {
-                    $rootId = $chain[array_key_last($chain)];
-                    $memberId = $categoryId;
-                }
-            }
+            $rootId = $this->rootOf($categoryId);
+            $memberId = $rootId !== null ? $categoryId : null;
 
             $key = $rootId ?? 'uncat';
 
