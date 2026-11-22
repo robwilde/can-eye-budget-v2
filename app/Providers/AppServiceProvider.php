@@ -11,11 +11,13 @@ use App\Contracts\GmailServiceContract;
 use App\Contracts\ScheduleSource;
 use App\Contracts\StatementPdfExtractor;
 use App\Contracts\TypeSafeServiceContract;
+use App\Contracts\VectorStoreContract;
 use App\Models\Transaction;
 use App\Observers\TransactionObserver;
 use App\Services\Bnpl\GmailScheduleSource;
 use App\Services\CategoryRuleGenerator;
 use App\Services\ContextDevService;
+use App\Services\Documents\OpenAiVectorStore;
 use App\Services\ExchangeRateClient;
 use App\Services\GitHubService;
 use App\Services\GmailService;
@@ -86,6 +88,13 @@ final class AppServiceProvider extends ServiceProvider
                 model: (string) config('services.typesafe.model'),
             );
         });
+
+        $this->app->bind(VectorStoreContract::class, fn (): OpenAiVectorStore => new OpenAiVectorStore(
+            apiKey: (string) config('services.vector_store.openai.api_key'),
+            baseUrl: (string) config('services.vector_store.openai.base_url'),
+            timeout: (int) config('services.vector_store.openai.timeout'),
+            connectTimeout: (int) config('services.vector_store.openai.connect_timeout'),
+        ));
 
         $this->app->bind(StatementPdfExtractor::class, fn (): AnthropicStatementPdfExtractor => new AnthropicStatementPdfExtractor(
             apiKey: config('services.statement_ai.api_key'),
