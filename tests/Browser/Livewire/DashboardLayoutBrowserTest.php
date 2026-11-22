@@ -5,10 +5,12 @@
 declare(strict_types=1);
 
 use App\Enums\DashboardWidget;
+use App\Enums\TransactionDirection;
 use App\Enums\TransactionPeriod;
 use App\Models\Account;
 use App\Models\AccountDailyBalance;
 use App\Models\PlannedTransaction;
+use App\Models\Transaction;
 use App\Models\User;
 
 function dashboardUser(): User
@@ -124,5 +126,27 @@ test('the net worth chart and balance sheet load lazily and the chart follows th
         ->click('[data-testid="dashboard-period-ytd"]')
         ->assertSeeIn('[data-test="net-worth"]', 'over Year to Date')
         ->assertSeeIn('[data-test="balance-sheet"]', 'Assets')
+        ->assertNoJavaScriptErrors();
+});
+
+test('the money flow and spending trend load lazily and read their month from the URL', function () {
+    $user = dashboardUser();
+    $account = $user->accounts()->firstOrFail();
+    Transaction::factory()->for($user)->for($account)->create(['amount' => 4200, 'direction' => TransactionDirection::Debit, 'post_date' => now()->toDateString(), 'transfer_pair_id' => null]);
+    $this->actingAs($user);
+
+    visit('/dashboard?flowMonth=2099-01&trendMonth=2020-01')
+        ->assertPresent('[data-test="money-flow"]')
+        ->assertSeeIn('[data-test="money-flow"]', '(to date)')
+        ->assertPresent('[data-test="money-flow-bars"]')
+        ->assertPresent('[data-test="spending-trend-chart"]')
+        ->assertSeeIn('[data-test="spending-trend"]', 'January 2020')
+        ->assertValue('[data-test="money-flow-month"]', $user->today()->format('Y-m'))
+        ->assertValue('[data-test="spending-trend-month"]', '2020-01')
+        ->select('[data-test="money-flow-account"]', (string) $account->id)
+        ->assertQueryStringHas('flowAccount', (string) $account->id)
+        ->assertSeeIn('[data-test="money-flow"]', '(to date)')
+        ->select('[data-test="money-flow-account"]', '')
+        ->assertQueryStringMissing('flowAccount')
         ->assertNoJavaScriptErrors();
 });
