@@ -24,16 +24,22 @@
         <x-cib.card>
             <flux:heading size="lg">Upload a CSV statement</flux:heading>
             <flux:text size="sm" class="mt-1">
-                Choose a CSV file exported from your bank, then pick (or create) the account it belongs to.
+                Choose a file exported from your bank or another budgeting app, then pick (or create) the account it belongs to.
             </flux:text>
 
             <div class="mt-4 space-y-4">
+                <flux:select wire:model.live="importPreset" :label="__('What kind of file is it?')" data-testid="import-bank-preset">
+                    @foreach($presets as $preset)
+                        <option value="{{ $preset->value }}">{{ __($preset->label()) }}</option>
+                    @endforeach
+                </flux:select>
+
                 <div>
-                    <flux:label>CSV file</flux:label>
+                    <flux:label>{{ __('File') }}</flux:label>
                     <input
                         type="file"
                         wire:model="file"
-                        accept=".csv,text/csv"
+                        accept=".csv,.txt,.qif,text/csv"
                         data-testid="import-bank-file-input"
                         class="mt-1 block w-full text-sm"
                     />
@@ -128,28 +134,45 @@
 
     {{-- STEP 2: mapping + preview --}}
     @if($step === 2)
-        <x-cib.card>
-            <flux:heading size="lg">Map your columns</flux:heading>
-            <flux:text size="sm" class="mt-1">
-                We've guessed the mapping. Adjust any rows that look wrong, then confirm.
-            </flux:text>
-
-            <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="import-bank-mapping">
-                @foreach($fields as $field => $label)
-                    <flux:select
-                        wire:model.live="mapping.{{ $field }}"
-                        wire:change="refreshPreview"
-                        :label="$label"
-                        :data-testid="'import-bank-mapping-' . $field"
-                    >
-                        <option value="">— unmapped —</option>
-                        @foreach($headers as $header)
-                            <option value="{{ $header }}">{{ $header }}</option>
+        @if($isQif)
+            <x-cib.card data-testid="import-bank-qif">
+                <flux:heading size="lg">{{ __('Quicken QIF file') }}</flux:heading>
+                <flux:text size="sm" class="mt-1">
+                    {{ __('Bank, credit-card and cash transactions were read from the file. Choose which of its categories and tags to bring in below; anything you leave empty is imported without it.') }}
+                </flux:text>
+                <div class="mt-4 max-w-sm">
+                    <flux:select wire:model.live="qifDateOrder" :label="__('How are the dates written?')" data-testid="import-bank-qif-date-order">
+                        @foreach($qifOrders as $value => $label)
+                            <option value="{{ $value }}">{{ $label }}</option>
                         @endforeach
                     </flux:select>
-                @endforeach
-            </div>
-        </x-cib.card>
+                </div>
+            </x-cib.card>
+        @else
+            <x-cib.card>
+                <flux:heading size="lg">Map your columns</flux:heading>
+                <flux:text size="sm" class="mt-1">
+                    We've guessed the mapping. Adjust any rows that look wrong, then confirm.
+                </flux:text>
+
+                <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="import-bank-mapping">
+                    @foreach($fields as $field => $label)
+                        <flux:select
+                            wire:model.live="mapping.{{ $field }}"
+                            wire:change="refreshPreview"
+                            :label="$label"
+                            :data-testid="'import-bank-mapping-' . $field"
+                        >
+                            <option value="">— unmapped —</option>
+                            @foreach($headers as $header)
+                                <option value="{{ $header }}">{{ $header }}</option>
+                            @endforeach
+                        </flux:select>
+                    @endforeach
+                </div>
+            </x-cib.card>
+
+        @endif
 
         @if($format !== null)
             <x-cib.card data-testid="import-bank-format">
@@ -303,7 +326,9 @@
                             <span class="{{ $clean['invalid'] > 0 ? 'font-bold text-cib-red-600' : '' }}">{{ trans_choice(':count invalid|:count invalid', $clean['invalid']) }}</span>
                         </flux:text>
                         <flux:checkbox wire:model.live="errorsOnly" :label="__('Errors only')" data-testid="import-bank-errors-only"/>
-                        <flux:button size="sm" variant="ghost" wire:click="closeRows">{{ __('Close') }}</flux:button>
+                        @unless($isQif)
+                            <flux:button size="sm" variant="ghost" wire:click="closeRows">{{ __('Close') }}</flux:button>
+                        @endunless
                     </div>
                 </div>
                 @error('rows') <flux:text class="mt-2 text-sm text-cib-red-600">{{ $message }}</flux:text> @enderror
@@ -324,9 +349,9 @@
                             @foreach($clean['rows'] as $importRow)
                                 @php
                                     $cells = [
-                                        'date' => $importRow->date?->format($format?->dateFormat ?? 'd/m/Y') ?? $importRow->raw_date,
+                                        'date' => $importRow->date?->format(($clean['format'] ?? $format)?->dateFormat ?? 'd/m/Y') ?? $importRow->raw_date,
                                         'description' => $importRow->description,
-                                        'amount' => $importRow->amount === null ? $importRow->raw_amount : app(\App\Services\CsvImport\CsvNumberParser::class)->format($importRow->amount, ($format ?? new \App\DTOs\CsvFormat)->numberFormat),
+                                        'amount' => $importRow->amount === null ? $importRow->raw_amount : app(\App\Services\CsvImport\CsvNumberParser::class)->format($importRow->amount, ($clean['format'] ?? $format ?? new \App\DTOs\CsvFormat)->numberFormat),
                                         'category_value' => $importRow->category_value,
                                         'tag_value' => $importRow->tag_value,
                                     ];
