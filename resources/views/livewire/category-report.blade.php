@@ -22,6 +22,8 @@
                 <flux:button size="sm" variant="subtle" icon="chevron-left" wire:click="step(-1)" :disabled="! $canStep" aria-label="Previous period" data-testid="period-prev"/>
                 <flux:button size="sm" variant="subtle" icon="chevron-right" wire:click="step(1)" :disabled="! $canStepForward" aria-label="Next period" data-testid="period-next"/>
             </div>
+            <flux:button size="sm" variant="subtle" icon="arrow-down-tray" wire:click="exportCsv" data-testid="export-csv">Export CSV</flux:button>
+            <flux:button size="sm" variant="subtle" icon="printer" :href="route('reports.print', $reportQuery)" target="_blank" data-testid="print-report">Print</flux:button>
             <flux:select wire:model.live="period" size="sm" class="w-auto">
                 <flux:select.option value="7d">Last 7 Days</flux:select.option>
                 <flux:select.option value="this-month">This Month</flux:select.option>
