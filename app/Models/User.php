@@ -83,6 +83,7 @@ final class User extends Authenticatable
         'two_factor_secret',
         'two_factor_recovery_codes',
         'remember_token',
+        'vector_store_id',
     ];
 
     /**
