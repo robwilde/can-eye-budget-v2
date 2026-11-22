@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Enums\PayFrequency;
+use App\Enums\RedbarkTransport;
 use App\Jobs\SyncRedbarkFeedJob;
 use App\Livewire\ConnectBank;
 use App\Livewire\RedbarkAccountSetup;
@@ -82,17 +83,25 @@ test('a key Redbark rejects keeps the user on step 1 with an inline error and st
 test('a rejected key leaves an existing feed untouched', function () {
     Http::fake(['*/connections' => Http::response([], 401)]);
     $user = User::factory()->create();
-    $feed = RedbarkFeed::factory()->for($user)->synced()->pendingSetup()->create(['api_key' => 'rbk_live_old_key_0123456', 'auth_failure_count' => 2]);
+    $feed = RedbarkFeed::factory()->for($user)->synced()->pendingSetup()->create([
+        'transport' => RedbarkTransport::SimpleFin,
+        'api_key' => null,
+        'simplefin_access_url' => 'https://sfuser:sfpass@api.redbark.com/simplefin',
+        'auth_failure_count' => 2,
+    ]);
 
     Livewire::actingAs($user)
         ->test(ConnectBank::class)
         ->set('api_key', 'rbk_live_0123456789abcdef')
-        ->call('connect');
+        ->call('connect')
+        ->assertHasErrors('api_key');
 
     $feed->refresh();
 
-    expect($feed->api_key)->toBe('rbk_live_old_key_0123456')
-        ->and($feed->auth_failure_count)->toBe(2);
+    expect($feed->simplefin_access_url)->toBe('https://sfuser:sfpass@api.redbark.com/simplefin')
+        ->and($feed->auth_failure_count)->toBe(2)
+        ->and(RedbarkFeed::query()->where('user_id', $user->id)->count())->toBe(1);
+    Http::assertSentCount(1);
     Queue::assertNothingPushed();
 });
 

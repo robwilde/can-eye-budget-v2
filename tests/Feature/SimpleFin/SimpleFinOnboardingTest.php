@@ -14,7 +14,6 @@ use App\Enums\RefreshTrigger;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionStatus;
 use App\Exceptions\Redbark\RedbarkAuthenticationException;
-use App\Exceptions\Redbark\RedbarkRequestException;
 use App\Jobs\SyncRedbarkFeedJob;
 use App\Livewire\ConnectBank;
 use App\Models\Account;
@@ -431,33 +430,33 @@ test('a revoked access URL counts as an authentication failure and flags the fee
     expect($feed->fresh()->status)->toBe(RedbarkFeedStatus::RequiresUpdate);
 });
 
-test('saving an API key over a SimpleFIN feed switches it back to the REST client and drops the access URL', function () {
+test('saving an API key beside a SimpleFIN feed keeps both feeds with their own credentials', function () {
     $user = User::factory()->create();
-    $feed = RedbarkFeed::factory()->for($user)->create([
+    $simpleFin = RedbarkFeed::factory()->for($user)->create([
         'transport' => RedbarkTransport::SimpleFin,
         'api_key' => null,
         'simplefin_access_url' => SIMPLEFIN_ACCESS_URL,
     ]);
 
-    app(SaveRedbarkApiKey::class)->handle($user, 'rbk_live_0123456789abcdef');
+    $rest = app(SaveRedbarkApiKey::class)->handle($user, 'rbk_live_0123456789abcdef');
 
-    $feed->refresh();
-
-    expect($feed->transport)->toBe(RedbarkTransport::Rest)
-        ->and($feed->api_key)->toBe('rbk_live_0123456789abcdef')
-        ->and($feed->simplefin_access_url)->toBeNull()
-        ->and(app(RedbarkClientFactory::class)->for($feed))->toBeInstanceOf(RedbarkService::class);
+    expect($rest->is($simpleFin))->toBeFalse()
+        ->and($rest->transport)->toBe(RedbarkTransport::Rest)
+        ->and($rest->api_key)->toBe('rbk_live_0123456789abcdef')
+        ->and($simpleFin->fresh()->simplefin_access_url)->toBe(SIMPLEFIN_ACCESS_URL)
+        ->and($simpleFin->fresh()->api_key)->toBeNull()
+        ->and(app(RedbarkClientFactory::class)->for($rest))->toBeInstanceOf(RedbarkService::class)
+        ->and(RedbarkFeed::query()->where('user_id', $user->id)->count())->toBe(2);
 });
 
-test('a SimpleFIN feed with linked accounts refuses an API key instead of orphaning them', function () {
+test('a SimpleFIN feed with linked accounts is untouched when an API key is added', function () {
     simpleFinFake();
     $user = User::factory()->create();
     $feed = simpleFinConnect($user);
     simpleFinSync($feed);
     simpleFinLink($feed, SIMPLEFIN_PURPLE_ID);
 
-    expect(fn () => app(SaveRedbarkApiKey::class)->handle($user, 'rbk_live_0123456789abcdef'))
-        ->toThrow(RedbarkRequestException::class);
+    app(SaveRedbarkApiKey::class)->handle($user, 'rbk_live_0123456789abcdef');
 
     $feed->refresh();
 
@@ -466,19 +465,40 @@ test('a SimpleFIN feed with linked accounts refuses an API key instead of orphan
         ->and($feed->accounts()->linked()->count())->toBe(1);
 });
 
-test('switching transport with nothing linked discards the old discovery state', function () {
+test('connecting SimpleFIN beside a REST feed keeps the REST feed and its discovered accounts', function () {
     simpleFinFake();
     $user = User::factory()->create();
-    $feed = RedbarkFeed::factory()->for($user)->create(['last_synced_at' => now(), 'pending_account_setup' => true]);
-    RedbarkAccount::factory()->for($feed, 'feed')->create(['account_id' => null, 'redbark_account_id' => 'acct_old']);
+    $rest = RedbarkFeed::factory()->for($user)->create(['last_synced_at' => now(), 'pending_account_setup' => true]);
+    RedbarkAccount::factory()->for($rest, 'feed')->create(['account_id' => null, 'redbark_account_id' => 'acct_rest']);
 
-    simpleFinConnect($user);
+    Livewire::actingAs($user)->test(ConnectBank::class)->set('setup_token', simpleFinToken())->call('connectSimpleFin')->assertHasNoErrors();
 
-    $feed->refresh();
+    expect($rest->fresh()->last_synced_at)->not->toBeNull()
+        ->and($rest->fresh()->pending_account_setup)->toBeTrue()
+        ->and(RedbarkAccount::query()->where('redbark_account_id', 'acct_rest')->exists())->toBeTrue()
+        ->and(RedbarkFeed::query()->where('user_id', $user->id)->count())->toBe(2);
+});
 
-    expect($feed->last_synced_at)->toBeNull()
-        ->and($feed->pending_account_setup)->toBeFalse()
-        ->and(RedbarkAccount::query()->where('redbark_account_id', 'acct_old')->exists())->toBeFalse();
+test('a transaction another feed already keeps on its account is not moved by this feed', function () {
+    simpleFinFake();
+    $user = User::factory()->create();
+    $rest = RedbarkFeed::factory()->for($user)->synced()->create();
+    $restAccount = Account::factory()->for($user)->create();
+    RedbarkAccount::factory()->for($rest, 'feed')->linked($restAccount)->create(['redbark_account_id' => 'rest-purple']);
+    $kept = Transaction::factory()->for($user)->create([
+        'account_id' => $restAccount->id,
+        'redbark_id' => 'bank_tx_409b6d0d1bd9cb1876bd1ddf13f86b6759e228e3bbdee67e2cde6f6b3e20381b',
+    ]);
+
+    Livewire::actingAs($user)->test(ConnectBank::class)->set('setup_token', simpleFinToken())->call('connectSimpleFin')->assertHasNoErrors();
+    $simpleFin = RedbarkFeed::query()->where('user_id', $user->id)->where('transport', RedbarkTransport::SimpleFin)->sole();
+    simpleFinSync($simpleFin);
+    $other = simpleFinLink($simpleFin, SIMPLEFIN_PURPLE_ID);
+
+    simpleFinSync($simpleFin);
+
+    expect($kept->fresh()->account_id)->toBe($restAccount->id)
+        ->and(Transaction::query()->where('account_id', $other->id)->count())->toBe(2);
 });
 
 test('a claim that answers with a redirect is not followed', function () {

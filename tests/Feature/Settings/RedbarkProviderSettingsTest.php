@@ -136,11 +136,11 @@ test('rotating the key clears a requires-update state', function () {
 
 test('sync now dispatches a job', function () {
     $user = User::factory()->create();
-    RedbarkFeed::factory()->create(['user_id' => $user->id]);
+    $feed = RedbarkFeed::factory()->create(['user_id' => $user->id]);
 
     Livewire::actingAs($user)
         ->test('pages::settings.providers')
-        ->call('syncNow');
+        ->call('syncNow', $feed->id);
 
     Queue::assertPushed(SyncRedbarkFeedJob::class, 1);
 });
@@ -158,7 +158,7 @@ test('sync now is a no-op while a sync is still open', function () {
     Livewire::actingAs($user)
         ->test('pages::settings.providers')
         ->assertSet('isSyncing', true)
-        ->call('syncNow');
+        ->call('syncNow', $feed->id);
 
     Queue::assertNothingPushed();
 });
@@ -177,7 +177,7 @@ test('a pending log older than 15 minutes no longer blocks a manual sync', funct
     Livewire::actingAs($user)
         ->test('pages::settings.providers')
         ->assertSet('isSyncing', false)
-        ->call('syncNow');
+        ->call('syncNow', $feed->id);
 
     Queue::assertPushed(SyncRedbarkFeedJob::class, 1);
 });
@@ -228,7 +228,7 @@ test('disconnecting deletes the feed and hands the accounts back as manual', fun
 
     Livewire::actingAs($user)
         ->test('pages::settings.providers')
-        ->call('disconnect');
+        ->call('disconnect', $feed->id);
 
     expect(RedbarkFeed::query()->count())->toBe(0)
         ->and(RedbarkAccount::query()->count())->toBe(0)
@@ -239,11 +239,15 @@ test('disconnecting deletes the feed and hands the accounts back as manual', fun
 
 test('one user cannot see another user\'s feed', function () {
     $user = User::factory()->create();
-    RedbarkFeed::factory()->create();
+    RedbarkFeed::factory()->for($user)->create();
+    $foreign = RedbarkFeed::factory()->create();
 
     Livewire::actingAs($user)
         ->test('pages::settings.providers')
-        ->call('syncNow');
+        ->call('syncNow', $foreign->id)
+        ->call('disconnect', $foreign->id);
 
     Queue::assertNothingPushed();
+    expect(RedbarkFeed::query()->where('user_id', $user->id)->count())->toBe(1);
+    expect(RedbarkFeed::query()->whereKey($foreign->id)->exists())->toBeTrue();
 });
