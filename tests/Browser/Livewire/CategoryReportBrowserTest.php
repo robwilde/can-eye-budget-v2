@@ -210,3 +210,39 @@ test('the tag filter limits the breakdown to tagged transactions', function () {
         ->assertDontSee('Plain spend')
         ->assertNoJavaScriptErrors();
 });
+
+test('the page offers the csv export and a print link that carries its filters', function () {
+    $user = User::factory()->create();
+    $tag = Tag::factory()->for($user)->create(['name' => 'Holiday']);
+
+    $this->actingAs($user);
+
+    visit('/reports?tag='.$tag->id)
+        ->assertPresent('[data-testid="export-csv"]')
+        ->assertAttributeContains('[data-testid="print-report"]', 'href', '/reports/print')
+        ->assertAttributeContains('[data-testid="print-report"]', 'href', 'tag='.$tag->id)
+        ->click('[data-testid="export-csv"]')
+        ->assertNoJavaScriptErrors();
+});
+
+test('the print view shows the report totals without the app chrome', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $spend = Category::factory()->for($user)->create(['name' => 'Dining']);
+    $earn = Category::factory()->for($user)->create(['name' => 'Salary']);
+
+    Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $spend->id, 'amount' => 30000, 'post_date' => now()]);
+    Transaction::factory()->for($user)->credit()->create(['account_id' => $account->id, 'category_id' => $earn->id, 'amount' => 400000, 'post_date' => now()]);
+
+    $this->actingAs($user);
+
+    visit('/reports/print')
+        ->assertSee('Dining')
+        ->assertSee('Salary')
+        ->assertSeeIn('[data-testid="print-income"]', '$4,000.00')
+        ->assertSeeIn('[data-testid="print-expenses"]', '$300.00')
+        ->assertSeeIn('[data-testid="print-net"]', '$3,700.00')
+        ->assertPresent('[data-testid="print-button"]')
+        ->assertMissing('[data-flux-sidebar-item]')
+        ->assertNoJavaScriptErrors();
+});
