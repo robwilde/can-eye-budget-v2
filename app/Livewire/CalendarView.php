@@ -6,6 +6,7 @@ namespace App\Livewire;
 
 use App\Casts\MoneyCast;
 use App\Enums\PayFrequency;
+use App\Enums\TransactionStatus;
 use App\Livewire\Dashboard\Data\PayCyclePip;
 use App\Livewire\Data\CalendarDayData;
 use App\Models\PlannedTransaction;
@@ -166,8 +167,10 @@ final class CalendarView extends Component
     /**
      * Ordinary planned income and spend still to come this month. Reconciled occurrences are
      * suppressed by DayActivityLoader and past unreconciled ones are never loaded, so each
-     * plan counts once, as its posting once entered. Transfers and plans on accounts excluded
-     * from reports are left out, matching the reported actuals they are compared with.
+     * plan counts once, as its posting once entered. A plan matched only by a pending
+     * transaction stays to come at that transaction's amount, because reports leave pending
+     * rows out until they post. Transfers and plans on accounts excluded from reports are
+     * left out, matching the reported actuals they are compared with.
      *
      * @return array{income: int, spend: int}
      */
@@ -177,6 +180,7 @@ final class CalendarView extends Component
         $income = 0;
         $spend = 0;
         $planIds = [];
+        $matchedPips = [];
 
         foreach ($this->days as $day) { // @phpstan-ignore property.notFound
             if (! $day->isCurrentMonth) {
@@ -186,6 +190,10 @@ final class CalendarView extends Component
             foreach ($day->pips as $pip) {
                 if ($pip->kind === 'plan' && $pip->plannedTransactionId !== null) {
                     $planIds[$pip->plannedTransactionId] = true;
+                }
+
+                if ($pip->matched && $pip->transactionId !== null && ($pip->tone === 'inc' || $pip->tone === 'out')) {
+                    $matchedPips[$pip->transactionId][] = $pip;
                 }
             }
         }
@@ -212,6 +220,25 @@ final class CalendarView extends Component
                 if ($pip->tone === 'inc') {
                     $income += $pip->amount;
                 } elseif ($pip->tone === 'out') {
+                    $spend += $pip->amount;
+                }
+            }
+        }
+
+        $pendingIds = $matchedPips === [] ? [] : Transaction::query()
+            ->where('user_id', $this->authenticatedUser()->id)
+            ->whereIn('id', array_keys($matchedPips))
+            ->where('status', TransactionStatus::Pending)
+            ->where('excluded', false)
+            ->whereHas('account', static fn ($account) => $account->where('exclude_from_reports', false))
+            ->pluck('id')
+            ->all();
+
+        foreach ($pendingIds as $pendingId) {
+            foreach ($matchedPips[$pendingId] as $pip) {
+                if ($pip->tone === 'inc') {
+                    $income += $pip->amount;
+                } else {
                     $spend += $pip->amount;
                 }
             }
