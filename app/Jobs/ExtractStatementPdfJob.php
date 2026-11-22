@@ -5,14 +5,17 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Contracts\StatementPdfExtractor;
+use App\Enums\DocumentStatus;
 use App\Enums\PdfImportStatus;
 use App\Enums\StatementLineKind;
 use App\Exceptions\Statement\StatementExtractionFailed;
+use App\Models\Document;
 use App\Models\PdfImport;
 use App\Models\Statement;
 use App\Notifications\PdfImportReadyNotification;
 use App\Services\Statement\StatementLineDateParser;
 use App\Support\Audit\AttributeJobToUser;
+use App\Support\Documents\VectorStoreStatus;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
@@ -111,6 +114,7 @@ final class ExtractStatementPdfJob implements ShouldQueue
 
         if ($stored) {
             $import->refresh()->user->notify(new PdfImportReadyNotification($import));
+            $this->index($import);
         }
     }
 
@@ -154,6 +158,39 @@ final class ExtractStatementPdfJob implements ShouldQueue
         }
 
         return (string) $disk->get($statement->stored_path);
+    }
+
+    /**
+     * Adds the analysed PDF to the user's document store when one is configured. A failure here
+     * never fails the import.
+     */
+    private function index(PdfImport $import): void
+    {
+        if (! VectorStoreStatus::configured()) {
+            return;
+        }
+
+        try {
+            $statement = Statement::query()->where('user_id', $import->user_id)->find($import->statement_id);
+
+            if ($statement === null || Document::query()->forUser($import->user_id)->where('stored_path', $statement->stored_path)->exists()) {
+                return;
+            }
+
+            $document = Document::query()->create([
+                'user_id' => $import->user_id,
+                'filename' => $statement->original_filename,
+                'mime_type' => 'application/pdf',
+                'byte_size' => $statement->byte_size,
+                'stored_path' => $statement->stored_path,
+                'content_hash' => $statement->content_hash,
+                'status' => DocumentStatus::Pending,
+            ]);
+
+            IndexDocumentJob::dispatch($document);
+        } catch (Throwable $exception) {
+            Log::warning('Statement PDF could not be queued for the document store', ['pdfImportId' => $import->id, 'exception' => $exception::class]);
+        }
     }
 
     private function fail(PdfImport $import, string $message): void
