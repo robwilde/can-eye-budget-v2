@@ -8,6 +8,7 @@ use App\Enums\DocumentStatus;
 use App\Exceptions\DocumentRefused;
 use App\Models\Document;
 use App\Models\User;
+use App\Support\Documents\VectorStoreStatus;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
@@ -27,7 +28,7 @@ final class DocumentUploadService
     {
         $driver = config('budget.documents.vector_store');
 
-        if (! is_string($driver) || $driver === '') {
+        if (! VectorStoreStatus::configured() || ! is_string($driver)) {
             throw new DocumentRefused(__('No vector store is configured'));
         }
 

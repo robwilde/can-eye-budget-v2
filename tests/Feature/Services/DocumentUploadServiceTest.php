@@ -15,6 +15,8 @@ use Livewire\Livewire;
 
 beforeEach(function () {
     Storage::fake('local');
+    Illuminate\Support\Facades\Queue::fake();
+    config()->set('services.vector_store.openai.api_key', 'sk-test');
     $this->user = User::factory()->create();
 });
 
@@ -55,6 +57,7 @@ it('stores an uploaded document as pending and records an audit event', function
     documentUpload($this->user, UploadedFile::fake()->create('notes.docx', 10))->assertSet('documentMessage', 'Document stored.');
 
     $document = Document::query()->sole();
+    Illuminate\Support\Facades\Queue::assertPushed(App\Jobs\IndexDocumentJob::class, fn (App\Jobs\IndexDocumentJob $job): bool => $job->document->is($document));
 
     expect($document->user_id)->toBe($this->user->id)
         ->and($document->status)->toBe(DocumentStatus::Pending)

@@ -48,6 +48,17 @@ return [
         'max_tokens' => (int) (env('STATEMENT_AI_MAX_TOKENS') ?: 16000),
     ],
 
+    'vector_store' => [
+        // Hosted document store (OpenAI vector stores). User documents and analysed statement
+        // PDFs are sent to it only when budget.documents.vector_store is 'openai' and a key is set.
+        'openai' => [
+            'api_key' => env('OPENAI_VECTOR_STORE_API_KEY'),
+            'base_url' => env('OPENAI_VECTOR_STORE_BASE_URL') ?: 'https://api.openai.com/v1',
+            'timeout' => (int) (env('OPENAI_VECTOR_STORE_TIMEOUT') ?: 60),
+            'connect_timeout' => (int) (env('OPENAI_VECTOR_STORE_CONNECT_TIMEOUT') ?: 10),
+        ],
+    ],
+
     'typesafe' => [
         // Server-side secret for TypeSafe System One (Jev). Only the offline
         // categories:jev-eval command (#505) calls it; nothing in the request path does.
