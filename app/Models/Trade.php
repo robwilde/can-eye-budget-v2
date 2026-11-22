@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $id
  * @property int $account_id
  * @property int|null $security_id
+ * @property int|null $original_security_id the security the trade was recorded on before a remap, null when it was never remapped
  * @property CarbonImmutable $date
  * @property string $quantity
  * @property int $price
@@ -46,6 +47,7 @@ final class Trade extends Model
     protected $fillable = [
         'account_id',
         'security_id',
+        'original_security_id',
         'date',
         'quantity',
         'price',
