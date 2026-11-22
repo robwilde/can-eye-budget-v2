@@ -101,11 +101,9 @@ test('the grid is sortable by its handles only while customising', function () {
     visit('/dashboard')
         ->assertScript($sortable, false)
         ->click('[data-testid="dashboard-customise"]')
-        ->wait(1)
         ->assertScript($sortable, true)
         ->assertPresent('[data-testid="widget-handle-recent-spending"]')
         ->click('[data-testid="dashboard-customise"]')
-        ->wait(1)
         ->assertScript($sortable, false)
         ->assertNoJavaScriptErrors();
 });
