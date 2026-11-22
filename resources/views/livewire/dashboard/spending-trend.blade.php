@@ -8,8 +8,6 @@
 @endphp
 
 <section class="space-y-3" data-test="spending-trend">
-    <x-cib.url-sync :params="['month' => 'trendMonth', 'category' => 'trendCategory']"/>
-
     <div class="flex flex-wrap items-center justify-between gap-2">
         <x-cib.sec-head :title="__('Spending trend')"/>
         <div class="flex items-center gap-2">

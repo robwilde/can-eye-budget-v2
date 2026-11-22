@@ -72,9 +72,9 @@
         </div>
     @endif
 
-    <div wire:key="dashboard-grid-{{ $customising ? 'edit' : 'view' }}"
+    <div wire:key="dashboard-grid"
          @class(['grid gap-4', 'lg:grid-cols-2' => $layout->twoColumn])
-         @if ($customising) wire:sort="reorder" @endif
+         wire:sort="reorder"
          data-testid="dashboard-grid">
         @foreach ($this->visibleWidgets as $widget)
             @php
@@ -95,7 +95,7 @@
 
             @if ($customising || $collapsed || $hasContent)
                 <div wire:key="widget-{{ $widget->value }}"
-                     @if ($customising) wire:sort:item="{{ $widget->value }}" @endif
+                     wire:sort:item="{{ $widget->value }}"
                      data-widget="{{ $widget->value }}"
                      @class([
                          'space-y-2',
@@ -103,6 +103,9 @@
                          $layout->height($widget)->minHeightClass() => $widget->isChart() && ! $collapsed,
                          'rounded-xl border-2 border-dashed border-cib-black p-2' => $customising,
                      ])>
+                    @if (! $customising)
+                        <span wire:sort:handle hidden aria-hidden="true"></span>
+                    @endif
                     @if ($customising || $collapsed)
                         <div class="flex flex-wrap items-center justify-between gap-2" data-testid="widget-toolbar-{{ $widget->value }}">
                             <div class="flex items-center gap-2">
