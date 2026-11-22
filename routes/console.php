@@ -53,3 +53,8 @@ if (config('budget.redbark.nightly_sync_time') !== null) {
         ->name('redbark:nightly-sync')
         ->withoutOverlapping();
 }
+
+Schedule::call(static fn () => App\Models\DataExport::failStuck())
+    ->everyFiveMinutes()
+    ->name('data-exports:fail-stuck')
+    ->withoutOverlapping();
