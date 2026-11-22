@@ -256,7 +256,6 @@ it('syncs and polls a feed that was added after the first one finished setup', f
     perTransportFeed($user, RedbarkTransport::Rest);
     $simpleFin = perTransportFeed($user, RedbarkTransport::SimpleFin);
     $simpleFin->update(['last_synced_at' => null]);
-    RedbarkSyncLog::factory()->create(['user_id' => $user->id, 'redbark_feed_id' => $simpleFin->id, 'status' => RefreshStatus::Pending]);
 
     Livewire::actingAs($user)->test(RedbarkAccountSetup::class)->assertSet('isSyncing', true);
 

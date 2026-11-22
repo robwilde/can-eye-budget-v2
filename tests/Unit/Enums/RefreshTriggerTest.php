@@ -7,7 +7,8 @@ declare(strict_types=1);
 use App\Enums\RefreshTrigger;
 
 test('all refresh trigger cases exist', function () {
-    expect(RefreshTrigger::cases())->toHaveCount(3);
+    expect(RefreshTrigger::cases())->toHaveCount(4);
+    expect(RefreshTrigger::Login->value)->toBe('login');
 });
 
 test('refresh trigger has correct backing values', function () {

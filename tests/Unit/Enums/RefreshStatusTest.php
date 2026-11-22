@@ -7,7 +7,8 @@ declare(strict_types=1);
 use App\Enums\RefreshStatus;
 
 test('all refresh status cases exist', function () {
-    expect(RefreshStatus::cases())->toHaveCount(3);
+    expect(RefreshStatus::cases())->toHaveCount(4);
+    expect(RefreshStatus::Stale->value)->toBe('stale');
 });
 
 test('refresh status has correct backing values', function () {
