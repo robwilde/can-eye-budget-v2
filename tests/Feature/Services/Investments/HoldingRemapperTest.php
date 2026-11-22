@@ -158,15 +158,21 @@ it('puts a holding remapped back to its original security straight back without 
 
 it('resets only the holdings and trades that were remapped, not the target security\'s own', function () {
     $wrong = remapHolding($this->account, $this->wrong, '10.00000000', 11000, 1000, '2026-03-10');
-    $genuine = remapHolding($this->account, $this->right, '4.00000000', 5000, 1250, '2026-03-11');
-    $genuineTrade = Trade::factory()->create(['account_id' => $this->account->id, 'security_id' => $this->right->id]);
+    remapHolding($this->account, $this->right, '4.00000000', 5000, 1250, '2026-03-11');
+    $genuineTrade = Trade::factory()->create(['account_id' => $this->account->id, 'security_id' => $this->right->id, 'quantity' => '4.00000000']);
     $wrongTrade = Trade::factory()->create(['account_id' => $this->account->id, 'security_id' => $this->wrong->id]);
 
     $this->remapper->remap($this->user, $wrong, $this->right);
-    $this->remapper->reset($this->user, $wrong->fresh());
 
-    expect($wrong->fresh()->security_id)->toBe($this->wrong->id)
-        ->and($genuine->fresh()->security_id)->toBe($this->right->id)
+    $position = Holding::query()->where('security_id', $this->right->id)->sole();
+
+    expect($position->quantity)->toBe('14.00000000')
+        ->and($position->original_security_id)->toBe($this->wrong->id);
+
+    $this->remapper->reset($this->user, $position);
+
+    expect(Holding::query()->where('security_id', $this->wrong->id)->sole()->quantity)->toBe('10.00000000')
+        ->and(Holding::query()->where('security_id', $this->right->id)->sole()->quantity)->toBe('4.00000000')
         ->and($genuineTrade->fresh()->security_id)->toBe($this->right->id)
         ->and($wrongTrade->fresh()->security_id)->toBe($this->wrong->id)
         ->and($wrongTrade->fresh()->original_security_id)->toBeNull();
