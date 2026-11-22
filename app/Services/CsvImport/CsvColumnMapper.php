@@ -20,6 +20,8 @@ final class CsvColumnMapper
 
     public const string FIELD_CATEGORY = 'category';
 
+    public const string FIELD_TAG = 'tag';
+
     /**
      * Canonical fields → keyword fragments that commonly appear in headers.
      * Order matters: more-specific patterns should win.
@@ -34,6 +36,7 @@ final class CsvColumnMapper
         self::FIELD_CREDIT => ['credit amount', 'credit', 'deposit', 'money in'],
         self::FIELD_BALANCE => ['running balance', 'balance', 'closing balance'],
         self::FIELD_CATEGORY => ['category'],
+        self::FIELD_TAG => ['tags', 'tag', 'labels', 'label'],
     ];
 
     /**
