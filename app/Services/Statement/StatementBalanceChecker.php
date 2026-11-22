@@ -11,8 +11,9 @@ use Illuminate\Database\Eloquent\Builder;
 
 /**
  * Compares a statement's opening balance, closing balance and period movement with the
- * account's daily balance history. The ledger value for the opening balance is the start of
- * the period's first day; for the closing balance, the end of its last day.
+ * account's daily balance history. The ledger value for the opening balance is the total at the
+ * start of the period's first day; for the closing balance, the total at the end of its last day.
+ * The total is cash plus the securities' value, which is what an investment statement reports.
  */
 final class StatementBalanceChecker
 {
@@ -39,7 +40,7 @@ final class StatementBalanceChecker
         $failures = [];
         $compared = false;
 
-        foreach ([['opening', $statement->opening_balance, $first?->start_balance, $first], ['closing', $statement->closing_balance, $last?->end_balance, $last]] as [$name, $statementValue, $ledgerValue, $row]) {
+        foreach ([['opening', $statement->opening_balance, $first?->startTotal(), $first], ['closing', $statement->closing_balance, $last?->endTotal(), $last]] as [$name, $statementValue, $ledgerValue, $row]) {
             if ($statementValue === null || $ledgerValue === null || ! $this->sameCurrency($statement, $row)) {
                 continue;
             }
@@ -55,7 +56,7 @@ final class StatementBalanceChecker
             && $this->sameCurrency($statement, $first) && $this->sameCurrency($statement, $last)) {
             $compared = true;
 
-            if (abs(($statement->closing_balance - $statement->opening_balance) - ($last->end_balance - $first->start_balance)) > self::TOLERANCE_CENTS) {
+            if (abs(($statement->closing_balance - $statement->opening_balance) - ($last->endTotal() - $first->startTotal())) > self::TOLERANCE_CENTS) {
                 $failures[] = 'movement';
             }
         }

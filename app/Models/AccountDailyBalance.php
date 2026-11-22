@@ -62,6 +62,18 @@ final class AccountDailyBalance extends Model
         return $this->belongsTo(Account::class);
     }
 
+    /** The account's total at the start of the day: cash plus the securities' value. */
+    public function startTotal(): int
+    {
+        return $this->start_balance + ($this->start_non_cash_balance ?? 0);
+    }
+
+    /** The account's total at the end of the day: cash plus the securities' value. */
+    public function endTotal(): int
+    {
+        return $this->end_balance + ($this->end_non_cash_balance ?? 0);
+    }
+
     /**
      * Daily balances carry no user_id; ownership comes from the parent account (C2).
      *
