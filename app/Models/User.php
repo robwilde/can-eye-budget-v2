@@ -8,6 +8,7 @@ use App\Casts\MoneyCast;
 use App\Casts\UserPreferencesCast;
 use App\DTOs\UserPreferences;
 use App\Enums\PayFrequency;
+use App\Enums\RedbarkTransport;
 use App\Services\CurrencyConverter;
 use App\Support\Currencies;
 use Carbon\CarbonImmutable;
@@ -138,10 +139,15 @@ final class User extends Authenticatable
         return $this->hasOne(GmailCredential::class);
     }
 
-    /** @return HasOne<RedbarkFeed, $this> */
-    public function redbarkFeed(): HasOne
+    /** @return HasMany<RedbarkFeed, $this> */
+    public function redbarkFeeds(): HasMany
     {
-        return $this->hasOne(RedbarkFeed::class);
+        return $this->hasMany(RedbarkFeed::class);
+    }
+
+    public function redbarkFeedFor(RedbarkTransport $transport): ?RedbarkFeed
+    {
+        return $this->redbarkFeeds()->where('transport', $transport)->first();
     }
 
     /** @return HasMany<RedbarkSyncLog, $this> */

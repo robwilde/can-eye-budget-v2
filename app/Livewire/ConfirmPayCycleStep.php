@@ -64,6 +64,16 @@ final class ConfirmPayCycleStep extends Component
     #[Computed]
     public function isAnalysing(): bool
     {
+        $syncOpen = RedbarkSyncLog::query()
+            ->where('user_id', Auth::id())
+            ->where('status', RefreshStatus::Pending)
+            ->where('created_at', '>', now()->subSeconds(SyncRedbarkFeedJob::UNIQUE_FOR))
+            ->exists();
+
+        if ($syncOpen) {
+            return true;
+        }
+
         $log = RedbarkSyncLog::query()
             ->where('user_id', Auth::id())
             ->latest('id')

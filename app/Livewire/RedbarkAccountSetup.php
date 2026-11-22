@@ -47,9 +47,9 @@ final class RedbarkAccountSetup extends Component
 
     public function mount(): void
     {
-        $feed = $this->feed();
+        $feeds = $this->feeds();
 
-        if ($feed === null) {
+        if ($feeds->isEmpty()) {
             $this->redirect(route('providers.edit'), navigate: true);
 
             return;
@@ -58,7 +58,7 @@ final class RedbarkAccountSetup extends Component
         // Straight after saving a key the queued sync may not have run yet, which would
         // leave the wizard empty. Queue it and let the view poll for the result instead
         // of blocking the request on a backfill that can outlive the request lifetime.
-        if ($feed->last_synced_at === null) {
+        foreach ($feeds->whereNull('last_synced_at') as $feed) {
             SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Manual);
         }
 
@@ -69,13 +69,11 @@ final class RedbarkAccountSetup extends Component
     #[Computed]
     public function redbarkAccounts(): Collection
     {
-        $feed = $this->feed();
-
-        if ($feed === null) {
-            return new Collection;
-        }
-
-        return $feed->accounts()->needsSetup()->orderBy('name')->get();
+        return RedbarkAccount::query()
+            ->whereIn('redbark_feed_id', $this->feeds()->modelKeys())
+            ->needsSetup()
+            ->orderBy('name')
+            ->get();
     }
 
     /** @return Collection<int, Account> */
@@ -97,65 +95,66 @@ final class RedbarkAccountSetup extends Component
     #[Computed]
     public function isSyncing(): bool
     {
-        $feed = $this->feed();
+        foreach ($this->feeds()->whereNull('last_synced_at') as $feed) {
+            $log = RedbarkSyncLog::query()
+                ->where('redbark_feed_id', $feed->id)
+                ->latest('id')
+                ->first();
 
-        if ($feed === null || $feed->last_synced_at !== null) {
-            return false;
+            if ($log?->status === RefreshStatus::Pending
+                && $log->created_at->greaterThan(now()->subSeconds(SyncRedbarkFeedJob::UNIQUE_FOR))) {
+                return true;
+            }
         }
 
-        $log = RedbarkSyncLog::query()
-            ->where('redbark_feed_id', $feed->id)
-            ->latest('id')
-            ->first();
-
-        return $log?->status === RefreshStatus::Pending
-            && $log->created_at->greaterThan(now()->subSeconds(SyncRedbarkFeedJob::UNIQUE_FOR));
+        return false;
     }
 
     /** @return list<array{context: string, message: string}> */
     #[Computed]
     public function lastSyncErrors(): array
     {
-        $feed = $this->feed();
+        foreach ($this->feeds() as $feed) {
+            if ($feed->accounts()->exists()) {
+                continue;
+            }
 
-        if ($feed === null || $feed->accounts()->exists()) {
-            return [];
+            $log = RedbarkSyncLog::query()
+                ->where('redbark_feed_id', $feed->id)
+                ->latest('id')
+                ->first();
+
+            if ($log?->status === RefreshStatus::Failed) {
+                return $log->errors ?? [['context' => 'sync', 'message' => __('The sync failed before Redbark returned any details. Check your Redbark key and try again.')]];
+            }
         }
 
-        $log = RedbarkSyncLog::query()
-            ->where('redbark_feed_id', $feed->id)
-            ->latest('id')
-            ->first();
-
-        if ($log?->status !== RefreshStatus::Failed) {
-            return [];
-        }
-
-        return $log->errors ?? [['context' => 'sync', 'message' => __('The sync failed before Redbark returned any details. Check your Redbark key and try again.')]];
+        return [];
     }
 
     public function save(): void
     {
-        $feed = $this->feed();
+        $feeds = $this->feeds();
 
-        if ($feed === null) {
+        if ($feeds->isEmpty()) {
             $this->redirect(route('providers.edit'), navigate: true);
 
             return;
         }
 
-        // Drop choices for rows this feed already resolved (linked or skipped) since the
+        // Drop choices for rows these feeds already resolved (linked or skipped) since the
         // last save; resubmitting must not re-apply a stale 'new:'/'existing:' choice.
         // Ids that are not one of this feed's rows at all (e.g. another user's account)
         // are left in place so the ownership check below still rejects them.
-        $resolvedIds = $feed->accounts()
+        $resolvedIds = RedbarkAccount::query()
+            ->whereIn('redbark_feed_id', $feeds->modelKeys())
             ->whereNotIn('id', $this->redbarkAccounts()->pluck('id'))
             ->pluck('id')
             ->all();
         $this->choices = array_diff_key($this->choices, array_flip($resolvedIds));
 
         $this->rowErrors = [];
-        $linked = 0;
+        $linkedFeedIds = [];
 
         foreach ($this->choices as $redbarkAccountId => $choice) {
             $redbarkAccount = RedbarkAccount::query()->with('feed')->find($redbarkAccountId);
@@ -169,8 +168,10 @@ final class RedbarkAccountSetup extends Component
             try {
                 // Each row commits on its own so one bad choice cannot cost the user the
                 // rest of the batch; the failures are reported back on the wizard.
-                DB::transaction(function () use ($redbarkAccount, $choice, &$linked): void {
-                    $linked += $this->applyChoice($redbarkAccount, $choice);
+                DB::transaction(function () use ($redbarkAccount, $choice, &$linkedFeedIds): void {
+                    if ($this->applyChoice($redbarkAccount, $choice) > 0) {
+                        $linkedFeedIds[$redbarkAccount->redbark_feed_id] = true;
+                    }
                 });
             } catch (HttpException $e) {
                 throw $e;
@@ -179,16 +180,21 @@ final class RedbarkAccountSetup extends Component
             }
         }
 
-        $stillPending = $feed->accounts()->needsSetup()->exists();
+        $stillPending = false;
 
-        $feed->update(['pending_account_setup' => $stillPending]);
+        foreach ($feeds as $feed) {
+            $pending = $feed->accounts()->needsSetup()->exists();
+            $stillPending = $stillPending || $pending;
+
+            $feed->update(['pending_account_setup' => $pending]);
+
+            if (isset($linkedFeedIds[$feed->id])) {
+                SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Manual);
+            }
+        }
 
         // @phpstan-ignore property.notFound
         unset($this->redbarkAccounts, $this->availableAccounts);
-
-        if ($linked > 0) {
-            SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Manual);
-        }
 
         if ($this->rowErrors !== [] || $stillPending) {
             return;
@@ -225,9 +231,10 @@ final class RedbarkAccountSetup extends Component
         ]);
     }
 
-    private function feed(): ?RedbarkFeed
+    /** @return Collection<int, RedbarkFeed> */
+    private function feeds(): Collection
     {
-        return RedbarkFeed::query()->where('user_id', Auth::id())->first();
+        return RedbarkFeed::query()->where('user_id', Auth::id())->orderBy('id')->get();
     }
 
     private function seedChoices(): void
@@ -300,6 +307,16 @@ final class RedbarkAccountSetup extends Component
 
     private function defaultChoiceFor(RedbarkAccount $redbarkAccount): string
     {
+        $reportedByAnotherFeed = RedbarkAccount::query()
+            ->whereIn('redbark_feed_id', $this->feeds()->modelKeys())
+            ->where('redbark_account_id', $redbarkAccount->redbark_account_id)
+            ->whereKeyNot($redbarkAccount->id)
+            ->exists();
+
+        if ($reportedByAnotherFeed) {
+            return 'skip';
+        }
+
         $class = AccountClass::tryFrom(mb_strtolower(mb_trim((string) $redbarkAccount->account_type)));
 
         return $class !== null && in_array($class, $this->offeredAccountClasses(), true)

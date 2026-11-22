@@ -14,6 +14,7 @@ use App\Jobs\RunTransactionAnalysisJob;
 use App\Livewire\Attributes\NotAudited;
 use App\Livewire\ConnectBank;
 use App\Models\AuditEvent;
+use App\Models\RedbarkFeed;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Support\Audit\AttributeJobToUser;
@@ -513,9 +514,11 @@ test('a component whose combined action name is too long still runs and is simpl
 });
 
 test('actions on a single-file page component are audited under its namespaced name', function () {
+    Queue::fake();
     $user = User::factory()->create();
+    $feed = RedbarkFeed::factory()->for($user)->create();
 
-    Livewire::actingAs($user)->test('pages::settings.providers')->call('syncNow');
+    Livewire::actingAs($user)->test('pages::settings.providers')->call('syncNow', $feed->id);
 
     $event = AuditEvent::query()->sole();
 

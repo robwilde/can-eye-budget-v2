@@ -456,3 +456,14 @@ test('confirming an auto-applied pay cycle unchanged keeps the detected income d
     expect(PlannedTransaction::query()->where('user_id', $user->id)->where('is_pay_cycle_income', true)->sole()->description)
         ->toBe('SALARY ACME');
 });
+
+test('the pay cycle step waits while another feed still has a sync open', function () {
+    $user = User::factory()->create();
+    $older = RedbarkFeed::factory()->for($user)->create();
+    $newer = RedbarkFeed::factory()->for($user)->create(['transport' => App\Enums\RedbarkTransport::SimpleFin, 'api_key' => null, 'simplefin_access_url' => 'https://sfuser:sfpass@api.redbark.com/simplefin']);
+    RedbarkSyncLog::factory()->create(['user_id' => $user->id, 'redbark_feed_id' => $older->id, 'status' => App\Enums\RefreshStatus::Pending]);
+    RedbarkSyncLog::factory()->create(['user_id' => $user->id, 'redbark_feed_id' => $newer->id, 'status' => App\Enums\RefreshStatus::Success]);
+    PipelineRun::factory()->for($user)->create(['status' => PipelineRunStatus::Completed]);
+
+    Livewire::actingAs($user)->test(ConfirmPayCycleStep::class)->assertSet('isAnalysing', true);
+});
