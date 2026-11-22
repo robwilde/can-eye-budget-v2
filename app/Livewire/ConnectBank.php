@@ -54,9 +54,9 @@ final class ConnectBank extends Component
 
     public function mount(): void
     {
-        $feed = RedbarkFeed::query()->where('user_id', Auth::id())->first();
+        $feeds = RedbarkFeed::query()->where('user_id', Auth::id())->get();
 
-        if ($feed === null) {
+        if ($feeds->isEmpty()) {
             return;
         }
 
@@ -66,7 +66,7 @@ final class ConnectBank extends Component
         // step 3 rather than past it, including while the analysis runs or found nothing.
         // One that has never synced is still discovering accounts, so it belongs on step 2
         // even though pending_account_setup is only raised once that first sync lands.
-        if (! $feed->pending_account_setup && $feed->last_synced_at !== null) {
+        if ($feeds->every(fn (RedbarkFeed $feed): bool => ! $feed->pending_account_setup && $feed->last_synced_at !== null)) {
             if ($this->needsPayCycleConfirmation()) {
                 $this->step = self::STEP_PAY_CYCLE;
 
@@ -87,6 +87,15 @@ final class ConnectBank extends Component
             'api_key' => ['required', 'string', 'min:16', 'max:512'],
         ]);
 
+        /** @var User $user */
+        $user = Auth::user();
+
+        if ($user->redbarkFeedFor(RedbarkTransport::Rest) !== null) {
+            $this->addError('api_key', __('You already have a bank connected through a Redbark API key. Update it under Settings > Providers.'));
+
+            return;
+        }
+
         try {
             $clients->forValidation($validated['api_key'])->listConnections();
         } catch (RedbarkAuthenticationException $e) {
@@ -101,16 +110,7 @@ final class ConnectBank extends Component
             return;
         }
 
-        /** @var User $user */
-        $user = Auth::user();
-
-        try {
-            $feed = $saveApiKey->handle($user, $validated['api_key']);
-        } catch (RedbarkException) {
-            $this->addError('api_key', __('This bank is connected through SimpleFIN. Disconnect it first to use an API key instead.'));
-
-            return;
-        }
+        $feed = $saveApiKey->handle($user, $validated['api_key']);
 
         $this->api_key = '';
 
@@ -127,10 +127,11 @@ final class ConnectBank extends Component
 
         $this->setup_token = '';
 
-        $existing = RedbarkFeed::query()->where('user_id', Auth::id())->first();
+        /** @var User $user */
+        $user = Auth::user();
 
-        if ($existing !== null && $existing->transport === RedbarkTransport::Rest && $existing->accounts()->linked()->exists()) {
-            $this->addError('setup_token', __('You already have a bank connected through a Redbark API key. Manage it under Settings > Providers.'));
+        if ($user->redbarkFeedFor(RedbarkTransport::SimpleFin) !== null) {
+            $this->addError('setup_token', __('You already have a bank connected through SimpleFIN. Update it under Settings > Providers.'));
 
             return;
         }
@@ -145,16 +146,7 @@ final class ConnectBank extends Component
             return;
         }
 
-        /** @var User $user */
-        $user = Auth::user();
-
-        try {
-            $feed = $saveAccessUrl->handle($user, $accessUrl);
-        } catch (RedbarkException) {
-            $this->addError('setup_token', __('You already have a bank connected through a Redbark API key. Manage it under Settings > Providers.'));
-
-            return;
-        }
+        $feed = $saveAccessUrl->handle($user, $accessUrl);
 
         SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Manual);
 
