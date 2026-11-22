@@ -30,6 +30,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property bool $category_matcher_enabled
  * @property CarbonImmutable|null $sync_start_date
  * @property CarbonImmutable|null $transactions_synced_at
+ * @property CarbonImmutable|null $missing_upstream_at
  * @property array<int, array<string, mixed>>|null $raw_transactions_payload
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
@@ -57,6 +58,7 @@ final class RedbarkAccount extends Model
         'category_matcher_enabled',
         'sync_start_date',
         'transactions_synced_at',
+        'missing_upstream_at',
         'raw_transactions_payload',
     ];
 
@@ -94,6 +96,15 @@ final class RedbarkAccount extends Model
      * @param  Builder<self>  $query
      * @return Builder<self>
      */
+    public function scopeVanished(Builder $query): Builder
+    {
+        return $query->whereNotNull('account_id')->whereNotNull('missing_upstream_at');
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
     public function scopeNeedsSetup(Builder $query): Builder
     {
         return $query->whereNull('account_id')->where('ignored', false);
@@ -109,6 +120,7 @@ final class RedbarkAccount extends Model
             'raw_transactions_payload' => 'array',
             'sync_start_date' => 'immutable_date',
             'transactions_synced_at' => 'immutable_datetime',
+            'missing_upstream_at' => 'immutable_datetime',
             'ignored' => 'boolean',
             'category_matcher_enabled' => 'boolean',
         ];

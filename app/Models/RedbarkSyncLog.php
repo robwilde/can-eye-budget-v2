@@ -26,6 +26,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int|null $transactions_updated
  * @property int|null $balances_updated
  * @property list<array{context: string, message: string}>|null $errors
+ * @property CarbonImmutable|null $cancelled_at
+ * @property CarbonImmutable|null $since_date
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
  */
@@ -47,6 +49,8 @@ final class RedbarkSyncLog extends Model
         'transactions_updated',
         'balances_updated',
         'errors',
+        'cancelled_at',
+        'since_date',
     ];
 
     /** @return BelongsTo<User, $this> */
@@ -70,6 +74,8 @@ final class RedbarkSyncLog extends Model
             'trigger' => RefreshTrigger::class,
             'status' => RefreshStatus::class,
             'errors' => 'array',
+            'cancelled_at' => 'immutable_datetime',
+            'since_date' => 'immutable_date',
         ];
     }
 }
