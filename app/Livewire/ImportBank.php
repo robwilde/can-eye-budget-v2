@@ -14,6 +14,7 @@ use App\Exceptions\BankImportRevertRefused;
 use App\Exceptions\DocumentRefused;
 use App\Exceptions\Statement\PdfImportRefused;
 use App\Jobs\ImportCsvTransactionsJob;
+use App\Jobs\IndexDocumentJob;
 use App\Livewire\Attributes\NotAudited;
 use App\Livewire\Concerns\ReportsFailure;
 use App\Models\Account;
@@ -144,7 +145,7 @@ final class ImportBank extends Component
         }
 
         try {
-            $uploads->store(auth()->user(), $this->documentFile);
+            IndexDocumentJob::dispatch($uploads->store(auth()->user(), $this->documentFile));
         } catch (DocumentRefused $exception) {
             $this->fail($exception->getMessage());
 
