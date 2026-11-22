@@ -246,3 +246,60 @@ test('the print view shows the report totals without the app chrome', function (
         ->assertMissing('[data-flux-sidebar-item]')
         ->assertNoJavaScriptErrors();
 });
+
+test('reports sections can be collapsed and reordered, and the order survives a reload', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 500000]);
+    $spend = Category::factory()->for($user)->create(['name' => 'Dining']);
+    Transaction::factory()->for($user)->debit()->create([
+        'account_id' => $account->id,
+        'category_id' => $spend->id,
+        'amount' => 3000,
+        'post_date' => now(),
+    ]);
+
+    $this->actingAs($user);
+
+    $order = 'Array.from(document.querySelectorAll("section[data-testid^=report-section-]")).map((section) => section.dataset.testid.replace("report-section-", "")).join(",")';
+
+    $hint = static fn (string $text): string => 'Array.from(document.querySelectorAll("[data-testid=report-net-worth] .mhint")).some((hint) => hint.textContent.trim() === '.json_encode($text).')';
+
+    visit('/reports')
+        ->assertPresent('[data-testid="report-net-worth"]')
+        ->assertPresent('[data-testid="trends-table"]')
+        ->assertPresent('.apexcharts-canvas')
+        ->assertScript("{$order} === 'spending,net-worth,trends'")
+        ->click('[data-testid="report-section-up-trends"]')
+        ->assertScript("{$order} === 'spending,trends,net-worth'")
+        ->click('[data-testid="report-section-down-spending"]')
+        ->assertScript("{$order} === 'trends,spending,net-worth'")
+        ->assertPresent('.apexcharts-canvas')
+        ->click('[data-testid="report-section-up-spending"]')
+        ->assertScript("{$order} === 'spending,trends,net-worth'")
+        ->click('[data-testid="report-section-toggle-trends"]')
+        ->assertMissing('[data-testid="trends-table"]')
+        ->click('[data-testid="report-section-toggle-trends"]')
+        ->assertVisible('[data-testid="trends-table"]')
+        ->assertScript($hint(now()->startOfMonth()->format('j M Y')))
+        ->click('[data-testid="period-prev"]')
+        ->assertScript($hint(now()->startOfMonth()->subMonthNoOverflow()->format('j M Y')))
+        ->assertSeeIn('[data-testid="trends-table"]', now()->startOfMonth()->subMonthNoOverflow()->format('M Y'))
+        ->refresh()
+        ->assertScript("{$order} === 'spending,trends,net-worth'")
+        ->assertNoJavaScriptErrors();
+});
+
+test('a collapsed spending section can be reopened after switching to the plan tab', function () {
+    $user = User::factory()->create();
+    Account::factory()->for($user)->create();
+
+    $this->actingAs($user);
+
+    visit('/reports')
+        ->click('[data-testid="report-section-toggle-spending"]')
+        ->click('Plan')
+        ->assertPresent('[data-testid="report-section-toggle-spending"]')
+        ->click('[data-testid="report-section-toggle-spending"]')
+        ->assertVisible('#report-section-body-spending')
+        ->assertNoJavaScriptErrors();
+});

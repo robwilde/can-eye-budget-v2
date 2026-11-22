@@ -23,6 +23,7 @@ final class UserPreferences extends Dto
     /**
      * @param  list<string>  $allowedCurrencies  Currencies the pickers offer; empty means every supported currency.
      * @param  list<int>  $recentCategoryIds  Categories the user last picked by hand, most recent first.
+     * @param  list<string>  $reportSectionOrder  ReportSection keys in the order the user arranged the reports page; read through ReportSection::ordered().
      */
     public function __construct(
         public readonly Theme $theme = Theme::System,
@@ -41,6 +42,7 @@ final class UserPreferences extends Dto
         public readonly ?string $dashboardTo = null,
         public readonly DashboardLayout $dashboardLayout = new DashboardLayout,
         public readonly CashFlowGrouping $cashFlowGrouping = CashFlowGrouping::Group,
+        public readonly array $reportSectionOrder = [],
     ) {}
 
     /**
@@ -68,6 +70,7 @@ final class UserPreferences extends Dto
             dashboardFrom: self::isoDate($stored['dashboardFrom'] ?? null),
             dashboardTo: self::isoDate($stored['dashboardTo'] ?? null),
             dashboardLayout: self::layout($stored['dashboardLayout'] ?? null) ?? $defaults->dashboardLayout,
+            reportSectionOrder: is_array($stored['reportSectionOrder'] ?? null) ? array_values(array_filter($stored['reportSectionOrder'], is_string(...))) : $defaults->reportSectionOrder,
             cashFlowGrouping: is_string($stored['cashFlowGrouping'] ?? null) ? CashFlowGrouping::tryFrom($stored['cashFlowGrouping']) ?? $defaults->cashFlowGrouping : $defaults->cashFlowGrouping,
         );
     }

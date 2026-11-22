@@ -1,0 +1,1 @@
+<livewire:reports.trends-section :from="$span['start']->toDateString()" :to="$span['end']->toDateString()" :account-id="$filters->accountId" :tag-id="$filters->tagId" :min-cents="$filters->minCents" :max-cents="$filters->maxCents" key="report-trends"/>

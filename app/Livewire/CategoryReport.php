@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Casts\MoneyCast;
+use App\Enums\ReportSection;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionPeriod;
 use App\Models\Account;
@@ -419,6 +420,48 @@ final class CategoryReport extends Component
         ];
     }
 
+    /**
+     * The page's sections in the user's saved order, unknown keys ignored and missing sections appended.
+     *
+     * @return list<ReportSection>
+     */
+    #[Computed]
+    public function sections(): array
+    {
+        return ReportSection::ordered($this->user()->preferences->reportSectionOrder);
+    }
+
+    /**
+     * Moves a section one place up or down and saves the order for this user.
+     */
+    public function moveSection(string $key, string $direction): void
+    {
+        $section = ReportSection::tryFrom($key);
+        $offset = match ($direction) {
+            'up' => -1,
+            'down' => 1,
+            default => null,
+        };
+
+        if ($section === null || $offset === null) {
+            return;
+        }
+
+        $order = $this->sections; // @phpstan-ignore property.notFound
+        $index = array_search($section, $order, true);
+        $target = $index + $offset;
+
+        if (! isset($order[$target])) {
+            return;
+        }
+
+        [$order[$index], $order[$target]] = [$order[$target], $order[$index]];
+
+        $this->user()->updatePreferences(['reportSectionOrder' => array_map(static fn (ReportSection $item): string => $item->value, $order)]);
+
+        unset($this->sections); // @phpstan-ignore property.notFound
+    }
+
     public function render(): View
     {
         $periodEnum = TransactionPeriod::tryFrom($this->period) ?? TransactionPeriod::ThisMonth;
@@ -438,6 +481,7 @@ final class CategoryReport extends Component
             'tagName' => $this->print && $this->mode === 'real' && $this->filters()->tagId !== null ? Tag::query()->where('user_id', $this->user()->id)->whereKey($this->filters()->tagId)->value('name') : null,
             'filters' => $this->mode === 'real' ? $this->filters() : new ReportFilters,
             'window' => $this->window(),
+            'span' => $this->print ? null : $this->span(),
         ]);
     }
 
@@ -739,6 +783,23 @@ final class CategoryReport extends Component
         $page = min(max(1, $page), $pages);
 
         return ['rows' => array_slice($rows, ($page - 1) * self::PAGE_SIZE, self::PAGE_SIZE), 'page' => $page, 'pages' => $pages];
+    }
+
+    /**
+     * The report's first and last day: the selected dates, or the months the data spans when the
+     * period is open-ended.
+     *
+     * @return array{start: CarbonImmutable, end: CarbonImmutable}
+     */
+    private function span(): array
+    {
+        $dates = $this->dates();
+        $bounds = $this->bounds();
+
+        return [
+            'start' => CarbonImmutable::parse(($dates['start'] ?? $bounds['start'])->toDateString()),
+            'end' => CarbonImmutable::parse(($dates['end'] ?? $bounds['end'])->toDateString()),
+        ];
     }
 
     /**
