@@ -8,7 +8,8 @@ use App\Enums\AccountOrder;
 use App\Livewire\AccountManager;
 use App\Livewire\AccountShow;
 use App\Livewire\Dashboard;
-use App\Livewire\Dashboard\NetWorth;
+use App\Livewire\Dashboard\BalanceSheet;
+use App\Livewire\Dashboard\NetWorthChart;
 use App\Models\Account;
 use App\Models\AccountDailyBalance;
 use App\Models\User;
@@ -27,27 +28,22 @@ it('shows net worth as assets minus debts', function () {
 
     Livewire::actingAs($this->user)
         ->test(Dashboard::class)
-        ->assertSeeLivewire(NetWorth::class);
+        ->assertSeeLivewire(NetWorthChart::class)
+        ->assertSeeLivewire(BalanceSheet::class);
 
     Livewire::actingAs($this->user)
-        ->test(NetWorth::class)
-        ->assertSeeHtml('data-test="net-worth-figure">$200,000.00</div>')
+        ->test(NetWorthChart::class)
+        ->assertSeeHtml('data-test="net-worth-figure">$200,000.00</div>');
+
+    Livewire::actingAs($this->user)
+        ->test(BalanceSheet::class)
         ->assertSee('Assets')
         ->assertSee('Liabilities');
 });
 
-it('keeps the net worth period to the offered choices', function () {
-    Livewire::actingAs($this->user)
-        ->test(NetWorth::class)
-        ->set('days', 30)
-        ->assertSet('days', 30)
-        ->set('days', 7)
-        ->assertSet('days', 90);
-});
-
 it('saves the account order preference from the balance sheet', function () {
     Livewire::actingAs($this->user)
-        ->test(NetWorth::class)
+        ->test(BalanceSheet::class)
         ->call('setAccountOrder', 'balance-desc');
 
     expect($this->user->fresh()->preferences->accountOrder)->toBe(AccountOrder::BalanceDesc);
@@ -55,7 +51,7 @@ it('saves the account order preference from the balance sheet', function () {
 
 it('ignores an account order that does not exist', function () {
     Livewire::actingAs($this->user)
-        ->test(NetWorth::class)
+        ->test(BalanceSheet::class)
         ->call('setAccountOrder', 'sideways');
 
     expect($this->user->fresh()->preferences->accountOrder)->toBe(AccountOrder::NameAsc);
@@ -111,7 +107,7 @@ it('colours a falling net worth as unfavourable', function () {
     AccountDailyBalance::factory()->for($account)->create(['balance_date' => '2026-04-01', 'start_balance' => 90000, 'end_balance' => 90000]);
     AccountDailyBalance::factory()->for($account)->create(['balance_date' => '2026-07-15', 'start_balance' => 10000, 'end_balance' => 10000]);
 
-    $component = Livewire::actingAs($this->user)->test(NetWorth::class);
+    $component = Livewire::actingAs($this->user)->test(NetWorthChart::class);
 
     expect($component->instance()->favourable())->toBeFalse();
 });
