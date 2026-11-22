@@ -10,6 +10,7 @@ use Database\Factories\BankImportFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property int $id
@@ -26,6 +27,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property array<int, array{row: int, description: string|null, message: string}>|null $row_errors
  * @property list<array{value: string, rows: int}>|null $unresolved_categories
  * @property array<string, string>|null $column_mapping
+ * @property array{categories?: array<string, int|null>, tags?: array<string, array{type: string, id?: int}|null>}|null $value_mapping
  * @property CarbonImmutable|null $started_at
  * @property CarbonImmutable|null $completed_at
  * @property CarbonImmutable $created_at
@@ -53,9 +55,16 @@ final class BankImport extends Model
         'row_errors',
         'unresolved_categories',
         'column_mapping',
+        'value_mapping',
         'started_at',
         'completed_at',
     ];
+
+    /** @return HasMany<BankImportRow, $this> */
+    public function rows(): HasMany
+    {
+        return $this->hasMany(BankImportRow::class);
+    }
 
     /** @return BelongsTo<User, $this> */
     public function user(): BelongsTo
@@ -81,6 +90,7 @@ final class BankImport extends Model
     {
         return [
             'status' => BankImportStatus::class,
+            'value_mapping' => 'array',
             'column_mapping' => 'array',
             'row_errors' => 'array',
             'unresolved_categories' => 'array',
