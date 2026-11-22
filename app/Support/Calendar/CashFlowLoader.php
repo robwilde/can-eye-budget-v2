@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Support\Calendar;
 
+use App\Enums\CashFlowGrouping;
 use App\Enums\TransactionDirection;
+use App\Models\Account;
 use App\Models\Category;
 use App\Models\CategoryGroup;
 use App\Models\User;
@@ -21,26 +23,102 @@ final readonly class CashFlowLoader
 {
     private const string UNGROUPED_COLOR = '#8C9492';
 
+    private const array ACCOUNT_COLORS = ['#2F7D6E', '#B5651D', '#4A6FA5', '#8E5A9B', '#A3485A', '#6B8E23'];
+
     public function __construct(
         private ReportAggregator $aggregator,
         private CashFlowGraphBuilder $builder,
     ) {}
 
     /**
+     * The range runs from $start to $end, or over the whole month of $start when no end is given.
      * Transfers with one tracked side are included as Savings & Investments or Transfer spend and income.
      */
-    public function load(User $user, CarbonImmutable $monthStart): CashFlow
+    public function load(User $user, CarbonImmutable $start, ?CarbonImmutable $end = null, CashFlowGrouping $grouping = CashFlowGrouping::Group): CashFlow
     {
-        return $this->builder->build($this->parents($user, $monthStart, includeTransfers: true));
+        return $this->builder->build($this->parents($user, $start, includeTransfers: true, end: $end, grouping: $grouping));
     }
 
     /**
      * @return list<FlowParent>
      */
-    public function parents(User $user, CarbonImmutable $monthStart, bool $includeTransfers): array
+    public function parents(User $user, CarbonImmutable $start, bool $includeTransfers, ?CarbonImmutable $end = null, CashFlowGrouping $grouping = CashFlowGrouping::Group): array
     {
-        $atoms = $this->aggregator->atoms($user, 'actual', $monthStart, $monthStart->endOfMonth(), $includeTransfers);
+        $end ??= $start->endOfMonth();
 
+        if ($grouping === CashFlowGrouping::Account) {
+            return $this->accountParents($user, $this->aggregator->accountAtoms($user, $start, $end, $includeTransfers));
+        }
+
+        return $this->groupParents($user, $this->aggregator->atoms($user, 'actual', $start, $end, $includeTransfers));
+    }
+
+    private static function accountColour(int $accountId): string
+    {
+        return self::ACCOUNT_COLORS[$accountId % count(self::ACCOUNT_COLORS)];
+    }
+
+    /**
+     * One parent per account that has counted flow, its children the categories booked on it and posts
+     * with no category as the parent's own share.
+     *
+     * @param  list<array{account_id: int, direction: string, category_id: int|null, total: int}>  $atoms
+     * @return list<FlowParent>
+     */
+    private function accountParents(User $user, array $atoms): array
+    {
+        if ($atoms === []) {
+            return [];
+        }
+
+        $map = CategoryGroupMap::load($user->id);
+        $accounts = Account::query()->where('user_id', $user->id)->orderBy('id')->pluck('name', 'id');
+        $colours = Category::query()->where('user_id', $user->id)->whereNotNull('color')->pluck('color', 'id');
+
+        /** @var array<int, array{own: int, children: array<string, array{name: string, color: string, net: int}>}> $tree */
+        $tree = [];
+
+        foreach ($atoms as $atom) {
+            $net = $atom['direction'] === TransactionDirection::Debit->value ? $atom['total'] : -$atom['total'];
+            $accountId = $atom['account_id'];
+            $tree[$accountId] ??= ['own' => 0, 'children' => []];
+
+            if ($atom['category_id'] === null) {
+                $tree[$accountId]['own'] += $net;
+
+                continue;
+            }
+
+            $childKey = 'c'.$atom['category_id'];
+            $tree[$accountId]['children'][$childKey] ??= [
+                'name' => $map->name($atom['category_id']),
+                'color' => $this->safeColour($colours->get($atom['category_id']), self::accountColour($accountId)),
+                'net' => 0,
+            ];
+            $tree[$accountId]['children'][$childKey]['net'] += $net;
+        }
+
+        $parents = [];
+
+        foreach ($tree as $accountId => $account) {
+            $children = [];
+
+            foreach ($account['children'] as $childKey => $child) {
+                $children[] = new FlowChild($childKey, $child['name'], $child['color'], $child['net']);
+            }
+
+            $parents[] = new FlowParent('a'.$accountId, (string) ($accounts->get($accountId) ?? __('Account')), self::accountColour($accountId), null, $account['own'], $children);
+        }
+
+        return $parents;
+    }
+
+    /**
+     * @param  list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>  $atoms
+     * @return list<FlowParent>
+     */
+    private function groupParents(User $user, array $atoms): array
+    {
         if ($atoms === []) {
             return [];
         }
