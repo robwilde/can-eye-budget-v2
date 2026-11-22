@@ -1,7 +1,9 @@
 <?php
 
 use App\Actions\Redbark\SaveRedbarkApiKey;
+use App\Actions\Redbark\SaveSimpleFinAccessUrl;
 use App\Enums\ImportSource;
+use App\Enums\RedbarkTransport;
 use App\Enums\RefreshStatus;
 use App\Enums\RefreshTrigger;
 use App\Exceptions\Redbark\RedbarkException;
@@ -9,6 +11,7 @@ use App\Jobs\SyncRedbarkFeedJob;
 use App\Models\Account;
 use App\Models\RedbarkFeed;
 use App\Models\RedbarkSyncLog;
+use App\Services\SimpleFinClaimer;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
@@ -18,10 +21,13 @@ use Livewire\Component;
 new #[Title('Bank providers')] class extends Component {
     public string $api_key = '';
 
+    public string $setup_token = '';
+
+    /** @return Collection<int, RedbarkFeed> */
     #[Computed]
-    public function feed(): ?RedbarkFeed
+    public function feeds(): Collection
     {
-        return RedbarkFeed::query()->where('user_id', Auth::id())->first();
+        return RedbarkFeed::query()->where('user_id', Auth::id())->orderBy('id')->get();
     }
 
     #[Computed]
@@ -29,6 +35,7 @@ new #[Title('Bank providers')] class extends Component {
     {
         return RedbarkSyncLog::query()
             ->where('user_id', Auth::id())
+            ->with('feed')
             ->latest('id')
             ->limit(10)
             ->get();
@@ -38,14 +45,26 @@ new #[Title('Bank providers')] class extends Component {
      * Polling is only worth its cost while a run is actually open. A Pending row
      * older than SyncRedbarkFeedJob::UNIQUE_FOR is stranded (job died mid-run
      * without updating its log), not actually syncing.
+     *
+     * @return list<int> the ids of the feeds with an open run
      */
+    #[Computed]
+    public function syncingFeedIds(): array
+    {
+        return RedbarkSyncLog::query()
+            ->where('user_id', Auth::id())
+            ->where('status', RefreshStatus::Pending)
+            ->where('created_at', '>=', now()->subSeconds(SyncRedbarkFeedJob::UNIQUE_FOR))
+            ->pluck('redbark_feed_id')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
     #[Computed]
     public function isSyncing(): bool
     {
-        $log = $this->logs->first();
-
-        return $log?->status === RefreshStatus::Pending
-            && $log->created_at->greaterThan(now()->subSeconds(SyncRedbarkFeedJob::UNIQUE_FOR));
+        return $this->syncingFeedIds !== [];
     }
 
     public function save(SaveRedbarkApiKey $saveApiKey): void
@@ -54,50 +73,61 @@ new #[Title('Bank providers')] class extends Component {
             'api_key' => ['required', 'string', 'min:16', 'max:512'],
         ]);
 
-        try {
-            $feed = $saveApiKey->handle(Auth::user(), $validated['api_key']);
-        } catch (RedbarkException) {
-            $this->addError('api_key', __('This bank is connected through SimpleFIN. Disconnect it first to use an API key instead.'));
-
-            return;
-        }
+        $feed = $saveApiKey->handle(Auth::user(), $validated['api_key']);
 
         $this->api_key = '';
 
         SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Manual);
 
         // Reset after dispatching so this render already sees the open log and starts polling.
-        unset($this->feed, $this->logs, $this->isSyncing);
+        $this->forgetFeeds();
 
         $this->dispatch('redbark-saved');
     }
 
-    public function syncNow(): void
+    public function connectSimpleFin(SaveSimpleFinAccessUrl $saveAccessUrl, SimpleFinClaimer $claimer): void
     {
-        $feed = $this->feed;
+        $validated = $this->validate([
+            'setup_token' => ['required', 'string', 'max:2048'],
+        ]);
 
-        if ($feed === null) {
+        $this->setup_token = '';
+
+        try {
+            $accessUrl = $claimer->claim($validated['setup_token']);
+        } catch (RedbarkException $e) {
+            $this->addError('setup_token', $e->errorType === 'invalid_token'
+                ? __('Redbark did not accept this setup token. Check you copied all of it, or create a new token under Settings > SimpleFIN in Redbark. A token only works once.')
+                : __('We could not reach Redbark just now. Please try again in a moment with a new setup token.'));
+
             return;
         }
 
-        $inFlight = RedbarkSyncLog::query()
-            ->where('user_id', Auth::id())
-            ->where('status', RefreshStatus::Pending)
-            ->where('created_at', '>=', now()->subSeconds(SyncRedbarkFeedJob::UNIQUE_FOR))
-            ->exists();
+        $feed = $saveAccessUrl->handle(Auth::user(), $accessUrl);
 
-        if ($inFlight) {
+        SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Manual);
+
+        $this->forgetFeeds();
+
+        $this->dispatch('simplefin-saved');
+    }
+
+    public function syncNow(int $feedId): void
+    {
+        $feed = $this->feeds->firstWhere('id', $feedId);
+
+        if ($feed === null || in_array($feed->id, $this->syncingFeedIds, true)) {
             return;
         }
 
         SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Manual);
 
-        unset($this->logs, $this->isSyncing);
+        unset($this->logs, $this->syncingFeedIds, $this->isSyncing);
     }
 
-    public function disconnect(): void
+    public function disconnect(int $feedId): void
     {
-        $feed = $this->feed;
+        $feed = $this->feeds->firstWhere('id', $feedId);
 
         if ($feed === null) {
             return;
@@ -108,15 +138,21 @@ new #[Title('Bank providers')] class extends Component {
         $accountIds = $feed->accounts()->linked()->pluck('account_id')->all();
 
         Account::query()
+            ->where('user_id', Auth::id())
             ->whereIn('id', $accountIds)
             ->update(['import_source' => ImportSource::Manual]);
 
         $feed->delete();
 
-        unset($this->feed, $this->logs, $this->isSyncing);
+        $this->forgetFeeds();
 
-        $this->modal('confirm-redbark-disconnect')->close();
+        $this->modal('confirm-redbark-disconnect-'.$feedId)->close();
         $this->dispatch('redbark-disconnected');
+    }
+
+    private function forgetFeeds(): void
+    {
+        unset($this->feeds, $this->logs, $this->syncingFeedIds, $this->isSyncing);
     }
 }; ?>
 
@@ -127,40 +163,85 @@ new #[Title('Bank providers')] class extends Component {
 
     <x-pages::settings.layout :heading="__('Providers')" :subheading="__('Connect your Australian bank accounts via Redbark')">
         <div @if($this->isSyncing) wire:poll.3s @endif class="my-6 w-full space-y-6">
-            @if ($this->feed)
-                <div class="flex flex-wrap items-center gap-3">
-                    <flux:badge :color="$this->feed->status === App\Enums\RedbarkFeedStatus::Good ? 'green' : 'amber'" size="sm">
-                        {{ $this->feed->status->label() }}
-                    </flux:badge>
+            @foreach ($this->feeds as $feed)
+                <div class="space-y-3" wire:key="redbark-feed-{{ $feed->id }}" data-test="redbark-feed-{{ $feed->transport->value }}">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <flux:heading size="sm">
+                            {{ $feed->transport === App\Enums\RedbarkTransport::Rest ? __('Redbark API key') : __('SimpleFIN') }}
+                        </flux:heading>
 
-                    <flux:text size="sm" class="text-zinc-500">
-                        @if ($this->feed->last_synced_at)
-                            {{ __('Last synced :time', ['time' => $this->feed->last_synced_at->diffForHumans()]) }}
-                        @else
-                            {{ __('Never synced') }}
+                        <flux:badge :color="$feed->status === App\Enums\RedbarkFeedStatus::Good ? 'green' : 'amber'" size="sm">
+                            {{ $feed->status->label() }}
+                        </flux:badge>
+
+                        <flux:text size="sm" class="text-zinc-500">
+                            @if ($feed->last_synced_at)
+                                {{ __('Last synced :time', ['time' => $feed->last_synced_at->diffForHumans()]) }}
+                            @else
+                                {{ __('Never synced') }}
+                            @endif
+                        </flux:text>
+
+                        @if (in_array($feed->id, $this->syncingFeedIds, true))
+                            <flux:text size="sm" class="text-zinc-500">{{ __('Sync in progress…') }}</flux:text>
                         @endif
-                    </flux:text>
+                    </div>
 
-                    @if ($this->isSyncing)
-                        <flux:text size="sm" class="text-zinc-500">{{ __('Sync in progress…') }}</flux:text>
+                    @if ($feed->pending_account_setup)
+                        <flux:callout icon="building-library">
+                            <flux:callout.heading>{{ __('Accounts are waiting to be set up') }}</flux:callout.heading>
+                            <flux:callout.text>
+                                {{ __('Redbark found accounts that are not connected to a Can Eye account yet.') }}
+                            </flux:callout.text>
+                            <x-slot name="actions">
+                                <flux:button :href="route('redbark.setup')" wire:navigate size="sm" variant="primary"
+                                             data-test="redbark-setup-button">
+                                    {{ __('Set up accounts') }}
+                                </flux:button>
+                            </x-slot>
+                        </flux:callout>
                     @endif
-                </div>
 
-                @if ($this->feed->pending_account_setup)
-                    <flux:callout icon="building-library">
-                        <flux:callout.heading>{{ __('Accounts are waiting to be set up') }}</flux:callout.heading>
-                        <flux:callout.text>
-                            {{ __('Redbark found accounts that are not connected to a Can Eye account yet.') }}
-                        </flux:callout.text>
-                        <x-slot name="actions">
-                            <flux:button :href="route('redbark.setup')" wire:navigate size="sm" variant="primary"
-                                         data-test="redbark-setup-button">
-                                {{ __('Set up accounts') }}
+                    <div class="flex items-center gap-4">
+                        <flux:button wire:click="syncNow({{ $feed->id }})" variant="filled" data-test="sync-redbark-button"
+                                     :disabled="in_array($feed->id, $this->syncingFeedIds, true)">
+                            {{ __('Sync now') }}
+                        </flux:button>
+
+                        <flux:modal.trigger name="confirm-redbark-disconnect-{{ $feed->id }}">
+                            <flux:button variant="subtle" data-test="disconnect-redbark-button">
+                                {{ __('Disconnect') }}
                             </flux:button>
-                        </x-slot>
-                    </flux:callout>
-                @endif
-            @endif
+                        </flux:modal.trigger>
+                    </div>
+
+                    <flux:modal name="confirm-redbark-disconnect-{{ $feed->id }}" class="md:w-96">
+                        <div class="space-y-6">
+                            <div>
+                                <flux:heading size="lg">{{ __('Disconnect this connection?') }}</flux:heading>
+                                <flux:text class="mt-2">
+                                    {{ __('Your accounts and their transactions are kept, and become manual accounts again. The stored credential is deleted.') }}
+                                </flux:text>
+                            </div>
+
+                            <div class="flex gap-2">
+                                <flux:spacer />
+
+                                <flux:modal.close>
+                                    <flux:button variant="ghost">{{ __('Cancel') }}</flux:button>
+                                </flux:modal.close>
+
+                                <flux:button wire:click="disconnect({{ $feed->id }})" variant="danger" data-test="confirm-disconnect-redbark-button">
+                                    {{ __('Disconnect') }}
+                                </flux:button>
+                            </div>
+                        </div>
+                    </flux:modal>
+                </div>
+            @endforeach
+
+            @php($restFeed = $this->feeds->firstWhere('transport', App\Enums\RedbarkTransport::Rest))
+            @php($simpleFinFeed = $this->feeds->firstWhere('transport', App\Enums\RedbarkTransport::SimpleFin))
 
             <form wire:submit="save" class="space-y-6">
                 <flux:input
@@ -175,23 +256,32 @@ new #[Title('Bank providers')] class extends Component {
 
                 <div class="flex items-center gap-4">
                     <flux:button variant="primary" type="submit" data-test="save-redbark-key-button">
-                        {{ $this->feed ? __('Update key') : __('Save') }}
+                        {{ $restFeed ? __('Update key') : __('Save') }}
                     </flux:button>
 
-                    @if ($this->feed)
-                        <flux:button wire:click="syncNow" variant="filled" data-test="sync-redbark-button"
-                                     :disabled="$this->isSyncing">
-                            {{ __('Sync now') }}
-                        </flux:button>
-
-                        <flux:modal.trigger name="confirm-redbark-disconnect">
-                            <flux:button variant="subtle" data-test="disconnect-redbark-button">
-                                {{ __('Disconnect') }}
-                            </flux:button>
-                        </flux:modal.trigger>
-                    @endif
-
                     <x-action-message class="me-3" on="redbark-saved">
+                        {{ __('Saved.') }}
+                    </x-action-message>
+                </div>
+            </form>
+
+            <form wire:submit="connectSimpleFin" class="space-y-6">
+                <flux:input
+                    wire:model="setup_token"
+                    :label="__('SimpleFIN setup token')"
+                    type="password"
+                    :description="__('Create a token under Settings > SimpleFIN in Redbark. A token only works once.')"
+                    viewable
+                    required
+                    data-test="simplefin-token-input"
+                />
+
+                <div class="flex items-center gap-4">
+                    <flux:button variant="filled" type="submit" data-test="connect-simplefin-button">
+                        {{ $simpleFinFeed ? __('Replace SimpleFIN token') : __('Connect SimpleFIN') }}
+                    </flux:button>
+
+                    <x-action-message class="me-3" on="simplefin-saved">
                         {{ __('Saved.') }}
                     </x-action-message>
                 </div>
@@ -204,6 +294,7 @@ new #[Title('Bank providers')] class extends Component {
                     <flux:table>
                         <flux:table.columns>
                             <flux:table.column>{{ __('When') }}</flux:table.column>
+                            <flux:table.column>{{ __('Connection') }}</flux:table.column>
                             <flux:table.column>{{ __('Trigger') }}</flux:table.column>
                             <flux:table.column>{{ __('Status') }}</flux:table.column>
                             <flux:table.column>{{ __('Changes') }}</flux:table.column>
@@ -213,6 +304,7 @@ new #[Title('Bank providers')] class extends Component {
                             @foreach ($this->logs as $log)
                                 <flux:table.row wire:key="redbark-log-{{ $log->id }}">
                                     <flux:table.cell>{{ $log->created_at->diffForHumans() }}</flux:table.cell>
+                                    <flux:table.cell>{{ $log->feed?->transport === App\Enums\RedbarkTransport::SimpleFin ? __('SimpleFIN') : __('Redbark API key') }}</flux:table.cell>
                                     <flux:table.cell>{{ $log->trigger->label() }}</flux:table.cell>
                                     <flux:table.cell>
                                         <flux:badge size="sm" :color="match ($log->status) {
@@ -234,7 +326,7 @@ new #[Title('Bank providers')] class extends Component {
 
                                 @if (! empty($log->errors))
                                     <flux:table.row wire:key="redbark-log-errors-{{ $log->id }}">
-                                        <flux:table.cell colspan="4">
+                                        <flux:table.cell colspan="5">
                                             {{-- Native disclosure: flux:accordion is a Pro component. --}}
                                             <details class="text-sm">
                                                 <summary class="cursor-pointer text-red-600 dark:text-red-400">
@@ -267,27 +359,5 @@ new #[Title('Bank providers')] class extends Component {
             <livewire:analysis-suggestions />
         </div>
 
-        <flux:modal name="confirm-redbark-disconnect" class="md:w-96">
-            <div class="space-y-6">
-                <div>
-                    <flux:heading size="lg">{{ __('Disconnect Redbark?') }}</flux:heading>
-                    <flux:text class="mt-2">
-                        {{ __('Your accounts and their transactions are kept, and become manual accounts again. The stored API key is deleted.') }}
-                    </flux:text>
-                </div>
-
-                <div class="flex gap-2">
-                    <flux:spacer />
-
-                    <flux:modal.close>
-                        <flux:button variant="ghost">{{ __('Cancel') }}</flux:button>
-                    </flux:modal.close>
-
-                    <flux:button wire:click="disconnect" variant="danger" data-test="confirm-disconnect-redbark-button">
-                        {{ __('Disconnect') }}
-                    </flux:button>
-                </div>
-            </div>
-        </flux:modal>
     </x-pages::settings.layout>
 </section>
