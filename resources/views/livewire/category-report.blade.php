@@ -6,6 +6,10 @@
         $unit = $mode === 'plan' ? 'planned entry' : 'transaction';
         $expenseRows = $this->expenseRows;
         $incomeRows = $this->incomeRows;
+        $expenseView = $this->expenseView;
+        $incomeView = $this->incomeView;
+        $budget = $this->budgetPerformance;
+        $change = static fn (?int $value): string => $value === null ? '' : ' · '.($value > 0 ? '+' : '').$value.'% vs previous period';
     @endphp
 
     <div class="flex flex-wrap items-center justify-between gap-4">
@@ -14,6 +18,10 @@
             <flux:text class="mt-1">Incoming and outgoing by category — {{ $periodLabel }}</flux:text>
         </div>
         <div class="flex flex-wrap items-center gap-3">
+            <div class="flex items-center gap-1">
+                <flux:button size="sm" variant="subtle" icon="chevron-left" wire:click="step(-1)" :disabled="! $canStep" aria-label="Previous period" data-testid="period-prev"/>
+                <flux:button size="sm" variant="subtle" icon="chevron-right" wire:click="step(1)" :disabled="! $canStepForward" aria-label="Next period" data-testid="period-next"/>
+            </div>
             <flux:select wire:model.live="period" size="sm" class="w-auto">
                 <flux:select.option value="7d">Last 7 Days</flux:select.option>
                 <flux:select.option value="this-month">This Month</flux:select.option>
@@ -33,6 +41,13 @@
         </div>
     </div>
 
+    @if($rangeSwapped)
+        <flux:callout variant="warning" icon="exclamation-triangle" data-testid="range-swapped">
+            <flux:callout.heading>The end date was before the start date</flux:callout.heading>
+            <flux:callout.text>The dates were swapped, so the report covers {{ $from }} to {{ $to }}.</flux:callout.text>
+        </flux:callout>
+    @endif
+
     <x-cib.filter-toggle
         :options="[
             ['value' => 'real', 'label' => 'Real', 'tone' => 'out'],
@@ -42,25 +57,57 @@
         wire-model="mode"
     />
 
+    @if($mode === 'real')
+        <div class="flex flex-wrap items-center gap-3" data-testid="report-filters">
+            <flux:select wire:model.live="account" size="sm" class="w-auto" aria-label="Account">
+                <flux:select.option value="">All accounts</flux:select.option>
+                @foreach($accounts as $accountOption)
+                    <flux:select.option value="{{ $accountOption->id }}">{{ $accountOption->name }}</flux:select.option>
+                @endforeach
+            </flux:select>
+            <flux:select wire:model.live="tag" size="sm" class="w-auto" aria-label="Tag">
+                <flux:select.option value="">All tags</flux:select.option>
+                @foreach($tags as $tagOption)
+                    <flux:select.option value="{{ $tagOption->id }}">{{ $tagOption->name }}</flux:select.option>
+                @endforeach
+            </flux:select>
+            <div class="w-28">
+                <flux:input type="number" min="0" step="0.01" wire:model.live.debounce.500ms="min" size="sm" placeholder="Min $" aria-label="Minimum amount"/>
+            </div>
+            <div class="w-28">
+                <flux:input type="number" min="0" step="0.01" wire:model.live.debounce.500ms="max" size="sm" placeholder="Max $" aria-label="Maximum amount"/>
+            </div>
+        </div>
+    @endif
+
     <div class="grid gap-3 sm:grid-cols-3">
         <x-cib.money-card
             label="Income"
             tone="available"
             :amount="$summary['in']"
-            hint="{{ $formatMoney($summary['inPerMonth']) }}/mo across {{ $summary['months'] }} {{ \Illuminate\Support\Str::plural('month', $summary['months']) }}"
+            hint="{{ $formatMoney($summary['inPerMonth']) }}/mo across {{ $summary['months'] }} {{ \Illuminate\Support\Str::plural('month', $summary['months']) }}{{ $change($summary['inChange']) }}"
         />
         <x-cib.money-card
             label="Expenses"
             tone="owed"
             :amount="$summary['out']"
-            hint="{{ $formatMoney($summary['outPerMonth']) }}/mo{{ $summary['outPctIncome'] !== null ? ' · '.$summary['outPctIncome'].'% of income' : '' }}"
+            hint="{{ $formatMoney($summary['outPerMonth']) }}/mo{{ $summary['outPctIncome'] !== null ? ' · '.$summary['outPctIncome'].'% of income' : '' }}{{ $change($summary['outChange']) }}"
         />
         <x-cib.money-card
             label="Net"
             :tone="$summary['net'] >= 0 ? 'available' : 'owed'"
             :amount="$summary['net']"
-            hint="{{ $formatMoney($summary['netPerMonth']) }}/mo{{ $summary['netPctIncome'] !== null ? ' · '.$summary['netPctIncome'].'% of income' : '' }}"
+            hint="{{ $formatMoney($summary['netPerMonth']) }}/mo{{ $summary['netPctIncome'] !== null ? ' · '.$summary['netPctIncome'].'% of income' : '' }}{{ $change($summary['netChange']) }}"
         />
+        @if($budget !== null)
+            <x-cib.money-card
+                label="Budget"
+                :tone="$budget['spent'] > $budget['budget'] ? 'owed' : 'needed'"
+                :amount="$budget['spent']"
+                hint="{{ $budget['percent'] }}% of {{ $formatMoney($budget['budget']) }} budget used"
+                data-testid="budget-performance"
+            />
+        @endif
     </div>
 
     <div
@@ -98,6 +145,10 @@
         <button type="button" wire:click="$toggle('showSubcategories')" @class(['report-chip', 'active' => $showSubcategories])>
             Subcategories
         </button>
+        <flux:select wire:model.live="sort" size="sm" class="w-auto" aria-label="Sort by">
+            <flux:select.option value="amount">Sort by amount</flux:select.option>
+            <flux:select.option value="count">Sort by count</flux:select.option>
+        </flux:select>
     </div>
 
     <div class="grid gap-6 lg:grid-cols-2">
@@ -107,7 +158,7 @@
                 <x-cib.empty-state icon="chart-pie" title="No expenses in this period" description="Try a different time frame."/>
             @else
                 <div class="day-card">
-                    @foreach($expenseRows as $bucket)
+                    @foreach($expenseView['rows'] as $bucket)
                         @include('livewire.partials.category-report-bucket', [
                             'bucket' => $bucket,
                             'tone' => 'out',
@@ -115,6 +166,7 @@
                         ])
                     @endforeach
                 </div>
+                @include('livewire.partials.category-report-pager', ['view' => $expenseView, 'property' => 'expensePage'])
             @endif
         </section>
 
@@ -124,7 +176,7 @@
                 <x-cib.empty-state icon="chart-pie" title="No income in this period" description="Try a different time frame."/>
             @else
                 <div class="day-card">
-                    @foreach($incomeRows as $bucket)
+                    @foreach($incomeView['rows'] as $bucket)
                         @include('livewire.partials.category-report-bucket', [
                             'bucket' => $bucket,
                             'tone' => 'inc',
@@ -132,6 +184,7 @@
                         ])
                     @endforeach
                 </div>
+                @include('livewire.partials.category-report-pager', ['view' => $incomeView, 'property' => 'incomePage'])
             @endif
         </section>
     </div>
