@@ -26,6 +26,7 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Laravel\Fortify\TwoFactorAuthenticatable;
@@ -85,6 +86,13 @@ final class User extends Authenticatable
         'remember_token',
         'vector_store_id',
     ];
+
+    /**
+     * Deleting a user cascades their accounts, transactions, receipts and statements in SQL, which fires no
+     * Transaction or Statement events, so the stored files are collected first and removed after the delete.
+     */
+    /** @var array<int, list<string>> */
+    private static array $documentPathsToPurge = [];
 
     /**
      * Get the user's initials
@@ -410,20 +418,20 @@ final class User extends Authenticatable
         return CarbonImmutable::today()->setDateFrom(CarbonImmutable::now($this->resolvedTimezone()));
     }
 
-    /**
-     * Deleting a user cascades their accounts, transactions, receipts and statements in SQL, which fires no
-     * Transaction or Statement events, so the stored files are collected first and removed after the delete.
-     */
     protected static function booted(): void
     {
         self::deleting(static function (self $user): void {
             TransactionAttachment::remember($user, TransactionAttachment::query()->forUser($user)->get(['disk', 'path']));
             Statement::remember($user, Statement::query()->forUser($user)->pluck('stored_path'));
+            self::$documentPathsToPurge[$user->id] = Document::query()->forUser($user)->pluck('stored_path')->all();
         });
 
         self::deleted(static function (self $user): void {
             TransactionAttachment::purgeRemembered($user);
             Statement::purgeRemembered($user);
+            Storage::disk('local')->delete(self::$documentPathsToPurge[$user->id] ?? []);
+            Storage::disk('local')->deleteDirectory('exports/'.$user->id);
+            unset(self::$documentPathsToPurge[$user->id]);
         });
     }
 
