@@ -28,6 +28,8 @@ enum DashboardWidget: string
     case BalanceSheet = 'balance-sheet';
     case MoneyFlow = 'money-flow';
     case SpendingTrend = 'spending-trend';
+    case CashFlow = 'cash-flow';
+    case Outflows = 'outflows';
     case PayCycleCalendar = 'pay-cycle-calendar';
     case BudgetsThisCycle = 'budgets-this-cycle';
     case UpcomingPlans = 'upcoming-plans';
@@ -45,6 +47,8 @@ enum DashboardWidget: string
             self::BalanceSheet => 'Balance sheet',
             self::MoneyFlow => 'Money flow',
             self::SpendingTrend => 'Spending trend',
+            self::CashFlow => 'Cash flow',
+            self::Outflows => 'Outflows',
             self::PayCycleCalendar => 'Pay cycle calendar',
             self::BudgetsThisCycle => 'Budgets this cycle',
             self::UpcomingPlans => 'Upcoming plans',
@@ -61,6 +65,8 @@ enum DashboardWidget: string
             self::BalanceSheet => 'dashboard.balance-sheet',
             self::MoneyFlow => 'dashboard.money-flow',
             self::SpendingTrend => 'dashboard.spending-trend',
+            self::CashFlow => 'dashboard.cash-flow',
+            self::Outflows => 'dashboard.outflows',
             self::PayCycleCalendar => 'dashboard.pay-cycle-calendar',
             self::MonthlyProjection => 'dashboard.monthly-projection',
             default => null,
@@ -75,7 +81,7 @@ enum DashboardWidget: string
 
     public function lazy(): bool
     {
-        return in_array($this, [self::NetWorthChart, self::BalanceSheet, self::MoneyFlow, self::SpendingTrend, self::MonthlyProjection], true);
+        return in_array($this, [self::NetWorthChart, self::BalanceSheet, self::MoneyFlow, self::SpendingTrend, self::CashFlow, self::Outflows, self::MonthlyProjection], true);
     }
 
     /**
@@ -86,7 +92,7 @@ enum DashboardWidget: string
      */
     public function followsPeriod(): bool
     {
-        return $this === self::NetWorthChart;
+        return in_array($this, [self::NetWorthChart, self::CashFlow, self::Outflows], true);
     }
 
     /**
@@ -106,13 +112,13 @@ enum DashboardWidget: string
     /** Chart widgets can be given a compact, auto or tall height. */
     public function isChart(): bool
     {
-        return in_array($this, [self::NetWorthChart, self::MoneyFlow, self::SpendingTrend, self::MonthlyProjection], true);
+        return in_array($this, [self::NetWorthChart, self::MoneyFlow, self::SpendingTrend, self::CashFlow, self::Outflows, self::MonthlyProjection], true);
     }
 
     public function defaultWidth(): WidgetWidth
     {
         return match ($this) {
-            self::BudgetsThisCycle, self::UpcomingPlans, self::RecentSpending, self::NetWorthChart, self::BalanceSheet, self::MoneyFlow, self::SpendingTrend => WidgetWidth::Half,
+            self::BudgetsThisCycle, self::UpcomingPlans, self::RecentSpending, self::NetWorthChart, self::BalanceSheet, self::MoneyFlow, self::SpendingTrend, self::CashFlow, self::Outflows => WidgetWidth::Half,
             default => WidgetWidth::Full,
         };
     }
@@ -132,7 +138,7 @@ enum DashboardWidget: string
             self::PayCycleCalendar => $user->hasPayCycleConfigured(),
             self::BudgetsThisCycle => $user->budgets()->exists(),
             self::UpcomingPlans => $user->plannedTransactions()->exists(),
-            self::RecentSpending, self::MoneyFlow, self::SpendingTrend => Transaction::query()->where('user_id', $user->id)->exists(),
+            self::RecentSpending, self::MoneyFlow, self::SpendingTrend, self::CashFlow, self::Outflows => Transaction::query()->where('user_id', $user->id)->exists(),
             self::MonthlyProjection => $user->primary_account_id !== null,
             self::PaySummary => true,
         };
