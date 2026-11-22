@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\DTOs;
 
 use App\Enums\AccountOrder;
+use App\Enums\CashFlowGrouping;
 use App\Enums\SupportedLocale;
 use App\Enums\Theme;
 use App\Enums\TransactionPeriod;
@@ -39,6 +40,7 @@ final class UserPreferences extends Dto
         public readonly ?string $dashboardFrom = null,
         public readonly ?string $dashboardTo = null,
         public readonly DashboardLayout $dashboardLayout = new DashboardLayout,
+        public readonly CashFlowGrouping $cashFlowGrouping = CashFlowGrouping::Group,
     ) {}
 
     /**
@@ -66,6 +68,7 @@ final class UserPreferences extends Dto
             dashboardFrom: self::isoDate($stored['dashboardFrom'] ?? null),
             dashboardTo: self::isoDate($stored['dashboardTo'] ?? null),
             dashboardLayout: self::layout($stored['dashboardLayout'] ?? null) ?? $defaults->dashboardLayout,
+            cashFlowGrouping: is_string($stored['cashFlowGrouping'] ?? null) ? CashFlowGrouping::tryFrom($stored['cashFlowGrouping']) ?? $defaults->cashFlowGrouping : $defaults->cashFlowGrouping,
         );
     }
 

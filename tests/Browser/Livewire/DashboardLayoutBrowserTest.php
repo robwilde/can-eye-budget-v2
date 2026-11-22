@@ -9,6 +9,7 @@ use App\Enums\TransactionDirection;
 use App\Enums\TransactionPeriod;
 use App\Models\Account;
 use App\Models\AccountDailyBalance;
+use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
@@ -148,5 +149,28 @@ test('the money flow and spending trend load lazily and read their month from th
         ->assertSeeIn('[data-test="money-flow"]', '(to date)')
         ->select('[data-test="money-flow-account"]', '')
         ->assertQueryStringMissing('flowAccount')
+        ->assertNoJavaScriptErrors();
+});
+
+test('the cash flow and outflows widgets follow the period and switch to account grouping', function () {
+    $user = dashboardUser();
+    $account = $user->accounts()->firstOrFail();
+    $food = Category::factory()->for($user)->create(['name' => 'Food']);
+    $salary = Category::factory()->for($user)->create(['name' => 'Salary']);
+    Transaction::factory()->for($user)->for($account)->create(['amount' => 4200, 'direction' => TransactionDirection::Debit, 'category_id' => $food->id, 'post_date' => now()->subDays(2)->toDateString(), 'transfer_pair_id' => null]);
+    Transaction::factory()->for($user)->for($account)->create(['amount' => 90000, 'direction' => TransactionDirection::Credit, 'category_id' => $salary->id, 'post_date' => now()->subDays(3)->toDateString(), 'transfer_pair_id' => null]);
+    $this->actingAs($user);
+
+    visit('/dashboard')
+        ->assertPresent('[data-test="cash-flow-widget"] [data-testid="cash-flow"]')
+        ->assertSeeIn('[data-test="cash-flow-widget-summary"]', 'over Last 30 Days')
+        ->assertPresent('[data-test="outflows-widget"] .mf-donut')
+        ->assertSeeIn('[data-test="outflows-widget"]', 'Ungrouped')
+        ->click('[data-test="cash-flow-widget"] [data-test="cash-flow-grouping-account"]')
+        ->assertSeeIn('[data-test="outflows-widget"]', $account->name)
+        ->assertPresent('[data-test="cash-flow-widget"] [data-test="cash-flow-grouping-account"][aria-pressed="true"]')
+        ->assertPresent('[data-test="cash-flow-widget"] [data-node-id="expense_a'.$account->id.'"]')
+        ->click('[data-testid="dashboard-period-ytd"]')
+        ->assertSeeIn('[data-test="cash-flow-widget-summary"]', 'over Year to Date')
         ->assertNoJavaScriptErrors();
 });

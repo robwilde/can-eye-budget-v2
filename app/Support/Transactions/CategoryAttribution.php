@@ -22,7 +22,7 @@ use Illuminate\Support\Facades\DB;
  * category_id; its own category_id is suppressed, so nothing is double-counted.
  *
  * Columns exposed on each atom: transaction_id, category_id, amount, direction,
- * post_date, currency, transfer_pair_id. Callers apply their own date/direction/category
+ * post_date, currency, transfer_pair_id, account_id. Callers apply their own date/direction/category
  * filters and aggregate. Portable across SQLite and MySQL.
  */
 final class CategoryAttribution
@@ -45,6 +45,7 @@ final class CategoryAttribution
             ->select([
                 'transactions.id as transaction_id',
                 'transactions.category_id as category_id',
+                'transactions.account_id as account_id',
                 'transactions.amount as amount',
                 'transactions.direction as direction',
                 'transactions.currency as currency',
@@ -65,6 +66,7 @@ final class CategoryAttribution
             ->select([
                 'transactions.id as transaction_id',
                 's.category_id as category_id',
+                'transactions.account_id as account_id',
                 's.amount as amount',
                 'transactions.direction as direction',
                 'transactions.currency as currency',

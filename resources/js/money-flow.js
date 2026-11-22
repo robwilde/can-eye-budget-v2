@@ -152,7 +152,7 @@ document.addEventListener('alpine:init', () => {
 
         get title() {
             if (this.drillId === null) {
-                return 'All categories';
+                return payload.rootTitle ?? 'All categories';
             }
 
             return this.overview.nodes.find((node) => node.id === this.drillId)?.name ?? '';
@@ -172,7 +172,7 @@ document.addEventListener('alpine:init', () => {
         init() {
             this.$nextTick(() => {
                 this.draw(true);
-                this.observer = new ResizeObserver(() => this.draw());
+                this.observer = new ResizeObserver(() => requestAnimationFrame(() => this.draw()));
                 this.observer.observe(this.$refs.canvas);
             });
         },
