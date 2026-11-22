@@ -108,6 +108,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Investments
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, the investments feature (securities, prices, holdings and
+    | trades on investment accounts) is available. Off by default.
+    |
+    */
+
+    'investments' => [
+        'enabled' => (bool) env('BUDGET_INVESTMENTS_ENABLED', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Insights Feed
     |--------------------------------------------------------------------------
     |
