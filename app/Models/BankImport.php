@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\BankImportStatus;
+use App\Enums\ImportPreset;
 use Carbon\CarbonImmutable;
 use Database\Factories\BankImportFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -26,6 +27,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $error_summary
  * @property array<int, array{row: int, description: string|null, message: string}>|null $row_errors
  * @property list<array{value: string, rows: int}>|null $unresolved_categories
+ * @property ImportPreset $preset
  * @property array<string, string>|null $column_mapping
  * @property array{categories?: array<string, int|null>, tags?: array<string, array{type: string, id?: int}|null>}|null $value_mapping
  * @property CarbonImmutable|null $started_at
@@ -54,10 +56,18 @@ final class BankImport extends Model
         'error_summary',
         'row_errors',
         'unresolved_categories',
+        'preset',
         'column_mapping',
         'value_mapping',
         'started_at',
         'completed_at',
+    ];
+
+    /**
+     * @var array<string, string>
+     */
+    protected $attributes = [
+        'preset' => 'bank_csv',
     ];
 
     /** @return HasMany<BankImportRow, $this> */
@@ -90,6 +100,7 @@ final class BankImport extends Model
     {
         return [
             'status' => BankImportStatus::class,
+            'preset' => ImportPreset::class,
             'value_mapping' => 'array',
             'column_mapping' => 'array',
             'row_errors' => 'array',
