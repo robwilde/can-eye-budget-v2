@@ -133,4 +133,21 @@ return [
 
     'feed_category_matching' => (bool) env('BUDGET_FEED_CATEGORY_MATCHING', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Redbark Nightly Sync
+    |--------------------------------------------------------------------------
+    |
+    | A sync of every healthy feed at this time (HH:MM) in the given timezone, on
+    | top of the six-hourly one. A run that is already open is joined, never
+    | doubled. Set the time to null (BUDGET_REDBARK_NIGHTLY_SYNC_TIME=null) to
+    | switch it off.
+    |
+    */
+
+    'redbark' => [
+        'nightly_sync_time' => env('BUDGET_REDBARK_NIGHTLY_SYNC_TIME', '02:22'),
+        'nightly_sync_timezone' => env('BUDGET_REDBARK_NIGHTLY_SYNC_TIMEZONE', 'UTC'),
+    ],
+
 ];
