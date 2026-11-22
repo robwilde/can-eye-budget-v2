@@ -10,7 +10,10 @@ use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Models\BankImport;
 use App\Models\Transaction;
+use App\Services\CsvImport\BankImportRowBuilder;
+use App\Services\CsvImport\BankImportValueMapping;
 use App\Services\CsvImport\CsvParserService;
+use App\Services\CsvImport\ParsedTransactionDto;
 use App\Services\FeedCategoryMatcher;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\TransactionIngestor;
@@ -22,6 +25,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
@@ -78,6 +82,8 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
         $rowErrors = [];
         $mapping = $bankImport->column_mapping ?? [];
         $categoryMatcher = app(FeedCategoryMatcher::class);
+        $valueMapping = app(BankImportValueMapping::class);
+        $explicitValues = $bankImport->value_mapping !== null;
         $unresolved = [];
         $path = Storage::disk('local')->path($bankImport->stored_path);
         $earliest = null;
@@ -95,13 +101,39 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
         };
 
         try {
-            foreach ($parser->eachRow($path, $mapping) as $row) {
+            if (! $bankImport->rows()->exists()) {
+                app(BankImportRowBuilder::class)->build($bankImport);
+            }
+
+            $tagChoices = $valueMapping->tagChoices($bankImport);
+            $occurrences = [];
+
+            foreach ($bankImport->rows()->orderBy('row_number')->cursor() as $importRow) {
+                if (! $importRow->isValid() || $importRow->date === null || $importRow->amount === null || $importRow->direction === null) {
+                    continue;
+                }
+
                 $rowCount++;
+                $key = CsvParserService::hashFor($importRow->date, $importRow->amount, (string) $importRow->description);
+                $occurrence = $occurrences[$key] = ($occurrences[$key] ?? -1) + 1;
+                $row = new ParsedTransactionDto(
+                    postDate: CarbonImmutable::parse($importRow->date),
+                    amount: $importRow->amount,
+                    direction: $importRow->direction,
+                    description: (string) $importRow->description,
+                    balance: null,
+                    rawRow: [],
+                    csvHash: CsvParserService::hashFor($importRow->date, $importRow->amount, (string) $importRow->description, $occurrence),
+                    category: $importRow->category_value,
+                    tag: $importRow->tag_value,
+                );
 
                 try {
                     $categoryId = null;
 
-                    if ($row->category !== null) {
+                    if ($explicitValues) {
+                        $categoryId = $valueMapping->categoryFor($bankImport, $row->category);
+                    } elseif ($row->category !== null) {
                         $categoryId = $categoryMatcher->match($bankImport->user_id, $row->category);
 
                         if ($categoryId === null) {
@@ -127,13 +159,16 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
 
                     if ($existing === null) {
                         $touch($row->postDate);
-                        $ingestor->ingest(new Transaction([
-                            'account_id' => $bankImport->account_id,
-                            'csv_hash' => $row->csvHash,
-                            'bank_import_id' => $bankImport->id,
-                            ...$values,
-                            ...($categoryId === null ? [] : ['category_id' => $categoryId, 'category_source' => CategorySource::Feed]),
-                        ]), rebuildHistory: false);
+                        DB::transaction(function () use ($ingestor, $valueMapping, $bankImport, $row, $values, $categoryId, $tagChoices): void {
+                            $createdRow = $ingestor->ingest(new Transaction([
+                                'account_id' => $bankImport->account_id,
+                                'csv_hash' => $row->csvHash,
+                                'bank_import_id' => $bankImport->id,
+                                ...$values,
+                                ...($categoryId === null ? [] : ['category_id' => $categoryId, 'category_source' => CategorySource::Feed]),
+                            ]), rebuildHistory: false);
+                            $valueMapping->attachTags($bankImport, $createdRow, $row->tag, $tagChoices);
+                        });
                         $imported++;
 
                         continue;
@@ -149,7 +184,10 @@ final class ImportCsvTransactionsJob implements ShouldBeUnique, ShouldQueue
                         $existing->fill($values);
                         $existing->restored_by_bank_import_id = $bankImport->id;
                         self::fillEmptyCategory($existing, $categoryId);
-                        $existing->restore();
+                        DB::transaction(function () use ($existing, $valueMapping, $bankImport, $row, $tagChoices): void {
+                            $existing->restore();
+                            $valueMapping->attachTags($bankImport, $existing, $row->tag, $tagChoices);
+                        });
                         $touch($previousDate);
                         $touch($row->postDate);
                         $restored++;
