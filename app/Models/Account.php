@@ -104,6 +104,18 @@ final class Account extends Model
         return $this->hasMany(AccountValuation::class);
     }
 
+    /** @return HasMany<Holding, $this> */
+    public function holdings(): HasMany
+    {
+        return $this->hasMany(Holding::class);
+    }
+
+    /** @return HasMany<Trade, $this> */
+    public function trades(): HasMany
+    {
+        return $this->hasMany(Trade::class);
+    }
+
     /** @return HasOne<AccountDetail, $this> */
     public function detail(): HasOne
     {
