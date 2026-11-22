@@ -117,6 +117,19 @@
             </div>
         </x-cib.card>
 
+        @if (config('budget.documents.vector_store'))
+            <x-cib.card data-testid="import-bank-document">
+                <flux:heading size="lg">{{ __('Or import a document') }}</flux:heading>
+                <flux:text size="sm" class="mt-1">{{ __('Store a document (up to 25 MB) so it can be searched later. PDFs are read as statements instead.') }}</flux:text>
+                <div class="mt-4 space-y-3">
+                    <input type="file" wire:model="documentFile" data-testid="import-bank-document-input" class="block w-full text-sm"/>
+                    @if($documentMessage) <flux:text class="text-sm font-bold" data-testid="import-bank-document-stored">{{ $documentMessage }}</flux:text> @endif
+                    @error('documentFile') <flux:text class="text-sm text-cib-red-600">{{ $message }}</flux:text> @enderror
+                    <flux:button wire:click="importDocument" wire:loading.attr="disabled" data-testid="import-bank-document-start">{{ __('Import document') }}</flux:button>
+                </div>
+            </x-cib.card>
+        @endif
+
         @if (config('budget.pdf_import.enabled'))
             <x-cib.card data-testid="import-bank-pdf">
                 <flux:heading size="lg">{{ __('Or upload a PDF statement') }}</flux:heading>
