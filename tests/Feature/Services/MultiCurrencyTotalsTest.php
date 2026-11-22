@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\CashFlowGrouping;
 use App\Enums\TransactionDirection;
 use App\Livewire\Dashboard;
 use App\Livewire\Dashboard\BalanceSheet;
@@ -16,6 +17,7 @@ use App\Models\User;
 use App\Services\NetWorthService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\Reports\ReportAggregator;
+use App\Support\Calendar\CashFlowLoader;
 use App\Support\Transactions\TransactionTotals;
 use Carbon\CarbonImmutable;
 use Livewire\Livewire;
@@ -95,6 +97,23 @@ it('converts transaction totals at each entry date', function () {
 
     expect(mcTotals($this->user)['expenses'])->toBe(11000 + 12000 + 5000)
         ->and(mcReportTotal($this->user))->toBe(11000 + 12000 + 5000);
+});
+
+it('converts each account into the base currency when cash flow is grouped by account', function () {
+    mcRate('2026-10-10', 1.10);
+    mcRate('2026-10-12', 1.20);
+    $euro = mcAccount($this->user, 'EUR');
+    $dollar = mcAccount($this->user, 'USD');
+    mcRow($this->user, $euro, '2026-10-10', 10000, 'EUR');
+    mcRow($this->user, $euro, '2026-10-12', 10000, 'EUR');
+    mcRow($this->user, $dollar, '2026-10-12', 5000, 'USD');
+
+    $flow = app(CashFlowLoader::class)->load($this->user, CarbonImmutable::parse('2026-10-01'), grouping: CashFlowGrouping::Account);
+    $nodes = collect($flow->overview['nodes'])->pluck('value', 'id');
+
+    expect($nodes['expense_a'.$euro->id])->toBe(11000 + 12000)
+        ->and($nodes['expense_a'.$dollar->id])->toBe(5000)
+        ->and($flow->spending)->toBe(mcReportTotal($this->user));
 });
 
 it('keeps totals unconverted when multi currency is off', function () {
