@@ -41,6 +41,12 @@ Schedule::command('insights:generate')
     ->name('insights:generate')
     ->withoutOverlapping();
 
+Schedule::command('securities:sync-prices')
+    ->dailyAt('06:00')
+    ->name('securities:sync-prices')
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('goals:maintain')
     ->dailyAt('02:00')
     ->name('goals:maintain')
