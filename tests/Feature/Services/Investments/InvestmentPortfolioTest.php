@@ -153,7 +153,9 @@ it('counts contributions by direction, once per split, in absolute amounts', fun
     Transaction::factory()->create(['user_id' => $this->user->id, 'account_id' => $this->account->id, 'amount' => -20000, 'direction' => TransactionDirection::Debit, 'status' => TransactionStatus::Posted]);
     Transaction::factory()->create(['user_id' => $this->user->id, 'account_id' => $this->account->id, 'amount' => 100000, 'direction' => TransactionDirection::Credit, 'status' => TransactionStatus::Posted, 'split_parent_id' => $credit->id]);
 
-    expect(app(InvestmentPortfolio::class)->contributions($this->user, $this->account))->toBe(80000);
+    $flows = app(InvestmentPortfolio::class)->flows($this->user, $this->account, null, null);
+
+    expect($flows)->toBe(['inflows' => 100000, 'outflows' => 20000]);
 });
 
 it('leaves the holdings of a provider-linked account to the provider', function () {

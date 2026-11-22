@@ -14,6 +14,7 @@ use App\Models\Category;
 use App\Models\Tag;
 use App\Models\User;
 use App\Services\Budgets\BudgetPlanCalculator;
+use App\Services\Reports\InvestmentReport;
 use App\Services\Reports\ReportAggregator;
 use App\Services\Reports\ReportCsv;
 use App\Services\Reports\ReportFilters;
@@ -422,13 +423,26 @@ final class CategoryReport extends Component
 
     /**
      * The page's sections in the user's saved order, unknown keys ignored and missing sections appended.
+     * The investment sections are left out while the investments flag is off, when the user has no active
+     * investment account and, for the flows, when the period has no contributions or withdrawals.
      *
      * @return list<ReportSection>
      */
     #[Computed]
     public function sections(): array
     {
-        return ReportSection::ordered($this->user()->preferences->reportSectionOrder);
+        $user = $this->user();
+        $span = $this->span();
+        $investments = app(InvestmentReport::class);
+
+        return array_values(array_filter(
+            ReportSection::ordered($user->preferences->reportSectionOrder),
+            static fn (ReportSection $section): bool => match ($section) {
+                ReportSection::InvestmentPerformance => $investments->appliesTo($user),
+                ReportSection::InvestmentFlows => $investments->hasFlows($user, $span['start'], $span['end']),
+                default => true,
+            },
+        ));
     }
 
     /**
@@ -447,15 +461,19 @@ final class CategoryReport extends Component
             return;
         }
 
-        $order = $this->sections; // @phpstan-ignore property.notFound
-        $index = array_search($section, $order, true);
-        $target = $index + $offset;
+        $shown = $this->sections; // @phpstan-ignore property.notFound
+        $index = array_search($section, $shown, true);
+        $neighbour = $index === false ? null : ($shown[$index + $offset] ?? null);
 
-        if (! isset($order[$target])) {
+        if ($neighbour === null) {
             return;
         }
 
-        [$order[$index], $order[$target]] = [$order[$target], $order[$index]];
+        $order = ReportSection::ordered($this->user()->preferences->reportSectionOrder);
+        $from = array_search($section, $order, true);
+        $to = array_search($neighbour, $order, true);
+
+        [$order[$from], $order[$to]] = [$order[$to], $order[$from]];
 
         $this->user()->updatePreferences(['reportSectionOrder' => array_map(static fn (ReportSection $item): string => $item->value, $order)]);
 
