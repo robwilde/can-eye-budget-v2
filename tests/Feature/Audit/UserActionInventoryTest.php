@@ -11,6 +11,7 @@ use App\Jobs\EnrichMerchantBrandsJob;
 use App\Jobs\ExtractStatementPdfJob;
 use App\Jobs\GenerateInsightsJob;
 use App\Jobs\ImportCsvTransactionsJob;
+use App\Jobs\IndexDocumentJob;
 use App\Jobs\MaintainGoalsJob;
 use App\Jobs\ResolveMerchantBrandJob;
 use App\Jobs\RunTransactionAnalysisJob;
@@ -19,6 +20,7 @@ use App\Jobs\SyncRedbarkFeedJob;
 use App\Livewire\Hooks\AuditComponentCalls;
 use App\Models\AuditEvent;
 use App\Models\BankImport;
+use App\Models\Document;
 use App\Models\PdfImport;
 use App\Models\RedbarkFeed;
 use App\Models\User;
@@ -202,6 +204,7 @@ test('every queued job is in the inventory and carries the audit middleware as d
         CategoriseRuleMatchesJob::class => [new CategoriseRuleMatchesJob($user, []), true],
         ApplyUserRulesJob::class => [new ApplyUserRulesJob($user), true],
         ExtractStatementPdfJob::class => [new ExtractStatementPdfJob(PdfImport::factory()->create()), true],
+        IndexDocumentJob::class => [new IndexDocumentJob(Document::factory()->create()), true],
     ];
 
     $discovered = collect(File::allFiles(app_path('Jobs')))

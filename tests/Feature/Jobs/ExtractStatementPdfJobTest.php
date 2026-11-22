@@ -293,3 +293,30 @@ it('marks an unexpected failure as failed without exposing details', function ()
 
     Log::shouldHaveReceived('error')->withArgs(fn (string $message, array $context): bool => $context['exception'] === RuntimeException::class && ! str_contains(json_encode($context), 'sk-test-secret'));
 });
+
+it('adds the analysed pdf to the document store only when one is configured', function () {
+    Illuminate\Support\Facades\Queue::fake([App\Jobs\IndexDocumentJob::class]);
+    Http::fake(['*' => aiReply(['document_type' => 'bank_statement', 'date_format' => 'd/m/Y', 'lines' => [aiLine('01/03/2026', '4.50')]])]);
+
+    runExtraction($this->import);
+    Illuminate\Support\Facades\Queue::assertNotPushed(App\Jobs\IndexDocumentJob::class);
+
+    config(['budget.documents.vector_store' => 'openai', 'services.vector_store.openai.api_key' => 'sk-vs']);
+    $second = PdfImport::factory()->create(['user_id' => $this->statement->user_id, 'statement_id' => $this->statement->id]);
+    runExtraction($second);
+
+    Illuminate\Support\Facades\Queue::assertPushed(App\Jobs\IndexDocumentJob::class, 1);
+
+    $third = PdfImport::factory()->create(['user_id' => $this->statement->user_id, 'statement_id' => $this->statement->id]);
+    runExtraction($third);
+    Illuminate\Support\Facades\Queue::assertPushed(App\Jobs\IndexDocumentJob::class, 1);
+    expect(App\Models\Document::query()->where('user_id', $this->statement->user_id)->sole()->stored_path)->toBe('statements/s.pdf');
+});
+
+it('keeps the import ready when the document store cannot be queued', function () {
+    config(['budget.documents.vector_store' => 'openai', 'services.vector_store.openai.api_key' => 'sk-vs']);
+    Http::fake(['*' => aiReply(['document_type' => 'bank_statement', 'date_format' => 'd/m/Y', 'lines' => [aiLine('01/03/2026', '4.50')]])]);
+    App\Models\Document::creating(fn () => throw new RuntimeException('down'));
+
+    expect(runExtraction($this->import)->status)->toBe(PdfImportStatus::Ready);
+});
