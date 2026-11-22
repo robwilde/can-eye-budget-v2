@@ -23,8 +23,7 @@ final class SyncRedbarkFeedsCommand extends Command
         // Feeds needing a new key are skipped: every call would 401 and the user has
         // already been told in the providers panel.
         foreach (RedbarkFeed::query()->where('status', RedbarkFeedStatus::Good)->cursor() as $feed) {
-            SyncRedbarkFeedJob::dispatch($feed, RefreshTrigger::Scheduled)
-                ->delay(now()->addSeconds($index * 10));
+            SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Scheduled, delaySeconds: $index * 10);
 
             $index++;
         }
