@@ -10,6 +10,7 @@
             <flux:navlist.item :href="route('currency.edit')" wire:navigate>{{ __('Currency') }}</flux:navlist.item>
             <flux:navlist.item :href="route('preferences.edit')" wire:navigate>{{ __('Preferences') }}</flux:navlist.item>
             <flux:navlist.item :href="route('providers.edit')" wire:navigate>{{ __('Providers') }}</flux:navlist.item>
+            <flux:navlist.item :href="route('exports.edit')" wire:navigate>{{ __('Exports') }}</flux:navlist.item>
         </flux:navlist>
     </div>
 
