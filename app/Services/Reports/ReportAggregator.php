@@ -15,6 +15,7 @@ use App\Support\Transactions\CategoryAttribution;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 
 final class ReportAggregator
 {
@@ -239,6 +240,49 @@ final class ReportAggregator
         return $dates;
     }
 
+    /**
+     * Posted, counted, user-scoped totals per day, direction and category, in the base currency,
+     * under the same transfer, exclusion and filter rules as the monthly atoms.
+     *
+     * @return list<array{day: string, direction: string, category_id: int|null, total: int}>
+     */
+    public function dailyAtoms(User $user, CarbonInterface $start, CarbonInterface $end, ?ReportFilters $filters = null): array
+    {
+        $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
+
+        $query = $this->countedQuery($user, true, $start, $end, $filters)
+            ->selectRaw('date(post_date) as day, direction, category_id, SUM(ABS(amount)) as total')
+            ->groupByRaw('date(post_date)')
+            ->groupBy('direction', 'category_id');
+
+        if ($converter !== null) {
+            $query->selectRaw('currency')->groupBy('currency');
+        }
+
+        $atoms = [];
+
+        foreach ($query->get() as $row) {
+            $total = (int) $row->total;
+
+            if ($converter !== null && $row->currency !== $user->base_currency) {
+                $total = $converter->convert($total, (string) $row->currency, $user->base_currency, CarbonImmutable::parse((string) $row->day));
+            }
+
+            $key = $row->day.'|'.$row->direction.'|'.($row->category_id ?? 'null');
+
+            $atoms[$key] ??= [
+                'day' => (string) $row->day,
+                'direction' => (string) $row->direction,
+                'category_id' => $row->category_id === null ? null : (int) $row->category_id,
+                'total' => 0,
+            ];
+
+            $atoms[$key]['total'] += $total;
+        }
+
+        return array_values($atoms);
+    }
+
     private function earliestActualDate(User $user): ?CarbonImmutable
     {
         $min = Transaction::query()
@@ -265,16 +309,11 @@ final class ReportAggregator
         return $max === null ? null : CarbonImmutable::parse((string) $max);
     }
 
-    /**
-     * @return list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>
-     */
-    private function actualAtoms(User $user, ?CarbonInterface $start, ?CarbonInterface $end, bool $includeTransfers, ?ReportFilters $filters): array
+    private function countedQuery(User $user, bool $includeTransfers, ?CarbonInterface $start, ?CarbonInterface $end, ?ReportFilters $filters): QueryBuilder
     {
-        $monthExpr = $this->monthExpression();
         $transferCategoryIds = $this->transferCategoryIds($user->id);
-        $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
 
-        $query = CategoryAttribution::query($user->id, forMoney: true, forReports: true, postedOnly: true)
+        return CategoryAttribution::query($user->id, forMoney: true, forReports: true, postedOnly: true)
             ->where(fn ($counted) => $counted
                 ->where(fn ($ordinary) => $ordinary
                     ->whereNull('transfer_pair_id')
@@ -290,7 +329,18 @@ final class ReportAggregator
                     ->select('transactions.id'))))
             ->when($start, fn ($q, $s) => $q->where('post_date', '>=', $s))
             ->when($end, fn ($q, $e) => $q->where('post_date', '<=', $e))
-            ->when($filters !== null && ! $filters->isEmpty(), fn ($q) => $q->whereIn('transaction_id', $this->filteredTransactionIds($user, $filters)))
+            ->when($filters !== null && ! $filters->isEmpty(), fn ($q) => $q->whereIn('transaction_id', $this->filteredTransactionIds($user, $filters)));
+    }
+
+    /**
+     * @return list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>
+     */
+    private function actualAtoms(User $user, ?CarbonInterface $start, ?CarbonInterface $end, bool $includeTransfers, ?ReportFilters $filters): array
+    {
+        $monthExpr = $this->monthExpression();
+        $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
+
+        $query = $this->countedQuery($user, $includeTransfers, $start, $end, $filters)
             ->selectRaw("{$monthExpr} as ym, direction, category_id, SUM(ABS(amount)) as total, COUNT(*) as tx_count")
             ->groupByRaw($monthExpr)
             ->groupBy('direction', 'category_id');
