@@ -339,15 +339,22 @@ final class Dashboard extends Component
     }
 
     /**
-     * Moves a widget to a zero-based position among the visible widgets; called by drag reordering.
+     * Moves a widget to a zero-based position among the widgets drawn on the page, which leave out one
+     * that is unavailable; called by drag reordering.
      */
     public function reorder(string $item, int $position): void
     {
         $widget = DashboardWidget::tryFrom($item);
 
-        if ($widget !== null) {
-            $this->saveLayout($this->layout()->move($widget, $position));
+        if ($widget === null) {
+            return;
         }
+
+        $shown = array_values(array_filter($this->visibleWidgets, static fn (DashboardWidget $other): bool => $other !== $widget)); // @phpstan-ignore property.notFound
+        $all = array_values(array_filter($this->layout()->visible(), static fn (DashboardWidget $other): bool => $other !== $widget));
+        $anchor = $shown[$position] ?? null;
+
+        $this->saveLayout($this->layout()->move($widget, $anchor === null ? count($all) : (int) array_search($anchor, $all, true)));
     }
 
     public function setWidth(string $key, string $width): void
@@ -433,7 +440,9 @@ final class Dashboard extends Component
     #[Computed]
     public function visibleWidgets(): array
     {
-        return $this->layout()->visible();
+        $user = auth()->user();
+
+        return array_values(array_filter($this->layout()->visible(), static fn (DashboardWidget $widget): bool => $widget->availableTo($user)));
     }
 
     /**
