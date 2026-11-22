@@ -20,6 +20,7 @@ use App\Models\User;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\Transfers\TransferLinker;
 use App\Support\Investments\Decimal;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -55,7 +56,7 @@ final readonly class TradeRecorder
 
         $currency = $this->currencyOf($input->currency, $account);
 
-        return DB::transaction(function () use ($user, $input, $currency): Trade {
+        return DB::transaction(function () use ($user, $input, $currency, $account): Trade {
             $this->lockAccounts($user, $input->accountId);
 
             $security = $this->security($input, $currency);
@@ -76,6 +77,7 @@ final readonly class TradeRecorder
 
             if ($input->activity->movesShares()) {
                 $this->holdings->refresh($user, $input->accountId, $security->id, $currency);
+                $this->history->rebuild($account, CarbonImmutable::parse($input->date));
             }
 
             return $trade;
@@ -126,6 +128,7 @@ final readonly class TradeRecorder
 
             if ($locked->security_id !== null) {
                 $this->holdings->refresh($user, $locked->account_id, $locked->security_id, $locked->currency);
+                $this->history->rebuild($locked->account, $locked->date);
             }
 
             return $locked;

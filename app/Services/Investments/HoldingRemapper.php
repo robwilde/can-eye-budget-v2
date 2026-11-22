@@ -11,6 +11,7 @@ use App\Models\Holding;
 use App\Models\Security;
 use App\Models\Trade;
 use App\Models\User;
+use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Support\Investments\Decimal;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -27,7 +28,7 @@ use Illuminate\Support\Facades\DB;
  */
 final readonly class HoldingRemapper
 {
-    public function __construct(private TradeRecorder $recorder, private HoldingSnapshotter $snapshotter) {}
+    public function __construct(private TradeRecorder $recorder, private HoldingSnapshotter $snapshotter, private AccountBalanceHistoryBuilder $history) {}
 
     /**
      * @return Collection<int, Holding> the account's holdings of the new security after the remap
@@ -128,6 +129,7 @@ final readonly class HoldingRemapper
 
         $this->moveTrades($accountId, $fromSecurityId, $toSecurityId, $onlyOriginal);
         $this->refresh($user, $accountId, [$fromSecurityId, $toSecurityId]);
+        $this->history->rebuild(Account::query()->where('user_id', $user->id)->findOrFail($accountId));
 
         return $this->holdingsOf($accountId, $toSecurityId);
     }

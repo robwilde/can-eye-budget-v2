@@ -10,6 +10,7 @@ use App\Models\Account;
 use App\Models\Holding;
 use App\Models\Trade;
 use App\Models\User;
+use App\Services\Projection\AccountBalanceHistoryBuilder;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -19,6 +20,8 @@ use Illuminate\Support\Facades\DB;
  */
 final readonly class HoldingDeleter
 {
+    public function __construct(private AccountBalanceHistoryBuilder $history) {}
+
     /**
      * @throws HoldingRefusedException when the holding is not the user's or a linked provider would recreate it
      */
@@ -38,6 +41,8 @@ final readonly class HoldingDeleter
 
             Trade::query()->where('account_id', $account->id)->where('security_id', $own->security_id)->delete();
             Holding::query()->where('account_id', $account->id)->where('security_id', $own->security_id)->delete();
+
+            $this->history->rebuild($account);
         });
     }
 }
