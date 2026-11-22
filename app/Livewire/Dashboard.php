@@ -5,9 +5,14 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\DTOs\BudgetLineSummaryDto;
+use App\DTOs\DashboardLayout;
+use App\Enums\ChartHeight;
+use App\Enums\DashboardWidget;
 use App\Enums\InsightStatus;
 use App\Enums\InsightType;
 use App\Enums\TransactionDirection;
+use App\Enums\TransactionPeriod;
+use App\Enums\WidgetWidth;
 use App\Models\Account;
 use App\Models\Budget;
 use App\Models\BudgetPlan;
@@ -18,6 +23,7 @@ use App\Models\User;
 use App\Services\Budgets\BudgetPlanCalculator;
 use App\Services\FirstImportSummary;
 use App\Services\Transfers\TransferReviewQueue;
+use App\Support\Dashboard\DashboardPeriod;
 use App\Support\Transactions\CategoryAttribution;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -29,6 +35,23 @@ use Livewire\Component;
 
 final class Dashboard extends Component
 {
+    public bool $customising = false;
+
+    public bool $showCustomRange = false;
+
+    public string $customFrom = '';
+
+    public string $customTo = '';
+
+    public function mount(): void
+    {
+        $preferences = auth()->user()->preferences;
+
+        $this->showCustomRange = $preferences->dashboardPeriod === TransactionPeriod::Custom;
+        $this->customFrom = $preferences->dashboardFrom ?? '';
+        $this->customTo = $preferences->dashboardTo ?? '';
+    }
+
     public function placeholder(): string
     {
         return <<<'HTML'
@@ -282,9 +305,176 @@ final class Dashboard extends Component
         ];
     }
 
+    /** Turns customise mode on or off. */
+    public function toggleCustomise(): void
+    {
+        $this->customising = ! $this->customising;
+    }
+
+    public function hideWidget(string $key): void
+    {
+        $widget = DashboardWidget::tryFrom($key);
+
+        if ($widget !== null) {
+            $this->saveLayout($this->layout()->hide($widget));
+        }
+    }
+
+    public function showWidget(string $key): void
+    {
+        $widget = DashboardWidget::tryFrom($key);
+
+        if ($widget !== null) {
+            $this->saveLayout($this->layout()->show($widget));
+        }
+    }
+
+    public function toggleCollapsed(string $key): void
+    {
+        $widget = DashboardWidget::tryFrom($key);
+
+        if ($widget !== null) {
+            $this->saveLayout($this->layout()->toggleCollapsed($widget));
+        }
+    }
+
+    /**
+     * Moves a widget to a zero-based position among the visible widgets; called by drag reordering.
+     */
+    public function reorder(string $item, int $position): void
+    {
+        $widget = DashboardWidget::tryFrom($item);
+
+        if ($widget !== null) {
+            $this->saveLayout($this->layout()->move($widget, $position));
+        }
+    }
+
+    public function setWidth(string $key, string $width): void
+    {
+        $widget = DashboardWidget::tryFrom($key);
+        $choice = WidgetWidth::tryFrom($width);
+
+        if ($widget !== null && $choice !== null) {
+            $this->saveLayout($this->layout()->withWidth($widget, $choice));
+        }
+    }
+
+    public function setChartHeight(string $key, string $height): void
+    {
+        $widget = DashboardWidget::tryFrom($key);
+        $choice = ChartHeight::tryFrom($height);
+
+        if ($widget !== null && $widget->isChart() && $choice !== null) {
+            $this->saveLayout($this->layout()->withHeight($widget, $choice));
+        }
+    }
+
+    public function setTwoColumn(bool $twoColumn): void
+    {
+        $this->saveLayout($this->layout()->withTwoColumn($twoColumn));
+    }
+
+    public function resetLayout(): void
+    {
+        $this->saveLayout(new DashboardLayout);
+    }
+
+    /**
+     * Saves the period the dashboard widgets follow. Custom is saved with setCustomRange().
+     */
+    public function setPeriod(string $key): void
+    {
+        $period = TransactionPeriod::tryFrom($key);
+
+        if ($period === null || ! in_array($period, TransactionPeriod::dashboardOptions(), true)) {
+            return;
+        }
+
+        if ($period === TransactionPeriod::Custom) {
+            $this->showCustomRange = true;
+
+            return;
+        }
+
+        $this->showCustomRange = false;
+        $this->savePeriod($period, null, null);
+    }
+
+    /**
+     * Saves a custom start and end. A pair that is invalid or backwards is saved as the last
+     * 30 days instead.
+     */
+    public function setCustomRange(): void
+    {
+        if (! TransactionPeriod::validRange($this->customFrom, $this->customTo)) {
+            $this->showCustomRange = false;
+            $this->savePeriod(TransactionPeriod::ThirtyDays, null, null);
+
+            return;
+        }
+
+        $this->savePeriod(TransactionPeriod::Custom, $this->customFrom, $this->customTo);
+    }
+
+    #[Computed]
+    public function layout(): DashboardLayout
+    {
+        return auth()->user()->preferences->dashboardLayout;
+    }
+
+    #[Computed]
+    public function period(): DashboardPeriod
+    {
+        return DashboardPeriod::for(auth()->user());
+    }
+
+    /** @return list<DashboardWidget> */
+    #[Computed]
+    public function visibleWidgets(): array
+    {
+        return $this->layout()->visible();
+    }
+
+    /**
+     * The hidden widgets the user can add back: only those that have something to show.
+     *
+     * @return list<DashboardWidget>
+     */
+    #[Computed]
+    public function hiddenOffers(): array
+    {
+        $user = auth()->user();
+
+        return array_values(array_filter(
+            $this->layout()->hiddenWidgets(),
+            static fn (DashboardWidget $widget): bool => $widget->hasData($user),
+        ));
+    }
+
     public function render(): View
     {
         return view('livewire.dashboard');
+    }
+
+    private function saveLayout(DashboardLayout $layout): void
+    {
+        auth()->user()->updatePreferences(['dashboardLayout' => $layout->toArray()]);
+
+        unset($this->layout, $this->visibleWidgets, $this->hiddenOffers); // @phpstan-ignore property.notFound
+    }
+
+    private function savePeriod(TransactionPeriod $period, ?string $from, ?string $to): void
+    {
+        auth()->user()->updatePreferences([
+            'dashboardPeriod' => $period->value,
+            'dashboardFrom' => $from,
+            'dashboardTo' => $to,
+        ]);
+
+        unset($this->period); // @phpstan-ignore property.notFound
+
+        $this->dispatch('dashboard-period-changed');
     }
 
     /**

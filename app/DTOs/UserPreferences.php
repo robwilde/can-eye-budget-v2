@@ -35,6 +35,10 @@ final class UserPreferences extends Dto
         public readonly bool $categoriesLocked = false,
         public readonly array $recentCategoryIds = [],
         public readonly bool $autoSyncOnLogin = false,
+        public readonly TransactionPeriod $dashboardPeriod = TransactionPeriod::ThirtyDays,
+        public readonly ?string $dashboardFrom = null,
+        public readonly ?string $dashboardTo = null,
+        public readonly DashboardLayout $dashboardLayout = new DashboardLayout,
     ) {}
 
     /**
@@ -58,6 +62,10 @@ final class UserPreferences extends Dto
             categoriesLocked: is_bool($stored['categoriesLocked'] ?? null) ? $stored['categoriesLocked'] : $defaults->categoriesLocked,
             recentCategoryIds: is_array($stored['recentCategoryIds'] ?? null) ? self::categoryIds($stored['recentCategoryIds']) : $defaults->recentCategoryIds,
             autoSyncOnLogin: is_bool($stored['autoSyncOnLogin'] ?? null) ? $stored['autoSyncOnLogin'] : $defaults->autoSyncOnLogin,
+            dashboardPeriod: self::dashboardPeriod($stored['dashboardPeriod'] ?? null) ?? $defaults->dashboardPeriod,
+            dashboardFrom: self::isoDate($stored['dashboardFrom'] ?? null),
+            dashboardTo: self::isoDate($stored['dashboardTo'] ?? null),
+            dashboardLayout: self::layout($stored['dashboardLayout'] ?? null) ?? $defaults->dashboardLayout,
         );
     }
 
@@ -68,10 +76,36 @@ final class UserPreferences extends Dto
             static fn (mixed $value): mixed => match (true) {
                 $value instanceof BackedEnum => $value->value,
                 $value instanceof DateTimeInterface => CarbonImmutable::instance($value)->toIso8601String(),
+                $value instanceof DashboardLayout => $value->toArray(),
                 default => $value,
             },
             get_object_vars($this),
         );
+    }
+
+    private static function layout(mixed $value): ?DashboardLayout
+    {
+        return match (true) {
+            $value instanceof DashboardLayout => $value,
+            is_array($value) => DashboardLayout::fromStored($value),
+            default => null,
+        };
+    }
+
+    /**
+     * The saved dashboard period when it is one the selector offers; anything else is null so the
+     * caller falls back to the last 30 days.
+     */
+    private static function dashboardPeriod(mixed $value): ?TransactionPeriod
+    {
+        $period = is_string($value) ? TransactionPeriod::tryFrom($value) : null;
+
+        return $period !== null && in_array($period, TransactionPeriod::dashboardOptions(), true) ? $period : null;
+    }
+
+    private static function isoDate(mixed $value): ?string
+    {
+        return is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1 ? $value : null;
     }
 
     private static function moment(mixed $value): ?CarbonImmutable

@@ -7,7 +7,21 @@ declare(strict_types=1);
 use App\Enums\TransactionPeriod;
 
 test('all transaction period cases exist', function () {
-    expect(TransactionPeriod::cases())->toHaveCount(9);
+    expect(TransactionPeriod::cases())->toHaveCount(16);
+});
+
+test('the dashboard periods have their backing values, labels and short labels', function () {
+    expect(TransactionPeriod::OneDay->value)->toBe('1d')
+        ->and(TransactionPeriod::WeekToDate->value)->toBe('wtd')
+        ->and(TransactionPeriod::LastMonth->value)->toBe('last-month')
+        ->and(TransactionPeriod::ThirtyDays->value)->toBe('last-30-days')
+        ->and(TransactionPeriod::YearToDate->value)->toBe('ytd')
+        ->and(TransactionPeriod::FiveYears->value)->toBe('5y')
+        ->and(TransactionPeriod::TenYears->value)->toBe('10y')
+        ->and(TransactionPeriod::OneDay->label())->toBe('Last Day')
+        ->and(TransactionPeriod::LastMonth->label())->toBe('Last Month')
+        ->and(array_map(static fn (TransactionPeriod $period): string => $period->shortLabel(), TransactionPeriod::dashboardOptions()))
+        ->toBe(['1D', 'WTD', '7D', 'MTD', 'LM', '30D', '90D', 'YTD', '365D', '5Y', '10Y', 'All', 'Custom']);
 });
 
 test('transaction period has correct backing values', function () {
