@@ -9,6 +9,7 @@ enum RefreshTrigger: string
     case Manual = 'manual';
     case Scheduled = 'scheduled';
     case Webhook = 'webhook';
+    case Login = 'login';
 
     public function label(): string
     {
@@ -16,6 +17,7 @@ enum RefreshTrigger: string
             self::Manual => 'Manual',
             self::Scheduled => 'Scheduled',
             self::Webhook => 'Webhook',
+            self::Login => 'Login',
         };
     }
 }

@@ -9,6 +9,7 @@ enum RefreshStatus: string
     case Pending = 'pending';
     case Success = 'success';
     case Failed = 'failed';
+    case Stale = 'stale';
 
     public function label(): string
     {
@@ -16,6 +17,7 @@ enum RefreshStatus: string
             self::Pending => 'Pending',
             self::Success => 'Success',
             self::Failed => 'Failed',
+            self::Stale => 'Stale',
         };
     }
 }
