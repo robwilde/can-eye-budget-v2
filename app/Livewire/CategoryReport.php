@@ -7,9 +7,14 @@ namespace App\Livewire;
 use App\Casts\MoneyCast;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionPeriod;
+use App\Models\Account;
+use App\Models\BudgetPlan;
 use App\Models\Category;
+use App\Models\Tag;
 use App\Models\User;
+use App\Services\Budgets\BudgetPlanCalculator;
 use App\Services\Reports\ReportAggregator;
+use App\Services\Reports\ReportFilters;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Exception;
@@ -24,6 +29,10 @@ final class CategoryReport extends Component
     private const array VALID_MODES = ['real', 'plan'];
 
     private const int TOP_LIMIT = 5;
+
+    private const int PAGE_SIZE = 10;
+
+    private const array VALID_SORTS = ['amount', 'count'];
 
     private const array FALLBACK_COLORS = [
         '#6366F1', '#8B5CF6', '#EC4899', '#F43F5E',
@@ -49,6 +58,29 @@ final class CategoryReport extends Component
     #[Url]
     public bool $showSubcategories = false;
 
+    #[Url]
+    public string $account = '';
+
+    #[Url]
+    public string $tag = '';
+
+    #[Url]
+    public string $min = '';
+
+    #[Url]
+    public string $max = '';
+
+    #[Url]
+    public string $sort = 'amount';
+
+    #[Url]
+    public int $expensePage = 1;
+
+    #[Url]
+    public int $incomePage = 1;
+
+    public bool $rangeSwapped = false;
+
     /** @var list<int> */
     public array $expanded = [];
 
@@ -57,6 +89,14 @@ final class CategoryReport extends Component
 
     /** @var array{start: CarbonInterface|null, end: CarbonInterface|null}|null */
     private ?array $datesCache = null;
+
+    private ?ReportFilters $filtersCache = null;
+
+    /** @var list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>|null */
+    private ?array $rawAtomsCache = null;
+
+    /** @var list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>|null */
+    private ?array $monthAtomsCache = null;
 
     /** @var list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>|null */
     private ?array $atomsCache = null;
@@ -78,6 +118,12 @@ final class CategoryReport extends Component
         if (! in_array($this->mode, self::VALID_MODES, true)) {
             $this->mode = 'real';
         }
+
+        if (! in_array($this->sort, self::VALID_SORTS, true)) {
+            $this->sort = 'amount';
+        }
+
+        $this->settleRange();
     }
 
     public function updatedPeriod(): void
@@ -86,6 +132,7 @@ final class CategoryReport extends Component
             $this->period = 'this-month';
         }
 
+        $this->settleRange();
         $this->refreshCharts();
     }
 
@@ -100,13 +147,66 @@ final class CategoryReport extends Component
 
     public function updatedFrom(): void
     {
-        $this->from = $this->normaliseDate($this->from);
+        $this->settleRange();
         $this->refreshCharts();
     }
 
     public function updatedTo(): void
     {
-        $this->to = $this->normaliseDate($this->to);
+        $this->settleRange();
+        $this->refreshCharts();
+    }
+
+    public function updated(string $property): void
+    {
+        if (! in_array($property, ['account', 'tag', 'min', 'max', 'sort'], true)) {
+            return;
+        }
+
+        if (! in_array($this->sort, self::VALID_SORTS, true)) {
+            $this->sort = 'amount';
+        }
+
+        $this->refreshCharts();
+    }
+
+    /**
+     * Moves the report to the previous (-1) or next (1) period of the same length. A range of
+     * whole calendar months steps by its own number of months; any other range steps by its
+     * own number of days. Nothing later than the current period can be stepped to.
+     */
+    public function step(int $direction): void
+    {
+        $window = $this->window();
+
+        if ($window === null) {
+            return;
+        }
+
+        $direction = $direction < 0 ? -1 : 1;
+        ['start' => $start, 'end' => $end] = $window;
+
+        if ($direction > 0 && ! $this->canStepForward()) {
+            return;
+        }
+
+        $wholeMonth = $start->isSameDay($start->startOfMonth())
+            && ($this->period === TransactionPeriod::ThisMonth->value || $end->isSameDay($end->endOfMonth()));
+
+        if ($wholeMonth) {
+            $months = ($end->year - $start->year) * 12 + $end->month - $start->month + 1;
+            $newStart = $start->addMonthsNoOverflow($direction * $months);
+            $newEnd = $newStart->addMonthsNoOverflow($months - 1)->endOfMonth();
+        } else {
+            $days = (int) round($start->diffInDays($end)) + 1;
+            $newStart = $start->addDays($direction * $days);
+            $newEnd = $newStart->addDays($days - 1);
+        }
+
+        $this->period = TransactionPeriod::Custom->value;
+        $this->from = $newStart->toDateString();
+        $this->to = $newEnd->toDateString();
+        $this->rangeSwapped = false;
         $this->refreshCharts();
     }
 
@@ -125,24 +225,16 @@ final class CategoryReport extends Component
     }
 
     /**
-     * @return array{in: int, out: int, net: int, months: int, inPerMonth: int, outPerMonth: int, netPerMonth: int, outPctIncome: int|null, netPctIncome: int|null}
+     * @return array{in: int, out: int, net: int, months: int, inPerMonth: int, outPerMonth: int, netPerMonth: int, outPctIncome: int|null, netPctIncome: int|null, inChange: int|null, outChange: int|null, netChange: int|null}
      */
     #[Computed]
     public function summary(): array
     {
-        $in = 0;
-        $out = 0;
-
-        foreach ($this->atoms() as $atom) {
-            if ($atom['direction'] === TransactionDirection::Credit->value) {
-                $in += $atom['total'];
-            } else {
-                $out += $atom['total'];
-            }
-        }
+        [$in, $out] = $this->directionTotals($this->atoms());
 
         $months = $this->monthCount();
         $net = $in - $out;
+        $prior = $this->priorTotals();
 
         return [
             'in' => $in,
@@ -154,6 +246,9 @@ final class CategoryReport extends Component
             'netPerMonth' => intdiv($net, $months),
             'outPctIncome' => $in > 0 ? (int) round($out / $in * 100) : null,
             'netPctIncome' => $in > 0 ? (int) round($net / $in * 100) : null,
+            'inChange' => $prior === null ? null : $this->percentChange($in, $prior['in']),
+            'outChange' => $prior === null ? null : $this->percentChange($out, $prior['out']),
+            'netChange' => $prior === null ? null : $this->percentChange($net, $prior['in'] - $prior['out']),
         ];
     }
 
@@ -194,6 +289,62 @@ final class CategoryReport extends Component
     }
 
     /**
+     * @return array{rows: list<array{id: int|null, name: string, icon: string|null, color: string, total: int, count: int, pct: float, perMonth: int, bar: int, expandable: bool, children: list<array{id: int, path: string, total: int, count: int, pct: float, perMonth: int, bar: int}>}>, page: int, pages: int}
+     */
+    #[Computed]
+    public function expenseView(): array
+    {
+        return $this->paginate($this->expenseRows(), $this->expensePage);
+    }
+
+    /**
+     * @return array{rows: list<array{id: int|null, name: string, icon: string|null, color: string, total: int, count: int, pct: float, perMonth: int, bar: int, expandable: bool, children: list<array{id: int, path: string, total: int, count: int, pct: float, perMonth: int, bar: int}>}>, page: int, pages: int}
+     */
+    #[Computed]
+    public function incomeView(): array
+    {
+        return $this->paginate($this->incomeRows(), $this->incomePage);
+    }
+
+    /**
+     * This month's spending against the initialised budget plan, shown only while the
+     * report covers the current calendar month in real mode.
+     *
+     * @return array{spent: int, budget: int, percent: int}|null
+     */
+    #[Computed]
+    public function budgetPerformance(): ?array
+    {
+        if ($this->mode !== 'real' || ! $this->coversCurrentMonth()) {
+            return null;
+        }
+
+        $user = $this->user();
+
+        $plan = BudgetPlan::query()
+            ->where('user_id', $user->id)
+            ->whereNotNull('initialised_at')
+            ->whereDate('period_start', $user->today()->startOfMonth())
+            ->first();
+
+        if ($plan === null) {
+            return null;
+        }
+
+        $summary = app(BudgetPlanCalculator::class)->summarise($plan);
+
+        if ($summary->totalAmount <= 0) {
+            return null;
+        }
+
+        return [
+            'spent' => $summary->spent,
+            'budget' => $summary->totalAmount,
+            'percent' => intdiv($summary->spent * 100, $summary->totalAmount),
+        ];
+    }
+
+    /**
      * @return array{labels: list<string>, income: list<int>, expense: list<int>, net: list<int>}
      */
     #[Computed]
@@ -205,7 +356,7 @@ final class CategoryReport extends Component
         /** @var array<string, array<string, int>> $byMonth */
         $byMonth = [];
 
-        foreach ($this->atoms() as $atom) {
+        foreach ($this->monthAtoms() as $atom) {
             $byMonth[$atom['ym']][$atom['direction']] = ($byMonth[$atom['ym']][$atom['direction']] ?? 0) + $atom['total'];
         }
 
@@ -248,11 +399,26 @@ final class CategoryReport extends Component
             'hasPayCycle' => $this->user()->hasPayCycleConfigured(),
             'showCustomRange' => $periodEnum === TransactionPeriod::Custom,
             'topLimit' => self::TOP_LIMIT,
+            'canStep' => $this->window() !== null,
+            'canStepForward' => $this->canStepForward(),
+            'accounts' => Account::query()->where('user_id', $this->user()->id)->orderBy('name')->get(['id', 'name']),
+            'tags' => Tag::query()->where('user_id', $this->user()->id)->orderBy('name')->get(['id', 'name']),
         ]);
     }
 
     private function refreshCharts(): void
     {
+        $this->datesCache = null;
+        $this->filtersCache = null;
+        $this->rawAtomsCache = null;
+        $this->monthAtomsCache = null;
+        $this->atomsCache = null;
+        $this->boundsCache = null;
+        $this->monthCountCache = null;
+        $this->bucketsCache = [];
+        $this->expensePage = 1;
+        $this->incomePage = 1;
+
         $this->dispatch('reports:refresh', chart: $this->chart(), treemap: $this->treemap());
     }
 
@@ -279,9 +445,189 @@ final class CategoryReport extends Component
             return $this->atomsCache;
         }
 
+        return $this->atomsCache = $this->aggregator()->netRefunds($this->rawAtoms(), byMonth: false);
+    }
+
+    /**
+     * @return list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>
+     */
+    private function monthAtoms(): array
+    {
+        return $this->monthAtomsCache ??= $this->aggregator()->netRefunds($this->rawAtoms(), byMonth: true);
+    }
+
+    /**
+     * @return list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>
+     */
+    private function rawAtoms(): array
+    {
+        if ($this->rawAtomsCache !== null) {
+            return $this->rawAtomsCache;
+        }
+
         $dates = $this->dates();
 
-        return $this->atomsCache = $this->aggregator()->atoms($this->user(), $this->mode, $dates['start'], $dates['end']);
+        return $this->rawAtomsCache = $this->aggregator()->atoms(
+            $this->user(),
+            $this->mode,
+            $dates['start'],
+            $dates['end'],
+            filters: $this->mode === 'real' ? $this->filters() : null,
+        );
+    }
+
+    /**
+     * Filters from the URL, limited to the user's own account and tag; an unknown or
+     * foreign id is ignored.
+     */
+    private function filters(): ReportFilters
+    {
+        if ($this->filtersCache !== null) {
+            return $this->filtersCache;
+        }
+
+        $userId = $this->user()->id;
+        $accountId = ctype_digit($this->account) ? (int) $this->account : null;
+        $tagId = ctype_digit($this->tag) ? (int) $this->tag : null;
+
+        return $this->filtersCache = new ReportFilters(
+            accountId: $accountId !== null && Account::query()->where('user_id', $userId)->whereKey($accountId)->exists() ? $accountId : null,
+            tagId: $tagId !== null && Tag::query()->where('user_id', $userId)->whereKey($tagId)->exists() ? $tagId : null,
+            minCents: $this->inputToCents($this->min),
+            maxCents: $this->inputToCents($this->max),
+        );
+    }
+
+    private function inputToCents(string $value): ?int
+    {
+        $value = mb_trim($value);
+
+        if ($value === '' || ! is_numeric($value) || (float) $value < 0) {
+            return null;
+        }
+
+        return (int) round((float) $value * 100);
+    }
+
+    /**
+     * The resolved first and last day of the selected period; an open end is today.
+     *
+     * @return array{start: CarbonImmutable, end: CarbonImmutable}|null
+     */
+    private function window(): ?array
+    {
+        $dates = $this->dates();
+
+        if ($dates['start'] === null) {
+            return null;
+        }
+
+        $start = CarbonImmutable::parse($dates['start']->toDateString())->startOfDay();
+        $end = $dates['end'] === null
+            ? $this->user()->today()->startOfDay()
+            : CarbonImmutable::parse($dates['end']->toDateString())->startOfDay();
+
+        return ['start' => $start, 'end' => $end->lessThan($start) ? $start : $end];
+    }
+
+    private function canStepForward(): bool
+    {
+        $window = $this->window();
+
+        return $window !== null && $window['end']->lessThan($this->user()->today()->startOfDay());
+    }
+
+    private function coversCurrentMonth(): bool
+    {
+        $dates = $this->dates();
+        $today = $this->user()->today();
+
+        if ($dates['start'] === null || ! CarbonImmutable::parse($dates['start']->toDateString())->isSameDay($today->startOfMonth())) {
+            return false;
+        }
+
+        return $dates['end'] === null || (
+            $dates['end']->toDateString() >= $today->toDateString()
+            && $dates['end']->toDateString() <= $today->endOfMonth()->toDateString()
+        );
+    }
+
+    /**
+     * Income and expense totals of the equal-length range just before the selected one.
+     *
+     * @return array{in: int, out: int}|null
+     */
+    private function priorTotals(): ?array
+    {
+        $window = $this->window();
+
+        if ($this->mode !== 'real' || $window === null) {
+            return null;
+        }
+
+        $prior = $this->aggregator()->priorRange($window['start'], $window['end']);
+        $atoms = $this->aggregator()->netRefunds(
+            $this->aggregator()->atoms($this->user(), 'real', $prior['start'], $prior['end'], filters: $this->filters()),
+            byMonth: false,
+        );
+
+        [$in, $out] = $this->directionTotals($atoms);
+
+        return ['in' => $in, 'out' => $out];
+    }
+
+    /**
+     * @param  list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>  $atoms
+     * @return array{0: int, 1: int} income and expense cents
+     */
+    private function directionTotals(array $atoms): array
+    {
+        $in = 0;
+        $out = 0;
+
+        foreach ($atoms as $atom) {
+            if ($atom['direction'] === TransactionDirection::Credit->value) {
+                $in += $atom['total'];
+            } else {
+                $out += $atom['total'];
+            }
+        }
+
+        return [$in, $out];
+    }
+
+    private function percentChange(int $current, int $prior): ?int
+    {
+        return $prior === 0 ? null : (int) round(($current - $prior) / abs($prior) * 100);
+    }
+
+    /**
+     * A custom range that runs backwards is swapped, and the page says so.
+     */
+    private function settleRange(): void
+    {
+        $this->from = $this->normaliseDate($this->from);
+        $this->to = $this->normaliseDate($this->to);
+        $this->rangeSwapped = false;
+
+        if ($this->period === TransactionPeriod::Custom->value && $this->from !== null && $this->to !== null && $this->from > $this->to) {
+            [$this->from, $this->to] = [$this->to, $this->from];
+            $this->rangeSwapped = true;
+        }
+    }
+
+    /**
+     * @template TRow
+     *
+     * @param  list<TRow>  $rows
+     * @return array{rows: list<TRow>, page: int, pages: int}
+     */
+    private function paginate(array $rows, int $page): array
+    {
+        $pages = max(1, (int) ceil(count($rows) / self::PAGE_SIZE));
+        $page = min(max(1, $page), $pages);
+
+        return ['rows' => array_slice($rows, ($page - 1) * self::PAGE_SIZE, self::PAGE_SIZE), 'page' => $page, 'pages' => $pages];
     }
 
     /**
@@ -466,6 +812,10 @@ final class CategoryReport extends Component
      */
     private function limitBuckets(array $buckets): array
     {
+        if ($this->sort === 'count') {
+            usort($buckets, static fn (array $a, array $b): int => [$b['count'], $b['total']] <=> [$a['count'], $a['total']]);
+        }
+
         return $this->topOnly ? array_slice($buckets, 0, self::TOP_LIMIT) : $buckets;
     }
 
