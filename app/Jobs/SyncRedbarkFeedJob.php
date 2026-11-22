@@ -85,6 +85,8 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
 
     private bool $transactionFetchFailed = false;
 
+    private ?CarbonImmutable $since = null;
+
     public function __construct(
         public readonly RedbarkFeed $feed,
         public readonly RefreshTrigger $trigger = RefreshTrigger::Scheduled,
@@ -99,26 +101,36 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
      * the result without a manual refresh. handle() reuses this row rather than opening
      * a second one.
      */
-    public static function dispatchFor(RedbarkFeed $feed, RefreshTrigger $trigger): void
+    public static function dispatchFor(RedbarkFeed $feed, RefreshTrigger $trigger, ?CarbonImmutable $since = null, int $delaySeconds = 0): void
     {
         // Reuse pending logs only within the UNIQUE_FOR window to avoid stale UI state
         // (created_at, trigger). After 15 minutes, create a fresh log for the next run.
         $log = RedbarkSyncLog::where('redbark_feed_id', $feed->id)
             ->where('status', RefreshStatus::Pending)
+            ->whereNull('cancelled_at')
             ->where('created_at', '>', now()->subSeconds(self::UNIQUE_FOR))
             ->latest()
             ->first();
 
-        if (! $log) {
-            RedbarkSyncLog::create([
-                'redbark_feed_id' => $feed->id,
-                'user_id' => $feed->user_id,
-                'status' => RefreshStatus::Pending,
-                'trigger' => $trigger,
-            ]);
+        // A request that arrives while a run is open is not queued again: it joins that run,
+        // and reaching further back widens the run's window.
+        if ($log !== null) {
+            if ($since !== null && ($log->since_date === null || $since->startOfDay()->lessThan($log->since_date))) {
+                $log->update(['since_date' => $since->toDateString()]);
+            }
+
+            return;
         }
 
-        self::dispatch($feed, $trigger);
+        RedbarkSyncLog::create([
+            'redbark_feed_id' => $feed->id,
+            'user_id' => $feed->user_id,
+            'status' => RefreshStatus::Pending,
+            'trigger' => $trigger,
+            'since_date' => $since?->toDateString(),
+        ]);
+
+        self::dispatch($feed, $trigger)->delay(now()->addSeconds($delaySeconds));
     }
 
     /**
@@ -160,6 +172,13 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
     ): void {
         $client = $factory->for($this->feed);
         $log = $this->openLog();
+        $this->since = $log->since_date;
+
+        if ($this->cancelled($log)) {
+            $this->resolveStale($log);
+
+            return;
+        }
 
         $connections = $this->loadConnections($client, $log);
         $upstreamIds = $this->syncAccounts($client, $connections, $log);
@@ -168,8 +187,15 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             'pending_account_setup' => $this->feed->accounts()->needsSetup()->exists(),
         ]);
 
+        if ($this->cancelled($log)) {
+            $this->resolveStale($log);
+
+            return;
+        }
+
         $this->syncTransactions($client, $connections, $log);
         $balancesUpdated = $this->syncBalances($client, $connections, $upstreamIds, $log);
+
         $notices = array_map(
             static fn (string $notice): array => ['context' => 'connections', 'message' => $notice],
             $client->notices(),
@@ -225,6 +251,24 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
     private static function toCents(string $amount): int
     {
         return (int) bcmul($amount, '100', 0);
+    }
+
+    /**
+     * The user cancelled this run. Checked between phases, so the running phase finishes first.
+     *
+     * @phpstan-impure
+     */
+    private function cancelled(RedbarkSyncLog $log): bool
+    {
+        return RedbarkSyncLog::query()->whereKey($log->id)->whereNotNull('cancelled_at')->exists();
+    }
+
+    private function resolveStale(RedbarkSyncLog $log): void
+    {
+        $log->update([
+            'status' => RefreshStatus::Stale,
+            'errors' => $this->errors === [] ? null : $this->errors,
+        ]);
     }
 
     /**
@@ -395,6 +439,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
                     'currency' => RedbarkCurrency::normaliseOr($row->currency, 'AUD'),
                     'account_type' => $row->type,
                     'institution_name' => $institution,
+                    'missing_upstream_at' => null,
                     // current_balance is deliberately absent: it comes from /balances,
                     // and writing a default here would clobber a good value.
                 ],
@@ -413,6 +458,15 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
                 ->whereNull('account_id')
                 ->whereNotIn('redbark_account_id', $upstreamIds)
                 ->delete();
+
+            // A linked row that vanished is kept and flagged so the user can delete the link or
+            // move it, instead of its history being cut off silently.
+            RedbarkAccount::query()
+                ->where('redbark_feed_id', $this->feed->id)
+                ->whereNotNull('account_id')
+                ->whereNull('missing_upstream_at')
+                ->whereNotIn('redbark_account_id', $upstreamIds)
+                ->update(['missing_upstream_at' => now()]);
         }
 
         return $upstreamIds;
@@ -432,6 +486,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
 
         $accounts = $this->feed->accounts()
             ->linked()
+            ->whereNull('missing_upstream_at')
             ->where('ignored', false)
             ->whereNotNull('bank_connection_id')
             ->get();
@@ -442,6 +497,10 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
             }
 
             $start = $this->transactionStartDate($redbarkAccount);
+
+            if ($this->since !== null && $start->greaterThan($this->since)) {
+                $start = $this->since->startOfDay();
+            }
 
             try {
                 $fresh = $client->getTransactions(
