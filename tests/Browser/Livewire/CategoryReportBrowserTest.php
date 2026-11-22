@@ -7,8 +7,10 @@ declare(strict_types=1);
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
+use App\Models\BudgetPlan;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
+use App\Models\Tag;
 use App\Models\Transaction;
 use App\Models\User;
 
@@ -128,4 +130,83 @@ test('the sidebar links through to the reports page', function () {
         ->click('[data-flux-sidebar-item][href$="/reports"]')
         ->assertPathBeginsWith('/reports')
         ->assertSee('Incoming and outgoing by category');
+});
+
+test('the summary shows the change against the previous period and the budget card for this month', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    BudgetPlan::factory()->for($user)->create([
+        'period_start' => now()->startOfMonth()->toDateString(),
+        'period_end' => now()->endOfMonth()->toDateString(),
+        'total_amount' => 100000,
+        'initialised_at' => now(),
+    ]);
+
+    foreach ([[6000, now()], [1000, now()->startOfMonth()]] as [$amount, $date]) {
+        Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $category->id, 'amount' => $amount, 'post_date' => $date]);
+    }
+    Transaction::factory()->for($user)->credit()->create(['account_id' => $account->id, 'category_id' => $category->id, 'amount' => 1000, 'post_date' => now()]);
+    Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $category->id, 'amount' => 3000, 'post_date' => now()->startOfMonth()->subDays(2)]);
+
+    $this->actingAs($user);
+
+    visit('/reports?period=custom&from='.now()->startOfMonth()->toDateString().'&to='.now()->endOfMonth()->toDateString())
+        ->assertSee('vs previous period')
+        ->assertPresent('[data-testid="budget-performance"]')
+        ->assertSeeIn('.report-row .tx-amt', '$60.00')
+        ->assertNoJavaScriptErrors();
+});
+
+test('stepping to the previous month moves the report and drops the budget card', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $category = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    BudgetPlan::factory()->for($user)->create([
+        'period_start' => now()->startOfMonth()->toDateString(),
+        'period_end' => now()->endOfMonth()->toDateString(),
+        'total_amount' => 100000,
+        'initialised_at' => now(),
+    ]);
+    Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $category->id, 'amount' => 4200, 'post_date' => now()->startOfMonth()->subDays(3)]);
+
+    $this->actingAs($user);
+
+    visit('/reports')
+        ->assertPresent('[data-testid="budget-performance"]')
+        ->assertDontSee('$42.00')
+        ->click('[data-testid="period-prev"]')
+        ->assertSee('$42.00')
+        ->assertMissing('[data-testid="budget-performance"]')
+        ->assertQueryStringHas('period', 'custom')
+        ->assertNoJavaScriptErrors();
+});
+
+test('a backwards custom range is swapped with an alert', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user);
+
+    visit('/reports?period=custom&from=2026-03-31&to=2026-03-01')
+        ->assertSee('The end date was before the start date')
+        ->assertSee('2026-03-01 to 2026-03-31')
+        ->assertNoJavaScriptErrors();
+});
+
+test('the tag filter limits the breakdown to tagged transactions', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $tagged = Category::factory()->for($user)->create(['name' => 'Tagged spend']);
+    $plain = Category::factory()->for($user)->create(['name' => 'Plain spend']);
+    $tag = Tag::factory()->for($user)->create(['name' => 'Holiday']);
+
+    Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $tagged->id, 'amount' => 3000, 'post_date' => now()])->tags()->attach($tag);
+    Transaction::factory()->for($user)->debit()->create(['account_id' => $account->id, 'category_id' => $plain->id, 'amount' => 5000, 'post_date' => now()]);
+
+    $this->actingAs($user);
+
+    visit('/reports?tag='.$tag->id)
+        ->assertSee('Tagged spend')
+        ->assertDontSee('Plain spend')
+        ->assertNoJavaScriptErrors();
 });
