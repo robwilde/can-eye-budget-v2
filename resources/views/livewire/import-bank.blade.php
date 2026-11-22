@@ -117,7 +117,7 @@
             </div>
         </x-cib.card>
 
-        @if (config('budget.documents.vector_store'))
+        @if (\App\Support\Documents\VectorStoreStatus::configured())
             <x-cib.card data-testid="import-bank-document">
                 <flux:heading size="lg">{{ __('Or import a document') }}</flux:heading>
                 <flux:text size="sm" class="mt-1">{{ __('Store a document (up to 25 MB) so it can be searched later. PDFs are read as statements instead.') }}</flux:text>
