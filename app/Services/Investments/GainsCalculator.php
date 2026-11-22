@@ -12,6 +12,7 @@ use App\Models\Trade;
 use App\Models\User;
 use App\Services\ExchangeRateLookup;
 use App\Support\Investments\Decimal;
+use Carbon\CarbonInterface;
 
 /**
  * Realised and unrealised gains in cents. A gain is null, never a guess, when the cost is unknown.
@@ -75,16 +76,51 @@ final readonly class GainsCalculator
         }
 
         $cost = $this->costBasis->resolve($holding);
-        $price ??= SecurityPrice::query()
-            ->where('security_id', $holding->security_id)
-            ->where('currency', $holding->currency)
-            ->orderByDesc('date')
-            ->value('price');
+        $price ??= $this->latestPrice($holding);
 
         if ($cost === null || $price === null) {
             return null;
         }
 
-        return Decimal::mulCents($holding->quantity, (int) $price - $cost['perShare']);
+        return Decimal::mulCents($holding->quantity, $price - $cost['perShare']);
+    }
+
+    /**
+     * The latest stored price of the holding's security in the holding's currency, in cents.
+     */
+    public function latestPrice(Holding $holding): ?int
+    {
+        return $this->priceOn($holding, null);
+    }
+
+    /**
+     * The latest stored price on or before $day, or the latest one when $day is null.
+     */
+    public function priceOn(Holding $holding, ?CarbonInterface $day): ?int
+    {
+        $price = SecurityPrice::query()
+            ->where('security_id', $holding->security_id)
+            ->where('currency', $holding->currency)
+            ->when($day !== null, fn ($query) => $query->whereDate('date', '<=', $day->toDateString()))
+            ->orderByDesc('date')
+            ->value('price');
+
+        return $price === null ? null : (int) $price;
+    }
+
+    /**
+     * What the holding gained or lost between its two latest stored prices: quantity times the
+     * difference. Null when there are fewer than two prices.
+     */
+    public function dayChange(Holding $holding): ?int
+    {
+        $prices = SecurityPrice::query()
+            ->where('security_id', $holding->security_id)
+            ->where('currency', $holding->currency)
+            ->orderByDesc('date')
+            ->limit(2)
+            ->pluck('price');
+
+        return $prices->count() < 2 ? null : Decimal::mulCents($holding->quantity, (int) $prices[0] - (int) $prices[1]);
     }
 }

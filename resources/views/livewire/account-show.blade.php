@@ -18,6 +18,8 @@
 
     @if ($tab === 'statements')
         <livewire:statement-coverage :account="$account" :key="'statement-coverage-'.$account->id"/>
+    @elseif ($tab === 'holdings')
+        <livewire:account-holdings :account="$account" :key="'account-holdings-'.$account->id"/>
     @elseif ($tab === 'schedule')
         <x-cib.card data-test="account-schedule">
             @if ($schedule === null)

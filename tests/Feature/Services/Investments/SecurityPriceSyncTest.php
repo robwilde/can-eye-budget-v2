@@ -355,3 +355,16 @@ it('stops calling a provider for the rest of a run once it has failed', function
 it('gives the job a timeout below the queue retry_after', function () {
     expect((new SyncSecurityPricesJob($this->user))->timeout)->toBeLessThan(90);
 });
+
+it('syncs only the securities held on the given account', function () {
+    $provider = new FakePriceProvider;
+    useProviders($provider);
+    $second = Account::factory()->investment()->for($this->user)->create();
+    $other = Security::factory()->create(['ticker' => 'OTHR', 'exchange_mic' => 'XASX']);
+    Holding::factory()->create(['account_id' => $second->id, 'security_id' => $other->id]);
+    Holding::factory()->create(['account_id' => $this->account->id, 'security_id' => $this->security->id]);
+
+    app(SecurityPriceSyncer::class)->sync($this->user, accountId: $second->id);
+
+    expect(array_column($provider->requested, 0))->toBe(['OTHR']);
+});

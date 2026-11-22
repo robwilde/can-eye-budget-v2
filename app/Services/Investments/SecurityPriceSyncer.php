@@ -32,16 +32,17 @@ final readonly class SecurityPriceSyncer
     public function __construct(private SecurityPriceProviders $providers) {}
 
     /**
+     * @param  int|null  $accountId  limit the sync to the securities held on this one account of the user
      * @return array{synced: int, skipped: int, failed: int}
      */
-    public function sync(User $user, ?CarbonImmutable $today = null, bool $force = false): array
+    public function sync(User $user, ?CarbonImmutable $today = null, bool $force = false, ?int $accountId = null): array
     {
         $today ??= $user->today();
         $from = $today->subDays(self::DAYS - 1);
         $result = ['synced' => 0, 'skipped' => 0, 'failed' => 0];
 
         $securities = Security::query()
-            ->whereIn('id', Holding::query()->forUser($user)->select('security_id'))
+            ->whereIn('id', Holding::query()->forUser($user)->when($accountId !== null, fn ($query) => $query->where('account_id', $accountId))->select('security_id'))
             ->orderBy('id')
             ->get();
 

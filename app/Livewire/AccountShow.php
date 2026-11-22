@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\DTOs\LoanSchedule;
+use App\Enums\AccountClass;
 use App\Models\Account;
 use App\Services\LoanAmortisationService;
 use App\Services\NetWorthService;
@@ -31,6 +32,8 @@ final class AccountShow extends Component
     private const string TAB_SCHEDULE = 'schedule';
 
     private const string TAB_STATEMENTS = 'statements';
+
+    private const string TAB_HOLDINGS = 'holdings';
 
     private const array PERIOD_DAYS = [30, 90, 365];
 
@@ -110,6 +113,10 @@ final class AccountShow extends Component
             $tabs[] = ['value' => self::TAB_SCHEDULE, 'label' => __('Schedule')];
         }
 
+        if ($this->showsHoldings()) {
+            $tabs[] = ['value' => self::TAB_HOLDINGS, 'label' => __('Holdings')];
+        }
+
         $tabs[] = ['value' => self::TAB_STATEMENTS, 'label' => __('Statements')];
 
         return view('livewire.account-show', ['tabs' => $tabs, 'periods' => self::PERIOD_DAYS]);
@@ -121,8 +128,17 @@ final class AccountShow extends Component
             ? [self::TAB_OVERVIEW, self::TAB_SCHEDULE, self::TAB_STATEMENTS]
             : [self::TAB_OVERVIEW, self::TAB_STATEMENTS];
 
+        if ($this->showsHoldings()) {
+            $allowed[] = self::TAB_HOLDINGS;
+        }
+
         if (! in_array($this->tab, $allowed, true)) {
             $this->tab = self::TAB_OVERVIEW;
         }
+    }
+
+    private function showsHoldings(): bool
+    {
+        return config('budget.investments.enabled') === true && $this->account->type === AccountClass::Investment;
     }
 }

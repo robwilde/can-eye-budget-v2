@@ -39,6 +39,7 @@ final readonly class TradeRecorder
     public function __construct(
         private TransferLinker $transfers,
         private AccountBalanceHistoryBuilder $history,
+        private HoldingSnapshotter $holdings,
     ) {}
 
     /**
@@ -60,7 +61,7 @@ final readonly class TradeRecorder
             $security = $this->security($input, $currency);
             [$quantity, $price, $fee, $amount] = $this->figures($input);
 
-            return Trade::query()->create([
+            $trade = Trade::query()->create([
                 'account_id' => $input->accountId,
                 'security_id' => $security->id,
                 'date' => $input->date,
@@ -72,6 +73,12 @@ final readonly class TradeRecorder
                 'activity' => $input->activity,
                 'name' => $input->name ?? $this->nameFor($input->activity, $quantity, $security),
             ])->refresh();
+
+            if ($input->activity->movesShares()) {
+                $this->holdings->refresh($user, $input->accountId, $security->id, $currency);
+            }
+
+            return $trade;
         });
     }
 
@@ -116,6 +123,10 @@ final readonly class TradeRecorder
                 'name' => $this->nameFor($activity, $newQuantity, $locked->security),
                 'locked' => true,
             ]);
+
+            if ($locked->security_id !== null) {
+                $this->holdings->refresh($user, $locked->account_id, $locked->security_id, $locked->currency);
+            }
 
             return $locked;
         });

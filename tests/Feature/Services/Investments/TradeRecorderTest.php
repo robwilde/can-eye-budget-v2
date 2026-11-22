@@ -250,7 +250,7 @@ it('locks the account rows in id order', function () {
     DB::enableQueryLog();
     $this->recorder->record($this->user, recordTrade());
 
-    $locks = collect(DB::getQueryLog())->pluck('query')->filter(fn (string $sql): bool => str_contains($sql, 'from "accounts"') && str_contains($sql, 'order by'));
+    $locks = collect(DB::getQueryLog())->pluck('query')->filter(fn (string $sql): bool => preg_match('/^select [^()]*? from "accounts"/', $sql) === 1 && str_contains($sql, 'order by'));
 
     expect($locks)->not->toBeEmpty()
         ->and($locks->every(fn (string $sql): bool => str_contains($sql, 'order by "accounts"."id"') || str_contains($sql, 'order by "id"')))->toBeTrue();

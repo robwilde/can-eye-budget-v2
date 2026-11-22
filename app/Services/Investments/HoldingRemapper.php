@@ -27,7 +27,7 @@ use Illuminate\Support\Facades\DB;
  */
 final readonly class HoldingRemapper
 {
-    public function __construct(private TradeRecorder $recorder) {}
+    public function __construct(private TradeRecorder $recorder, private HoldingSnapshotter $snapshotter) {}
 
     /**
      * @return Collection<int, Holding> the account's holdings of the new security after the remap
@@ -127,8 +127,28 @@ final readonly class HoldingRemapper
         }
 
         $this->moveTrades($accountId, $fromSecurityId, $toSecurityId, $onlyOriginal);
+        $this->refresh($user, $accountId, [$fromSecurityId, $toSecurityId]);
 
         return $this->holdingsOf($accountId, $toSecurityId);
+    }
+
+    /**
+     * Brings the holdings of both securities back in step with their trades, in every currency either
+     * has on the account, since the position of the new security now includes the moved trades.
+     *
+     * @param  list<int>  $securityIds
+     */
+    private function refresh(User $user, int $accountId, array $securityIds): void
+    {
+        foreach ($securityIds as $securityId) {
+            $currencies = Trade::query()->where('account_id', $accountId)->where('security_id', $securityId)->distinct()->pluck('currency')
+                ->merge(Holding::query()->where('account_id', $accountId)->where('security_id', $securityId)->distinct()->pluck('currency'))
+                ->unique();
+
+            foreach ($currencies as $currency) {
+                $this->snapshotter->refresh($user, $accountId, $securityId, $currency);
+            }
+        }
     }
 
     private function moveTrades(int $accountId, int $fromSecurityId, int $toSecurityId, bool $onlyOriginal): void
