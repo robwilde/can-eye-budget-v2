@@ -81,7 +81,7 @@ final class AccountBalanceHistoryBuilder
 
             if ($previous !== null) {
                 $firstDay = $resumeFrom;
-                $startBalance = $previous->end_balance + ($previous->end_non_cash_balance ?? 0);
+                $startBalance = $previous->endTotal();
                 $account->dailyBalances()->whereDate('balance_date', '>=', $firstDay)->delete();
             } else {
                 $account->dailyBalances()->delete();
