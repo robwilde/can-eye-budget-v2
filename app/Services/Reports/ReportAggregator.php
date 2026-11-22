@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Reports;
 
+use App\Enums\TransactionStatus;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
@@ -178,6 +179,7 @@ final class ReportAggregator
             ->where('user_id', $user->id)
             ->current()
             ->countable()
+            ->where('status', TransactionStatus::Posted)
             ->whereHas('account', fn ($account) => $account->where('exclude_from_reports', false))
             ->min('post_date');
 
@@ -190,6 +192,7 @@ final class ReportAggregator
             ->where('user_id', $user->id)
             ->current()
             ->countable()
+            ->where('status', TransactionStatus::Posted)
             ->whereHas('account', fn ($account) => $account->where('exclude_from_reports', false))
             ->max('post_date');
 
@@ -205,7 +208,7 @@ final class ReportAggregator
         $transferCategoryIds = $this->transferCategoryIds($user->id);
         $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
 
-        $query = CategoryAttribution::query($user->id, forMoney: true, forReports: true)
+        $query = CategoryAttribution::query($user->id, forMoney: true, forReports: true, postedOnly: true)
             ->where(fn ($counted) => $counted
                 ->where(fn ($ordinary) => $ordinary
                     ->whereNull('transfer_pair_id')

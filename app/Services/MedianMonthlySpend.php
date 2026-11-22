@@ -56,7 +56,7 @@ final class MedianMonthlySpend
         $transferCategoryIds = $this->transferCategoryIds($user->id);
         $bounds = [$from?->startOfDay()->toDateTimeString(), $before->startOfDay()->toDateTimeString()];
 
-        return CategoryAttribution::query($user->id, forMoney: true, forReports: true)
+        return CategoryAttribution::query($user->id, forMoney: true, forReports: true, postedOnly: true)
             ->where('direction', TransactionDirection::Debit->value)
             ->where(fn (Builder $counted): Builder => $counted
                 ->where(fn (Builder $ordinary): Builder => $ordinary
