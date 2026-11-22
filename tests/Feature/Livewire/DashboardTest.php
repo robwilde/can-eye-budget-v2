@@ -614,12 +614,13 @@ test('spend last 7 days excludes transactions categorised at the parent Transfer
 
 // ── Layout ─────────────────────────────────────────────────────────
 
-test('uses two-column layout class on lg breakpoint', function () {
+test('lays the widgets out in a two-column grid by default', function () {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
         ->test(Dashboard::class)
-        ->assertSeeHtml('lg:grid-cols-[1fr_300px]');
+        ->assertSeeHtml('data-testid="dashboard-grid"')
+        ->assertSeeHtml('lg:grid-cols-2');
 });
 
 // ── Live refresh ───────────────────────────────────────────────────
