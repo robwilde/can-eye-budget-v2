@@ -9,6 +9,7 @@ use App\Enums\TransactionStatus;
 use App\Enums\ValuationKind;
 use App\Exceptions\InvalidValuationException;
 use App\Models\Account;
+use App\Models\AccountDailyBalance;
 use App\Models\AccountValuation;
 use App\Models\Transaction;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
@@ -169,16 +170,16 @@ final class AccountValuationService
             ->first();
 
         if ($anchor !== null) {
-            return $anchor->balance + $this->signedTransactionSum($account, $anchor->valued_on, $date);
+            return $anchor->balance + $this->signedTransactionSum($account, $anchor->valued_on, $date) + $this->marketMovement($account, $anchor->valued_on, $date);
         }
 
         $later = (clone $others)->orderBy('valued_on')->first();
 
         if ($later === null) {
-            return $account->balance - $this->signedTransactionSum($account, $date, CarbonImmutable::today());
+            return $account->balance - $this->signedTransactionSum($account, $date, CarbonImmutable::today()) - $this->marketMovement($account, $date, CarbonImmutable::today());
         }
 
-        return $later->balance - $this->signedTransactionSum($account, $date, $later->valued_on);
+        return $later->balance - $this->signedTransactionSum($account, $date, $later->valued_on) - $this->marketMovement($account, $date, $later->valued_on);
     }
 
     /**
@@ -191,6 +192,19 @@ final class AccountValuationService
 
         return $isCashOrCard
             && ! $account->valuations()->where('kind', ValuationKind::Reconciliation)->exists();
+    }
+
+    /**
+     * The change in the value of an investment account's securities that is not a trade, summed over
+     * the days after $after up to $until, from its daily balance rows (null columns count as none).
+     */
+    private function marketMovement(Account $account, CarbonImmutable $after, CarbonImmutable $until): int
+    {
+        return (int) AccountDailyBalance::query()
+            ->where('account_id', $account->id)
+            ->whereDate('balance_date', '>', $after->toDateString())
+            ->whereDate('balance_date', '<=', $until->toDateString())
+            ->sum('market_movement');
     }
 
     private function lock(Account $account): Account

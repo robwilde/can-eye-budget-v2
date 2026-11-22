@@ -13,16 +13,22 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * One account's cash balance over one day, derived from its transactions and valuations.
- * Rows are rebuilt by AccountBalanceHistoryBuilder and never edited directly.
+ * One account's balance over one day, derived from its transactions, valuations and, for a manual
+ * investment account, its trades and security prices. start_balance and end_balance are cash; the
+ * non-cash columns hold the value of the securities and are null when the account holds none, so an
+ * account's total is cash plus non-cash. Rows are rebuilt by AccountBalanceHistoryBuilder and never
+ * edited directly.
  *
  * @property int $id
  * @property int $account_id
  * @property CarbonImmutable $balance_date
  * @property int $start_balance
  * @property int $end_balance
+ * @property int|null $start_non_cash_balance
+ * @property int|null $end_non_cash_balance
  * @property int $inflows
  * @property int $outflows
+ * @property int|null $market_movement the change in the securities' value that is not a trade
  * @property int $adjustments a valuation's correction: its balance minus start + inflows - outflows
  * @property string $currency
  * @property CarbonImmutable $created_at
@@ -41,8 +47,11 @@ final class AccountDailyBalance extends Model
         'balance_date',
         'start_balance',
         'end_balance',
+        'start_non_cash_balance',
+        'end_non_cash_balance',
         'inflows',
         'outflows',
+        'market_movement',
         'adjustments',
         'currency',
     ];
@@ -78,6 +87,9 @@ final class AccountDailyBalance extends Model
             'balance_date' => 'immutable_date',
             'start_balance' => MoneyCast::class,
             'end_balance' => MoneyCast::class,
+            'start_non_cash_balance' => MoneyCast::class,
+            'end_non_cash_balance' => MoneyCast::class,
+            'market_movement' => MoneyCast::class,
             'inflows' => MoneyCast::class,
             'outflows' => MoneyCast::class,
             'adjustments' => MoneyCast::class,

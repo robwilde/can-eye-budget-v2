@@ -4,13 +4,19 @@ declare(strict_types=1);
 
 namespace App\Services\Investments;
 
+use App\Enums\AccountClass;
+use App\Enums\ImportSource;
+use App\Models\Account;
 use App\Models\Holding;
 use App\Models\Security;
 use App\Models\SecurityPrice;
+use App\Models\Trade;
 use App\Models\User;
+use App\Services\Projection\AccountBalanceHistoryBuilder;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Brings the stored prices of the securities one user holds up to date from their provider, for the
@@ -29,7 +35,7 @@ final readonly class SecurityPriceSyncer
 
     public const string ERROR_NO_PRICES = 'no_prices';
 
-    public function __construct(private SecurityPriceProviders $providers) {}
+    public function __construct(private SecurityPriceProviders $providers, private AccountBalanceHistoryBuilder $history) {}
 
     /**
      * @param  int|null  $accountId  limit the sync to the securities held on this one account of the user
@@ -47,6 +53,7 @@ final readonly class SecurityPriceSyncer
             ->get();
 
         $down = [];
+        $priced = [];
 
         foreach ($securities as $security) {
             $provider = $security->offline_at !== null
@@ -55,6 +62,10 @@ final readonly class SecurityPriceSyncer
 
             if ($provider === null || ! $provider->enabled() || isset($down[$provider->key()]) || (! $force && $this->refreshedToday($security))) {
                 $result['skipped']++;
+
+                if ($provider !== null && $this->refreshedToday($security)) {
+                    $priced[] = $security->id;
+                }
 
                 continue;
             }
@@ -90,9 +101,43 @@ final readonly class SecurityPriceSyncer
             });
 
             $result['synced']++;
+            $priced[] = $security->id;
         }
 
+        $this->rebuildHistory($user, $priced);
+
         return $result;
+    }
+
+    /**
+     * The new prices change what the user's manual investment accounts were worth on past days, so their
+     * balance history is rebuilt, whichever of the user's accounts the sync was limited to. This covers a
+     * security another user's sync already refreshed today. A rebuild that fails is reported and does not
+     * stop the others; the prices are already stored.
+     *
+     * @param  list<int>  $securityIds
+     */
+    private function rebuildHistory(User $user, array $securityIds): void
+    {
+        if ($securityIds === []) {
+            return;
+        }
+
+        $accounts = Account::query()
+            ->where('user_id', $user->id)
+            ->where('type', AccountClass::Investment)
+            ->where(fn ($query) => $query->whereNull('import_source')->orWhere('import_source', '!=', ImportSource::Redbark))
+            ->whereIn('id', Trade::query()->whereIn('security_id', $securityIds)->select('account_id'))
+            ->orderBy('id')
+            ->get();
+
+        foreach ($accounts as $account) {
+            try {
+                $this->history->rebuild($account);
+            } catch (Throwable $e) {
+                report($e);
+            }
+        }
     }
 
     private function refreshedToday(Security $security): bool

@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace App\Services\Projection;
 
+use App\Enums\AccountClass;
+use App\Enums\ImportSource;
 use App\Enums\TransactionStatus;
 use App\Enums\ValuationKind;
 use App\Models\Account;
 use App\Models\AccountDailyBalance;
 use App\Models\AccountValuation;
 use App\Models\Transaction;
+use App\Services\Investments\HoldingsValuation;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -23,10 +26,19 @@ use Illuminate\Support\Facades\DB;
  * non-deleted transactions; a valuation on a day resets that day's end balance and the gap is
  * recorded as the day's adjustment. A split child is skipped: its parent already carries the
  * same money.
+ *
+ * A manual investment account that has share trades is split into cash and holdings: the balance
+ * and every valuation are its total, the securities are valued each day by HoldingsValuation, the
+ * non-cash columns hold that value, market movement is the change in it that is not a trade, and
+ * cash is the total less the securities. The account's stored balance is its total today, so a rebuild
+ * that moves it (a price change) writes it back. A provider-linked account is not split: the provider's
+ * balance already includes its holdings, so splitting would count them twice.
  */
 final class AccountBalanceHistoryBuilder
 {
     private const int INSERT_CHUNK = 500;
+
+    public function __construct(private readonly HoldingsValuation $holdings) {}
 
     /**
      * Recomputes from $from forward, or the whole history when $from is null. A partial
@@ -41,6 +53,8 @@ final class AccountBalanceHistoryBuilder
             $account = Account::query()->whereKey($account->id)->lockForUpdate()->firstOrFail();
             $today = CarbonImmutable::today();
             $flows = $this->dailyFlows($account);
+            $holdings = $this->splitsHoldings($account) ? $this->holdings->series($account, $today) : [];
+            $market = $this->marketMovement($holdings, $flows);
 
             if ($from !== null && $this->holdsSeveralCurrencies($account)) {
                 $from = null;
@@ -51,7 +65,7 @@ final class AccountBalanceHistoryBuilder
                 ->keyBy(fn (AccountValuation $valuation): string => $valuation->valued_on->toDateString())
                 ->all();
 
-            [$firstDay, $startBalance] = $this->startingPoint($account, $flows, $valuations, $today);
+            [$firstDay, $startBalance] = $this->startingPoint($account, $flows, $valuations, $today, $market, $holdings);
 
             $resumeFrom = $from?->startOfDay();
             $pinned = $resumeFrom !== null
@@ -61,15 +75,23 @@ final class AccountBalanceHistoryBuilder
                 ? $account->dailyBalances()->whereDate('balance_date', $resumeFrom->subDay())->first()
                 : null;
 
+            if ($previous !== null && $holdings !== [] && $previous->end_non_cash_balance === null) {
+                $previous = null;
+            }
+
             if ($previous !== null) {
                 $firstDay = $resumeFrom;
-                $startBalance = $previous->end_balance;
+                $startBalance = $previous->end_balance + ($previous->end_non_cash_balance ?? 0);
                 $account->dailyBalances()->whereDate('balance_date', '>=', $firstDay)->delete();
             } else {
                 $account->dailyBalances()->delete();
             }
 
-            $this->writeRows($account, $firstDay, $today, $startBalance, $flows, $valuations);
+            $total = $this->writeRows($account, $firstDay, $today, $startBalance, $flows, $valuations, $market, $holdings);
+
+            if ($holdings !== [] && $account->isManuallyBalanced() && $account->balance !== $total) {
+                $account->forceFill(['balance' => $total])->save();
+            }
         });
     }
 
@@ -235,9 +257,11 @@ final class AccountBalanceHistoryBuilder
     /**
      * @param  array<string, array{inflows: int, outflows: int}>  $flows
      * @param  array<string, AccountValuation>  $valuations
+     * @param  array<string, int>  $market
+     * @param  array<string, array{value: int, invested: int}>  $holdings
      * @return array{0: CarbonImmutable, 1: int}
      */
-    private function startingPoint(Account $account, array $flows, array $valuations, CarbonImmutable $today): array
+    private function startingPoint(Account $account, array $flows, array $valuations, CarbonImmutable $today, array $market, array $holdings): array
     {
         foreach ($valuations as $valuation) {
             if ($valuation->kind === ValuationKind::OpeningBalance) {
@@ -245,7 +269,7 @@ final class AccountBalanceHistoryBuilder
             }
         }
 
-        $dates = [...array_keys($flows), ...array_keys($valuations)];
+        $dates = [...array_keys($flows), ...array_keys($valuations), ...array_slice(array_keys($holdings), 0, 1)];
         $firstDay = $dates === [] ? $today : CarbonImmutable::parse(min($dates));
 
         if ($firstDay->greaterThan($today)) {
@@ -256,25 +280,31 @@ final class AccountBalanceHistoryBuilder
         $anchorDay = $earliest->valued_on ?? $today;
         $anchorBalance = $earliest->balance ?? $account->balance;
 
-        return [$firstDay, $anchorBalance - $this->netBetween($flows, $firstDay, $anchorDay)];
+        return [$firstDay, $anchorBalance - $this->netBetween($flows, $market, $firstDay, $anchorDay)];
     }
 
     /**
      * @param  array<string, array{inflows: int, outflows: int}>  $flows
      * @param  array<string, AccountValuation>  $valuations
+     * @param  array<string, int>  $market
+     * @param  array<string, array{value: int, invested: int}>  $holdings
+     * @return int the total at the end of the last day
      */
-    private function writeRows(Account $account, CarbonImmutable $firstDay, CarbonImmutable $lastDay, int $startBalance, array $flows, array $valuations): void
+    private function writeRows(Account $account, CarbonImmutable $firstDay, CarbonImmutable $lastDay, int $startBalance, array $flows, array $valuations, array $market, array $holdings): int
     {
         $rows = [];
         $balance = $startBalance;
+        $nonCashStart = $holdings[$firstDay->subDay()->toDateString()]['value'] ?? 0;
         $now = CarbonImmutable::now();
 
         for ($day = $firstDay; $day->lessThanOrEqualTo($lastDay); $day = $day->addDay()) {
             $key = $day->toDateString();
             $inflows = $flows[$key]['inflows'] ?? 0;
             $outflows = $flows[$key]['outflows'] ?? 0;
+            $movement = $market[$key] ?? 0;
+            $nonCashEnd = $holdings[$key]['value'] ?? 0;
             $start = $balance;
-            $end = $start + $inflows - $outflows;
+            $end = $start + $inflows - $outflows + $movement;
             $adjustment = 0;
 
             if (isset($valuations[$key])) {
@@ -285,10 +315,13 @@ final class AccountBalanceHistoryBuilder
             $rows[] = [
                 'account_id' => $account->id,
                 'balance_date' => $key,
-                'start_balance' => $start,
-                'end_balance' => $end,
+                'start_balance' => $start - $nonCashStart,
+                'end_balance' => $end - $nonCashEnd,
+                'start_non_cash_balance' => $holdings === [] ? null : $nonCashStart,
+                'end_non_cash_balance' => $holdings === [] ? null : $nonCashEnd,
                 'inflows' => $inflows,
                 'outflows' => $outflows,
+                'market_movement' => $holdings === [] ? null : $movement,
                 'adjustments' => $adjustment,
                 'currency' => $account->currency,
                 'created_at' => $now,
@@ -296,6 +329,7 @@ final class AccountBalanceHistoryBuilder
             ];
 
             $balance = $end;
+            $nonCashStart = $nonCashEnd;
 
             if (count($rows) === self::INSERT_CHUNK) {
                 AccountDailyBalance::query()->insert($rows);
@@ -306,6 +340,8 @@ final class AccountBalanceHistoryBuilder
         if ($rows !== []) {
             AccountDailyBalance::query()->insert($rows);
         }
+
+        return $balance;
     }
 
     /**
@@ -342,8 +378,9 @@ final class AccountBalanceHistoryBuilder
      * Net flow of the days from $from to $until, both inclusive.
      *
      * @param  array<string, array{inflows: int, outflows: int}>  $flows
+     * @param  array<string, int>  $market
      */
-    private function netBetween(array $flows, CarbonImmutable $from, CarbonImmutable $until): int
+    private function netBetween(array $flows, array $market, CarbonImmutable $from, CarbonImmutable $until): int
     {
         $net = 0;
         $first = $from->toDateString();
@@ -355,6 +392,48 @@ final class AccountBalanceHistoryBuilder
             }
         }
 
+        foreach ($market as $day => $movement) {
+            if ($day >= $first && $day <= $last) {
+                $net += $movement;
+            }
+        }
+
         return $net;
+    }
+
+    /**
+     * Whether the account's balance is a total this builder splits into cash and securities: a manual
+     * investment account. A provider-linked one already has its holdings in the provider's balance.
+     */
+    private function splitsHoldings(Account $account): bool
+    {
+        return $account->type === AccountClass::Investment && $account->import_source !== ImportSource::Redbark;
+    }
+
+    /**
+     * The change in the securities' value on each day that is not a trade: the day's value less the
+     * day before's less what the day's trades moved in. Days before the first trade have none.
+     *
+     * @param  array<string, array{value: int, invested: int}>  $holdings
+     * @param  array<string, array{inflows: int, outflows: int}>  $flows  gets a zero row for the first trade day so history starts no later than it
+     * @return array<string, int>
+     */
+    private function marketMovement(array $holdings, array &$flows): array
+    {
+        $market = [];
+        $previous = 0;
+
+        foreach ($holdings as $day => $figures) {
+            $market[$day] = $figures['value'] - $previous - $figures['invested'];
+            $previous = $figures['value'];
+        }
+
+        $first = array_key_first($holdings);
+
+        if ($first !== null) {
+            $flows[$first] ??= ['inflows' => 0, 'outflows' => 0];
+        }
+
+        return $market;
     }
 }

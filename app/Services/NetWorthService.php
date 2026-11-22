@@ -383,7 +383,8 @@ final class NetWorthService
     }
 
     /**
-     * End-of-day balances per account and day. A day without a row keeps the balance of the
+     * End-of-day balances per account and day: an account's total, which is its cash plus the value of
+     * its securities when the history splits them (the non-cash columns are null otherwise). A day without a row keeps the balance of the
      * last earlier row, including one before $from. A day before an account's first row keeps
      * that row's start balance: the history only starts from 0 when the account has an opening
      * balance, and otherwise begins from the balance the account already carried. With
@@ -415,14 +416,15 @@ final class NetWorthService
                 $join->on('account_daily_balances.account_id', '=', 'latest.account_id')
                     ->whereRaw('date(account_daily_balances.balance_date) = latest.latest_day');
             })
-            ->pluck('account_daily_balances.end_balance', 'account_daily_balances.account_id');
+            ->selectRaw('account_daily_balances.account_id, account_daily_balances.end_balance + coalesce(account_daily_balances.end_non_cash_balance, 0) as end_balance')
+            ->pluck('end_balance', 'account_id');
 
         $rows = AccountDailyBalance::query()
             ->toBase()
             ->whereIn('account_id', $accountIds)
             ->whereDate('balance_date', '>=', $from->toDateString())
             ->whereDate('balance_date', '<=', $to->toDateString())
-            ->selectRaw('account_id, date(balance_date) as day, start_balance, end_balance')
+            ->selectRaw('account_id, date(balance_date) as day, start_balance + coalesce(start_non_cash_balance, 0) as start_balance, end_balance + coalesce(end_non_cash_balance, 0) as end_balance')
             ->orderBy('balance_date')
             ->get()
             ->groupBy('account_id');
