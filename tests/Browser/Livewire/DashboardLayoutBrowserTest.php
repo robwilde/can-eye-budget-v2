@@ -7,6 +7,7 @@ declare(strict_types=1);
 use App\Enums\DashboardWidget;
 use App\Enums\TransactionPeriod;
 use App\Models\Account;
+use App\Models\AccountDailyBalance;
 use App\Models\PlannedTransaction;
 use App\Models\User;
 
@@ -106,5 +107,24 @@ test('the grid is sortable by its handles only while customising', function () {
         ->click('[data-testid="dashboard-customise"]')
         ->wait(1)
         ->assertScript($sortable, false)
+        ->assertNoJavaScriptErrors();
+});
+
+test('the net worth chart and balance sheet load lazily and the chart follows the period', function () {
+    $user = dashboardUser();
+    $account = $user->accounts()->firstOrFail();
+    AccountDailyBalance::factory()->for($account)->create([
+        'balance_date' => now()->subYears(2)->toDateString(),
+        'start_balance' => 500000,
+        'end_balance' => 500000,
+    ]);
+    $this->actingAs($user);
+
+    visit('/dashboard')
+        ->assertPresent('[data-test="balance-sheet"]')
+        ->assertSeeIn('[data-test="net-worth"]', 'over Last 30 Days')
+        ->click('[data-testid="dashboard-period-ytd"]')
+        ->assertSeeIn('[data-test="net-worth"]', 'over Year to Date')
+        ->assertSeeIn('[data-test="balance-sheet"]', 'Assets')
         ->assertNoJavaScriptErrors();
 });

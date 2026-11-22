@@ -87,19 +87,19 @@ it('runs no queries for hidden widgets', function () {
 it('stores the dashboard layout per user', function () {
     $other = User::factory()->withPayCycle()->create();
 
-    dashboardFor($this->user)->call('hideWidget', 'net-worth')->call('setWidth', 'pay-summary', 'half')->call('setTwoColumn', false);
+    dashboardFor($this->user)->call('hideWidget', 'net-worth-chart')->call('setWidth', 'pay-summary', 'half')->call('setTwoColumn', false);
 
     $mine = $this->user->fresh()->preferences->dashboardLayout;
     $theirs = $other->fresh()->preferences->dashboardLayout;
 
-    expect($mine->isHidden(DashboardWidget::NetWorth))->toBeTrue()
+    expect($mine->isHidden(DashboardWidget::NetWorthChart))->toBeTrue()
         ->and($mine->width(DashboardWidget::PaySummary))->toBe(WidgetWidth::Half)
         ->and($mine->twoColumn)->toBeFalse()
         ->and($theirs->hidden)->toBe([])
         ->and($theirs->twoColumn)->toBeTrue();
 
-    expect(widgetKeysOf(dashboardFor($other)->instance()->visibleWidgets()))->toContain('net-worth')
-        ->and(widgetKeysOf(dashboardFor($this->user)->instance()->visibleWidgets()))->not->toContain('net-worth');
+    expect(widgetKeysOf(dashboardFor($other)->instance()->visibleWidgets()))->toContain('net-worth-chart')
+        ->and(widgetKeysOf(dashboardFor($this->user)->instance()->visibleWidgets()))->not->toContain('net-worth-chart');
 });
 
 it('falls back to the last 30 days for an unknown saved period', function () {
@@ -287,15 +287,15 @@ it('reorders widgets, sets widths and heights, and resets the layout', function 
     $component = dashboardFor($this->user)
         ->call('reorder', 'budgets-this-cycle', 1)
         ->call('setWidth', 'pay-summary', 'half')
-        ->call('setChartHeight', 'net-worth', 'tall')
+        ->call('setChartHeight', 'net-worth-chart', 'tall')
         ->call('setChartHeight', 'pay-summary', 'tall');
 
     $layout = $this->user->fresh()->preferences->dashboardLayout;
 
     expect(widgetKeysOf($layout->visible())[1])->toBe('budgets-this-cycle')
         ->and($layout->width(DashboardWidget::PaySummary))->toBe(WidgetWidth::Half)
-        ->and($layout->height(DashboardWidget::NetWorth))->toBe(ChartHeight::Tall)
-        ->and($layout->heights)->toBe(['net-worth' => 'tall']);
+        ->and($layout->height(DashboardWidget::NetWorthChart))->toBe(ChartHeight::Tall)
+        ->and($layout->heights)->toBe(['net-worth-chart' => 'tall']);
 
     $component->call('resetLayout');
 
@@ -324,9 +324,9 @@ it('does not offer a hidden widget that has no data', function () {
 });
 
 it('offers every hidden widget that does have data', function () {
-    dashboardFor($this->user)->call('hideWidget', 'net-worth')->call('hideWidget', 'pay-summary');
+    dashboardFor($this->user)->call('hideWidget', 'net-worth-chart')->call('hideWidget', 'pay-summary');
 
-    expect(widgetKeysOf(dashboardFor($this->user)->instance()->hiddenOffers()))->toBe(['pay-summary', 'net-worth']);
+    expect(widgetKeysOf(dashboardFor($this->user)->instance()->hiddenOffers()))->toBe(['pay-summary', 'net-worth-chart']);
 });
 
 it('renders widgets full width in two columns and in one column', function () {
@@ -343,7 +343,7 @@ it('shows the toolbar only in customise mode and keeps that mode out of the save
         ->call('toggleCustomise')
         ->assertSeeHtml('data-testid="widget-handle-pay-summary"')
         ->assertSeeHtml('data-testid="widget-width-pay-summary-half"')
-        ->assertSeeHtml('data-testid="widget-height-net-worth-tall"')
+        ->assertSeeHtml('data-testid="widget-height-net-worth-chart-tall"')
         ->assertDontSeeHtml('data-testid="widget-height-pay-summary-tall"');
 
     expect($this->user->fresh()->preferences->dashboardLayout->hidden)->toBe([]);
@@ -361,9 +361,11 @@ it('mounts child widgets lazily or with the period stamp as the registry says', 
     $stamp = DashboardPeriod::for($this->user)->stamp();
 
     expect(DashboardWidget::MonthlyProjection->componentParams($stamp))->toBe(['lazy' => true])
-        ->and(DashboardWidget::NetWorth->componentParams($stamp))->toBe([])
+        ->and(DashboardWidget::NetWorthChart->componentParams($stamp))->toBe(['lazy' => true, 'periodStamp' => $stamp])
+        ->and(DashboardWidget::BalanceSheet->componentParams($stamp))->toBe(['lazy' => true])
         ->and(DashboardWidget::PayCycleCalendar->componentParams($stamp))->toBe([])
-        ->and(DashboardWidget::NetWorth->component())->toBe('dashboard.net-worth')
+        ->and(DashboardWidget::NetWorthChart->component())->toBe('dashboard.net-worth-chart')
+        ->and(DashboardWidget::BalanceSheet->component())->toBe('dashboard.balance-sheet')
         ->and(DashboardWidget::PaySummary->component())->toBeNull()
         ->and(DashboardWidget::PaySummary->view())->toBe('livewire.dashboard.widgets.pay-summary');
 });

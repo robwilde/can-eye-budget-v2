@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 use App\Enums\TransactionDirection;
 use App\Livewire\Dashboard;
-use App\Livewire\Dashboard\NetWorth;
+use App\Livewire\Dashboard\BalanceSheet;
+use App\Livewire\Dashboard\NetWorthChart;
 use App\Models\Account;
 use App\Models\AccountDailyBalance;
 use App\Models\AccountValuation;
@@ -144,8 +145,12 @@ it('shows each balance sheet row in the base currency', function () {
     mcAccount($this->user, 'EUR', ['balance' => 100000]);
 
     Livewire::actingAs($this->user)
-        ->test(NetWorth::class)
-        ->assertSeeHtml('data-test="net-worth-figure">$1,100.00</div>')
+        ->test(NetWorthChart::class)
+        ->assertSeeHtml('data-test="net-worth-figure">$1,100.00</div>');
+
+    Livewire::actingAs($this->user)
+        ->test(BalanceSheet::class)
+        ->assertSeeHtml('data-test="balance-sheet-base-currency"')
         ->assertSeeHtmlInOrder(['data-test="balance-sheet-account"', '$1,100.00']);
 });
 
@@ -211,14 +216,14 @@ it('subtracts needed from available in the base currency', function () {
 
 it('names the base currency on the net worth card only when converting', function () {
     Livewire::actingAs($this->user)
-        ->test(NetWorth::class)
+        ->test(NetWorthChart::class)
         ->assertSeeHtml('data-test="net-worth-base-currency"')
         ->assertSee('All amounts converted to USD');
 
     config(['budget.multi_currency' => false]);
 
     Livewire::actingAs($this->user)
-        ->test(NetWorth::class)
+        ->test(NetWorthChart::class)
         ->assertDontSeeHtml('data-test="net-worth-base-currency"');
 });
 
