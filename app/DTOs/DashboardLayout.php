@@ -18,6 +18,11 @@ use Spatie\LaravelData\Dto;
  */
 final class DashboardLayout extends Dto
 {
+    /** Widget keys that were split or renamed, with the keys that replace them in a saved layout. */
+    private const array RETIRED = [
+        'net-worth' => ['net-worth-chart', 'balance-sheet'],
+    ];
+
     /**
      * @param  list<string>  $order  widget keys, first to last
      * @param  list<string>  $hidden
@@ -163,8 +168,14 @@ final class DashboardLayout extends Dto
         $keys = [];
 
         foreach ($value as $key) {
-            if (is_string($key) && DashboardWidget::tryFrom($key) !== null && ! in_array($key, $keys, true)) {
-                $keys[] = $key;
+            if (! is_string($key)) {
+                continue;
+            }
+
+            foreach (self::expand($key) as $current) {
+                if (DashboardWidget::tryFrom($current) !== null && ! in_array($current, $keys, true)) {
+                    $keys[] = $current;
+                }
             }
         }
 
@@ -182,14 +193,38 @@ final class DashboardLayout extends Dto
         }
 
         $choices = [];
+        $retired = [];
 
         foreach ($value as $key => $choice) {
-            if (is_string($key) && DashboardWidget::tryFrom($key) !== null && is_string($choice) && $enum::tryFrom($choice) !== null) {
+            if (! is_string($key) || ! is_string($choice) || $enum::tryFrom($choice) === null) {
+                continue;
+            }
+
+            if (isset(self::RETIRED[$key])) {
+                $retired[$key] = $choice;
+            } elseif (DashboardWidget::tryFrom($key) !== null) {
                 $choices[$key] = $choice;
             }
         }
 
+        foreach ($retired as $key => $choice) {
+            foreach (self::expand($key) as $current) {
+                $choices[$current] ??= $choice;
+            }
+        }
+
         return $choices;
+    }
+
+    /**
+     * The current widget keys a stored key stands for: a retired key maps onto its successors,
+     * anything else is itself, and an unknown key is left for the caller to drop.
+     *
+     * @return list<string>
+     */
+    private static function expand(string $key): array
+    {
+        return self::RETIRED[$key] ?? [$key];
     }
 
     /**
