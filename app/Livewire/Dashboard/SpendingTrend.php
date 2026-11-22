@@ -20,10 +20,10 @@ use Livewire\Component;
  */
 final class SpendingTrend extends Component
 {
-    #[Url(as: 'trendMonth')]
+    #[Url(as: 'trendMonth', except: '')]
     public string $month = '';
 
-    #[Url(as: 'trendCategory')]
+    #[Url(as: 'trendCategory', except: '')]
     public string $category = '';
 
     public function mount(): void
@@ -34,7 +34,7 @@ final class SpendingTrend extends Component
     public function placeholder(): string
     {
         return <<<'HTML'
-        <div class="animate-pulse rounded-xl bg-zinc-100 min-h-48"></div>
+        <section class="animate-pulse rounded-xl bg-zinc-100 min-h-48"></section>
         HTML;
     }
 

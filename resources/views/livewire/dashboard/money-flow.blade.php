@@ -3,8 +3,6 @@
 @php($peak = max(1, ...array_map(fn (array $bar): int => max($bar['income'], $bar['expense']), $this->bars)))
 
 <section class="space-y-3" data-test="money-flow">
-    <x-cib.url-sync :params="['month' => 'flowMonth', 'account' => 'flowAccount']"/>
-
     <div class="flex flex-wrap items-center justify-between gap-2">
         <x-cib.sec-head :title="__('Money flow')"/>
         <div class="flex items-center gap-2">

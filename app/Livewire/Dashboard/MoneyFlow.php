@@ -21,10 +21,10 @@ use Livewire\Component;
  */
 final class MoneyFlow extends Component
 {
-    #[Url(as: 'flowMonth')]
+    #[Url(as: 'flowMonth', except: '')]
     public string $month = '';
 
-    #[Url(as: 'flowAccount')]
+    #[Url(as: 'flowAccount', except: '')]
     public string $account = '';
 
     public function mount(): void
@@ -35,7 +35,7 @@ final class MoneyFlow extends Component
     public function placeholder(): string
     {
         return <<<'HTML'
-        <div class="animate-pulse rounded-xl bg-zinc-100 min-h-48"></div>
+        <section class="animate-pulse rounded-xl bg-zinc-100 min-h-48"></section>
         HTML;
     }
 
