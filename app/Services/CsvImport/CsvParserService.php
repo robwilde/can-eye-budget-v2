@@ -254,6 +254,32 @@ final class CsvParserService
     }
 
     /**
+     * The first few different values of a column, so a file that mixes accounts can be spotted.
+     *
+     * @return list<string>
+     *
+     * @throws Exception
+     */
+    public function distinctValues(string $path, string $column, ?CsvFormat $format = null, int $limit = 2): array
+    {
+        $values = [];
+
+        foreach ($this->records($path, $format) as $record) {
+            $value = mb_trim((string) ($this->normalizeRow($record)[$column] ?? ''));
+
+            if ($value !== '') {
+                $values[mb_strtolower($value)] ??= $value;
+            }
+
+            if (count($values) >= $limit) {
+                break;
+            }
+        }
+
+        return array_values($values);
+    }
+
+    /**
      * @throws CsvRowInvalid
      */
     public function cellDate(string $raw, CsvFormat $format): CarbonImmutable
