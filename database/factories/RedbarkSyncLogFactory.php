@@ -49,6 +49,14 @@ final class RedbarkSyncLogFactory extends Factory
         ]);
     }
 
+    public function stale(): self
+    {
+        return $this->state(fn (array $attributes): array => [
+            'status' => RefreshStatus::Stale,
+            'cancelled_at' => now(),
+        ]);
+    }
+
     public function scheduled(): self
     {
         return $this->state(fn (array $attributes): array => [
