@@ -21,5 +21,6 @@ final readonly class ParsedTransactionDto
         public array $rawRow,
         public string $csvHash,
         public ?string $category = null,
+        public ?string $tag = null,
     ) {}
 }

@@ -7,6 +7,7 @@ namespace App\Services\CsvImport;
 use App\DTOs\CsvFormat;
 use App\Enums\CsvSignConvention;
 use App\Enums\TransactionDirection;
+use App\Exceptions\CsvRowInvalid;
 use Carbon\CarbonImmutable;
 use Generator;
 use InvalidArgumentException;
@@ -17,6 +18,17 @@ use Throwable;
 
 final class CsvParserService
 {
+    /**
+     * The hash a row is stored under: its date, amount and description, plus how many identical
+     * rows came before it in the file.
+     */
+    public static function hashFor(CarbonImmutable $date, int $amountCents, string $description, int $occurrence = 0): string
+    {
+        $base = hash('sha256', implode('|', [$date->format('Y-m-d'), (string) $amountCents, mb_strtolower(mb_trim($description))]));
+
+        return $occurrence === 0 ? $base : hash('sha256', $base.'|'.$occurrence);
+    }
+
     /**
      * @return list<string>
      *
@@ -78,6 +90,55 @@ final class CsvParserService
             }
 
             yield $offset => $parsed;
+        }
+    }
+
+    /**
+     * Every data row, valid or not. The date and the amount are read separately, so a row with
+     * one bad cell keeps the other as parsed, and each failed cell is named with its reason.
+     * This is what the clean step stores so the user can fix invalid cells before importing.
+     *
+     * @param  array<string, string|null>  $mapping
+     * @return Generator<int, array{row: array<string, string>, date: CarbonImmutable|null, amount: int|null, direction: TransactionDirection|null, errors: array<string, string>}>
+     *
+     * @throws Exception
+     */
+    public function rows(string $path, array $mapping): Generator
+    {
+        $format = CsvFormat::fromMapping($mapping);
+        $number = 0;
+
+        foreach ($this->records($path, $format) as $record) {
+            $number++;
+            $row = $this->normalizeRow($record);
+            $errors = [];
+            $date = null;
+            $amount = null;
+            $direction = null;
+            $rawDate = $row[$mapping[CsvColumnMapper::FIELD_DATE] ?? ''] ?? '';
+
+            if ($rawDate === '') {
+                $errors['date'] = 'Missing date';
+            } else {
+                try {
+                    $date = $format === null ? $this->parseDate($rawDate) : $this->parseDateIn($rawDate, $format);
+                } catch (Throwable $exception) {
+                    $errors['date'] = $exception->getMessage();
+                }
+            }
+
+            try {
+                [$amount, $direction] = $this->parseAmount($row, $mapping, $format);
+
+                if ($amount === null) {
+                    $errors['amount'] = 'Missing amount';
+                    $direction = null;
+                }
+            } catch (CsvRowInvalid $exception) {
+                $errors['amount'] = $exception->getMessage();
+            }
+
+            yield $number => ['row' => $row, 'date' => $date, 'amount' => $amount, 'direction' => $direction, 'errors' => $errors];
         }
     }
 
@@ -193,6 +254,14 @@ final class CsvParserService
     }
 
     /**
+     * @throws CsvRowInvalid
+     */
+    public function cellDate(string $raw, CsvFormat $format): CarbonImmutable
+    {
+        return $this->parseDateIn($raw, $format);
+    }
+
+    /**
      * The data rows. With a header offset League CSV still returns the lines above the header,
      * matched against the headers, so they are dropped here.
      *
@@ -279,6 +348,7 @@ final class CsvParserService
             rawRow: $row,
             csvHash: $index === 0 ? $base : hash('sha256', $base.'|'.$index),
             category: $this->parseCategory($row, $mapping),
+            tag: $this->parseTag($row, $mapping),
         );
     }
 
@@ -287,13 +357,13 @@ final class CsvParserService
         $raw = mb_trim($raw);
 
         if (! app(CsvFormatDetector::class)->parses($raw, $format->dateFormat)) {
-            throw new InvalidArgumentException(sprintf('Date "%s" does not match the format %s', $raw, CsvFormat::DATE_FORMATS[$format->dateFormat] ?? $format->dateFormat));
+            throw new CsvRowInvalid(sprintf('Date "%s" does not match the format %s', $raw, CsvFormat::DATE_FORMATS[$format->dateFormat] ?? $format->dateFormat));
         }
 
         $date = CarbonImmutable::createFromFormat('!'.$format->dateFormat, $raw);
 
         if ($date->greaterThan(CarbonImmutable::today())) {
-            throw new InvalidArgumentException(sprintf('Date "%s" is in the future', $raw));
+            throw new CsvRowInvalid(sprintf('Date "%s" is in the future', $raw));
         }
 
         return $date->startOfDay();
@@ -348,7 +418,7 @@ final class CsvParserService
                     $cell = $column === null ? '' : mb_trim($row[$column] ?? '');
 
                     if ($cell !== '' && $value === null) {
-                        throw new InvalidArgumentException(sprintf('Amount "%s" is not a number in the format %s', $cell, $format->numberFormat->label()));
+                        throw new CsvRowInvalid(sprintf('Amount "%s" is not a number in the format %s', $cell, $format->numberFormat->label()));
                     }
                 }
             }
@@ -376,7 +446,7 @@ final class CsvParserService
         $signed = $this->amount($raw, $format);
 
         if ($signed === null && $format !== null && mb_trim($raw) !== '') {
-            throw new InvalidArgumentException(sprintf('Amount "%s" is not a number in the format %s', $raw, $format->numberFormat->label()));
+            throw new CsvRowInvalid(sprintf('Amount "%s" is not a number in the format %s', $raw, $format->numberFormat->label()));
         }
 
         if ($signed === null) {
@@ -475,6 +545,18 @@ final class CsvParserService
         }
 
         return $this->amount($row[$col] ?? '', $format);
+    }
+
+    /**
+     * @param  array<string, string>  $row
+     * @param  array<string, string|null>  $mapping
+     */
+    private function parseTag(array $row, array $mapping): ?string
+    {
+        $col = $mapping[CsvColumnMapper::FIELD_TAG] ?? null;
+        $value = $col === null ? '' : mb_trim($row[$col] ?? '');
+
+        return $value === '' ? null : $value;
     }
 
     /**

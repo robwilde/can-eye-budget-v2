@@ -48,6 +48,22 @@ final class CsvNumberParser
         return $negative ? -$cents : $cents;
     }
 
+    /**
+     * The amount written the way the file writes numbers, so what the user sees can be typed back.
+     */
+    public function format(int $cents, CsvNumberFormat $format): string
+    {
+        $sign = $cents < 0 ? '-' : '';
+        $whole = intdiv(abs($cents), 100);
+        $fraction = mb_str_pad((string) (abs($cents) % 100), 2, '0', STR_PAD_LEFT);
+
+        return match ($format) {
+            CsvNumberFormat::CommaThousandsDotDecimal => $sign.$whole.'.'.$fraction,
+            CsvNumberFormat::DotThousandsCommaDecimal, CsvNumberFormat::SpaceThousandsCommaDecimal => $sign.$whole.','.$fraction,
+            CsvNumberFormat::CommaThousandsOnly => $sign.$whole,
+        };
+    }
+
     private function normalise(string $body, CsvNumberFormat $format): ?string
     {
         $spaces = self::SPACES;
