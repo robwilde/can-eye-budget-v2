@@ -16,8 +16,14 @@ use App\Livewire\Attributes\NotAudited;
 use App\Livewire\Concerns\ReportsFailure;
 use App\Models\Account;
 use App\Models\BankImport;
+use App\Models\BankImportRow;
+use App\Models\Category;
+use App\Models\Tag;
 use App\Models\Transaction;
 use App\Services\CsvImport\BankImportReverter;
+use App\Services\CsvImport\BankImportRowBuilder;
+use App\Services\CsvImport\BankImportRowEditor;
+use App\Services\CsvImport\BankImportValueMapping;
 use App\Services\CsvImport\CsvColumnMapper;
 use App\Services\CsvImport\CsvFormatDetector;
 use App\Services\CsvImport\CsvParserService;
@@ -34,12 +40,14 @@ use Livewire\Attributes\Validate;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithFileUploads;
+use Livewire\WithPagination;
 use Throwable;
 
 final class ImportBank extends Component
 {
     use ReportsFailure;
     use WithFileUploads;
+    use WithPagination;
 
     public int $step = 1;
 
@@ -76,9 +84,18 @@ final class ImportBank extends Component
 
     public ?int $bankImportId = null;
 
+    public bool $cleaning = false;
+
+    public bool $errorsOnly = false;
+
     public static function maxPdfKilobytes(): int
     {
         return min(25600, intdiv((int) config('services.statement_ai.max_pdf_bytes'), 1024));
+    }
+
+    public function updatedErrorsOnly(): void
+    {
+        $this->resetPage('rowsPage');
     }
 
     /**
@@ -179,6 +196,8 @@ final class ImportBank extends Component
             return;
         }
 
+        $this->forgetRows();
+
         if ($key !== null && in_array($key, [CsvFormat::KEY_DELIMITER, CsvFormat::KEY_SKIP], true)) {
             $format = CsvFormat::fromMapping($this->mapping);
 
@@ -199,6 +218,106 @@ final class ImportBank extends Component
         if ($key !== CsvFormat::KEY_DATE && $options !== [] && ! in_array($this->mapping[CsvFormat::KEY_DATE] ?? null, $options, true)) {
             $this->mapping[CsvFormat::KEY_DATE] = $options[0];
         }
+    }
+
+    /**
+     * Opens the rows table. The file is parsed into editable rows the first time, with a starting
+     * choice for each category and tag value in it; reopening keeps the user's edits and choices.
+     */
+    public function reviewRows(BankImportRowBuilder $builder): void
+    {
+        $this->clearFailure();
+        $this->resetErrorBag();
+
+        $bankImport = $this->currentImport();
+
+        try {
+            if (! $bankImport->rows()->exists()) {
+                $bankImport->update(['column_mapping' => $this->mapping]);
+                $builder->build($bankImport, suggest: true);
+            } elseif ($bankImport->value_mapping === null) {
+                $bankImport->update(['value_mapping' => app(BankImportValueMapping::class)->suggest($bankImport)]);
+            }
+        } catch (Throwable) {
+            $this->fail(__('The file could not be read with these settings.'));
+
+            return;
+        }
+
+        $this->cleaning = true;
+        $this->resetPage('rowsPage');
+    }
+
+    public function closeRows(): void
+    {
+        $this->cleaning = false;
+    }
+
+    /**
+     * Edits one cell of an import row and checks the row again.
+     */
+    public function updateRow(int $rowId, string $field, string $value, BankImportRowEditor $editor): void
+    {
+        $this->resetErrorBag();
+
+        $row = $this->ownedRow($rowId);
+
+        if ($row === null || ! in_array($field, BankImportRowEditor::FIELDS, true)) {
+            $this->addError('rows', __('That row is no longer available.'));
+
+            return;
+        }
+
+        $editor->update($row, $field, $value);
+    }
+
+    public function mapCategory(string $key, string $categoryId): void
+    {
+        $bankImport = $this->currentImport();
+        $value = collect(app(BankImportValueMapping::class)->categoryValues($bankImport))->first(fn (string $candidate): bool => BankImportValueMapping::key($candidate) === $key);
+
+        if ($value === null) {
+            return;
+        }
+
+        $id = $categoryId === '' ? null : (int) $categoryId;
+
+        if ($id !== null && ! Category::query()->where('user_id', auth()->id())->whereKey($id)->exists()) {
+            $this->addError('value_mapping', __('Choose one of your own categories.'));
+
+            return;
+        }
+
+        $mapping = $bankImport->value_mapping ?? ['categories' => [], 'tags' => []];
+        $mapping['categories'][$value] = $id;
+        $bankImport->update(['value_mapping' => $mapping]);
+    }
+
+    public function mapTag(string $key, string $choice): void
+    {
+        $bankImport = $this->currentImport();
+        $value = collect(app(BankImportValueMapping::class)->tagValues($bankImport))->first(fn (string $candidate): bool => BankImportValueMapping::key($candidate) === $key);
+
+        if ($value === null) {
+            return;
+        }
+
+        $mapped = match (true) {
+            $choice === '' => null,
+            $choice === BankImportValueMapping::TAG_NEW => ['type' => BankImportValueMapping::TAG_NEW],
+            ctype_digit($choice) && Tag::query()->where('user_id', auth()->id())->whereKey((int) $choice)->exists() => ['type' => BankImportValueMapping::TAG_EXISTING, 'id' => (int) $choice],
+            default => false,
+        };
+
+        if ($mapped === false) {
+            $this->addError('value_mapping', __('Choose one of your own tags.'));
+
+            return;
+        }
+
+        $mapping = $bankImport->value_mapping ?? ['categories' => [], 'tags' => []];
+        $mapping['tags'][$value] = $mapped;
+        $bankImport->update(['value_mapping' => $mapping]);
     }
 
     public function refreshPreview(): void
@@ -355,8 +474,11 @@ final class ImportBank extends Component
             'mapping',
             'bankImportId',
             'errorMessage',
+            'cleaning',
+            'errorsOnly',
         ]);
         $this->resetErrorBag('errorMessage');
+        $this->resetPage('rowsPage');
 
         $this->step = 1;
     }
@@ -429,6 +551,8 @@ final class ImportBank extends Component
             'summary' => $summary,
             'continuity' => $continuity,
             'format' => CsvFormat::fromMapping($this->mapping),
+            'storedInvalid' => $bankImport !== null && $this->step === 2 && $bankImport->rows()->exists() ? $bankImport->rows()->invalid()->count() : null,
+            'clean' => $this->cleaning && $bankImport !== null ? $this->cleanData($bankImport) : null,
             'dateFormatOptions' => $this->step === 2 && $bankImport !== null
                 ? $this->dateFormatOptions($parser, Storage::disk('local')->path($bankImport->stored_path))
                 : [],
@@ -440,6 +564,7 @@ final class ImportBank extends Component
                 CsvColumnMapper::FIELD_CREDIT => 'Credit (in)',
                 CsvColumnMapper::FIELD_BALANCE => 'Balance',
                 CsvColumnMapper::FIELD_CATEGORY => 'Category',
+                CsvColumnMapper::FIELD_TAG => 'Tags',
             ],
         ]);
     }
@@ -467,15 +592,30 @@ final class ImportBank extends Component
                 return false;
             }
 
-            $summary = $parser->summarize($path, $this->mapping);
+            if (! $bankImport->rows()->exists()) {
+                $bankImport->update(['column_mapping' => $this->mapping]);
+                app(BankImportRowBuilder::class)->build($bankImport);
+            }
         } catch (Throwable) {
             $this->addError('mapping.'.CsvFormat::KEY_DATE, __('The file could not be read with these format settings.'));
 
             return false;
         }
 
-        if ($summary->errorRows !== []) {
-            $this->addError('mapping.'.CsvFormat::KEY_DATE, trans_choice(':count row does not fit these formats. Fix the formats before importing.|:count rows do not fit these formats. Fix the formats before importing.', count($summary->errorRows)));
+        $invalid = $bankImport->rows()->invalid()->count();
+
+        if ($invalid > 0) {
+            $this->cleaning = true;
+            $this->addError('mapping.'.CsvFormat::KEY_DATE, trans_choice(':count row is invalid. Fix it in the rows table before importing.|:count rows are invalid. Fix them in the rows table before importing.', $invalid));
+
+            return false;
+        }
+
+        $problems = app(BankImportValueMapping::class)->problems($bankImport);
+
+        if ($problems !== []) {
+            $this->cleaning = true;
+            $this->addError('value_mapping', implode(' ', $problems));
 
             return false;
         }
@@ -522,6 +662,52 @@ final class ImportBank extends Component
         } catch (Throwable) {
             return [];
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function cleanData(BankImport $bankImport): array
+    {
+        $values = app(BankImportValueMapping::class);
+        $rows = $bankImport->rows()->when($this->errorsOnly, fn ($query) => $query->invalid())->orderBy('row_number')->paginate(25, pageName: 'rowsPage');
+
+        return [
+            'rows' => $rows,
+            'total' => $bankImport->rows()->count(),
+            'invalid' => $bankImport->rows()->invalid()->count(),
+            'categoryValues' => $values->categoryValues($bankImport),
+            'tagValues' => $values->tagValues($bankImport),
+            'mapping' => $bankImport->value_mapping ?? ['categories' => [], 'tags' => []],
+            'categories' => Category::query()->where('user_id', auth()->id())->orderBy('name')->get(['id', 'name']),
+            'tags' => Tag::query()->where('user_id', auth()->id())->orderBy('name')->get(['id', 'name']),
+        ];
+    }
+
+    private function forgetRows(): void
+    {
+        if ($this->bankImportId === null) {
+            return;
+        }
+
+        $bankImport = BankImport::query()->where('user_id', auth()->id())->find($this->bankImportId);
+
+        if ($bankImport !== null) {
+            $bankImport->rows()->delete();
+            $bankImport->update(['value_mapping' => null]);
+        }
+
+        $this->cleaning = false;
+    }
+
+    private function currentImport(): BankImport
+    {
+        return BankImport::query()->where('user_id', auth()->id())->findOrFail($this->bankImportId);
+    }
+
+    private function ownedRow(int $rowId): ?BankImportRow
+    {
+        return BankImportRow::query()->forUser((int) auth()->id())->where('bank_import_id', $this->bankImportId)->with('bankImport')->find($rowId);
     }
 
     private function storedPath(): ?string
