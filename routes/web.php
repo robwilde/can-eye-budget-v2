@@ -28,6 +28,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('transfers/review', 'transfers-review')->name('transfers.review');
     Route::view('calendar', 'calendar')->name('calendar');
     Route::view('reports', 'reports')->name('reports');
+    Route::view('reports/print', 'reports-print')->name('reports.print');
     Route::view('budget', 'budget')->name('budget');
     Route::view('goals', 'goals')->middleware(EnsureGoalsEnabled::class)->name('goals');
     Route::view('goals/{goal}', 'goal-show')->whereNumber('goal')->middleware(EnsureGoalsEnabled::class)->name('goals.show');
