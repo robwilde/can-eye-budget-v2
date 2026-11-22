@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Reports;
 
+use App\Enums\TransactionDirection;
 use App\Enums\TransactionStatus;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
@@ -13,6 +14,7 @@ use App\Services\CurrencyConverter;
 use App\Support\Transactions\CategoryAttribution;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Builder;
 
 final class ReportAggregator
 {
@@ -24,11 +26,12 @@ final class ReportAggregator
      * derived from these atoms.
      *
      * Transfers with exactly one tracked side count by default; pass
-     * $includeTransfers = false for ordinary income and spend only.
+     * $includeTransfers = false for ordinary income and spend only. Filters narrow
+     * actuals to one account, one tag and an absolute amount range; plans ignore them.
      *
      * @return list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>
      */
-    public function atoms(User $user, string $mode, ?CarbonInterface $start, ?CarbonInterface $end, bool $includeTransfers = true): array
+    public function atoms(User $user, string $mode, ?CarbonInterface $start, ?CarbonInterface $end, bool $includeTransfers = true, ?ReportFilters $filters = null): array
     {
         if ($mode === 'plan') {
             $now = $user->today();
@@ -48,7 +51,70 @@ final class ReportAggregator
             return $this->plannedAtoms($user, $windowStart, $windowEnd, $includeTransfers);
         }
 
-        return $this->actualAtoms($user, $start, $end, $includeTransfers);
+        return $this->actualAtoms($user, $start, $end, $includeTransfers, $filters);
+    }
+
+    /**
+     * Nets refunds against spending: a category's debits and credits collapse into the
+     * larger direction at the difference, so a 10 refund on 60 of groceries leaves 50 of
+     * spending and a category refunded beyond its spending moves to income. Uncategorised
+     * atoms cannot be told apart from ordinary income and stay as they are. With $byMonth
+     * each month nets on its own; otherwise the whole range nets together and the month
+     * key is left empty.
+     *
+     * @param  list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>  $atoms
+     * @return list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>
+     */
+    public function netRefunds(array $atoms, bool $byMonth): array
+    {
+        $netted = [];
+        $kept = [];
+
+        foreach ($atoms as $atom) {
+            if ($atom['category_id'] === null) {
+                $kept[] = $atom;
+
+                continue;
+            }
+
+            $ym = $byMonth ? $atom['ym'] : '';
+            $key = $ym.'|'.$atom['category_id'];
+
+            $netted[$key] ??= ['ym' => $ym, 'category_id' => $atom['category_id'], 'net' => 0, 'count' => 0];
+            $netted[$key]['net'] += $atom['direction'] === TransactionDirection::Debit->value ? $atom['total'] : -$atom['total'];
+            $netted[$key]['count'] += $atom['count'];
+        }
+
+        foreach ($netted as $entry) {
+            if ($entry['net'] === 0) {
+                continue;
+            }
+
+            $kept[] = [
+                'ym' => $entry['ym'],
+                'direction' => $entry['net'] > 0 ? TransactionDirection::Debit->value : TransactionDirection::Credit->value,
+                'category_id' => $entry['category_id'],
+                'total' => abs($entry['net']),
+                'count' => $entry['count'],
+            ];
+        }
+
+        return $kept;
+    }
+
+    /**
+     * The range of equal length that ends the day before $start: 29 January to 28 February
+     * for March.
+     *
+     * @return array{start: CarbonImmutable, end: CarbonImmutable}
+     */
+    public function priorRange(CarbonInterface $start, CarbonInterface $end): array
+    {
+        $first = CarbonImmutable::parse($start->toDateString())->startOfDay();
+        $last = CarbonImmutable::parse($end->toDateString())->startOfDay();
+        $days = (int) round($first->diffInDays($last)) + 1;
+
+        return ['start' => $first->subDays($days), 'end' => $first->subDay()->endOfDay()];
     }
 
     /**
@@ -202,7 +268,7 @@ final class ReportAggregator
     /**
      * @return list<array{ym: string, direction: string, category_id: int|null, total: int, count: int}>
      */
-    private function actualAtoms(User $user, ?CarbonInterface $start, ?CarbonInterface $end, bool $includeTransfers): array
+    private function actualAtoms(User $user, ?CarbonInterface $start, ?CarbonInterface $end, bool $includeTransfers, ?ReportFilters $filters): array
     {
         $monthExpr = $this->monthExpression();
         $transferCategoryIds = $this->transferCategoryIds($user->id);
@@ -224,6 +290,7 @@ final class ReportAggregator
                     ->select('transactions.id'))))
             ->when($start, fn ($q, $s) => $q->where('post_date', '>=', $s))
             ->when($end, fn ($q, $e) => $q->where('post_date', '<=', $e))
+            ->when($filters !== null && ! $filters->isEmpty(), fn ($q) => $q->whereIn('transaction_id', $this->filteredTransactionIds($user, $filters)))
             ->selectRaw("{$monthExpr} as ym, direction, category_id, SUM(ABS(amount)) as total, COUNT(*) as tx_count")
             ->groupByRaw($monthExpr)
             ->groupBy('direction', 'category_id');
@@ -322,5 +389,21 @@ final class ReportAggregator
         return Transaction::query()->getModel()->getConnection()->getDriverName() === 'sqlite'
             ? "strftime('%Y-%m', post_date)"
             : "DATE_FORMAT(post_date, '%Y-%m')";
+    }
+
+    /**
+     * @return Builder<Transaction>
+     */
+    private function filteredTransactionIds(User $user, ReportFilters $filters): Builder
+    {
+        return Transaction::query()
+            ->where('transactions.user_id', $user->id)
+            ->when($filters->accountId !== null, fn ($q) => $q->where('transactions.account_id', $filters->accountId))
+            ->when($filters->tagId !== null, fn ($q) => $q->whereHas('tags', fn ($tags) => $tags
+                ->where('tags.id', $filters->tagId)
+                ->where('tags.user_id', $user->id)))
+            ->when($filters->minCents !== null, fn ($q) => $q->whereRaw('ABS(transactions.amount) >= ?', [$filters->minCents]))
+            ->when($filters->maxCents !== null, fn ($q) => $q->whereRaw('ABS(transactions.amount) <= ?', [$filters->maxCents]))
+            ->select('transactions.id');
     }
 }
