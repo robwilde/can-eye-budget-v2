@@ -106,4 +106,19 @@ final class Decimal
 
         return mb_rtrim(mb_rtrim($text, '0'), '.');
     }
+
+    /**
+     * Whole cents for an amount typed in dollars ("15", "15.5", "1,234.56"): null when it is not a plain
+     * non-negative number with at most two decimal places beyond what rounds away.
+     */
+    public static function dollarsToCents(string $dollars): ?int
+    {
+        $text = str_replace(',', '', mb_trim($dollars));
+
+        if (preg_match('/^\d+(\.\d+)?$/', $text) !== 1) {
+            return null;
+        }
+
+        return self::toCents(bcmul($text, '100', self::WORKING_SCALE));
+    }
 }
