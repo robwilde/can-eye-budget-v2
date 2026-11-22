@@ -1,5 +1,11 @@
-@use('App\Casts\MoneyCast')
+@use('App\Enums\ChartHeight')
 @use('App\Enums\TransactionPeriod')
+@use('App\Enums\WidgetWidth')
+
+@php
+    $layout = $this->layout;
+    $period = $this->period;
+@endphp
 
 <div class="space-y-6">
     @if ($this->needsBankConnection)
@@ -30,132 +36,123 @@
         </x-cib.card>
     @endif
 
-    @if ($this->statementsDue->isNotEmpty())
-        <x-cib.card data-test="dashboard-statements-due-card">
-            <flux:heading size="lg">{{ __('Check last month\'s statements') }}</flux:heading>
-            <flux:text size="sm" class="mt-1">
-                {{ __('Upload each bank statement to confirm the feed delivered every transaction, then close the month.') }}
-            </flux:text>
-            <ul class="mt-3 space-y-1">
-                @foreach ($this->statementsDue as $dueAccount)
-                    <li wire:key="statement-due-{{ $dueAccount->id }}">
-                        <a href="{{ route('accounts.reconcile', $dueAccount) }}" wire:navigate
-                           class="text-sm font-bold underline decoration-dotted"
-                           data-test="dashboard-statement-due-{{ $dueAccount->id }}">{{ $dueAccount->name }}</a>
-                    </li>
-                @endforeach
-            </ul>
-        </x-cib.card>
-    @endif
-
-    @if ($this->pendingTransfers > 0)
-        <x-cib.card data-test="dashboard-pending-transfers-card">
-            <flux:heading size="lg">{{ trans_choice(':count possible transfer to review|:count possible transfers to review', $this->pendingTransfers) }}</flux:heading>
-            <flux:text size="sm" class="mt-1">
-                {{ __('Confirm each one once; the same transfer is then linked automatically on later imports.') }}
-            </flux:text>
-            <a href="{{ route('transfers.review') }}" wire:navigate
-               class="mt-3 inline-block text-sm font-bold underline decoration-dotted"
-               data-test="dashboard-pending-transfers-link">{{ __('Review transfers') }}</a>
-        </x-cib.card>
-    @endif
-
-    @if ($this->insights->isNotEmpty())
-        <x-cib.card data-test="dashboard-insights-card">
-            <flux:heading size="lg">{{ __('Insights') }}</flux:heading>
-            <ul class="mt-3 space-y-2">
-                @foreach ($this->insights as $insight)
-                    <li wire:key="dashboard-insight-{{ $insight->id }}" data-test="dashboard-insight">
-                        <div class="text-sm font-bold">{{ $insight->title }}</div>
-                        <flux:text size="sm">{{ $insight->body }}</flux:text>
-                    </li>
-                @endforeach
-            </ul>
-            <a href="{{ route('insights') }}" wire:navigate
-               class="mt-3 inline-block text-sm font-bold underline decoration-dotted"
-               data-test="dashboard-insights-link">{{ __('View all insights') }}</a>
-        </x-cib.card>
-    @endif
-
-    <div class="grid gap-4 lg:grid-cols-[1fr_300px]">
-        <div class="space-y-4">
-            @php
-                $buf = $this->buffer;
-            @endphp
-
-            <section @class([
-                'buffer-hero border-2 border-black rounded-[28px] p-6 shadow-[3px_3px_0_0_#111]',
-                'bg-cib-green-400' => $buf !== null && $buf >= 0,
-                'bg-red-400' => $buf !== null && $buf < 0,
-                'bg-cib-cream-50' => $buf === null,
-                'pos' => $buf !== null && $buf >= 0,
-                'neg' => $buf !== null && $buf < 0,
-            ])>
-                @if ($buf === null)
-                    <h2 class="font-display text-2xl font-black tracking-tight">SET UP PAY CYCLE</h2>
-                    <p class="mt-2 text-sm">Configure your next pay date and amount to see your buffer.</p>
-                @elseif ($buf >= 0)
-                    <h2 class="font-display text-2xl font-black tracking-tight">YOU CAN AFFORD</h2>
-                    <div class="buffer-amt mt-2 text-5xl font-black">{{ MoneyCast::format($buf) }}</div>
-                    <p class="mt-2 text-sm">After covering {{ MoneyCast::format($this->totalNeeded) }} of planned spend until payday.</p>
-                @else
-                    <h2 class="font-display text-2xl font-black tracking-tight">YOU ARE SHORT BY</h2>
-                    <div class="buffer-amt mt-2 text-5xl font-black">{{ MoneyCast::format(abs($buf)) }}</div>
-                    <p class="mt-2 text-sm">Planned spend exceeds what you have available by payday.</p>
-                @endif
-            </section>
-
-            <div class="grid gap-3 sm:grid-cols-3">
-                <x-cib.money-card label="Owed" :amount="$this->numbers['owed']" tone="owed"/>
-                <x-cib.money-card label="Available" :amount="$this->numbers['available']" tone="available"/>
-                <x-cib.money-card label="Needed" :amount="$this->numbers['needed']" tone="needed"/>
-            </div>
-            @if (config('budget.multi_currency'))
-                <p class="text-sm text-gray-500" data-test="dashboard-base-currency">{{ __('Owed, Available, Needed and the buffer are in :currency', ['currency' => auth()->user()->base_currency]) }}</p>
-            @endif
-
-            <livewire:dashboard.net-worth/>
-
-            <livewire:dashboard.pay-cycle-calendar/>
+    <div class="flex flex-wrap items-center justify-between gap-3" data-testid="dashboard-controls">
+        <div class="flex flex-wrap items-center gap-2" data-testid="dashboard-period" aria-label="{{ __('Period') }}">
+            @foreach (TransactionPeriod::dashboardOptions() as $option)
+                <button type="button"
+                        wire:click="setPeriod('{{ $option->value }}')"
+                        @class(['report-chip', 'active' => $period->period === $option])
+                        data-testid="dashboard-period-{{ $option->value }}"
+                        title="{{ $option->label() }}">{{ $option->shortLabel() }}</button>
+            @endforeach
         </div>
-
-        <aside class="space-y-4">
-            <section>
-                <x-cib.sec-head title="Budgets this cycle"/>
-                @forelse ($this->budgetsThisCycle as $row)
-                    <x-cib.budget-row
-                            :name="$row['budget']->name"
-                            :spent="$row['spent']"
-                            :limit="$row['limit']"
-                    />
-                @empty
-                    <p class="text-sm text-gray-500">No budgets yet.</p>
-                @endforelse
-            </section>
-
-            <section>
-                <x-cib.sec-head title="Next 3 planned"/>
-                @forelse ($this->nextThreePlanned as $row)
-                    <div class="planned-row flex items-center justify-between py-1 text-sm">
-                        <span class="font-medium">{{ $row['planned']->description }}</span>
-                        <span class="text-gray-600">{{ $row['next']->format('M j') }}</span>
-                        <span class="font-bold">{{ MoneyCast::format(abs((int) $row['planned']->amount)) }}</span>
-                    </div>
-                @empty
-                    <p class="text-sm text-gray-500">Nothing planned.</p>
-                @endforelse
-            </section>
-
-            <section>
-                <x-cib.sec-head title="Spend last 7 days"/>
-                <div class="spend-total text-2xl font-bold">{{ MoneyCast::format($this->spendLast7Days['sum']) }}</div>
-                <x-cib.spark
-                        :values="$this->spendLast7Days['sparkline']"
-                        :payday-indexes="$this->spendLast7Days['paydayIndexes']"
-                />
-            </section>
-        </aside>
+        <div class="flex items-center gap-2">
+            <flux:text size="sm" data-testid="dashboard-period-label">{{ $period->label() }}</flux:text>
+            <button type="button" wire:click="toggleCustomise" @class(['report-chip', 'active' => $customising]) data-testid="dashboard-customise">
+                {{ $customising ? __('Done') : __('Customise') }}
+            </button>
+        </div>
     </div>
 
-    <livewire:dashboard.monthly-projection lazy/>
+    @if ($this->showCustomRange)
+        <div class="flex flex-wrap items-end gap-3" data-testid="dashboard-custom-range">
+            <flux:input type="date" wire:model="customFrom" size="sm" class="w-auto" aria-label="{{ __('From') }}"/>
+            <flux:input type="date" wire:model="customTo" size="sm" class="w-auto" aria-label="{{ __('To') }}"/>
+            <flux:button size="sm" wire:click="setCustomRange" data-testid="dashboard-custom-apply">{{ __('Apply') }}</flux:button>
+        </div>
+    @endif
+
+    @if ($customising)
+        <div class="flex flex-wrap items-center gap-3 rounded-xl border-2 border-dashed border-cib-black p-3" data-testid="dashboard-customise-bar">
+            <flux:text size="sm">{{ __('Drag widgets to reorder them, collapse or hide them, and set their size.') }}</flux:text>
+            <button type="button" wire:click="setTwoColumn({{ $layout->twoColumn ? 'false' : 'true' }})" class="report-chip" data-testid="dashboard-two-column">
+                {{ $layout->twoColumn ? __('Two columns') : __('One column') }}
+            </button>
+            <button type="button" wire:click="resetLayout" class="report-chip" data-testid="dashboard-reset-layout">{{ __('Reset layout') }}</button>
+        </div>
+    @endif
+
+    <div wire:key="dashboard-grid-{{ $customising ? 'edit' : 'view' }}"
+         @class(['grid gap-4', 'lg:grid-cols-2' => $layout->twoColumn])
+         @if ($customising) wire:sort="reorder" @endif
+         data-testid="dashboard-grid">
+        @foreach ($this->visibleWidgets as $widget)
+            @php
+                $collapsed = $layout->isCollapsed($widget);
+                ob_start();
+            @endphp
+            @if (! $collapsed)
+                @if ($widget->component() !== null)
+                    @livewire($widget->component(), $widget->componentParams($period->stamp()), key('widget-'.$widget->value))
+                @else
+                    @include($widget->view(), ['dashboard' => $this])
+                @endif
+            @endif
+            @php
+                $content = trim((string) ob_get_clean());
+                $hasContent = trim(str_replace(['<!--[if BLOCK]><![endif]-->', '<!--[if ENDBLOCK]><![endif]-->'], '', $content)) !== '';
+            @endphp
+
+            @if ($customising || $collapsed || $hasContent)
+                <div wire:key="widget-{{ $widget->value }}"
+                     @if ($customising) wire:sort:item="{{ $widget->value }}" @endif
+                     data-widget="{{ $widget->value }}"
+                     @class([
+                         'space-y-2',
+                         'lg:col-span-2' => $layout->twoColumn && $layout->width($widget) === WidgetWidth::Full,
+                         $layout->height($widget)->minHeightClass() => $widget->isChart() && ! $collapsed,
+                         'rounded-xl border-2 border-dashed border-cib-black p-2' => $customising,
+                     ])>
+                    @if ($customising || $collapsed)
+                        <div class="flex flex-wrap items-center justify-between gap-2" data-testid="widget-toolbar-{{ $widget->value }}">
+                            <div class="flex items-center gap-2">
+                                @if ($customising)
+                                    <span wire:sort:handle class="cursor-grab select-none" aria-label="{{ __('Drag to reorder') }}" data-testid="widget-handle-{{ $widget->value }}">⋮⋮</span>
+                                @endif
+                                <flux:heading size="sm">{{ __($widget->label()) }}</flux:heading>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-1">
+                                <button type="button" wire:click="toggleCollapsed('{{ $widget->value }}')" class="report-chip" data-testid="widget-collapse-{{ $widget->value }}">
+                                    {{ $collapsed ? __('Expand') : __('Collapse') }}
+                                </button>
+                                @if ($customising)
+                                    @if ($layout->twoColumn)
+                                        @foreach (WidgetWidth::cases() as $width)
+                                            <button type="button" wire:click="setWidth('{{ $widget->value }}', '{{ $width->value }}')"
+                                                    @class(['report-chip', 'active' => $layout->width($widget) === $width])
+                                                    data-testid="widget-width-{{ $widget->value }}-{{ $width->value }}">{{ __($width->label()) }}</button>
+                                        @endforeach
+                                    @endif
+                                    @if ($widget->isChart())
+                                        @foreach (ChartHeight::cases() as $height)
+                                            <button type="button" wire:click="setChartHeight('{{ $widget->value }}', '{{ $height->value }}')"
+                                                    @class(['report-chip', 'active' => $layout->height($widget) === $height])
+                                                    data-testid="widget-height-{{ $widget->value }}-{{ $height->value }}">{{ __($height->label()) }}</button>
+                                        @endforeach
+                                    @endif
+                                    <button type="button" wire:click="hideWidget('{{ $widget->value }}')" class="report-chip" data-testid="widget-hide-{{ $widget->value }}">{{ __('Hide') }}</button>
+                                @endif
+                            </div>
+                        </div>
+                    @endif
+                    @if (! $collapsed)
+                        {!! $content !!}
+                    @endif
+                </div>
+            @endif
+        @endforeach
+    </div>
+
+    @if ($customising)
+        <section data-testid="dashboard-hidden-widgets">
+            <x-cib.sec-head title="Hidden widgets"/>
+            @forelse ($this->hiddenOffers as $widget)
+                <button type="button" wire:key="hidden-{{ $widget->value }}" wire:click="showWidget('{{ $widget->value }}')" class="report-chip" data-testid="widget-show-{{ $widget->value }}">
+                    {{ __('Add :widget', ['widget' => __($widget->label())]) }}
+                </button>
+            @empty
+                <p class="text-sm text-gray-500">{{ __('Nothing is hidden.') }}</p>
+            @endforelse
+        </section>
+    @endif
 </div>
