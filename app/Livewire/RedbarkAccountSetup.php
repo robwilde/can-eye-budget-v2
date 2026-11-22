@@ -170,7 +170,7 @@ final class RedbarkAccountSetup extends Component
                 // rest of the batch; the failures are reported back on the wizard.
                 DB::transaction(function () use ($redbarkAccount, $choice, &$linkedFeedIds): void {
                     if ($this->applyChoice($redbarkAccount, $choice) > 0) {
-                        $linkedFeedIds[$redbarkAccount->redbark_feed_id] = true;
+                        $linkedFeedIds[$redbarkAccount->redbark_feed_id][] = $redbarkAccount->id;
                     }
                 });
             } catch (HttpException $e) {
@@ -189,7 +189,9 @@ final class RedbarkAccountSetup extends Component
             $feed->update(['pending_account_setup' => $pending]);
 
             if (isset($linkedFeedIds[$feed->id])) {
-                SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Manual);
+                $since = $feed->accounts()->whereIn('id', $linkedFeedIds[$feed->id])->min('sync_start_date');
+
+                SyncRedbarkFeedJob::dispatchFor($feed, RefreshTrigger::Manual, $since === null ? null : CarbonImmutable::parse($since));
             }
         }
 

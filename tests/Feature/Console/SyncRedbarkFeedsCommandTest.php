@@ -61,6 +61,6 @@ test('the redbark sync is scheduled every six hours', function () {
     $events = collect(app(Illuminate\Console\Scheduling\Schedule::class)->events())
         ->filter(fn ($event): bool => str_contains((string) $event->command, 'app:sync-redbark-feeds'));
 
-    expect($events)->toHaveCount(1)
-        ->and($events->first()->expression)->toBe('0 */6 * * *');
+    expect($events->pluck('expression')->all())->toContain('0 */6 * * *')
+        ->and($events->where('expression', '0 */6 * * *'))->toHaveCount(1);
 });

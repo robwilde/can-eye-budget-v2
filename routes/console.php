@@ -45,3 +45,11 @@ Schedule::command('goals:maintain')
     ->dailyAt('02:00')
     ->name('goals:maintain')
     ->withoutOverlapping();
+
+if (config('budget.redbark.nightly_sync_time') !== null) {
+    Schedule::command('app:sync-redbark-feeds')
+        ->dailyAt((string) config('budget.redbark.nightly_sync_time'))
+        ->timezone((string) config('budget.redbark.nightly_sync_timezone'))
+        ->name('redbark:nightly-sync')
+        ->withoutOverlapping();
+}

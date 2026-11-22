@@ -9,12 +9,15 @@ use App\Enums\RefreshTrigger;
 use App\Exceptions\Redbark\RedbarkException;
 use App\Jobs\SyncRedbarkFeedJob;
 use App\Models\Account;
+use App\Models\RedbarkAccount;
 use App\Models\RedbarkFeed;
 use App\Models\RedbarkSyncLog;
 use App\Services\SimpleFinClaimer;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -22,6 +25,9 @@ new #[Title('Bank providers')] class extends Component {
     public string $api_key = '';
 
     public string $setup_token = '';
+
+    #[Locked]
+    public ?int $selectedLinkId = null;
 
     /** @return Collection<int, RedbarkFeed> */
     #[Computed]
@@ -125,6 +131,106 @@ new #[Title('Bank providers')] class extends Component {
         unset($this->logs, $this->syncingFeedIds, $this->isSyncing);
     }
 
+    public function cancelSync(int $feedId): void
+    {
+        $feed = $this->feeds->firstWhere('id', $feedId);
+
+        if ($feed === null) {
+            return;
+        }
+
+        RedbarkSyncLog::query()
+            ->where('user_id', Auth::id())
+            ->where('redbark_feed_id', $feed->id)
+            ->where('status', RefreshStatus::Pending)
+            ->where('created_at', '>=', now()->subSeconds(SyncRedbarkFeedJob::UNIQUE_FOR))
+            ->whereNull('cancelled_at')
+            ->update(['cancelled_at' => now()]);
+
+        unset($this->logs, $this->syncingFeedIds, $this->isSyncing);
+    }
+
+    public function toggleAutoSyncOnLogin(): void
+    {
+        $user = Auth::user();
+
+        $user->updatePreferences(['autoSyncOnLogin' => ! $user->preferences->autoSyncOnLogin]);
+    }
+
+    /** @return \Illuminate\Database\Eloquent\Collection<int, RedbarkAccount> */
+    #[Computed]
+    public function vanishedLinks(): \Illuminate\Database\Eloquent\Collection
+    {
+        return RedbarkAccount::query()
+            ->whereIn('redbark_feed_id', $this->feeds->modelKeys())
+            ->vanished()
+            ->with('account')
+            ->orderBy('name')
+            ->get();
+    }
+
+    /** @return Collection<int, Account> */
+    #[Computed]
+    public function moveTargets(): Collection
+    {
+        $current = $this->vanishedLinks->firstWhere('id', $this->selectedLinkId);
+
+        return Account::query()
+            ->where('user_id', Auth::id())
+            ->tracked()
+            ->whereDoesntHave('redbarkAccount')
+            ->when($current !== null, fn ($query) => $query->whereKeyNot($current->account_id))
+            ->orderBy('name')
+            ->get();
+    }
+
+    public function manageVanishedLink(int $redbarkAccountId): void
+    {
+        $this->selectedLinkId = $this->vanishedLinks->firstWhere('id', $redbarkAccountId)?->id;
+    }
+
+    public function deleteLink(): void
+    {
+        $link = $this->vanishedLinks->firstWhere('id', $this->selectedLinkId);
+
+        if ($link === null) {
+            return;
+        }
+
+        DB::transaction(function () use ($link): void {
+            Account::query()->where('user_id', Auth::id())->whereKey($link->account_id)->update(['import_source' => ImportSource::Manual]);
+            $link->delete();
+        });
+
+        $this->selectedLinkId = null;
+        unset($this->vanishedLinks, $this->moveTargets, $this->feeds);
+    }
+
+    public function moveLink(int|string $accountId): void
+    {
+        $link = $this->vanishedLinks->firstWhere('id', $this->selectedLinkId);
+        $target = $this->moveTargets->firstWhere('id', (int) $accountId);
+
+        if ($link === null) {
+            return;
+        }
+
+        if ($target === null) {
+            $this->addError('moveTarget', __('Choose one of your own accounts that is not connected yet.'));
+
+            return;
+        }
+
+        DB::transaction(function () use ($link, $target): void {
+            Account::query()->where('user_id', Auth::id())->whereKey($link->account_id)->update(['import_source' => ImportSource::Manual]);
+            $link->update(['account_id' => $target->id, 'raw_transactions_payload' => null, 'transactions_synced_at' => null, 'current_balance' => null]);
+            $target->update(['import_source' => ImportSource::Redbark]);
+        });
+
+        $this->selectedLinkId = null;
+        unset($this->vanishedLinks, $this->moveTargets);
+    }
+
     public function disconnect(int $feedId): void
     {
         $feed = $this->feeds->firstWhere('id', $feedId);
@@ -203,6 +309,12 @@ new #[Title('Bank providers')] class extends Component {
                     @endif
 
                     <div class="flex items-center gap-4">
+                        @if (in_array($feed->id, $this->syncingFeedIds, true))
+                            <flux:button wire:click="cancelSync({{ $feed->id }})" variant="subtle" data-test="cancel-redbark-sync-button">
+                                {{ __('Cancel sync') }}
+                            </flux:button>
+                        @endif
+
                         <flux:button wire:click="syncNow({{ $feed->id }})" variant="filled" data-test="sync-redbark-button"
                                      :disabled="in_array($feed->id, $this->syncingFeedIds, true)">
                             {{ __('Sync now') }}
@@ -286,6 +398,47 @@ new #[Title('Bank providers')] class extends Component {
                     </x-action-message>
                 </div>
             </form>
+
+            @if ($this->feeds->isNotEmpty())
+                <div class="space-y-2">
+                    <flux:switch wire:click="toggleAutoSyncOnLogin" :checked="auth()->user()->preferences->autoSyncOnLogin"
+                                 :label="__('Sync my banks the first time I log in each day')" data-test="auto-sync-on-login-toggle" />
+                </div>
+            @endif
+
+            @if ($this->vanishedLinks->isNotEmpty())
+                <div class="space-y-3" data-test="vanished-links">
+                    <flux:heading size="sm">{{ __('Accounts the provider no longer reports') }}</flux:heading>
+                    <flux:text size="sm" class="text-zinc-500">
+                        {{ __('These accounts stopped coming back from your bank connection. Their transactions are kept. Delete the link to make the account manual, or move it to another account of yours.') }}
+                    </flux:text>
+
+                    @foreach ($this->vanishedLinks as $link)
+                        <div class="flex flex-wrap items-center gap-3" wire:key="vanished-link-{{ $link->id }}">
+                            <span class="font-medium">{{ $link->account?->name ?? $link->name }}</span>
+                            <flux:button size="sm" variant="subtle" wire:click="manageVanishedLink({{ $link->id }})" data-test="manage-vanished-link">
+                                {{ __('Manage') }}
+                            </flux:button>
+                        </div>
+
+                        @if ($this->selectedLinkId === $link->id)
+                            <div class="flex flex-wrap items-center gap-3 ps-4" data-test="vanished-link-actions">
+                                <flux:button size="sm" variant="danger" wire:click="deleteLink" data-test="delete-vanished-link">
+                                    {{ __('Delete link') }}
+                                </flux:button>
+
+                                <flux:select wire:change="moveLink($event.target.value)" class="max-w-xs" data-test="move-vanished-link">
+                                    <option value="">{{ __('Move to another account…') }}</option>
+                                    @foreach ($this->moveTargets as $target)
+                                        <option value="{{ $target->id }}">{{ $target->name }}</option>
+                                    @endforeach
+                                </flux:select>
+                                @error('moveTarget') <flux:text size="sm" class="text-red-600">{{ $message }}</flux:text> @enderror
+                            </div>
+                        @endif
+                    @endforeach
+                </div>
+            @endif
 
             @if ($this->logs->isNotEmpty())
                 <div class="space-y-2">

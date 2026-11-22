@@ -34,6 +34,7 @@ final class UserPreferences extends Dto
         public readonly array $allowedCurrencies = [],
         public readonly bool $categoriesLocked = false,
         public readonly array $recentCategoryIds = [],
+        public readonly bool $autoSyncOnLogin = false,
     ) {}
 
     /**
@@ -56,6 +57,7 @@ final class UserPreferences extends Dto
             allowedCurrencies: is_array($stored['allowedCurrencies'] ?? null) ? Currencies::normaliseList($stored['allowedCurrencies']) : $defaults->allowedCurrencies,
             categoriesLocked: is_bool($stored['categoriesLocked'] ?? null) ? $stored['categoriesLocked'] : $defaults->categoriesLocked,
             recentCategoryIds: is_array($stored['recentCategoryIds'] ?? null) ? self::categoryIds($stored['recentCategoryIds']) : $defaults->recentCategoryIds,
+            autoSyncOnLogin: is_bool($stored['autoSyncOnLogin'] ?? null) ? $stored['autoSyncOnLogin'] : $defaults->autoSyncOnLogin,
         );
     }
 
