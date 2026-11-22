@@ -284,6 +284,43 @@ final class ReportAggregator
     }
 
     /**
+     * Counted spending per day over a range: the debit total in the base currency and the number of
+     * transactions it came from. A split transaction is one transaction however many allocation
+     * lines it has. Same counting rules as the other atoms because it reads countedQuery().
+     *
+     * @return list<array{day: string, total: int, count: int}>
+     */
+    public function spendingByDay(User $user, CarbonInterface $start, CarbonInterface $end, ?ReportFilters $filters = null): array
+    {
+        $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
+
+        $query = $this->countedQuery($user, true, $start, $end, $filters)
+            ->where('direction', TransactionDirection::Debit->value)
+            ->selectRaw('date(post_date) as day, SUM(ABS(amount)) as total, COUNT(DISTINCT transaction_id) as tx_count')
+            ->groupByRaw('date(post_date)');
+
+        if ($converter !== null) {
+            $query->selectRaw('currency')->groupBy('currency');
+        }
+
+        $days = [];
+
+        foreach ($query->get() as $row) {
+            $total = (int) $row->total;
+
+            if ($converter !== null && $row->currency !== $user->base_currency) {
+                $total = $converter->convert($total, (string) $row->currency, $user->base_currency, CarbonImmutable::parse((string) $row->day));
+            }
+
+            $days[$row->day] ??= ['day' => (string) $row->day, 'total' => 0, 'count' => 0];
+            $days[$row->day]['total'] += $total;
+            $days[$row->day]['count'] += (int) $row->tx_count;
+        }
+
+        return array_values($days);
+    }
+
+    /**
      * Counted actuals per account, direction and category over a range, in the base currency, under
      * the same rules as atoms() because both read countedQuery(). A refund nets against its category
      * inside the account it landed in.

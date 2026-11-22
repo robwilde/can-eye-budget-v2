@@ -89,11 +89,11 @@ final class NetWorthService
      * @param  list<int>  $accountIds
      * @return array<int, array<string, int>>
      */
-    public function accountSeries(User $user, array $accountIds, CarbonImmutable $from, CarbonImmutable $to): array
+    public function accountSeries(User $user, array $accountIds, CarbonImmutable $from, CarbonImmutable $to, bool $flatBeforeHistory = false): array
     {
         $ownedIds = $user->accounts()->whereIn('id', $accountIds)->pluck('id')->all();
 
-        return $this->dailyBalances($ownedIds, $from, $to);
+        return $this->dailyBalances($ownedIds, $from, $to, $flatBeforeHistory);
     }
 
     /**
@@ -124,17 +124,34 @@ final class NetWorthService
             return $this->series($user, $from, $to, flatBeforeHistory: true);
         }
 
+        $plotted = $this->plottedDays($from, $to, $period->granularity);
+
+        return $this->series($user, $from, $to, flatBeforeHistory: true, onlyDays: $plotted);
+    }
+
+    /**
+     * The days a chart at $granularity plots between $from and $to: the last day of each week or
+     * month, always with the first and the last day.
+     *
+     * @return list<string>
+     */
+    public function plottedDays(CarbonImmutable $from, CarbonImmutable $to, ChartGranularity $granularity): array
+    {
         $days = $this->days($from, $to);
+
+        if ($granularity === ChartGranularity::Daily) {
+            return $days;
+        }
+
         $first = $days[0];
         $last = $days[array_key_last($days)];
-        $plotted = array_values(array_filter($days, function (string $day) use ($period, $first, $last): bool {
+
+        return array_values(array_filter($days, function (string $day) use ($granularity, $first, $last): bool {
             $date = CarbonImmutable::parse($day);
-            $bucketEnd = $period->granularity === ChartGranularity::Weekly ? $date->isSunday() : $date->isSameDay($date->endOfMonth());
+            $bucketEnd = $granularity === ChartGranularity::Weekly ? $date->isSunday() : $date->isSameDay($date->endOfMonth());
 
             return $bucketEnd || $day === $first || $day === $last;
         }));
-
-        return $this->series($user, $from, $to, flatBeforeHistory: true, onlyDays: $plotted);
     }
 
     /**
@@ -146,31 +163,115 @@ final class NetWorthService
     public function velocity(User $user, DashboardPeriod $period): ?int
     {
         [$from, $to] = $this->window($user, $period);
+
+        return $this->changeBetween($user, $from, $to, $period->period === TransactionPeriod::All);
+    }
+
+    /**
+     * How much net worth moved from $from to $to, or null when the balance history does not reach
+     * back to $from. With $fromEarliestHistory the change starts at the earliest history day.
+     */
+    public function changeBetween(User $user, CarbonImmutable $from, CarbonImmutable $to, bool $fromEarliestHistory = false): ?int
+    {
+        if ($fromEarliestHistory) {
+            $earliest = $this->earliestHistoryDay($user);
+
+            if ($earliest === null) {
+                return null;
+            }
+
+            $from = $from->max($earliest);
+        } elseif (! $this->historyCovers($user, $from)) {
+            return null;
+        }
+
+        $series = $this->series($user, $from, $to, onlyDays: [$from->toDateString(), $to->toDateString()]);
+
+        return end($series) - reset($series);
+    }
+
+    /**
+     * Whether every counted account has balance history reaching back to $from, so a change measured
+     * from there is not growth from nothing. False when the user has no counted account.
+     */
+    public function historyCovers(User $user, CarbonImmutable $from): bool
+    {
+        $accountIds = $this->countedAccounts($user)->pluck('id')->all();
+
+        if ($accountIds === []) {
+            return false;
+        }
+
+        $firstDays = $this->firstHistoryDays($accountIds);
+
+        foreach ($accountIds as $accountId) {
+            if (! isset($firstDays[$accountId]) || $firstDays[$accountId] > $from->toDateString()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * The first day any counted account has balance history, or null when none has.
+     */
+    public function earliestHistoryDay(User $user): ?CarbonImmutable
+    {
         $accountIds = $this->countedAccounts($user)->pluck('id')->all();
 
         if ($accountIds === []) {
             return null;
         }
 
-        $firstDays = $this->firstHistoryDays($accountIds);
+        $first = $this->firstHistoryDays($accountIds)->min();
 
-        if ($period->period === TransactionPeriod::All) {
-            if ($firstDays->isEmpty()) {
-                return null;
+        return $first === null ? null : CarbonImmutable::parse((string) $first);
+    }
+
+    /**
+     * Each balance-sheet group's signed balance over time at the days given, keyed by side
+     * ('assets' or 'liabilities'), then account class value, then Y-m-d: the sum of its accounts' own
+     * series (accountSeries, an opening-balance account held at its first balance before its history),
+     * converted into the base currency at each day's rate. A class can sit on both sides (a credit
+     * card typed as a transaction account), so the side is part of the key.
+     *
+     * @param  list<string>  $days  days inside $from to $to
+     * @return array<string, array<string, array<string, int>>>
+     */
+    public function groupSeries(User $user, BalanceSheet $sheet, CarbonImmutable $from, CarbonImmutable $to, array $days): array
+    {
+        $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
+        $sides = ['assets' => $sheet->assets, 'liabilities' => $sheet->liabilities];
+        $accountIds = [];
+
+        foreach ($sides as $groups) {
+            foreach ($groups as $group) {
+                $accountIds = [...$accountIds, ...array_keys($group->balances)];
             }
+        }
 
-            $from = $from->max(CarbonImmutable::parse((string) $firstDays->min()));
-        } else {
-            foreach ($accountIds as $accountId) {
-                if (! isset($firstDays[$accountId]) || $firstDays[$accountId] > $from->toDateString()) {
-                    return null;
+        $balances = $this->accountSeries($user, $accountIds, $from, $to, flatBeforeHistory: true);
+        $series = [];
+
+        foreach ($sides as $side => $groups) {
+            foreach ($groups as $group) {
+                foreach ($days as $day) {
+                    $total = 0;
+
+                    foreach ($group->accounts as $account) {
+                        $balance = $balances[$account->id][$day];
+                        $total += $converter === null
+                            ? $balance
+                            : $converter->convert($balance, $account->currency, $user->base_currency, CarbonImmutable::parse($day));
+                    }
+
+                    $series[$side][$group->class->value][$day] = $total;
                 }
             }
         }
 
-        $series = $this->series($user, $from, $to, onlyDays: [$from->toDateString(), $to->toDateString()]);
-
-        return end($series) - reset($series);
+        return $series;
     }
 
     /**
