@@ -11,6 +11,7 @@ use App\Enums\CsvSignConvention;
 use App\Enums\ImportPreset;
 use App\Enums\ImportSource;
 use App\Exceptions\BankImportRevertRefused;
+use App\Exceptions\DocumentRefused;
 use App\Exceptions\Statement\PdfImportRefused;
 use App\Jobs\ImportCsvTransactionsJob;
 use App\Livewire\Attributes\NotAudited;
@@ -31,11 +32,13 @@ use App\Services\CsvImport\CsvFormatDetector;
 use App\Services\CsvImport\CsvParserService;
 use App\Services\CsvImport\ImportPresetMapper;
 use App\Services\CsvImport\QifParserService;
+use App\Services\DocumentUploadService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\Statement\PdfImportStarter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use League\Csv\Exception;
 use League\Csv\SyntaxError;
@@ -60,6 +63,10 @@ final class ImportBank extends Component
     public ?TemporaryUploadedFile $file = null;
 
     public ?TemporaryUploadedFile $pdfFile = null;
+
+    public ?TemporaryUploadedFile $documentFile = null;
+
+    public ?string $documentMessage = null;
 
     public ?int $accountId = null;
 
@@ -105,6 +112,47 @@ final class ImportBank extends Component
     public function updatedErrorsOnly(): void
     {
         $this->resetPage('rowsPage');
+    }
+
+    /**
+     * Stores a non-PDF document for later search. A PDF goes through the PDF import instead.
+     */
+    public function importDocument(DocumentUploadService $uploads, PdfImportStarter $starter): void
+    {
+        $this->clearFailure();
+        $this->documentMessage = null;
+
+        $this->validate(['documentFile' => ['required', 'file']]);
+
+        if (mb_strtolower($this->documentFile->getClientOriginalExtension()) === 'pdf') {
+            if (! config('budget.pdf_import.enabled')) {
+                $this->fail(__('PDF import is not enabled.'));
+
+                return;
+            }
+
+            $this->pdfFile = $this->documentFile;
+            $this->documentFile = null;
+
+            try {
+                $this->startPdfImport($starter);
+            } catch (ValidationException $exception) {
+                $this->fail(collect($exception->errors())->flatten()->first() ?? __('That PDF could not be imported.'));
+            }
+
+            return;
+        }
+
+        try {
+            $uploads->store(auth()->user(), $this->documentFile);
+        } catch (DocumentRefused $exception) {
+            $this->fail($exception->getMessage());
+
+            return;
+        }
+
+        $this->documentFile = null;
+        $this->documentMessage = __('Document stored.');
     }
 
     /**

@@ -150,4 +150,22 @@ return [
         'nightly_sync_timezone' => env('BUDGET_REDBARK_NIGHTLY_SYNC_TIMEZONE', 'UTC'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Documents
+    |--------------------------------------------------------------------------
+    |
+    | Documents uploaded from the import screen are kept for later indexing. They
+    | are refused while no vector store driver is named. accepted_types lists the
+    | file extensions each driver takes (PDFs go to the PDF import instead).
+    |
+    */
+
+    'documents' => [
+        'vector_store' => env('BUDGET_DOCUMENTS_VECTOR_STORE'),
+        'accepted_types' => [
+            'openai' => ['txt', 'md', 'csv', 'json', 'html', 'xml', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'],
+        ],
+    ],
+
 ];
