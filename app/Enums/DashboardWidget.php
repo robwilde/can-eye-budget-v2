@@ -24,7 +24,8 @@ enum DashboardWidget: string
     case StatementsDue = 'statements-due';
     case PendingTransfers = 'pending-transfers';
     case PaySummary = 'pay-summary';
-    case NetWorth = 'net-worth';
+    case NetWorthChart = 'net-worth-chart';
+    case BalanceSheet = 'balance-sheet';
     case PayCycleCalendar = 'pay-cycle-calendar';
     case BudgetsThisCycle = 'budgets-this-cycle';
     case UpcomingPlans = 'upcoming-plans';
@@ -38,7 +39,8 @@ enum DashboardWidget: string
             self::StatementsDue => 'Statements due',
             self::PendingTransfers => 'Transfers to review',
             self::PaySummary => 'Pay summary',
-            self::NetWorth => 'Net worth',
+            self::NetWorthChart => 'Net worth',
+            self::BalanceSheet => 'Balance sheet',
             self::PayCycleCalendar => 'Pay cycle calendar',
             self::BudgetsThisCycle => 'Budgets this cycle',
             self::UpcomingPlans => 'Upcoming plans',
@@ -51,7 +53,8 @@ enum DashboardWidget: string
     public function component(): ?string
     {
         return match ($this) {
-            self::NetWorth => 'dashboard.net-worth',
+            self::NetWorthChart => 'dashboard.net-worth-chart',
+            self::BalanceSheet => 'dashboard.balance-sheet',
             self::PayCycleCalendar => 'dashboard.pay-cycle-calendar',
             self::MonthlyProjection => 'dashboard.monthly-projection',
             default => null,
@@ -66,7 +69,7 @@ enum DashboardWidget: string
 
     public function lazy(): bool
     {
-        return $this === self::MonthlyProjection;
+        return in_array($this, [self::NetWorthChart, self::BalanceSheet, self::MonthlyProjection], true);
     }
 
     /**
@@ -77,7 +80,7 @@ enum DashboardWidget: string
      */
     public function followsPeriod(): bool
     {
-        return false;
+        return $this === self::NetWorthChart;
     }
 
     /**
@@ -97,13 +100,13 @@ enum DashboardWidget: string
     /** Chart widgets can be given a compact, auto or tall height. */
     public function isChart(): bool
     {
-        return in_array($this, [self::NetWorth, self::MonthlyProjection], true);
+        return in_array($this, [self::NetWorthChart, self::MonthlyProjection], true);
     }
 
     public function defaultWidth(): WidgetWidth
     {
         return match ($this) {
-            self::BudgetsThisCycle, self::UpcomingPlans, self::RecentSpending => WidgetWidth::Half,
+            self::BudgetsThisCycle, self::UpcomingPlans, self::RecentSpending, self::NetWorthChart, self::BalanceSheet => WidgetWidth::Half,
             default => WidgetWidth::Full,
         };
     }
@@ -119,7 +122,7 @@ enum DashboardWidget: string
                 && Insight::query()->where('user_id', $user->id)->exists(),
             self::StatementsDue => Account::query()->where('user_id', $user->id)->tracked()->statementDueForLastMonth()->exists(),
             self::PendingTransfers => app(TransferReviewQueue::class)->pendingCount($user) > 0,
-            self::NetWorth => Account::query()->where('user_id', $user->id)->exists(),
+            self::NetWorthChart, self::BalanceSheet => Account::query()->where('user_id', $user->id)->exists(),
             self::PayCycleCalendar => $user->hasPayCycleConfigured(),
             self::BudgetsThisCycle => $user->budgets()->exists(),
             self::UpcomingPlans => $user->plannedTransactions()->exists(),
