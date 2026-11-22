@@ -96,18 +96,22 @@ test('the one column and width controls change the grid', function () {
         ->and($layout->widths)->toBe(['pay-summary' => 'half']);
 });
 
-test('the grid is sortable by its handles only while customising', function () {
+test('widgets can be dragged by a visible handle only while customising', function () {
     $this->actingAs(dashboardUser());
 
     $sortable = "Object.getOwnPropertyNames(document.querySelector('[data-testid=dashboard-grid]')).some(name => /sortable/i.test(name))";
+    $visibleHandles = 'document.querySelectorAll("[data-testid=dashboard-grid] [wire\\\\:sort\\\\:handle]:not([hidden])").length';
 
     visit('/dashboard')
-        ->assertScript($sortable, false)
-        ->click('[data-testid="dashboard-customise"]')
         ->assertScript($sortable, true)
-        ->assertPresent('[data-testid="widget-handle-recent-spending"]')
+        ->assertScript("{$visibleHandles} === 0")
+        ->assertNotPresent('[data-testid="widget-handle-recent-spending"]')
         ->click('[data-testid="dashboard-customise"]')
-        ->assertScript($sortable, false)
+        ->assertPresent('[data-testid="widget-handle-recent-spending"]')
+        ->assertScript("{$visibleHandles} > 0")
+        ->click('[data-testid="dashboard-customise"]')
+        ->assertNotPresent('[data-testid="widget-handle-recent-spending"]')
+        ->assertScript("{$visibleHandles} === 0")
         ->assertNoJavaScriptErrors();
 });
 
@@ -142,6 +146,8 @@ test('the money flow and spending trend load lazily and read their month from th
         ->assertPresent('[data-test="money-flow-bars"]')
         ->assertPresent('[data-test="spending-trend-chart"]')
         ->assertSeeIn('[data-test="spending-trend"]', 'January 2020')
+        ->assertQueryStringMissing('flowMonth')
+        ->assertQueryStringHas('trendMonth', '2020-01')
         ->assertValue('[data-test="money-flow-month"]', $user->today()->format('Y-m'))
         ->assertValue('[data-test="spending-trend-month"]', '2020-01')
         ->select('[data-test="money-flow-account"]', (string) $account->id)
@@ -172,5 +178,25 @@ test('the cash flow and outflows widgets follow the period and switch to account
         ->assertPresent('[data-test="cash-flow-widget"] [data-node-id="expense_a'.$account->id.'"]')
         ->click('[data-testid="dashboard-period-ytd"]')
         ->assertSeeIn('[data-test="cash-flow-widget-summary"]', 'over Year to Date')
+        ->assertNoJavaScriptErrors();
+});
+
+test('the lazy widgets keep their listeners after loading', function () {
+    $this->actingAs(dashboardUser());
+
+    $names = "['dashboard.net-worth-chart', 'dashboard.balance-sheet', 'dashboard.money-flow', 'dashboard.spending-trend', 'dashboard.cash-flow', 'dashboard.outflows']";
+    $keeps = "Livewire.all().filter((component) => {$names}.includes(component.name)).length === 6 && Livewire.all().filter((component) => {$names}.includes(component.name)).every((component) => (component.originalEffects.listeners ?? []).includes('transaction-saved'))";
+
+    visit('/dashboard')
+        ->assertPresent('[data-test="net-worth"]')
+        ->assertPresent('[data-test="balance-sheet"]')
+        ->assertPresent('[data-test="money-flow-bars"]')
+        ->assertPresent('[data-test="spending-trend-chart"]')
+        ->assertPresent('[data-test="cash-flow-widget"]')
+        ->assertPresent('[data-test="outflows-widget"]')
+        ->assertScript($keeps)
+        ->click('[data-testid="dashboard-customise"]')
+        ->assertPresent('[data-testid="widget-handle-recent-spending"]')
+        ->assertScript($keeps)
         ->assertNoJavaScriptErrors();
 });
