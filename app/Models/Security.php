@@ -25,6 +25,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $provider
  * @property string|null $offline_reason
  * @property CarbonImmutable|null $offline_at
+ * @property string|null $last_error the last price sync error (provider_error or no_prices), cleared by a successful sync
+ * @property CarbonImmutable|null $last_error_at
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
  */
@@ -44,6 +46,8 @@ final class Security extends Model
         'provider',
         'offline_reason',
         'offline_at',
+        'last_error',
+        'last_error_at',
     ];
 
     /**
@@ -91,6 +95,7 @@ final class Security extends Model
     {
         return [
             'offline_at' => 'immutable_datetime',
+            'last_error_at' => 'immutable_datetime',
         ];
     }
 }
