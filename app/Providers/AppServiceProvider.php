@@ -9,6 +9,7 @@ use App\Contracts\ExchangeRateProviderContract;
 use App\Contracts\GitHubServiceContract;
 use App\Contracts\GmailServiceContract;
 use App\Contracts\ScheduleSource;
+use App\Contracts\SecurityPriceProviderContract;
 use App\Contracts\StatementPdfExtractor;
 use App\Contracts\TypeSafeServiceContract;
 use App\Contracts\VectorStoreContract;
@@ -21,6 +22,8 @@ use App\Services\Documents\OpenAiVectorStore;
 use App\Services\ExchangeRateClient;
 use App\Services\GitHubService;
 use App\Services\GmailService;
+use App\Services\Investments\SecurityPriceProviders;
+use App\Services\Investments\TwelveDataClient;
 use App\Services\MerchantBrands\ContextDevCreditBalance;
 use App\Services\MerchantBrands\ContextDevCreditBudget;
 use App\Services\PipelineStages\GoalPledgeMatchStage;
@@ -141,6 +144,16 @@ final class AppServiceProvider extends ServiceProvider
         ));
 
         $this->app->bind(ExchangeRateProviderContract::class, ExchangeRateClient::class);
+
+        $this->app->singleton(TwelveDataClient::class, fn (): TwelveDataClient => new TwelveDataClient(
+            enabled: (bool) config('services.security_prices.enabled'),
+            baseUrl: (string) config('services.security_prices.base_url'),
+            apiKey: (string) config('services.security_prices.api_key'),
+        ));
+
+        $this->app->bind(SecurityPriceProviderContract::class, TwelveDataClient::class);
+        $this->app->tag([TwelveDataClient::class], 'security-price-providers');
+        $this->app->bind(SecurityPriceProviders::class, fn ($app): SecurityPriceProviders => new SecurityPriceProviders($app->tagged('security-price-providers')));
 
         $this->app->singleton(TransactionAnalysisPipeline::class, fn (): TransactionAnalysisPipeline => new TransactionAnalysisPipeline(
             stages: [
