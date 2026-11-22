@@ -283,6 +283,50 @@ final class ReportAggregator
         return array_values($atoms);
     }
 
+    /**
+     * Counted actuals per account, direction and category over a range, in the base currency, under
+     * the same rules as atoms() because both read countedQuery(). A refund nets against its category
+     * inside the account it landed in.
+     *
+     * @return list<array{account_id: int, direction: string, category_id: int|null, total: int}>
+     */
+    public function accountAtoms(User $user, CarbonInterface $start, CarbonInterface $end, bool $includeTransfers = true): array
+    {
+        $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
+
+        $query = $this->countedQuery($user, $includeTransfers, $start, $end, null)
+            ->selectRaw('account_id, direction, category_id, SUM(ABS(amount)) as total')
+            ->groupBy('account_id', 'direction', 'category_id');
+
+        if ($converter !== null) {
+            $query->selectRaw("currency, case when currency = ? then '' else date(post_date) end as fx_day", [$user->base_currency])
+                ->groupBy('currency', 'fx_day');
+        }
+
+        $atoms = [];
+
+        foreach ($query->get() as $row) {
+            $total = (int) $row->total;
+
+            if ($converter !== null && $row->fx_day !== '') {
+                $total = $converter->convert($total, (string) $row->currency, $user->base_currency, CarbonImmutable::parse((string) $row->fx_day));
+            }
+
+            $key = $row->account_id.'|'.$row->direction.'|'.($row->category_id ?? 'null');
+
+            $atoms[$key] ??= [
+                'account_id' => (int) $row->account_id,
+                'direction' => (string) $row->direction,
+                'category_id' => $row->category_id === null ? null : (int) $row->category_id,
+                'total' => 0,
+            ];
+
+            $atoms[$key]['total'] += $total;
+        }
+
+        return array_values($atoms);
+    }
+
     private function earliestActualDate(User $user): ?CarbonImmutable
     {
         $min = Transaction::query()
