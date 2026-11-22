@@ -8,6 +8,7 @@ use App\Models\Account;
 use App\Models\Insight;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Reports\InvestmentReport;
 use App\Services\Transfers\TransferReviewQueue;
 
 /**
@@ -26,6 +27,7 @@ enum DashboardWidget: string
     case PaySummary = 'pay-summary';
     case NetWorthChart = 'net-worth-chart';
     case BalanceSheet = 'balance-sheet';
+    case InvestmentSummary = 'investment-summary';
     case MoneyFlow = 'money-flow';
     case SpendingTrend = 'spending-trend';
     case CashFlow = 'cash-flow';
@@ -45,6 +47,7 @@ enum DashboardWidget: string
             self::PaySummary => 'Pay summary',
             self::NetWorthChart => 'Net worth',
             self::BalanceSheet => 'Balance sheet',
+            self::InvestmentSummary => 'Investments',
             self::MoneyFlow => 'Money flow',
             self::SpendingTrend => 'Spending trend',
             self::CashFlow => 'Cash flow',
@@ -63,6 +66,7 @@ enum DashboardWidget: string
         return match ($this) {
             self::NetWorthChart => 'dashboard.net-worth-chart',
             self::BalanceSheet => 'dashboard.balance-sheet',
+            self::InvestmentSummary => 'dashboard.investment-summary',
             self::MoneyFlow => 'dashboard.money-flow',
             self::SpendingTrend => 'dashboard.spending-trend',
             self::CashFlow => 'dashboard.cash-flow',
@@ -81,7 +85,7 @@ enum DashboardWidget: string
 
     public function lazy(): bool
     {
-        return in_array($this, [self::NetWorthChart, self::BalanceSheet, self::MoneyFlow, self::SpendingTrend, self::CashFlow, self::Outflows, self::MonthlyProjection], true);
+        return in_array($this, [self::NetWorthChart, self::BalanceSheet, self::InvestmentSummary, self::MoneyFlow, self::SpendingTrend, self::CashFlow, self::Outflows, self::MonthlyProjection], true);
     }
 
     /**
@@ -92,7 +96,7 @@ enum DashboardWidget: string
      */
     public function followsPeriod(): bool
     {
-        return in_array($this, [self::NetWorthChart, self::CashFlow, self::Outflows], true);
+        return in_array($this, [self::NetWorthChart, self::CashFlow, self::Outflows, self::InvestmentSummary], true);
     }
 
     /**
@@ -124,6 +128,19 @@ enum DashboardWidget: string
     }
 
     /**
+     * Whether the dashboard may show the widget at all. A widget behind a flag is neither shown nor
+     * offered while it has nothing to draw: the investment summary needs the investments flag and a
+     * position on an active investment account.
+     */
+    public function availableTo(User $user): bool
+    {
+        return match ($this) {
+            self::InvestmentSummary => app(InvestmentReport::class)->hasData($user),
+            default => true,
+        };
+    }
+
+    /**
      * Whether the user has anything for this widget. The dashboard only offers a hidden widget
      * that has data; a widget that is shown draws its own empty state.
      */
@@ -140,6 +157,7 @@ enum DashboardWidget: string
             self::UpcomingPlans => $user->plannedTransactions()->exists(),
             self::RecentSpending, self::MoneyFlow, self::SpendingTrend, self::CashFlow, self::Outflows => Transaction::query()->where('user_id', $user->id)->exists(),
             self::MonthlyProjection => $user->primary_account_id !== null,
+            self::InvestmentSummary => app(InvestmentReport::class)->hasData($user),
             self::PaySummary => true,
         };
     }

@@ -13,6 +13,8 @@ enum ReportSection: string
     case Spending = 'spending';
     case NetWorth = 'net-worth';
     case Trends = 'trends';
+    case InvestmentPerformance = 'investment-performance';
+    case InvestmentFlows = 'investment-flows';
 
     /**
      * The sections in the saved order: unknown and repeated keys are ignored and a section the order
@@ -48,6 +50,8 @@ enum ReportSection: string
             self::Spending => 'Income and spending',
             self::NetWorth => 'Net worth',
             self::Trends => 'Trends',
+            self::InvestmentPerformance => 'Investment performance',
+            self::InvestmentFlows => 'Investment flows',
         };
     }
 }
