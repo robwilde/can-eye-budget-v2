@@ -164,7 +164,7 @@ return [
     'documents' => [
         'vector_store' => env('BUDGET_DOCUMENTS_VECTOR_STORE'),
         'accepted_types' => [
-            'openai' => ['txt', 'md', 'csv', 'json', 'html', 'xml', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'],
+            'openai' => ['txt', 'md', 'json', 'html', 'doc', 'docx', 'pptx'],
         ],
     ],
 
