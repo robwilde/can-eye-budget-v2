@@ -6,7 +6,6 @@ namespace App\Models;
 
 use App\Enums\RedbarkFeedStatus;
 use App\Enums\RedbarkTransport;
-use App\Exceptions\Redbark\RedbarkRequestException;
 use Carbon\CarbonImmutable;
 use Database\Factories\RedbarkFeedFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -15,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * One Redbark credential per user. Named "feed" rather than "connection" because
+ * One Redbark credential per user and transport. Named "feed" rather than "connection" because
  * Redbark's own API uses connectionId for a bank connection, which is stored on
  * RedbarkAccount::$bank_connection_id instead.
  *
@@ -73,27 +72,6 @@ final class RedbarkFeed extends Model
     public function syncLogs(): HasMany
     {
         return $this->hasMany(RedbarkSyncLog::class);
-    }
-
-    /**
-     * Prepares the feed for credentials of another transport. Account ids differ between
-     * transports, so linked accounts would be orphaned and the switch is refused; with none
-     * linked, the old transport's discovered rows and sync state are discarded.
-     *
-     * @throws RedbarkRequestException
-     */
-    public function prepareTransportSwitch(RedbarkTransport $to): void
-    {
-        if ($this->transport === $to) {
-            return;
-        }
-
-        if ($this->accounts()->linked()->exists()) {
-            throw new RedbarkRequestException('Linked accounts block switching the bank connection type', 'transport_locked');
-        }
-
-        $this->accounts()->delete();
-        $this->update(['last_synced_at' => null, 'pending_account_setup' => false]);
     }
 
     /**
