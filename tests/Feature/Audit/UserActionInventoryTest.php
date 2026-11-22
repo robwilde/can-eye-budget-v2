@@ -18,6 +18,7 @@ use App\Jobs\ResolveMerchantBrandJob;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Jobs\SendRuleMatchDigestJob;
 use App\Jobs\SyncRedbarkFeedJob;
+use App\Jobs\SyncSecurityPricesJob;
 use App\Livewire\Hooks\AuditComponentCalls;
 use App\Models\AuditEvent;
 use App\Models\BankImport;
@@ -203,6 +204,7 @@ test('every queued job is in the inventory and carries the audit middleware as d
         RunTransactionAnalysisJob::class => [new RunTransactionAnalysisJob($user), true],
         SyncRedbarkFeedJob::class => [new SyncRedbarkFeedJob(RedbarkFeed::factory()->create()), true],
         MaintainGoalsJob::class => [new MaintainGoalsJob($user), false],
+        SyncSecurityPricesJob::class => [new SyncSecurityPricesJob($user), false],
         SendRuleMatchDigestJob::class => [new SendRuleMatchDigestJob($user), true],
         CategoriseRuleMatchesJob::class => [new CategoriseRuleMatchesJob($user, []), true],
         ApplyUserRulesJob::class => [new ApplyUserRulesJob($user), true],
@@ -254,6 +256,17 @@ it('pins MaintainGoalsJob in the user action inventory', function () {
     $attribution->handle($job, fn () => null);
 
     expect(AuditEvent::query()->where('action', 'job.MaintainGoalsJob')->exists())->toBeFalse();
+});
+
+it('lists the price sync job with its audited flag', function () {
+    $job = new SyncSecurityPricesJob(User::factory()->create());
+    $attribution = collect($job->middleware())->first(fn (object $middleware): bool => $middleware instanceof AttributeJobToUser);
+
+    expect($attribution)->toBeInstanceOf(AttributeJobToUser::class);
+
+    $attribution->handle($job, fn () => null);
+
+    expect(AuditEvent::query()->where('action', 'job.SyncSecurityPricesJob')->exists())->toBeFalse();
 });
 
 it('pins SendRuleMatchDigestJob in the user action inventory', function () {
