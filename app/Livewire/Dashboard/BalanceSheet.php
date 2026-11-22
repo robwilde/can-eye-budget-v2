@@ -21,7 +21,7 @@ final class BalanceSheet extends Component
     public function placeholder(): string
     {
         return <<<'HTML'
-        <div class="animate-pulse rounded-xl bg-zinc-100 min-h-48"></div>
+        <section class="animate-pulse rounded-xl bg-zinc-100 min-h-48"></section>
         HTML;
     }
 
