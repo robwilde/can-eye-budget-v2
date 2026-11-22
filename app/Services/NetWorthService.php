@@ -8,9 +8,14 @@ use App\DTOs\BalanceSheet;
 use App\DTOs\BalanceSheetGroup;
 use App\Enums\AccountClass;
 use App\Enums\AccountOrder;
+use App\Enums\ChartGranularity;
+use App\Enums\TransactionPeriod;
+use App\Enums\ValuationKind;
 use App\Models\Account;
 use App\Models\AccountDailyBalance;
+use App\Models\AccountValuation;
 use App\Models\User;
+use App\Support\Dashboard\DashboardPeriod;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -45,20 +50,22 @@ final class NetWorthService
     }
 
     /**
-     * Net worth for each day from $from to $to inclusive, keyed by Y-m-d. An account that was
+     * Net worth for each day from $from to $to inclusive, keyed by Y-m-d, or only for $onlyDays (days
+     * inside the range) when given, which spares converting the others. An account that was
      * disabled counts through the day before it was disabled and not from that day on.
      *
+     * @param  list<string>|null  $onlyDays
      * @return array<string, int>
      */
-    public function series(User $user, CarbonImmutable $from, CarbonImmutable $to): array
+    public function series(User $user, CarbonImmutable $from, CarbonImmutable $to, bool $flatBeforeHistory = false, ?array $onlyDays = null): array
     {
         $accounts = $this->countedAccounts($user, includeDisabled: true)->get(['id', 'disabled_at', 'currency']);
-        $balances = $this->dailyBalances($accounts->pluck('id')->all(), $from, $to);
+        $balances = $this->dailyBalances($accounts->pluck('id')->all(), $from, $to, $flatBeforeHistory);
         $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
 
         $series = [];
 
-        foreach ($this->days($from, $to) as $day) {
+        foreach ($onlyDays ?? $this->days($from, $to) as $day) {
             $total = 0;
             $date = CarbonImmutable::parse($day);
 
@@ -98,6 +105,85 @@ final class NetWorthService
     public function isFavourable(array $series): bool
     {
         return $series === [] || end($series) >= reset($series);
+    }
+
+    /**
+     * Net worth over the dashboard period at its chart granularity: every day for a daily range,
+     * the last day of each week or month for coarser ones, always including the first and the last
+     * day. The range ends no later than today. An account that starts from an opening balance inside
+     * the window is held at that balance before it, never drawn as growth from zero. Only the days
+     * that are plotted are converted into the base currency.
+     *
+     * @return array<string, int>
+     */
+    public function chartSeries(User $user, DashboardPeriod $period): array
+    {
+        [$from, $to] = $this->window($user, $period);
+
+        if ($period->granularity === ChartGranularity::Daily) {
+            return $this->series($user, $from, $to, flatBeforeHistory: true);
+        }
+
+        $days = $this->days($from, $to);
+        $first = $days[0];
+        $last = $days[array_key_last($days)];
+        $plotted = array_values(array_filter($days, function (string $day) use ($period, $first, $last): bool {
+            $date = CarbonImmutable::parse($day);
+            $bucketEnd = $period->granularity === ChartGranularity::Weekly ? $date->isSunday() : $date->isSameDay($date->endOfMonth());
+
+            return $bucketEnd || $day === $first || $day === $last;
+        }));
+
+        return $this->series($user, $from, $to, flatBeforeHistory: true, onlyDays: $plotted);
+    }
+
+    /**
+     * How much net worth moved over the period, or null when the balance history does not reach
+     * back to the start of the window (an account whose history begins later, or has none), since a
+     * change measured from a partial history would read as growth from nothing. All Time is the whole
+     * recorded history, so it starts at the earliest history day.
+     */
+    public function velocity(User $user, DashboardPeriod $period): ?int
+    {
+        [$from, $to] = $this->window($user, $period);
+        $accountIds = $this->countedAccounts($user)->pluck('id')->all();
+
+        if ($accountIds === []) {
+            return null;
+        }
+
+        $firstDays = $this->firstHistoryDays($accountIds);
+
+        if ($period->period === TransactionPeriod::All) {
+            if ($firstDays->isEmpty()) {
+                return null;
+            }
+
+            $from = $from->max(CarbonImmutable::parse((string) $firstDays->min()));
+        } else {
+            foreach ($accountIds as $accountId) {
+                if (! isset($firstDays[$accountId]) || $firstDays[$accountId] > $from->toDateString()) {
+                    return null;
+                }
+            }
+        }
+
+        $series = $this->series($user, $from, $to, onlyDays: [$from->toDateString(), $to->toDateString()]);
+
+        return end($series) - reset($series);
+    }
+
+    /**
+     * The first and last day of the period as whole days, the last no later than today and the first
+     * no later than the last, so a range that reaches into the future is not drawn as recorded history.
+     *
+     * @return array{0: CarbonImmutable, 1: CarbonImmutable}
+     */
+    private function window(User $user, DashboardPeriod $period): array
+    {
+        $to = $period->end->startOfDay()->min($user->today()->startOfDay());
+
+        return [$period->start->startOfDay()->min($to), $to];
     }
 
     /**
@@ -179,15 +265,34 @@ final class NetWorthService
     }
 
     /**
+     * The first day each of the accounts has balance history, keyed by account id; an account with
+     * no history is absent.
+     *
+     * @param  list<int>  $accountIds
+     * @return Collection<int, string>
+     */
+    private function firstHistoryDays(array $accountIds): Collection
+    {
+        return AccountDailyBalance::query()
+            ->toBase()
+            ->whereIn('account_id', $accountIds)
+            ->selectRaw('account_id, min(date(balance_date)) as first_day')
+            ->groupBy('account_id')
+            ->pluck('first_day', 'account_id');
+    }
+
+    /**
      * End-of-day balances per account and day. A day without a row keeps the balance of the
      * last earlier row, including one before $from. A day before an account's first row keeps
      * that row's start balance: the history only starts from 0 when the account has an opening
-     * balance, and otherwise begins from the balance the account already carried.
+     * balance, and otherwise begins from the balance the account already carried. With
+     * $flatBeforeHistory an opening-balance account is instead held at its first balance before
+     * its history starts, so the first balance never shows as growth from zero.
      *
      * @param  list<int>  $accountIds
      * @return array<int, array<string, int>>
      */
-    private function dailyBalances(array $accountIds, CarbonImmutable $from, CarbonImmutable $to): array
+    private function dailyBalances(array $accountIds, CarbonImmutable $from, CarbonImmutable $to, bool $flatBeforeHistory = false): array
     {
         $days = $this->days($from, $to);
         $result = [];
@@ -221,10 +326,19 @@ final class NetWorthService
             ->get()
             ->groupBy('account_id');
 
+        $opening = $flatBeforeHistory
+            ? AccountValuation::query()->toBase()->whereIn('account_id', $accountIds)->where('kind', ValuationKind::OpeningBalance->value)->pluck('account_id')->flip()
+            : collect();
+
         foreach ($accountIds as $accountId) {
             $accountRows = $rows->get($accountId, collect());
             $byDay = $accountRows->pluck('end_balance', 'day');
-            $balance = (int) ($carried[$accountId] ?? $accountRows->first()->start_balance ?? 0);
+            $first = $accountRows->first();
+            $balance = (int) ($carried[$accountId] ?? $first->start_balance ?? 0);
+
+            if ($first !== null && $balance === 0 && ! isset($carried[$accountId]) && $opening->has($accountId)) {
+                $balance = (int) $first->end_balance;
+            }
 
             foreach ($days as $day) {
                 $balance = (int) ($byDay[$day] ?? $balance);
