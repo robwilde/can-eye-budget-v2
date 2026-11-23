@@ -27,8 +27,68 @@ enum RecurrenceFrequency: string
     case Every2Weeks = 'every-2-weeks';
     case Every3Weeks = 'every-3-weeks';
     case Every4Weeks = 'every-4-weeks';
+    case Semimonthly = 'semimonthly';
+    case EveryNWeeks = 'every-n-weeks';
+    case EveryNMonths = 'every-n-months';
+    case EveryNYears = 'every-n-years';
 
-    public function label(): string
+    /**
+     * The cadences the plan editors offer today. The interval and day-of-month cadences need the
+     * cadence picker before they can be chosen.
+     *
+     * @return list<self>
+     */
+    public static function selectable(): array
+    {
+        return array_values(array_filter(
+            self::cases(),
+            static fn (self $frequency): bool => ! $frequency->usesInterval() && $frequency !== self::Semimonthly,
+        ));
+    }
+
+    public function usesInterval(): bool
+    {
+        return in_array($this, [self::EveryNWeeks, self::EveryNMonths, self::EveryNYears], true);
+    }
+
+    /**
+     * Whole days between dates for the cadences that repeat every fixed number of days, else null.
+     */
+    public function dayStep(int $interval = 1): ?int
+    {
+        return match ($this) {
+            self::Everyday => 1,
+            self::Every2Days => 2,
+            self::Every3Days => 3,
+            self::Every4Days, self::TwoOnTwoOff => 4,
+            self::Every5Days => 5,
+            self::Every6Days => 6,
+            self::EveryWeek => 7,
+            self::Every2Weeks => 14,
+            self::Every3Weeks => 21,
+            self::Every4Weeks => 28,
+            self::EveryNWeeks => 7 * $interval,
+            default => null,
+        };
+    }
+
+    /**
+     * Whole months between the months a date can fall in for the calendar cadences, else null.
+     */
+    public function monthStep(int $interval = 1): ?int
+    {
+        return match ($this) {
+            self::EveryMonth, self::Semimonthly => 1,
+            self::Every3Months => 3,
+            self::Every6Months => 6,
+            self::EveryYear => 12,
+            self::EveryNMonths => $interval,
+            self::EveryNYears => 12 * $interval,
+            default => null,
+        };
+    }
+
+    public function label(int $interval = 1): string
     {
         return match ($this) {
             self::DontRepeat => "Don't repeat",
@@ -49,9 +109,17 @@ enum RecurrenceFrequency: string
             self::Every2Weeks => 'Every 2 weeks',
             self::Every3Weeks => 'Every 3 weeks',
             self::Every4Weeks => 'Every 4 weeks',
+            self::Semimonthly => 'Twice a month',
+            self::EveryNWeeks => $interval === 1 ? 'Every week' : "Every {$interval} weeks",
+            self::EveryNMonths => $interval === 1 ? 'Every month' : "Every {$interval} months",
+            self::EveryNYears => $interval === 1 ? 'Every year' : "Every {$interval} years",
         };
     }
 
+    /**
+     * The date one step after $from for the cadences that step from the previous date. Cadences
+     * with an interval or a day list have no single step and are scheduled by ScheduleGenerator.
+     */
     public function nextOccurrence(CarbonImmutable $from): ?CarbonImmutable
     {
         return match ($this) {
@@ -73,6 +141,7 @@ enum RecurrenceFrequency: string
             self::EveryWorkday => $from->addWeekday(),
             self::EveryWeekend => $this->nextWeekendDay($from),
             self::TwoOnTwoOff => $from->addDays(4),
+            self::Semimonthly, self::EveryNWeeks, self::EveryNMonths, self::EveryNYears => null,
         };
     }
 
