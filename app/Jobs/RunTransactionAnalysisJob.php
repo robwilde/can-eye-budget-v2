@@ -49,6 +49,8 @@ final class RunTransactionAnalysisJob implements ShouldBeUnique, ShouldQueue
     public function handle(TransactionAnalysisPipeline $pipeline): void
     {
         $pipeline->run($this->user, $this->trigger);
+
+        GeneratePlannedOccurrencesJob::dispatch($this->user);
     }
 
     public function failed(Throwable $exception): void
