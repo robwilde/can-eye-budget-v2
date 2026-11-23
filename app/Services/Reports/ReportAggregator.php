@@ -200,42 +200,29 @@ final class ReportAggregator
     }
 
     /**
-     * Occurrences of a plan inside [$start, $end]. Jumping straight to the first
-     * occurrence on or after $start means an old, high-frequency plan is never
-     * silently truncated by a fixed cap that counts from start_date.
+     * Due dates of a plan inside [$start, $end]. Unlike occurrencesBetween() this reads the whole
+     * schedule up to $end, so an old, high-frequency plan is never silently truncated by a cap
+     * that counts from start_date.
      *
      * @return list<CarbonImmutable>
      */
     public function planOccurrences(PlannedTransaction $plan, CarbonImmutable $start, CarbonImmutable $end): array
     {
-        $current = $plan->nextOccurrenceOnOrAfter($start);
-
-        if ($current === null) {
+        if (! $plan->is_active) {
             return [];
         }
 
+        $reach = $end->addDays(PlannedTransaction::WEEKEND_ADJUSTMENT_REACH_DAYS);
         $dates = [];
-        $endsOn = $plan->endsOn();
-        $maxIterations = (int) ceil($start->diffInDays($end)) + 2;
 
-        for ($i = 0; $i < $maxIterations; $i++) {
-            if ($current->greaterThan($end)) {
+        foreach ($plan->schedule() as $scheduled) {
+            if ($scheduled->original->greaterThan($reach)) {
                 break;
             }
 
-            if ($endsOn !== null && $current->greaterThan($endsOn)) {
-                break;
+            if ($scheduled->due->between($start, $end)) {
+                $dates[] = $scheduled->due;
             }
-
-            $dates[] = $current;
-
-            $next = $plan->frequency->nextOccurrence($current);
-
-            if ($next === null) {
-                break;
-            }
-
-            $current = $next;
         }
 
         return $dates;
