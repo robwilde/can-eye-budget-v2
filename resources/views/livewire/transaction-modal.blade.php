@@ -111,10 +111,19 @@
                         <button type="button"
                                 aria-pressed="{{ $mode === 'plan' ? 'true' : 'false' }}"
                                 class="{{ $mode === 'plan' ? 'active' : '' }}"
+                                @disabled($planExists && $mode !== 'plan')
+                                @if($planExists && $mode !== 'plan') aria-describedby="plan-already-exists-hint" @endif
+                                data-testid="mode-plan"
                                 wire:click="$set('mode', 'plan')">
                             {{ __('Plan') }}
                         </button>
                     </div>
+                    @if($planExists && $mode !== 'plan')
+                        <p id="plan-already-exists-hint" class="mt-1 text-xs text-zinc-500" data-testid="plan-already-exists">{{ __('A plan like this already exists.') }}</p>
+                    @endif
+                    @if($planExists)
+                        <flux:error name="mode" />
+                    @endif
                 </div>
             </div>
 

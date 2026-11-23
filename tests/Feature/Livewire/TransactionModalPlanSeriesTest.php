@@ -105,7 +105,7 @@ it('copies a payment link only to the users own matching plans', function () {
 it('copies a payment link from a newly planned bill', function () {
     $existing = modalPlan($this, ['description' => 'Gym']);
 
-    modalNewPlan($this)
+    modalNewPlan($this, input: '60 Gym')
         ->set('paymentUrl', 'gym.example/pay')
         ->set('copyPaymentUrl', true)
         ->call('save')

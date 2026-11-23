@@ -846,6 +846,10 @@ select:focus[data-flux-control] {
         cursor: pointer;
         color: var(--color-fg-2);
     }
+    .type-toggle button:disabled {
+        opacity: .5;
+        cursor: not-allowed;
+    }
     .type-toggle button.active {
         background: var(--color-cib-white);
         color: var(--color-cib-black);

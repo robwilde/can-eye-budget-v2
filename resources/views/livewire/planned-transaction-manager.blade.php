@@ -13,6 +13,11 @@
                 <flux:text size="sm" class="mt-1 text-zinc-500">Manage the recurring plans that match future imports for this account.</flux:text>
             </div>
 
+            <div class="flex flex-wrap items-end gap-2">
+                <flux:button size="sm" variant="primary" wire:click="$dispatch('declare-plan', { kind: 'bill' })" data-testid="add-bill">Add bill</flux:button>
+                <flux:button size="sm" wire:click="$dispatch('declare-plan', { kind: 'income' })" data-testid="add-income">Add income</flux:button>
+            </div>
+
             <flux:field class="min-w-56">
                 <flux:label>Account</flux:label>
                 <flux:select wire:model.live="accountId" size="sm">
@@ -145,6 +150,8 @@
             </div>
         @endif
     </div>
+
+    <livewire:plan-declaration-form />
 
     <flux:modal wire:model="showEditModal" class="max-w-lg">
         <div class="space-y-4">
