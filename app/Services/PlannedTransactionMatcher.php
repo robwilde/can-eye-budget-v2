@@ -123,7 +123,8 @@ final readonly class PlannedTransactionMatcher
             ->where('planned_transaction_id', $plan->id)
             ->where('excluded', true)
             ->whereBetween('post_date', [$occurrence->subDays($tolerance), $occurrence->addDays($tolerance)])
-            ->update(['planned_transaction_id' => null]);
+            ->get()
+            ->each(static fn (Transaction $excluded): bool => $excluded->update(['planned_transaction_id' => null]));
     }
 
     /**

@@ -16,6 +16,7 @@ use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Payees\PayeeConfirmer;
+use App\Services\Recurring\OccurrencePaymentRecorder;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -118,6 +119,8 @@ final readonly class SuggestionApplier
                     ->where('user_id', $user->id)
                     ->update($updateData);
 
+                $this->claimOccurrences($matchedIds, $user, $planned);
+
                 if ($categoryId !== null) {
                     $this->categoriseMerchantsOf($matchedIds, $user, $categoryId);
                 }
@@ -160,6 +163,27 @@ final readonly class SuggestionApplier
 
             $this->payeeConfirmer->updateTransactionsForMerchantKey($user, $merchantKey, $categoryId);
         }
+    }
+
+    /**
+     * Each matched charge pays the occurrence of the new plan it falls on, so the history shows as paid.
+     *
+     * @param  list<int>  $matchedIds
+     */
+    private function claimOccurrences(array $matchedIds, User $user, PlannedTransaction $planned): void
+    {
+        $recorder = app(OccurrencePaymentRecorder::class);
+
+        Transaction::query()
+            ->where('user_id', $user->id)
+            ->current()
+            ->whereKey($matchedIds)
+            ->orderBy('post_date')
+            ->get()
+            ->each(static function (Transaction $transaction) use ($recorder, $planned): void {
+                $recorder->release($transaction, $planned->id);
+                $recorder->claim($transaction, $planned);
+            });
     }
 
     private function markAccepted(AnalysisSuggestion $suggestion): void
