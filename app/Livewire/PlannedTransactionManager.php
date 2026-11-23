@@ -443,6 +443,7 @@ final class PlannedTransactionManager extends Component
 
         return PlannedOccurrence::query()
             ->forUser($user)
+            ->withSum('payments', 'amount')
             ->where('planned_transaction_id', $this->occurrencesPlanId)
             ->where(static fn (Builder $query) => $query->where('due_date', '>=', $from)->orWhere('snoozed_until', '>=', $from))
             ->with('plannedTransaction')

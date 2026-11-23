@@ -78,10 +78,10 @@ final readonly class MonthFlowLoader
             ->where(static fn ($q) => $q->whereNull('until_date')->orWhere('until_date', '>=', $monthStart))
             ->get();
 
-        $occurrencesByPlan = (new OccurrenceSchedule)->between($plans->collect(), $monthStart, $monthEnd);
+        $occurrencesByPlan = (new OccurrenceSchedule)->between($plans->collect(), $monthStart, $monthEnd, includeSettled: true);
 
         foreach ($plans as $plan) {
-            $total = array_sum(array_map(static fn (EffectiveOccurrence $item): int => $item->amount, $occurrencesByPlan[$plan->id]));
+            $total = array_sum(array_map(static fn (EffectiveOccurrence $item): int => $item->expected, $occurrencesByPlan[$plan->id]));
 
             if ($plan->direction === TransactionDirection::Credit) {
                 $income += $total;
