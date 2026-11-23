@@ -26,6 +26,12 @@ Schedule::command('app:expire-redbark-holds')
     ->name('redbark:expire-holds')
     ->withoutOverlapping();
 
+Schedule::command('app:settle-pending-payments')
+    ->everyFifteenMinutes()
+    ->name('payments:settle-pending')
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('app:scan-bnpl-emails')
     ->dailyAt('04:00')
     ->name('bnpl:scan-emails')

@@ -171,6 +171,8 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
         TransactionIngestor $ingestor,
         RedbarkTransactionMatcher $matcher,
     ): void {
+        app(PaymentSettlementDeferral::class)->sweep($this->feed->user_id);
+
         $client = $factory->for($this->feed);
         $log = $this->openLog();
         $this->since = $log->since_date;
