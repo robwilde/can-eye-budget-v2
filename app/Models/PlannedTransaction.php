@@ -4,18 +4,23 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Casts\DaysOfMonthCast;
 use App\Casts\MoneyCast;
+use App\DTOs\ScheduledDate;
 use App\Enums\PlanAmountStrategy;
 use App\Enums\PlannedTransactionType;
 use App\Enums\PlanOrigin;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Enums\WeekendAdjustment;
 use App\Events\PlannedTransactionCategoryUpdated;
 use App\Events\PlannedTransactionCreated;
 use App\Rules\PaymentUrl;
+use App\Support\Recurrence\ScheduleGenerator;
 use Carbon\CarbonImmutable;
 use Closure;
 use Database\Factories\PlannedTransactionFactory;
+use Generator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -43,6 +48,10 @@ use Illuminate\Support\Facades\Validator;
  * @property RecurrenceFrequency $frequency
  * @property CarbonImmutable|null $until_date
  * @property int|null $end_after_count
+ * @property int $recurrence_interval
+ * @property list<int|string>|null $days_of_month
+ * @property WeekendAdjustment $weekend_adjustment
+ * @property bool $schedule_pinned
  * @property CarbonImmutable|null $renewal_on
  * @property CarbonImmutable|null $trial_ends_on
  * @property CarbonImmutable|null $cancelled_on
@@ -62,6 +71,12 @@ final class PlannedTransaction extends Model
 {
     /** @use HasFactory<PlannedTransactionFactory> */
     use HasFactory;
+
+    public const int MAX_DATES_READ = 1000;
+
+    public const int MAX_CONSECUTIVE_SKIPS = 400;
+
+    public const int WEEKEND_ADJUSTMENT_REACH_DAYS = 3;
 
     /**
      * @var list<string>
@@ -83,6 +98,10 @@ final class PlannedTransaction extends Model
         'start_date',
         'frequency',
         'until_date',
+        'recurrence_interval',
+        'days_of_month',
+        'weekend_adjustment',
+        'schedule_pinned',
         'end_after_count',
         'renewal_on',
         'trial_ends_on',
@@ -105,6 +124,9 @@ final class PlannedTransaction extends Model
         'type' => 'bill',
         'origin' => 'declared',
         'autopay' => false,
+        'recurrence_interval' => 1,
+        'weekend_adjustment' => 'none',
+        'schedule_pinned' => false,
         'reminder_days' => 3,
         'grace_days' => 3,
         'amount_tolerance_bps' => 750,
@@ -281,57 +303,50 @@ final class PlannedTransaction extends Model
             ->orderBy('start_date');
     }
 
-    /** @return Collection<int, CarbonImmutable> */
+    /**
+     * The due dates inside the window, each computed from start_date, adjusted for weekends, and
+     * stopping at until_date and end_after_count. Reads at most 1000 dates from the start.
+     *
+     * @return Collection<int, CarbonImmutable>
+     */
     public function occurrencesBetween(CarbonImmutable $start, CarbonImmutable $end): Collection
     {
-        if (! $this->is_active) {
-            return collect();
-        }
+        return $this->scheduledBetween($start, $end)
+            ->map(static fn (ScheduledDate $date): CarbonImmutable => $date->due)
+            ->values();
+    }
 
+    /**
+     * Like occurrencesBetween(), keeping each date's original scheduled date beside its due date.
+     *
+     * @return Collection<int, ScheduledDate>
+     */
+    public function scheduledBetween(CarbonImmutable $start, CarbonImmutable $end): Collection
+    {
         $dates = collect();
-        $current = $this->start_date;
-        $limit = $this->until_date;
-        $maxIterations = 1000;
 
-        if ($this->frequency === RecurrenceFrequency::DontRepeat) {
-            if ($current->between($start, $end) && ($limit === null || $current->lte($limit))) {
-                $dates->push($current);
-            }
-
+        if (! $this->is_active) {
             return $dates;
         }
 
-        for ($i = 0; $i < $maxIterations; $i++) {
-            if ($this->end_after_count !== null && $i >= $this->end_after_count) {
+        $reach = $end->addDays(self::WEEKEND_ADJUSTMENT_REACH_DAYS);
+        $read = 0;
+
+        foreach ($this->schedule() as $scheduled) {
+            if ($read++ >= self::MAX_DATES_READ || $scheduled->original->greaterThan($reach)) {
                 break;
             }
 
-            if ($current->greaterThan($end)) {
-                break;
+            if ($scheduled->due->between($start, $end)) {
+                $dates->push($scheduled);
             }
-
-            if ($limit !== null && $current->greaterThan($limit)) {
-                break;
-            }
-
-            if ($current->between($start, $end)) {
-                $dates->push($current);
-            }
-
-            $next = $this->frequency->nextOccurrence($current);
-
-            if ($next === null) {
-                break;
-            }
-
-            $current = $next;
         }
 
         return $dates;
     }
 
     /**
-     * The final date an end count allows, or null when the plan has no end count.
+     * The final due date an end count allows, or null when the plan has no end count.
      */
     public function lastOccurrenceDate(): ?CarbonImmutable
     {
@@ -339,19 +354,13 @@ final class PlannedTransaction extends Model
             return null;
         }
 
-        $current = $this->start_date;
+        $last = null;
 
-        for ($i = 1; $i < $this->end_after_count; $i++) {
-            $next = $this->frequency->nextOccurrence($current);
-
-            if ($next === null) {
-                break;
-            }
-
-            $current = $next;
+        foreach ($this->dueDates() as $scheduled) {
+            $last = $scheduled->due;
         }
 
-        return $current;
+        return $last;
     }
 
     /**
@@ -369,53 +378,57 @@ final class PlannedTransaction extends Model
     }
 
     /**
-     * The first occurrence on or after $from, respecting until_date, advancing
-     * from start_date so the cadence anchor (e.g. day-of-month) is preserved.
-     * Unlike occurrencesBetween() this is not bound to a fixed window, so a
-     * long-running daily plan still resolves its next date. Null when inactive
-     * or ended.
+     * The first due date on or after $from, respecting until_date and the end count. Unlike
+     * occurrencesBetween() this is not bound to a fixed window, so a long-running daily plan still
+     * resolves its next date. Null when inactive or ended.
      */
     public function nextOccurrenceOnOrAfter(CarbonImmutable $from): ?CarbonImmutable
+    {
+        return $this->nextScheduledOnOrAfter($from)?->due;
+    }
+
+    public function nextScheduledOnOrAfter(CarbonImmutable $from): ?ScheduledDate
     {
         if (! $this->is_active) {
             return null;
         }
 
-        $current = $this->start_date;
+        $maxDates = (int) abs($this->start_date->diffInDays($from)) + 367;
+        $read = 0;
 
-        if ($this->frequency === RecurrenceFrequency::DontRepeat) {
-            if ($this->until_date !== null && $current->greaterThan($this->until_date)) {
+        foreach ($this->schedule() as $scheduled) {
+            if ($read++ >= $maxDates) {
                 return null;
             }
 
-            return $current->greaterThanOrEqualTo($from) ? $current : null;
-        }
-
-        $maxIterations = (int) abs($this->start_date->diffInDays($from)) + 367;
-
-        for ($i = 0; $i < $maxIterations; $i++) {
-            if ($this->end_after_count !== null && $i >= $this->end_after_count) {
-                return null;
+            if ($scheduled->due->greaterThanOrEqualTo($from)) {
+                return $scheduled;
             }
-
-            if ($this->until_date !== null && $current->greaterThan($this->until_date)) {
-                return null;
-            }
-
-            if ($current->greaterThanOrEqualTo($from)) {
-                return $current;
-            }
-
-            $next = $this->frequency->nextOccurrence($current);
-
-            if ($next === null) {
-                return null;
-            }
-
-            $current = $next;
         }
 
         return null;
+    }
+
+    /**
+     * Every date the plan is due, in order, up to until_date and end_after_count. Endless for a plan
+     * with neither, so callers stop reading.
+     *
+     * @return Generator<int, ScheduledDate>
+     */
+    public function schedule(): Generator
+    {
+        foreach ($this->dueDates() as $scheduled) {
+            if ($this->until_date !== null && $scheduled->original->greaterThan($this->until_date)) {
+                return;
+            }
+
+            yield $scheduled;
+        }
+    }
+
+    public function frequencyLabel(): string
+    {
+        return $this->frequency->label($this->recurrence_interval);
     }
 
     protected static function booted(): void
@@ -423,10 +436,17 @@ final class PlannedTransaction extends Model
         self::saving(static function (PlannedTransaction $plannedTransaction): void {
             $plannedTransaction->payment_url = PaymentUrl::normalise($plannedTransaction->payment_url);
 
-            Validator::make($plannedTransaction->only(['account_id', 'transfer_to_account_id', 'end_after_count', 'payment_url']), [
+            Validator::make($plannedTransaction->only(['account_id', 'transfer_to_account_id', 'end_after_count', 'payment_url', 'recurrence_interval', 'days_of_month']), [
                 'transfer_to_account_id' => ['nullable', 'integer', 'different:account_id'],
                 'end_after_count' => ['nullable', 'integer', 'min:1', 'max:600'],
                 'payment_url' => ['nullable', 'string', new PaymentUrl],
+                'recurrence_interval' => ['required', 'integer', 'min:1', 'max:99'],
+                'days_of_month' => ['nullable', 'array'],
+                'days_of_month.*' => [static function (string $attribute, mixed $value, Closure $fail): void {
+                    if ($value !== DaysOfMonthCast::LAST && (! is_int($value) || $value < 1 || $value > 31)) {
+                        $fail(__('A day of the month is 1 to 31 or last.'));
+                    }
+                }],
             ])->validate();
 
             if ($plannedTransaction->transfer_to_account_id !== null) {
@@ -467,6 +487,10 @@ final class PlannedTransaction extends Model
             'start_date' => 'date',
             'until_date' => 'date',
             'end_after_count' => 'integer',
+            'recurrence_interval' => 'integer',
+            'days_of_month' => DaysOfMonthCast::class,
+            'weekend_adjustment' => WeekendAdjustment::class,
+            'schedule_pinned' => 'boolean',
             'renewal_on' => 'date',
             'trial_ends_on' => 'date',
             'cancelled_on' => 'date',
@@ -480,5 +504,36 @@ final class PlannedTransaction extends Model
             'is_active' => 'boolean',
             'is_pay_cycle_income' => 'boolean',
         ];
+    }
+
+    /**
+     * @return Generator<int, ScheduledDate>
+     */
+    private function dueDates(): Generator
+    {
+        $yielded = 0;
+        $skipped = 0;
+
+        foreach (ScheduleGenerator::dates($this->frequency, $this->start_date, $this->recurrence_interval, $this->days_of_month) as $original) {
+            $due = $this->weekend_adjustment->adjust($original);
+
+            if ($due === null) {
+                if (++$skipped > self::MAX_CONSECUTIVE_SKIPS) {
+                    return;
+                }
+
+                continue;
+            }
+
+            $skipped = 0;
+
+            if ($this->end_after_count !== null && $yielded >= $this->end_after_count) {
+                return;
+            }
+
+            $yielded++;
+
+            yield new ScheduledDate($original, $due);
+        }
     }
 }
