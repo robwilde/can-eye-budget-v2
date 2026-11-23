@@ -18,6 +18,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Services\RecentCategoryPicks;
 use App\Services\Recurring\OccurrenceActions;
+use App\Services\Recurring\OccurrenceSchedule;
 use App\Services\Recurring\OccurrenceStateResolver;
 use App\Services\Recurring\PlannedOccurrenceGenerator;
 use Closure;
@@ -369,8 +370,10 @@ final class PlannedTransactionManager extends Component
             ->orderBy('description')
             ->get();
 
-        $plans->each(function (PlannedTransaction $plan) use ($today): void {
-            $plan->setAttribute('next_occurrence', $plan->nextOccurrenceOnOrAfter($today));
+        $nextByPlan = (new OccurrenceSchedule)->nextFor($plans->collect(), $today);
+
+        $plans->each(function (PlannedTransaction $plan) use ($nextByPlan): void {
+            $plan->setAttribute('next_occurrence', $nextByPlan[$plan->id]?->date);
         });
 
         return $plans;
