@@ -1,5 +1,6 @@
 @php
     use App\Casts\MoneyCast;
+    use App\Enums\RecurrenceFrequency;
     use App\Rules\PaymentUrl;
     use Illuminate\Support\Str;
 @endphp
@@ -72,7 +73,7 @@
                                     <flux:text>{{ Str::headline($plan->direction->value) }}</flux:text>
                                 </td>
                                 <td class="px-4 py-3 align-top">
-                                    <flux:text>{{ $plan->frequency->label() }}</flux:text>
+                                    <flux:text>{{ $plan->frequencyLabel() }}</flux:text>
                                 </td>
                                 <td class="px-4 py-3 align-top">
                                     <flux:text>{{ $plan->category?->fullPath() ?? 'No category' }}</flux:text>
@@ -130,7 +131,7 @@
                     <flux:select wire:model="frequency">
                         <flux:select.option value="">Select frequency</flux:select.option>
                         @foreach($frequencies as $recurrenceFrequency)
-                            <flux:select.option value="{{ $recurrenceFrequency->value }}">{{ $recurrenceFrequency->label() }}</flux:select.option>
+                            <flux:select.option value="{{ $recurrenceFrequency->value }}">{{ in_array($recurrenceFrequency, RecurrenceFrequency::selectable(), true) ? $recurrenceFrequency->label() : 'Custom schedule (kept as is)' }}</flux:select.option>
                         @endforeach
                     </flux:select>
                     <flux:error name="frequency" />
