@@ -20,6 +20,8 @@ final readonly class PayCyclePip
         public ?string $categoryPath = null,
         public ?string $detail = null,
         public ?string $transferFlow = null,
+        public ?int $occurrenceId = null,
+        public ?string $occurrenceState = null,
     ) {}
 
     /**

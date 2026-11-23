@@ -12,14 +12,20 @@ use App\Livewire\Concerns\EditsPlanSeries;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Merchant;
+use App\Models\PlannedOccurrence;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\RecentCategoryPicks;
+use App\Services\Recurring\OccurrenceActions;
+use App\Services\Recurring\OccurrenceStateResolver;
+use App\Services\Recurring\PlannedOccurrenceGenerator;
 use Closure;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -54,6 +60,14 @@ final class PlannedTransactionManager extends Component
     public int|string|null $merchantId = null;
 
     public string $notes = '';
+
+    public ?int $occurrencesPlanId = null;
+
+    /** @var array<int, string> */
+    public array $snoozeDates = [];
+
+    /** @var array<int, string> */
+    public array $occurrenceAmounts = [];
 
     public bool $showDeleteModal = false;
 
@@ -151,6 +165,47 @@ final class PlannedTransactionManager extends Component
         $this->resetEditForm();
     }
 
+    public function skipOccurrence(int $occurrenceId): void
+    {
+        $this->changeOccurrence(fn (User $user) => app(OccurrenceActions::class)->skip($user, $occurrenceId));
+    }
+
+    public function markOccurrenceMissed(int $occurrenceId): void
+    {
+        $this->changeOccurrence(fn (User $user) => app(OccurrenceActions::class)->markMissed($user, $occurrenceId));
+    }
+
+    public function reopenOccurrence(int $occurrenceId): void
+    {
+        $this->changeOccurrence(fn (User $user) => app(OccurrenceActions::class)->reopen($user, $occurrenceId));
+    }
+
+    public function snoozeOccurrence(int $occurrenceId): void
+    {
+        $date = $this->snoozeDates[$occurrenceId] ?? '';
+
+        $this->changeOccurrence(fn (User $user) => app(OccurrenceActions::class)->snooze($user, $occurrenceId, $date));
+
+        unset($this->snoozeDates[$occurrenceId]);
+    }
+
+    public function setOccurrenceAmount(int $occurrenceId): void
+    {
+        $amount = mb_trim($this->occurrenceAmounts[$occurrenceId] ?? '');
+
+        if ($amount !== '' && preg_match('/^\d+(\.\d{1,2})?$/', $amount) !== 1) {
+            $this->addError('occurrence', 'Use a positive amount with at most 2 decimal places.');
+
+            return;
+        }
+
+        $cents = $amount === '' ? null : (int) round((float) $amount * 100);
+
+        $this->changeOccurrence(fn (User $user) => app(OccurrenceActions::class)->setExpectedAmount($user, $occurrenceId, $cents));
+
+        unset($this->occurrenceAmounts[$occurrenceId]);
+    }
+
     public function toggleActive(int $id): void
     {
         $plan = $this->findUserPlan($id);
@@ -210,7 +265,44 @@ final class PlannedTransactionManager extends Component
             'categories' => Category::visibleSortedByFullPath($user->id),
             'frequencies' => $this->frequencyOptions($editing),
             'directions' => TransactionDirection::cases(),
+            'occurrences' => $this->occurrencesOfSelectedPlan($user),
+            'occurrenceStates' => new OccurrenceStateResolver,
+            'today' => $user->today(),
         ]);
+    }
+
+    private function changeOccurrence(Closure $change): void
+    {
+        $this->resetErrorBag('occurrence');
+
+        try {
+            $change($this->authenticatedUser());
+        } catch (ModelNotFoundException) {
+            abort(404);
+        }
+    }
+
+    /**
+     * The stored occurrences of the plan whose list is open, from the current cycle on.
+     *
+     * @return EloquentCollection<int, PlannedOccurrence>
+     */
+    private function occurrencesOfSelectedPlan(User $user): EloquentCollection
+    {
+        if ($this->occurrencesPlanId === null) {
+            return new EloquentCollection;
+        }
+
+        $from = app(PlannedOccurrenceGenerator::class)->cycleStart($user, $user->today())->toDateString();
+
+        return PlannedOccurrence::query()
+            ->forUser($user)
+            ->where('planned_transaction_id', $this->occurrencesPlanId)
+            ->where(static fn (Builder $query) => $query->where('due_date', '>=', $from)->orWhere('snoozed_until', '>=', $from))
+            ->with('plannedTransaction')
+            ->orderBy('original_date')
+            ->limit(24)
+            ->get();
     }
 
     private function authenticatedUser(): User

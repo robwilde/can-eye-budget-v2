@@ -12,6 +12,8 @@ use App\Livewire\Data\CalendarDayData;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Recurring\OccurrenceActions;
+use App\Services\Recurring\PlannedOccurrenceGenerator;
 use App\Support\Calendar\CashFlow;
 use App\Support\Calendar\CashFlowLoader;
 use App\Support\Calendar\DayActivity;
@@ -20,6 +22,8 @@ use App\Support\Calendar\MonthFlow;
 use App\Support\Calendar\MonthFlowLoader;
 use Carbon\CarbonImmutable;
 use Carbon\Constants\UnitValue;
+use Closure;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\View\View;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
@@ -32,6 +36,9 @@ final class CalendarView extends Component
     public string $currentMonth = '';
 
     public string $selectedDate = '';
+
+    /** @var array<int, string> */
+    public array $snoozeDates = [];
 
     public function mount(): void
     {
@@ -49,6 +56,20 @@ final class CalendarView extends Component
             : $this->authenticatedUser()->today()->format('Y-m-d');
 
         unset($this->selectedDay); // @phpstan-ignore property.notFound
+    }
+
+    public function skipOccurrence(int $occurrenceId): void
+    {
+        $this->changeOccurrence(fn (User $user) => app(OccurrenceActions::class)->skip($user, $occurrenceId));
+    }
+
+    public function snoozeOccurrence(int $occurrenceId): void
+    {
+        $date = $this->snoozeDates[$occurrenceId] ?? '';
+
+        $this->changeOccurrence(fn (User $user) => app(OccurrenceActions::class)->snooze($user, $occurrenceId, $date));
+
+        unset($this->snoozeDates[$occurrenceId]);
     }
 
     public function addTransaction(): void
@@ -114,7 +135,7 @@ final class CalendarView extends Component
         $userId = (int) auth()->id();
         $user = auth()->user();
 
-        $activity = (new DayActivityLoader)->load($gridStart, $gridEnd, $userId, includeTransfers: true, today: $today);
+        $activity = (new DayActivityLoader)->load($gridStart, $gridEnd, $userId, includeTransfers: true, today: $today, overdueFrom: app(PlannedOccurrenceGenerator::class)->cycleStart($this->authenticatedUser(), $today));
 
         $paydays = $user instanceof User
             ? $this->paydaysWithinGrid($gridStart, $gridEnd, $user)
@@ -412,6 +433,17 @@ final class CalendarView extends Component
         }
 
         return $date->startOfMonth();
+    }
+
+    private function changeOccurrence(Closure $change): void
+    {
+        try {
+            $change($this->authenticatedUser());
+        } catch (ModelNotFoundException) {
+            abort(404);
+        }
+
+        $this->bustCache();
     }
 
     private function bustCache(): void
