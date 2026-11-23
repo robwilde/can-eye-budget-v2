@@ -14,5 +14,6 @@ final class PlanOccurrence extends Dto
         public readonly PlannedTransaction $plan,
         public readonly CarbonImmutable $date,
         public readonly int $dayDiff,
+        public readonly ?CarbonImmutable $originalDate = null,
     ) {}
 }
