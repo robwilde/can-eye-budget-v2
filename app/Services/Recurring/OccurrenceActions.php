@@ -117,6 +117,11 @@ final class OccurrenceActions
 
             $occurrence->update(['expected_amount' => $cents]);
 
+            if ($occurrence->payments()->exists()) {
+                app(OccurrencePaymentRecorder::class)->reconcile($occurrence);
+                $occurrence->refresh();
+            }
+
             return $occurrence;
         });
     }
@@ -125,6 +130,10 @@ final class OccurrenceActions
     {
         return $this->locked($user, $occurrenceId, function (PlannedOccurrence $occurrence) use ($status): PlannedOccurrence {
             $this->requireOpen($occurrence, __('Only an open occurrence can be closed.'));
+
+            if ($occurrence->paidCents() > 0) {
+                $this->refuse(__('Remove its payments before skipping or missing a payment that has money against it.'));
+            }
 
             $occurrence->update([
                 'status' => $status,

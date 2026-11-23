@@ -14,6 +14,7 @@ use App\Enums\TransactionSource;
 use App\Enums\TransactionStatus;
 use App\Enums\TransferLinkSource;
 use App\Events\TransactionCategoryUpdated;
+use App\Services\Recurring\OccurrencePaymentRecorder;
 use App\Support\CleanDescriptionDeriver;
 use App\Support\Recurring\MerchantSignature;
 use App\Support\Transactions\TransactionCurrency;
@@ -58,6 +59,7 @@ use Illuminate\Support\Facades\DB;
  * @property TransferLinkSource|null $transfer_link_source
  * @property int|null $suggested_pair_id
  * @property int|null $planned_transaction_id
+ * @property bool|null $payments_exists
  * @property int|null $pdf_import_id
  * @property int|null $bank_import_id
  * @property int|null $restored_by_bank_import_id
@@ -345,6 +347,12 @@ final class Transaction extends Model
     public function tags(): BelongsToMany
     {
         return $this->belongsToMany(Tag::class);
+    }
+
+    /** @return HasMany<PlannedPayment, $this> */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(PlannedPayment::class);
     }
 
     /** @return HasMany<TransactionAttachment, $this> */
@@ -638,6 +646,8 @@ final class Transaction extends Model
             }
 
             $this->attachments()->update(['transaction_id' => $child->id]);
+            $this->payments()->update(['transaction_id' => $child->id]);
+            app(OccurrencePaymentRecorder::class)->revalidate($child, $child->planned_transaction_id !== $this->planned_transaction_id);
 
             self::query()->where('split_parent_id', $this->id)->update(['split_parent_id' => $child->id]);
             self::query()->where('transfer_fee_for_id', $this->id)->update(['transfer_fee_for_id' => $child->id]);

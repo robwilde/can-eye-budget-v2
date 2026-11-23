@@ -63,6 +63,7 @@ use Illuminate\Support\Facades\Validator;
  * @property int $match_early_days
  * @property int $match_late_days
  * @property PlanAmountStrategy $amount_strategy
+ * @property array{descriptions?: list<string>, merchant_keys?: list<string>}|null $learned_aliases
  * @property bool $is_active
  * @property bool|null $is_pay_cycle_income
  * @property CarbonImmutable|null $last_generated_date
@@ -106,6 +107,7 @@ final class PlannedTransaction extends Model
         'merchant_key',
         'payment_url',
         'notes',
+        'learned_aliases',
         'autopay',
         'start_date',
         'frequency',
@@ -517,6 +519,7 @@ final class PlannedTransaction extends Model
             'frequency' => RecurrenceFrequency::class,
             'amount' => MoneyCast::class,
             'autopay' => 'boolean',
+            'learned_aliases' => 'array',
             'start_date' => 'date',
             'until_date' => 'date',
             'end_after_count' => 'integer',
