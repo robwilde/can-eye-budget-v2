@@ -16,7 +16,6 @@ use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\RecentCategoryPicks;
-use Carbon\CarbonImmutable;
 use Closure;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
@@ -125,6 +124,7 @@ final class PlannedTransactionManager extends Component
             $plan->update([
                 'amount' => (int) round((float) $this->amount * 100),
                 'frequency' => $this->frequency,
+                ...($this->frequency !== $plan->frequency->value ? ['recurrence_interval' => 1, 'days_of_month' => null] : []),
                 'category_id' => $categoryId,
                 'direction' => $direction,
                 'is_active' => $this->isActive,
@@ -208,7 +208,7 @@ final class PlannedTransactionManager extends Component
             'accounts' => $this->accountsForUser($user),
             'plans' => $this->plannedTransactionsForSelectedAccount($user),
             'categories' => Category::visibleSortedByFullPath($user->id),
-            'frequencies' => RecurrenceFrequency::cases(),
+            'frequencies' => $this->frequencyOptions($editing),
             'directions' => TransactionDirection::cases(),
         ]);
     }
@@ -261,7 +261,7 @@ final class PlannedTransactionManager extends Component
             return collect();
         }
 
-        $today = CarbonImmutable::today();
+        $today = $user->today();
 
         $plans = PlannedTransaction::query()
             ->where('user_id', $user->id)
@@ -309,6 +309,20 @@ final class PlannedTransactionManager extends Component
             'notes' => ['nullable', 'string', 'max:1000'],
             ...$this->seriesRules($this->effectiveUntilType(), $this->editedType()),
         ];
+    }
+
+    /**
+     * The cadences to offer, plus the edited plan's own when it is one the editor cannot choose yet.
+     *
+     * @return list<RecurrenceFrequency>
+     */
+    private function frequencyOptions(?PlannedTransaction $editing): array
+    {
+        $options = RecurrenceFrequency::selectable();
+
+        return $editing !== null && ! in_array($editing->frequency, $options, true)
+            ? [...$options, $editing->frequency]
+            : $options;
     }
 
     private function editedType(): PlannedTransactionType

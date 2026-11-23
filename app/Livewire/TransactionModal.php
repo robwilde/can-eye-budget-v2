@@ -52,6 +52,7 @@ use App\Services\Transfers\TransferLinker;
 use App\Support\AmountParser;
 use App\Support\AmountParseResult;
 use App\Support\Categories\ProtectedCategories;
+use App\Support\Recurrence\ScheduleGenerator;
 use Carbon\CarbonImmutable;
 use Carbon\Exceptions\InvalidFormatException;
 use Closure;
@@ -1015,6 +1016,7 @@ final class TransactionModal extends Component
                 $this->transactionType === 'transfer',
             ),
             'amountStrategies' => PlanAmountStrategy::cases(),
+            'frequencyOptions' => $this->frequencyOptions(),
             'formatMoney' => MoneyCast::format(...),
             'parsedAmount' => $parsed->amount ?? 0,
             'parsedDescription' => $parsed->description ?? '',
@@ -1183,7 +1185,7 @@ final class TransactionModal extends Component
         }
 
         return $occurrence instanceof CarbonImmutable
-            && $occurrence->lessThanOrEqualTo(CarbonImmutable::today());
+            && $occurrence->lessThanOrEqualTo(auth()->user()->today());
     }
 
     public function updatedCategoriseMatching(): void
@@ -1803,6 +1805,11 @@ final class TransactionModal extends Component
 
         $data = $this->buildPlannedTransactionData($parsed);
         unset($data['user_id'], $data['is_active']);
+
+        if ($data['frequency'] !== $planned->frequency) {
+            $data['recurrence_interval'] = 1;
+            $data['days_of_month'] = null;
+        }
 
         DB::transaction(function () use ($planned, $data): void {
             $planned->update($data);
@@ -2624,27 +2631,45 @@ final class TransactionModal extends Component
     }
 
     /**
+     * The cadences to offer, plus the selected one when it is one the modal cannot choose yet.
+     *
+     * @return list<RecurrenceFrequency>
+     */
+    private function frequencyOptions(): array
+    {
+        $options = RecurrenceFrequency::selectable();
+        $current = RecurrenceFrequency::tryFrom($this->frequency);
+
+        return $current !== null && ! in_array($current, $options, true) ? [...$options, $current] : $options;
+    }
+
+    /**
      * First occurrence of the selected frequency strictly after today, starting
      * from the row's post date. Non-repeating plans (or a frequency that fails
      * to advance) default to tomorrow.
      */
     private function nextPlanStartDate(CarbonImmutable $from): string
     {
-        $today = CarbonImmutable::today();
+        $today = auth()->user()->today();
         $frequency = RecurrenceFrequency::tryFrom($this->frequency);
-        $date = $from->startOfDay();
 
-        while ($date->lessThanOrEqualTo($today)) {
-            $next = $frequency?->nextOccurrence($date);
-
-            if ($next === null || $next->lessThanOrEqualTo($date)) {
-                return $today->addDay()->format('Y-m-d');
-            }
-
-            $date = $next;
+        if ($frequency === null) {
+            return $today->addDay()->format('Y-m-d');
         }
 
-        return $date->format('Y-m-d');
+        $date = $from->startOfDay();
+
+        foreach (ScheduleGenerator::dates($frequency, $date) as $scheduled) {
+            if ($scheduled->greaterThan($today)) {
+                return $scheduled->format('Y-m-d');
+            }
+
+            if ($frequency === RecurrenceFrequency::DontRepeat) {
+                break;
+            }
+        }
+
+        return $today->addDay()->format('Y-m-d');
     }
 
     private function isTransfer(): bool
@@ -2984,7 +3009,7 @@ final class TransactionModal extends Component
             ],
             'merchantId' => ['nullable', Rule::exists('merchants', 'id')->where('user_id', auth()->id())],
             'date' => $this->mode === 'plan' && $this->editingPlannedTransactionId === null
-                ? ['required', 'date_format:Y-m-d', 'after:today']
+                ? ['required', 'date_format:Y-m-d', 'after:'.auth()->user()->today()->toDateString()]
                 : ['required', 'date_format:Y-m-d'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'tagIds' => ['array', 'max:50'],
