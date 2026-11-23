@@ -27,6 +27,8 @@ final class PlannedOccurrenceGenerator
 
     public const int CALENDAR_MONTHS = 13;
 
+    public const int HISTORY_MONTHS = 12;
+
     private const int INSERT_CHUNK = 500;
 
     /**
@@ -110,8 +112,23 @@ final class PlannedOccurrenceGenerator
     }
 
     /**
+     * Stores the plan's past occurrences from the last twelve months that are not stored yet, so a
+     * price change can pin what was already due. They are history, not debt: calendars only show
+     * open occurrences from the current cycle on.
+     */
+    public function backfillHistory(PlannedTransaction $plan, CarbonImmutable $today): int
+    {
+        if (! $plan->is_active) {
+            return 0;
+        }
+
+        return $this->generate($plan, $today->subMonths(self::HISTORY_MONTHS)->startOfDay(), $today);
+    }
+
+    /**
      * Removes the user's occurrences from before the current cycle that are still open: scheduled,
-     * not closed and not snoozed into the cycle. They are deleted, never marked missed.
+     * not closed, not snoozed into the cycle and without an amount of their own. They are deleted,
+     * never marked missed.
      */
     public function rebuildHistory(User $user): int
     {
@@ -121,6 +138,7 @@ final class PlannedOccurrenceGenerator
             ->forUser($user)
             ->where('status', OccurrenceStatus::Scheduled->value)
             ->whereNull('closed_at')
+            ->whereNull('expected_amount')
             ->where(static fn ($query) => $query
                 ->where(static fn ($unsnoozed) => $unsnoozed->whereNull('snoozed_until')->where('due_date', '<', $cycleStart))
                 ->orWhere('snoozed_until', '<', $cycleStart))

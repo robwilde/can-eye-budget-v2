@@ -13,6 +13,7 @@ use App\Enums\PlanOrigin;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\WeekendAdjustment;
+use App\Events\PlannedTransactionAmountChanged;
 use App\Events\PlannedTransactionCategoryUpdated;
 use App\Events\PlannedTransactionCreated;
 use App\Events\PlannedTransactionScheduleChanged;
@@ -489,6 +490,10 @@ final class PlannedTransaction extends Model
         });
 
         self::updated(static function (PlannedTransaction $plannedTransaction): void {
+            if ($plannedTransaction->wasChanged('amount')) {
+                event(new PlannedTransactionAmountChanged($plannedTransaction, (int) $plannedTransaction->getOriginal('amount')));
+            }
+
             if ($plannedTransaction->wasChanged(self::SCHEDULE_COLUMNS)) {
                 event(new PlannedTransactionScheduleChanged($plannedTransaction));
             }

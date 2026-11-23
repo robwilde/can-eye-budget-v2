@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace App\Support\Calendar;
 
+use App\Enums\OccurrenceStatus;
 use App\Enums\TransactionDirection;
 use App\Livewire\Dashboard\Data\PayCyclePip;
 use App\Models\Category;
+use App\Models\PlannedOccurrence;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Services\ReconciliationPolicy;
+use App\Services\Recurring\OccurrenceStateResolver;
 use Carbon\CarbonImmutable;
+use Closure;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 
@@ -41,8 +45,13 @@ final readonly class DayActivityLoader
      * Split transactions use: split category > clean description > raw description > 'Transaction'.
      * Unreconciled posted transactions use: clean description > tx category > raw description > 'Transaction'.
      *
-     * Unreconciled planned occurrences dated before $today (the server's date when omitted) are never
-     * rendered or counted: the past is represented by posted transactions only.
+     * Unreconciled planned occurrences dated before $today (the server's date when omitted) are not
+     * rendered or counted: the past is represented by posted transactions only. The one exception is a
+     * stored occurrence that is still open and due on or after $overdueFrom (the current cycle's
+     * start), which renders on its date as overdue instead of dropping out.
+     *
+     * Stored occurrences shape the planned pips: a skipped, missed or paid one is not rendered, a
+     * snoozed one renders on its snooze date, and an expected amount of its own replaces the plan's.
      *
      * Postings and occurrences up to the tolerance outside the range are fetched only to decide
      * matches (each posting pairs with its nearest occurrence); they are never rendered or counted.
@@ -53,7 +62,7 @@ final readonly class DayActivityLoader
      *
      * @return array<string, DayActivity>
      */
-    public function load(CarbonImmutable $start, CarbonImmutable $end, int $userId, bool $includeTransfers = false, ?CarbonImmutable $today = null): array
+    public function load(CarbonImmutable $start, CarbonImmutable $end, int $userId, bool $includeTransfers = false, ?CarbonImmutable $today = null, ?CarbonImmutable $overdueFrom = null): array
     {
         $tolerance = ReconciliationPolicy::DATE_TOLERANCE_DAYS;
 
@@ -72,7 +81,9 @@ final readonly class DayActivityLoader
 
         $startKey = $start->format('Y-m-d');
         $endKey = $end->format('Y-m-d');
-        $todayKey = ($today ?? CarbonImmutable::today())->format('Y-m-d');
+        $todayDate = $today ?? CarbonImmutable::today();
+        $todayKey = $todayDate->format('Y-m-d');
+        $overdueFromKey = $overdueFrom?->format('Y-m-d');
         $inRange = static fn (Transaction $t): bool => $t->post_date->format('Y-m-d') >= $startKey && $t->post_date->format('Y-m-d') <= $endKey;
         $transactions = $withinTolerance->filter($inRange)->values();
 
@@ -90,6 +101,15 @@ final readonly class DayActivityLoader
             : new EloquentCollection;
         $transferPlannedIds = array_flip($transferPlanned->modelKeys());
         $plannedTransactions = $ordinaryPlanned->concat($transferPlanned);
+        $storedOccurrences = $this->storedOccurrences($plannedTransactions, $start, $end, $tolerance);
+        $resolver = new OccurrenceStateResolver;
+        $snoozedByPlan = [];
+
+        foreach ($storedOccurrences as $stored) {
+            if ($stored->status === OccurrenceStatus::Scheduled && $stored->snoozed_until !== null) {
+                $snoozedByPlan[$stored->planned_transaction_id][] = $stored;
+            }
+        }
 
         $linkedCategories = Category::allWithLinkedParents($userId)->keyBy('id');
         $linked = static fn (?Category $category): ?Category => $category === null
@@ -183,31 +203,43 @@ final readonly class DayActivityLoader
             }
 
             $candidates = $reconciledByPlanned[$planned->id] ?? [];
-            $occurrences = $planned->occurrencesBetween($start->subDays($tolerance), $end->addDays($tolerance));
-            $matchedKeys = $this->matchedOccurrenceKeys($candidates, $occurrences);
+            $items = [];
+            $seen = [];
 
-            foreach ($occurrences as $occurrence) {
-                $key = $occurrence->format('Y-m-d');
+            foreach ($planned->scheduledBetween($start->subDays($tolerance), $end->addDays($tolerance)) as $item) {
+                $stored = $storedOccurrences[$planned->id.'|'.$item->original->format('Y-m-d')] ?? null;
 
-                if (isset($matchedKeys[$key]) || $key < $startKey || $key > $endKey || $key < $todayKey) {
+                if ($stored !== null) {
+                    $seen[$stored->id] = true;
+                }
+
+                if ($stored === null || $stored->status === OccurrenceStatus::Scheduled) {
+                    $items[] = [$stored, $stored->snoozed_until ?? $item->due];
+                }
+            }
+
+            foreach ($snoozedByPlan[$planned->id] ?? [] as $stored) {
+                if (! isset($seen[$stored->id])) {
+                    $items[] = [$stored, $stored->snoozed_until];
+                }
+            }
+
+            $matchedKeys = $this->matchedOccurrenceKeys($candidates, collect($items)->map(static fn (array $item): CarbonImmutable => $item[1]));
+
+            foreach ($items as [$stored, $effective]) {
+                $key = $effective->format('Y-m-d');
+
+                if (isset($matchedKeys[$key])) {
                     continue;
                 }
 
-                $plannedPipsByDate[$key] ??= [];
-                $plannedPipsByDate[$key][] = new PayCyclePip(
-                    kind: 'plan',
-                    tone: $isTransfer ? 'xfer' : ($planned->direction === TransactionDirection::Credit ? 'inc' : 'out'),
-                    name: $planned->category?->name ?? $planned->description, // @phpstan-ignore nullsafe.neverNull
-                    amount: abs((int) $planned->amount),
-                    icon: $iconFor($planned->category),
-                    transactionId: null,
-                    plannedTransactionId: $planned->id,
-                    occurrenceDate: $key,
-                    tooltip: $planned->category !== null ? $planned->description : null,
-                    categoryPath: $pathFor($planned->category),
-                    detail: $planned->description !== '' ? $planned->description : null,
-                    transferFlow: $planFlow,
-                );
+                $isOverdue = $key < $todayKey && $stored !== null && $overdueFromKey !== null && $key >= $overdueFromKey;
+
+                if ($key < $startKey || $key > $endKey || ($key < $todayKey && ! $isOverdue)) {
+                    continue;
+                }
+
+                $plannedPipsByDate[$key][] = $this->plannedPip($planned, $stored, $key, $isTransfer, $planFlow, $resolver, $todayDate, $iconFor, $pathFor);
             }
         }
 
@@ -328,6 +360,69 @@ final readonly class DayActivityLoader
         $clean = mb_trim($tx->clean_description ?? '');
 
         return $clean !== '' ? $clean : null;
+    }
+
+    /**
+     * The stored occurrences that can shape the pips in the range: those whose original date is near it
+     * and those snoozed into it, keyed by plan and original date.
+     *
+     * @param  Collection<int, PlannedTransaction>|EloquentCollection<int, PlannedTransaction>  $plans
+     * @return array<string, PlannedOccurrence>
+     */
+    private function storedOccurrences(Collection|EloquentCollection $plans, CarbonImmutable $start, CarbonImmutable $end, int $tolerance): array
+    {
+        if ($plans->isEmpty()) {
+            return [];
+        }
+
+        $byPlan = $plans->keyBy('id');
+        $stored = [];
+
+        PlannedOccurrence::query()
+            ->whereIn('planned_transaction_id', $byPlan->keys()->all())
+            ->where(static fn ($query) => $query
+                ->whereBetween('original_date', [$start->subDays($tolerance + 3)->startOfDay(), $end->addDays($tolerance + 3)])
+                ->orWhereBetween('snoozed_until', [$start->startOfDay(), $end]))
+            ->get()
+            ->each(static function (PlannedOccurrence $occurrence) use ($byPlan, &$stored): void {
+                $occurrence->setRelation('plannedTransaction', $byPlan[$occurrence->planned_transaction_id]);
+                $stored[$occurrence->planned_transaction_id.'|'.$occurrence->original_date->format('Y-m-d')] = $occurrence;
+            });
+
+        return $stored;
+    }
+
+    /**
+     * @param  Closure(?Category): ?string  $iconFor
+     * @param  Closure(?Category): ?string  $pathFor
+     */
+    private function plannedPip(
+        PlannedTransaction $planned,
+        ?PlannedOccurrence $stored,
+        string $key,
+        bool $isTransfer,
+        ?string $planFlow,
+        OccurrenceStateResolver $resolver,
+        CarbonImmutable $today,
+        Closure $iconFor,
+        Closure $pathFor,
+    ): PayCyclePip {
+        return new PayCyclePip(
+            kind: 'plan',
+            tone: $isTransfer ? 'xfer' : ($planned->direction === TransactionDirection::Credit ? 'inc' : 'out'),
+            name: $planned->category?->name ?? $planned->description, // @phpstan-ignore nullsafe.neverNull
+            amount: abs($stored->expected_amount ?? (int) $planned->amount),
+            icon: $iconFor($planned->category),
+            transactionId: null,
+            plannedTransactionId: $planned->id,
+            occurrenceDate: $key,
+            tooltip: $planned->category !== null ? $planned->description : null,
+            categoryPath: $pathFor($planned->category),
+            detail: $planned->description !== '' ? $planned->description : null,
+            transferFlow: $planFlow,
+            occurrenceId: $stored?->id,
+            occurrenceState: $stored === null ? null : $resolver->resolve($stored, $today)->value,
+        );
     }
 
     /**

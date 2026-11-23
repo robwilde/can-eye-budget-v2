@@ -7,6 +7,7 @@ declare(strict_types=1);
 use App\Enums\PayFrequency;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Jobs\GeneratePlannedOccurrencesJob;
 use App\Livewire\CalendarView;
 use App\Livewire\Data\CalendarDayData;
 use App\Models\Account;
@@ -17,6 +18,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Carbon\Constants\UnitValue;
+use Illuminate\Support\Facades\Bus;
 use Livewire\Livewire;
 
 test('component renders for authenticated user', function () {
@@ -1340,7 +1342,8 @@ test('goToToday returns to the month and day of the users own date', function ()
         ->assertSet('selectedDate', '2026-12-01');
 });
 
-test('keeps an unpaid plan date out of the grid once it is past on the users own date', function () {
+test('drops an unstored plan date that is past on the users own date', function () {
+    Bus::fake([GeneratePlannedOccurrencesJob::class]);
     useAppTimezone('Australia/Brisbane');
     $this->travelTo(CarbonImmutable::parse('2026-03-10 22:30:00', 'Australia/Brisbane'));
     $auckland = User::factory()->withTimezone('Pacific/Auckland')->create();
@@ -1354,5 +1357,23 @@ test('keeps an unpaid plan date out of the grid once it is past on the users own
     $march10 = $days->first(fn (CalendarDayData $day): bool => $day->iso === '2026-03-10');
 
     expect($march10->isPast)->toBeTrue()
-        ->and(count($march10->pips))->toBe(0);
+        ->and($march10->pips)->toHaveCount(0);
+});
+
+test('shows an open stored occurrence on its past day as overdue by the users own date', function () {
+    useAppTimezone('Australia/Brisbane');
+    $this->travelTo(CarbonImmutable::parse('2026-03-10 22:30:00', 'Australia/Brisbane'));
+    $auckland = User::factory()->withTimezone('Pacific/Auckland')->create();
+    $account = Account::factory()->for($auckland)->create();
+    PlannedTransaction::factory()->for($auckland)->for($account)->noRepeat()->create([
+        'description' => 'Rates bill',
+        'start_date' => '2026-03-07',
+    ]);
+
+    $days = collect(Livewire::actingAs($auckland)->test(CalendarView::class)->get('days'));
+    $march7 = $days->first(fn (CalendarDayData $day): bool => $day->iso === '2026-03-07');
+
+    expect($march7->isPast)->toBeTrue()
+        ->and($march7->pips)->toHaveCount(1)
+        ->and($march7->pips[0]->occurrenceState)->toBe('overdue');
 });

@@ -11,6 +11,7 @@ use App\Livewire\Dashboard\Data\PayCycleDayData;
 use App\Livewire\Dashboard\Data\PayCyclePip;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Recurring\PlannedOccurrenceGenerator;
 use App\Support\Calendar\DayActivity;
 use App\Support\Calendar\DayActivityLoader;
 use Carbon\CarbonImmutable;
@@ -152,7 +153,7 @@ final class PayCycleCalendar extends Component
 
         $userId = (int) auth()->id();
 
-        $activity = (new DayActivityLoader)->load($cycleStart, $lastRenderedDay, $userId, includeTransfers: true, today: $today);
+        $activity = (new DayActivityLoader)->load($cycleStart, $lastRenderedDay, $userId, includeTransfers: true, today: $today, overdueFrom: app(PlannedOccurrenceGenerator::class)->cycleStart(auth()->user(), $today));
 
         $days = [];
         $cursor = $cycleStart;

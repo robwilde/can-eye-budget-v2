@@ -7,15 +7,18 @@ declare(strict_types=1);
 use App\Enums\PayFrequency;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Jobs\GeneratePlannedOccurrencesJob;
 use App\Livewire\Dashboard\Data\PayCycleDayData;
 use App\Livewire\Dashboard\PayCycleCalendar;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\PlannedOccurrence;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Carbon\Constants\UnitValue;
+use Illuminate\Support\Facades\Bus;
 use Livewire\Livewire;
 
 function nextMondayAtLeastDaysAhead(int $minDaysAhead): CarbonImmutable
@@ -1204,7 +1207,8 @@ test('a plan due on the user local date still shows on the calendar when the ser
         ->and(collect($today->pips)->where('kind', 'plan'))->toHaveCount(1);
 });
 
-test('an unmatched plan from the user local yesterday is not shown when the server date is still that day', function () {
+test('an unmatched plan with no stored occurrence from the user local yesterday is not shown when the server date is still that day', function () {
+    Bus::fake([GeneratePlannedOccurrencesJob::class]);
     useAppTimezone('UTC');
     $this->travelTo(CarbonImmutable::parse('2026-04-17 14:05:00', 'UTC'));
 
@@ -1227,4 +1231,55 @@ test('an unmatched plan from the user local yesterday is not shown when the serv
     $past = collect($days)->firstWhere('iso', '2026-04-17');
 
     expect(collect($past->pips)->where('kind', 'plan'))->toHaveCount(0);
+});
+
+test('an unmatched plan with a stored occurrence from the user local yesterday is shown as due', function () {
+    useAppTimezone('UTC');
+    $this->travelTo(CarbonImmutable::parse('2026-04-17 14:05:00', 'UTC'));
+
+    $user = User::factory()->withTimezone('Australia/Sydney')->create([
+        'pay_amount' => 570660,
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => '2026-04-24',
+    ]);
+    $account = Account::factory()->for($user)->create();
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 60000,
+        'start_date' => '2026-04-17',
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'is_active' => true,
+    ]);
+
+    /** @var list<PayCycleDayData> $days */
+    $days = Livewire::actingAs($user)->test(PayCycleCalendar::class)->instance()->days();
+    $past = collect($days)->firstWhere('iso', '2026-04-17');
+
+    $plans = collect($past->pips)->where('kind', 'plan');
+
+    expect($plans)->toHaveCount(1)
+        ->and($plans->first()->occurrenceState)->toBe('due');
+});
+
+test('a past pay cycle does not show its open stored occurrences as overdue', function () {
+    useAppTimezone('UTC');
+    $this->travelTo(CarbonImmutable::parse('2026-11-23 12:00:00', 'UTC'));
+    $user = User::factory()->create([
+        'pay_amount' => 570660,
+        'pay_frequency' => PayFrequency::Fortnightly,
+        'next_pay_date' => '2026-12-03',
+    ]);
+    $plan = PlannedTransaction::factory()->for($user)->for(Account::factory()->for($user))->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 60000,
+        'start_date' => '2026-11-10',
+        'frequency' => RecurrenceFrequency::DontRepeat,
+    ]);
+    PlannedOccurrence::factory()->for($plan, 'plannedTransaction')->create(['original_date' => '2026-11-10', 'due_date' => '2026-11-10']);
+
+    $component = Livewire::actingAs($user)->test(PayCycleCalendar::class)->call('previousCycle');
+    $past = collect($component->instance()->days())->firstWhere('iso', '2026-11-10');
+
+    expect($past)->not->toBeNull()
+        ->and(collect($past->pips)->where('kind', 'plan'))->toHaveCount(0);
 });

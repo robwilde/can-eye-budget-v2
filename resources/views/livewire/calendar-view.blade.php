@@ -101,6 +101,9 @@
                 </div>
             </div>
             <div class="cyc-detail-body">
+                @error('occurrence')
+                    <p class="mb-2 text-sm text-red-700" data-testid="occurrence-error" role="alert">{{ $message }}</p>
+                @enderror
                 @forelse ($this->selectedDay['pips'] as $pip)
                     <x-cib.tx-row
                             :transaction-id="$pip->transactionId"
@@ -113,6 +116,14 @@
                             :matched="$pip->matched"
                             :title="$pip->tooltip"
                     />
+                    @if ($pip->occurrenceId !== null)
+                        <div class="mt-1 mb-2 flex flex-wrap items-center gap-2 pl-12 text-xs" data-testid="occurrence-actions-{{ $pip->occurrenceId }}" wire:key="occurrence-{{ $pip->occurrenceId }}">
+                            <span class="chip-count" data-testid="occurrence-state">{{ \App\Enums\OccurrenceState::from($pip->occurrenceState)->label() }}</span>
+                            <button type="button" class="cib-link" wire:click="skipOccurrence({{ $pip->occurrenceId }})" data-testid="occurrence-skip">{{ __('Skip') }}</button>
+                            <input type="date" class="rounded border border-neutral-300 px-1 py-0.5" wire:model="snoozeDates.{{ $pip->occurrenceId }}" aria-label="{{ __('Snooze until') }}" data-testid="occurrence-snooze-date">
+                            <button type="button" class="cib-link" wire:click="snoozeOccurrence({{ $pip->occurrenceId }})" data-testid="occurrence-snooze">{{ __('Snooze') }}</button>
+                        </div>
+                    @endif
                 @empty
                     <p class="cyc-empty">Nothing on this day.</p>
                 @endforelse
