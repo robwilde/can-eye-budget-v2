@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Enums\WeekendAdjustment;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
@@ -478,4 +479,69 @@ test('planned occurrences before a window still count towards the end count', fu
     $dates = app(ReportAggregator::class)->planOccurrences($plan, CarbonImmutable::parse('2026-07-10'), CarbonImmutable::parse('2026-07-31'));
 
     expect(array_map(fn (CarbonImmutable $date): string => $date->toDateString(), $dates))->toBe(['2026-07-13', '2026-07-20']);
+});
+
+test('planned occurrences are computed from the start date without drifting', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $plan = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'frequency' => RecurrenceFrequency::EveryMonth,
+        'start_date' => '2026-01-31',
+    ]);
+
+    $dates = app(ReportAggregator::class)->planOccurrences($plan, CarbonImmutable::parse('2026-01-01'), CarbonImmutable::parse('2026-05-31'));
+
+    expect(array_map(fn (CarbonImmutable $date): string => $date->toDateString(), $dates))->toBe(['2026-01-31', '2026-02-28', '2026-03-31', '2026-04-30', '2026-05-31']);
+});
+
+test('planned occurrences use the due date after a weekend adjustment', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $plan = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'frequency' => RecurrenceFrequency::EveryMonth,
+        'start_date' => '2026-03-14',
+        'weekend_adjustment' => WeekendAdjustment::After,
+    ]);
+
+    $dates = app(ReportAggregator::class)->planOccurrences($plan, CarbonImmutable::parse('2026-03-16'), CarbonImmutable::parse('2026-05-31'));
+
+    expect(array_map(fn (CarbonImmutable $date): string => $date->toDateString(), $dates))->toBe(['2026-03-16', '2026-04-14', '2026-05-14']);
+});
+
+test('planned occurrences cover the semimonthly cadence', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $plan = PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $account->id,
+        'frequency' => RecurrenceFrequency::Semimonthly,
+        'start_date' => '2026-01-01',
+        'days_of_month' => [15, 'last'],
+    ]);
+
+    $dates = app(ReportAggregator::class)->planOccurrences($plan, CarbonImmutable::parse('2026-02-01'), CarbonImmutable::parse('2026-03-15'));
+
+    expect(array_map(fn (CarbonImmutable $date): string => $date->toDateString(), $dates))->toBe(['2026-02-15', '2026-02-28', '2026-03-15']);
+});
+
+test('inactive plans have no planned occurrences', function () {
+    $plan = PlannedTransaction::factory()->inactive()->create(['start_date' => '2026-01-01']);
+
+    expect(app(ReportAggregator::class)->planOccurrences($plan, CarbonImmutable::parse('2026-01-01'), CarbonImmutable::parse('2026-06-30')))->toBe([]);
+});
+
+test('planned occurrences find a before adjusted date at the end of the window', function () {
+    $plan = PlannedTransaction::factory()->create([
+        'frequency' => RecurrenceFrequency::EveryMonth,
+        'start_date' => '2026-03-15',
+        'weekend_adjustment' => WeekendAdjustment::Before,
+    ]);
+
+    $dates = app(ReportAggregator::class)->planOccurrences($plan, CarbonImmutable::parse('2026-03-01'), CarbonImmutable::parse('2026-03-13'));
+
+    expect(array_map(fn (CarbonImmutable $date): string => $date->toDateString(), $dates))->toBe(['2026-03-13']);
 });

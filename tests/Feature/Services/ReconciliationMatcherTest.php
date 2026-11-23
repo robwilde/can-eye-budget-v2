@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Enums\WeekendAdjustment;
 use App\Models\Account;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
@@ -325,5 +326,23 @@ test('unclaimed occurrences list every open occurrence in plan then date order',
     expect($occurrences)->toHaveCount(1)
         ->and($occurrences->first()->plan->id)->toBe($monthly->id)
         ->and($occurrences->first()->date->toDateString())->toBe('2026-03-15')
+        ->and($occurrences->first()->dayDiff)->toBe(0);
+});
+
+test('unclaimed occurrences keep the original scheduled date beside the weekend adjusted one', function () {
+    $plan = PlannedTransaction::factory()->for($this->user)->for($this->account)->create([
+        'amount' => 1000,
+        'direction' => TransactionDirection::Debit,
+        'frequency' => RecurrenceFrequency::EveryMonth,
+        'start_date' => '2026-03-14',
+        'weekend_adjustment' => WeekendAdjustment::After,
+        'until_date' => null,
+    ]);
+
+    $occurrences = $this->matcher->unclaimedOccurrences($this->user->id, collect([$plan]), CarbonImmutable::parse('2026-03-16'));
+
+    expect($occurrences)->toHaveCount(1)
+        ->and($occurrences->first()->date->toDateString())->toBe('2026-03-16')
+        ->and($occurrences->first()->originalDate?->toDateString())->toBe('2026-03-14')
         ->and($occurrences->first()->dayDiff)->toBe(0);
 });

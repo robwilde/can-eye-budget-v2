@@ -7,6 +7,7 @@ use App\Enums\InsightStatus;
 use App\Enums\InsightType;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Enums\WeekendAdjustment;
 use App\Jobs\GenerateInsightsJob;
 use App\Models\Account;
 use App\Models\AccountDailyBalance;
@@ -507,4 +508,36 @@ it('does not flag a plan whose end count is used up in the subscription audit', 
     GenerateInsightsJob::dispatchSync($this->user);
 
     expect(insightsOf($this->user, InsightType::SubscriptionAudit))->toHaveCount(0);
+});
+
+it('audits a plan on an interval cadence by its own schedule', function () {
+    $plan = monthlyBill($this->user, $this->account, 'Water', [
+        'frequency' => RecurrenceFrequency::EveryNMonths,
+        'recurrence_interval' => 2,
+        'start_date' => '2026-01-11',
+    ]);
+    paidOn($plan, '2026-07-11');
+
+    GenerateInsightsJob::dispatchSync($this->user);
+
+    $insight = insightsOf($this->user, InsightType::SubscriptionAudit)->sole();
+
+    expect($insight->comparison)->toBe(['planned_transaction_id' => $plan->id, 'cycles_overdue' => 1]);
+});
+
+it('steps a weekend adjusted plan through its original dates in the subscription audit', function () {
+    $plan = monthlyBill($this->user, $this->account, 'Streaming', [
+        'frequency' => RecurrenceFrequency::EveryNMonths,
+        'recurrence_interval' => 2,
+        'start_date' => '2026-01-11',
+        'weekend_adjustment' => WeekendAdjustment::After,
+    ]);
+    paidOn($plan, '2026-07-11');
+
+    GenerateInsightsJob::dispatchSync($this->user);
+
+    $insight = insightsOf($this->user, InsightType::SubscriptionAudit)->sole();
+
+    expect($insight->comparison)->toBe(['planned_transaction_id' => $plan->id, 'cycles_overdue' => 1])
+        ->and($insight->figures['last_paid_date'])->toBe('2026-07-11');
 });

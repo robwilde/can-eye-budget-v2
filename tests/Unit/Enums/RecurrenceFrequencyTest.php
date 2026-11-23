@@ -8,7 +8,8 @@ use App\Enums\RecurrenceFrequency;
 use Carbon\CarbonImmutable;
 
 test('all recurrence frequency cases exist', function () {
-    expect(RecurrenceFrequency::cases())->toHaveCount(18);
+    expect(RecurrenceFrequency::cases())->toHaveCount(22)
+        ->and(RecurrenceFrequency::selectable())->toHaveCount(18);
 });
 
 test('recurrence frequency has correct backing values', function () {
@@ -160,7 +161,7 @@ test('all repeating frequencies return carbon immutable', function (RecurrenceFr
     expect($frequency->nextOccurrence($from))->toBeInstanceOf(CarbonImmutable::class);
 })->with(
     array_filter(
-        RecurrenceFrequency::cases(),
+        RecurrenceFrequency::selectable(),
         fn (RecurrenceFrequency $f) => $f !== RecurrenceFrequency::DontRepeat,
     ),
 );
@@ -172,7 +173,44 @@ test('all repeating frequencies return a date after the input', function (Recurr
     expect($result->greaterThan($from))->toBeTrue();
 })->with(
     array_filter(
-        RecurrenceFrequency::cases(),
+        RecurrenceFrequency::selectable(),
         fn (RecurrenceFrequency $f) => $f !== RecurrenceFrequency::DontRepeat,
     ),
 );
+
+test('the interval cadences are labelled with their interval', function () {
+    expect(RecurrenceFrequency::EveryNWeeks->label(3))->toBe('Every 3 weeks')
+        ->and(RecurrenceFrequency::EveryNMonths->label(5))->toBe('Every 5 months')
+        ->and(RecurrenceFrequency::EveryNYears->label(2))->toBe('Every 2 years')
+        ->and(RecurrenceFrequency::EveryNMonths->label())->toBe('Every month')
+        ->and(RecurrenceFrequency::Semimonthly->label())->toBe('Twice a month');
+});
+
+test('only the interval cadences use the interval', function () {
+    $using = array_filter(RecurrenceFrequency::cases(), fn (RecurrenceFrequency $frequency): bool => $frequency->usesInterval());
+
+    expect(array_values($using))->toBe([RecurrenceFrequency::EveryNWeeks, RecurrenceFrequency::EveryNMonths, RecurrenceFrequency::EveryNYears]);
+});
+
+test('day and month steps scale with the interval', function () {
+    expect(RecurrenceFrequency::EveryNWeeks->dayStep(3))->toBe(21)
+        ->and(RecurrenceFrequency::Every2Weeks->dayStep(9))->toBe(14)
+        ->and(RecurrenceFrequency::EveryNMonths->monthStep(5))->toBe(5)
+        ->and(RecurrenceFrequency::EveryNYears->monthStep(2))->toBe(24)
+        ->and(RecurrenceFrequency::EveryYear->monthStep(9))->toBe(12)
+        ->and(RecurrenceFrequency::Semimonthly->monthStep())->toBe(1)
+        ->and(RecurrenceFrequency::EveryMonth->dayStep())->toBeNull()
+        ->and(RecurrenceFrequency::EveryWorkday->dayStep())->toBeNull()
+        ->and(RecurrenceFrequency::EveryWorkday->monthStep())->toBeNull();
+});
+
+test('the interval and day list cadences have no single next step', function (RecurrenceFrequency $frequency) {
+    expect($frequency->nextOccurrence(CarbonImmutable::parse('2026-03-26')))->toBeNull();
+})->with([RecurrenceFrequency::Semimonthly, RecurrenceFrequency::EveryNWeeks, RecurrenceFrequency::EveryNMonths, RecurrenceFrequency::EveryNYears]);
+
+test('new cadences have the expected backing values', function () {
+    expect(RecurrenceFrequency::Semimonthly->value)->toBe('semimonthly')
+        ->and(RecurrenceFrequency::EveryNWeeks->value)->toBe('every-n-weeks')
+        ->and(RecurrenceFrequency::EveryNMonths->value)->toBe('every-n-months')
+        ->and(RecurrenceFrequency::EveryNYears->value)->toBe('every-n-years');
+});

@@ -1313,3 +1313,46 @@ test('plan and still-to-come figures leave out plans on accounts excluded from r
     expect($component->get('plannedToCome'))->toBe(['income' => 0, 'spend' => 150000])
         ->and($component->get('monthFlow')->planExpense)->toBe(150000);
 });
+
+test('opens on the month and day of the users own date', function () {
+    useAppTimezone('Australia/Brisbane');
+    $this->travelTo(CarbonImmutable::parse('2026-11-30 21:30:00', 'Australia/Brisbane'));
+    $auckland = User::factory()->withTimezone('Pacific/Auckland')->create();
+
+    $component = Livewire::actingAs($auckland)->test(CalendarView::class);
+
+    $component->assertSet('currentMonth', '2026-12')
+        ->assertSet('selectedDate', '2026-12-01');
+
+    expect($component->get('headerLabel')['isCurrentMonth'])->toBeTrue();
+});
+
+test('goToToday returns to the month and day of the users own date', function () {
+    useAppTimezone('Australia/Brisbane');
+    $this->travelTo(CarbonImmutable::parse('2026-11-30 21:30:00', 'Australia/Brisbane'));
+    $auckland = User::factory()->withTimezone('Pacific/Auckland')->create();
+
+    Livewire::actingAs($auckland)
+        ->test(CalendarView::class)
+        ->set('currentMonth', '2026-06')
+        ->call('goToToday')
+        ->assertSet('currentMonth', '2026-12')
+        ->assertSet('selectedDate', '2026-12-01');
+});
+
+test('keeps an unpaid plan date out of the grid once it is past on the users own date', function () {
+    useAppTimezone('Australia/Brisbane');
+    $this->travelTo(CarbonImmutable::parse('2026-03-10 22:30:00', 'Australia/Brisbane'));
+    $auckland = User::factory()->withTimezone('Pacific/Auckland')->create();
+    $account = Account::factory()->for($auckland)->create();
+    PlannedTransaction::factory()->for($auckland)->for($account)->noRepeat()->create([
+        'description' => 'Rates bill',
+        'start_date' => '2026-03-10',
+    ]);
+
+    $days = collect(Livewire::actingAs($auckland)->test(CalendarView::class)->get('days'));
+    $march10 = $days->first(fn (CalendarDayData $day): bool => $day->iso === '2026-03-10');
+
+    expect($march10->isPast)->toBeTrue()
+        ->and(count($march10->pips))->toBe(0);
+});

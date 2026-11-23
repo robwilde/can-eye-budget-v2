@@ -18,6 +18,7 @@ use App\Models\MerchantAlias;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
@@ -722,4 +723,70 @@ it('lists the type under its heading', function () {
         ->test(PlannedTransactionManager::class)
         ->assertSeeInOrder(['Description', 'Type', 'Amount', 'Direction'])
         ->assertSeeHtmlInOrder(['data-testid="plan-type"', 'Subscription', 'Debit']);
+});
+
+it('works out the next occurrence on the users local date', function () {
+    useAppTimezone('Australia/Brisbane');
+    $this->travelTo(CarbonImmutable::parse('2026-03-01 22:00:00', 'Australia/Brisbane'));
+    $auckland = User::factory()->withTimezone('Pacific/Auckland')->create();
+    $account = Account::factory()->for($auckland)->create();
+    $auckland->update(['primary_account_id' => $account->id]);
+    PlannedTransaction::factory()->monthly()->for($auckland)->for($account)->create([
+        'description' => 'Rates',
+        'start_date' => '2026-03-01',
+    ]);
+
+    Livewire::actingAs($auckland)
+        ->test(PlannedTransactionManager::class)
+        ->assertSee('2026-04-01')
+        ->assertDontSee('2026-03-01');
+});
+
+it('shows the interval label of a plan on a new cadence', function () {
+    managerPlan($this, [
+        'description' => 'Insurance',
+        'frequency' => RecurrenceFrequency::EveryNMonths,
+        'recurrence_interval' => 5,
+    ]);
+
+    Livewire::actingAs($this->user)
+        ->test(PlannedTransactionManager::class)
+        ->assertSee('Every 5 months');
+});
+
+it('offers only the fixed cadences in the edit form', function () {
+    $plan = managerPlan($this);
+
+    managerEditing($this, $plan)
+        ->assertSeeHtml('value="every-month"')
+        ->assertDontSeeHtml('value="semimonthly"')
+        ->assertDontSeeHtml('value="every-n-months"');
+});
+
+it('shows a plan on a custom cadence as kept as is and keeps its schedule when saved', function () {
+    $plan = managerPlan($this, ['frequency' => RecurrenceFrequency::Semimonthly, 'days_of_month' => [15, 'last']]);
+
+    managerEditing($this, $plan)
+        ->assertSeeHtml('value="semimonthly"')
+        ->assertSee('Custom schedule (kept as is)')
+        ->set('autopay', true)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $fresh = $plan->fresh();
+
+    expect($fresh->frequency)->toBe(RecurrenceFrequency::Semimonthly)
+        ->and($fresh->days_of_month)->toBe([15, 'last']);
+});
+
+it('clears the interval and days when a custom cadence is changed to a fixed one', function () {
+    $plan = managerPlan($this, ['frequency' => RecurrenceFrequency::EveryNMonths, 'recurrence_interval' => 5, 'days_of_month' => [10]]);
+
+    managerEditing($this, $plan)->set('frequency', 'every-month')->call('save')->assertHasNoErrors();
+
+    $fresh = $plan->fresh();
+
+    expect($fresh->frequency)->toBe(RecurrenceFrequency::EveryMonth)
+        ->and($fresh->recurrence_interval)->toBe(1)
+        ->and($fresh->days_of_month)->toBeNull();
 });
