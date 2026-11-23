@@ -44,3 +44,24 @@ test('parse extracts amount and description', function (string $input, int $expe
     'unary positive' => ['+25 bonus', 2500, 'bonus'],
     'nested parentheses' => ['50 rent (April (late))', 5000, 'rent'],
 ]);
+
+it('flags an amount with more than two decimal places', function (string $input, bool $excess) {
+    expect(AmountParser::hasExcessDecimals($input))->toBe($excess);
+})->with([
+    ['10.123 gym', true],
+    ['10.12 gym', false],
+    ['10.1 gym', false],
+    ['10 gym', false],
+    ['10.50 + 0.125 gym', true],
+    ['(1.2345) 10 gym', false],
+    ['gym 10.123', false],
+    ['', false],
+    ['0.5*0.25 gym', true],
+    ['10/3 gym', true],
+    ['10.1 23 gym', true],
+    ['1.5*3 gym', false],
+    ['0.1+0.2 gym', false],
+    ['100/4 gym', false],
+    ['3*0.1 gym', false],
+    ['.5 gym', false],
+]);

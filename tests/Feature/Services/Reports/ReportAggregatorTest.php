@@ -446,3 +446,36 @@ test('open-range plan atoms start on the first of the user local month', functio
 
     expect(array_column($atoms, 'ym'))->toBe(['2026-04']);
 });
+
+test('planned occurrences stop at the end count', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    PlannedTransaction::factory()->weekly()->for($user)->create([
+        'account_id' => $account->id,
+        'amount' => 1000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => '2026-07-06',
+        'end_after_count' => 3,
+        'is_active' => true,
+    ]);
+
+    $atoms = app(ReportAggregator::class)->atoms($user, 'plan', CarbonImmutable::parse('2026-07-01'), CarbonImmutable::parse('2026-07-31')->endOfDay());
+
+    expect((int) collect($atoms)->sum('count'))->toBe(3);
+});
+
+test('planned occurrences before a window still count towards the end count', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+
+    $plan = PlannedTransaction::factory()->weekly()->for($user)->create([
+        'account_id' => $account->id,
+        'start_date' => '2026-07-06',
+        'end_after_count' => 3,
+    ]);
+
+    $dates = app(ReportAggregator::class)->planOccurrences($plan, CarbonImmutable::parse('2026-07-10'), CarbonImmutable::parse('2026-07-31'));
+
+    expect(array_map(fn (CarbonImmutable $date): string => $date->toDateString(), $dates))->toBe(['2026-07-13', '2026-07-20']);
+});
