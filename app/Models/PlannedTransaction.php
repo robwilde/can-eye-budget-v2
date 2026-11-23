@@ -15,6 +15,7 @@ use App\Enums\TransactionDirection;
 use App\Enums\WeekendAdjustment;
 use App\Events\PlannedTransactionCategoryUpdated;
 use App\Events\PlannedTransactionCreated;
+use App\Events\PlannedTransactionScheduleChanged;
 use App\Rules\PaymentUrl;
 use App\Support\Recurrence\ScheduleGenerator;
 use Carbon\CarbonImmutable;
@@ -73,6 +74,18 @@ final class PlannedTransaction extends Model
     use HasFactory;
 
     public const int MAX_CONSECUTIVE_SKIPS = 400;
+
+    /** @var list<string> */
+    public const array SCHEDULE_COLUMNS = [
+        'start_date',
+        'frequency',
+        'recurrence_interval',
+        'days_of_month',
+        'weekend_adjustment',
+        'until_date',
+        'end_after_count',
+        'is_active',
+    ];
 
     public const int WEEKEND_ADJUSTMENT_REACH_DAYS = 3;
 
@@ -476,6 +489,10 @@ final class PlannedTransaction extends Model
         });
 
         self::updated(static function (PlannedTransaction $plannedTransaction): void {
+            if ($plannedTransaction->wasChanged(self::SCHEDULE_COLUMNS)) {
+                event(new PlannedTransactionScheduleChanged($plannedTransaction));
+            }
+
             if ($plannedTransaction->wasChanged('category_id')) {
                 event(new PlannedTransactionCategoryUpdated(
                     $plannedTransaction,
