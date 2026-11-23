@@ -390,13 +390,6 @@ it('matches the fixed cadences when the interval is one', function (RecurrenceFr
     'years' => [RecurrenceFrequency::EveryNYears, RecurrenceFrequency::EveryYear],
 ]);
 
-it('reads at most 1000 dates from the start of a window search and still finds the next date', function () {
-    $plan = cadencePlan('2020-01-01', RecurrenceFrequency::Everyday);
-
-    expect(cadenceDates($plan, '2026-01-01', '2026-01-31'))->toBe([])
-        ->and($plan->nextOccurrenceOnOrAfter(CarbonImmutable::parse('2026-01-01'))?->toDateString())->toBe('2026-01-01');
-});
-
 it('does not hang on a stored empty list of days', function () {
     $plan = PlannedTransaction::factory()->create(['frequency' => RecurrenceFrequency::EveryMonth, 'start_date' => '2026-01-10']);
     DB::table('planned_transactions')->where('id', $plan->id)->update(['days_of_month' => '[]']);

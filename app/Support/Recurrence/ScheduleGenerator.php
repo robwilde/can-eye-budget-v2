@@ -7,6 +7,7 @@ namespace App\Support\Recurrence;
 use App\Casts\DaysOfMonthCast;
 use App\Enums\RecurrenceFrequency;
 use Carbon\CarbonImmutable;
+use Carbon\Constants\UnitValue;
 use Generator;
 
 /**
@@ -18,6 +19,9 @@ final class ScheduleGenerator
     /**
      * The scheduled dates in order, without end of series or weekend adjustment. Endless: the caller stops.
      *
+     * With $from the generator seeks straight to it instead of walking from the start: it may yield
+     * some dates before $from but never skips one on or after it.
+     *
      * @param  list<int|string>|null  $daysOfMonth
      * @return Generator<int, CarbonImmutable>
      */
@@ -26,6 +30,7 @@ final class ScheduleGenerator
         CarbonImmutable $start,
         int $interval = 1,
         ?array $daysOfMonth = null,
+        ?CarbonImmutable $from = null,
     ): Generator {
         $interval = max(1, $interval);
 
@@ -38,7 +43,7 @@ final class ScheduleGenerator
         $dayStep = $frequency->dayStep($interval);
 
         if ($dayStep !== null) {
-            yield from self::everyDays($start, $dayStep);
+            yield from self::everyDays($start, $dayStep, $from);
 
             return;
         }
@@ -46,20 +51,24 @@ final class ScheduleGenerator
         $monthStep = $frequency->monthStep($interval);
 
         if ($monthStep !== null) {
-            yield from self::monthly($frequency, $start, $monthStep, $daysOfMonth);
+            yield from self::monthly($frequency, $start, $monthStep, $daysOfMonth, $from);
 
             return;
         }
 
-        for ($current = $start; $current !== null; $current = $frequency->nextOccurrence($current)) {
+        for ($current = self::stepwiseStart($frequency, $start, $from); $current !== null; $current = $frequency->nextOccurrence($current)) {
             yield $current;
         }
     }
 
     /** @return Generator<int, CarbonImmutable> */
-    private static function everyDays(CarbonImmutable $start, int $step): Generator
+    private static function everyDays(CarbonImmutable $start, int $step, ?CarbonImmutable $from): Generator
     {
-        for ($index = 0; ; $index++) {
+        $first = $from === null || $from->lessThanOrEqualTo($start)
+            ? 0
+            : max(0, intdiv((int) $start->startOfDay()->diffInDays($from->startOfDay()), $step) - 1);
+
+        for ($index = $first; ; $index++) {
             yield $start->addDays($step * $index);
         }
     }
@@ -68,11 +77,14 @@ final class ScheduleGenerator
      * @param  list<int|string>|null  $daysOfMonth
      * @return Generator<int, CarbonImmutable>
      */
-    private static function monthly(RecurrenceFrequency $frequency, CarbonImmutable $start, int $monthStep, ?array $daysOfMonth): Generator
+    private static function monthly(RecurrenceFrequency $frequency, CarbonImmutable $start, int $monthStep, ?array $daysOfMonth, ?CarbonImmutable $from): Generator
     {
         $days = $daysOfMonth ?: self::defaultDays($frequency, $start);
+        $first = $from === null || $from->lessThanOrEqualTo($start)
+            ? 0
+            : max(0, intdiv(($from->year - $start->year) * 12 + $from->month - $start->month, $monthStep) - 1);
 
-        for ($index = 0; ; $index++) {
+        for ($index = $first; ; $index++) {
             $month = $start->startOfMonth()->setTimeFrom($start)->addMonthsNoOverflow($monthStep * $index);
             $length = $month->daysInMonth;
             $inMonth = [];
@@ -91,6 +103,26 @@ final class ScheduleGenerator
                 }
             }
         }
+    }
+
+    /**
+     * Where the cadences that step from the previous date (workdays, weekends) start: the start
+     * date, or the first member of the sequence on or after $from, since every weekday or weekend
+     * day after the start date belongs to it.
+     */
+    private static function stepwiseStart(RecurrenceFrequency $frequency, CarbonImmutable $start, ?CarbonImmutable $from): CarbonImmutable
+    {
+        if ($from === null || $from->lessThanOrEqualTo($start)) {
+            return $start;
+        }
+
+        $cursor = $from->startOfDay()->setTimeFrom($start);
+
+        return match ($frequency) {
+            RecurrenceFrequency::EveryWorkday => $cursor->isWeekend() ? $cursor->nextWeekday() : $cursor,
+            RecurrenceFrequency::EveryWeekend => $cursor->isWeekend() ? $cursor : $cursor->next(UnitValue::SATURDAY),
+            default => $start,
+        };
     }
 
     /**

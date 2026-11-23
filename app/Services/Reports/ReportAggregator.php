@@ -200,9 +200,8 @@ final class ReportAggregator
     }
 
     /**
-     * Due dates of a plan inside [$start, $end]. Unlike occurrencesBetween() this reads the whole
-     * schedule up to $end, so an old, high-frequency plan is never silently truncated by a cap
-     * that counts from start_date.
+     * Due dates of a plan inside [$start, $end]. It seeks to $start rather than
+     * walking from the plan's start date, so an old, high-frequency plan is neither slow nor truncated.
      *
      * @return list<CarbonImmutable>
      */
@@ -215,7 +214,7 @@ final class ReportAggregator
         $reach = $end->addDays(PlannedTransaction::WEEKEND_ADJUSTMENT_REACH_DAYS);
         $dates = [];
 
-        foreach ($plan->schedule() as $scheduled) {
+        foreach ($plan->schedule($start) as $scheduled) {
             if ($scheduled->original->greaterThan($reach)) {
                 break;
             }

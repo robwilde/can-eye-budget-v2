@@ -72,8 +72,6 @@ final class PlannedTransaction extends Model
     /** @use HasFactory<PlannedTransactionFactory> */
     use HasFactory;
 
-    public const int MAX_DATES_READ = 1000;
-
     public const int MAX_CONSECUTIVE_SKIPS = 400;
 
     public const int WEEKEND_ADJUSTMENT_REACH_DAYS = 3;
@@ -305,7 +303,8 @@ final class PlannedTransaction extends Model
 
     /**
      * The due dates inside the window, each computed from start_date, adjusted for weekends, and
-     * stopping at until_date and end_after_count. Reads at most 1000 dates from the start.
+     * stopping at until_date and end_after_count. It seeks to the window, so a plan that started
+     * long ago costs no more than a new one.
      *
      * @return Collection<int, CarbonImmutable>
      */
@@ -330,10 +329,20 @@ final class PlannedTransaction extends Model
         }
 
         $reach = $end->addDays(self::WEEKEND_ADJUSTMENT_REACH_DAYS);
+        $earliest = $start->subDays(self::WEEKEND_ADJUSTMENT_REACH_DAYS);
+        $guard = (int) abs($earliest->diffInDays($reach)) + 2;
         $read = 0;
 
-        foreach ($this->schedule() as $scheduled) {
-            if ($read++ >= self::MAX_DATES_READ || $scheduled->original->greaterThan($reach)) {
+        foreach ($this->schedule($start) as $scheduled) {
+            if ($scheduled->original->greaterThan($reach)) {
+                break;
+            }
+
+            if ($scheduled->original->lessThan($earliest)) {
+                continue;
+            }
+
+            if ($read++ >= $guard) {
                 break;
             }
 
@@ -396,7 +405,7 @@ final class PlannedTransaction extends Model
         $maxDates = (int) abs($this->start_date->diffInDays($from)) + 367;
         $read = 0;
 
-        foreach ($this->schedule() as $scheduled) {
+        foreach ($this->schedule($from) as $scheduled) {
             if ($read++ >= $maxDates) {
                 return null;
             }
@@ -411,13 +420,15 @@ final class PlannedTransaction extends Model
 
     /**
      * Every date the plan is due, in order, up to until_date and end_after_count. Endless for a plan
-     * with neither, so callers stop reading.
+     * with neither, so callers stop reading. With $from the schedule seeks to it instead of walking
+     * from start_date, so it may begin a little before $from but never skips a date on or after it;
+     * a plan with an end count is always walked from its start, because the count needs every date.
      *
      * @return Generator<int, ScheduledDate>
      */
-    public function schedule(): Generator
+    public function schedule(?CarbonImmutable $from = null): Generator
     {
-        foreach ($this->dueDates() as $scheduled) {
+        foreach ($this->dueDates($from) as $scheduled) {
             if ($this->until_date !== null && $scheduled->original->greaterThan($this->until_date)) {
                 return;
             }
@@ -509,12 +520,15 @@ final class PlannedTransaction extends Model
     /**
      * @return Generator<int, ScheduledDate>
      */
-    private function dueDates(): Generator
+    private function dueDates(?CarbonImmutable $from = null): Generator
     {
         $yielded = 0;
         $skipped = 0;
+        $seekTo = $from !== null && $this->end_after_count === null
+            ? $from->subDays(self::WEEKEND_ADJUSTMENT_REACH_DAYS)
+            : null;
 
-        foreach (ScheduleGenerator::dates($this->frequency, $this->start_date, $this->recurrence_interval, $this->days_of_month) as $original) {
+        foreach (ScheduleGenerator::dates($this->frequency, $this->start_date, $this->recurrence_interval, $this->days_of_month, $seekTo) as $original) {
             $due = $this->weekend_adjustment->adjust($original);
 
             if ($due === null) {
