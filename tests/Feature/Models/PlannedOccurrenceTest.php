@@ -3,12 +3,18 @@
 declare(strict_types=1);
 
 use App\Enums\OccurrenceStatus;
+use App\Jobs\GeneratePlannedOccurrencesJob;
 use App\Models\PlannedOccurrence;
 use App\Models\PlannedTransaction;
 use App\Models\User;
 use Illuminate\Database\MariaDbConnection;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Schema;
+
+beforeEach(function () {
+    Bus::fake([GeneratePlannedOccurrencesJob::class]);
+});
 
 test('allows only one occurrence per plan and original date', function () {
     $plan = PlannedTransaction::factory()->create();

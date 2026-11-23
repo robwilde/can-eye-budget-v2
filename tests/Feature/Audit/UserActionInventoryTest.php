@@ -11,6 +11,7 @@ use App\Jobs\EnrichMerchantBrandsJob;
 use App\Jobs\ExtractStatementPdfJob;
 use App\Jobs\GenerateDataExportJob;
 use App\Jobs\GenerateInsightsJob;
+use App\Jobs\GeneratePlannedOccurrencesJob;
 use App\Jobs\ImportCsvTransactionsJob;
 use App\Jobs\IndexDocumentJob;
 use App\Jobs\MaintainGoalsJob;
@@ -204,6 +205,7 @@ test('every queued job is in the inventory and carries the audit middleware as d
         RunTransactionAnalysisJob::class => [new RunTransactionAnalysisJob($user), true],
         SyncRedbarkFeedJob::class => [new SyncRedbarkFeedJob(RedbarkFeed::factory()->create()), true],
         MaintainGoalsJob::class => [new MaintainGoalsJob($user), false],
+        GeneratePlannedOccurrencesJob::class => [new GeneratePlannedOccurrencesJob($user), false],
         SyncSecurityPricesJob::class => [new SyncSecurityPricesJob($user), false],
         SendRuleMatchDigestJob::class => [new SendRuleMatchDigestJob($user), true],
         CategoriseRuleMatchesJob::class => [new CategoriseRuleMatchesJob($user, []), true],
@@ -245,6 +247,17 @@ it('pins GenerateInsightsJob in the user action inventory', function () {
     $attribution->handle($job, fn () => null);
 
     expect(AuditEvent::query()->where('action', 'job.GenerateInsightsJob')->exists())->toBeTrue();
+});
+
+it('lists the occurrence generation job in the user action inventory', function () {
+    $job = new GeneratePlannedOccurrencesJob(User::factory()->create());
+    $attribution = collect($job->middleware())->first(fn (object $middleware): bool => $middleware instanceof AttributeJobToUser);
+
+    expect($attribution)->toBeInstanceOf(AttributeJobToUser::class);
+
+    $attribution->handle($job, fn () => null);
+
+    expect(AuditEvent::query()->where('action', 'job.GeneratePlannedOccurrencesJob')->exists())->toBeFalse();
 });
 
 it('pins MaintainGoalsJob in the user action inventory', function () {
