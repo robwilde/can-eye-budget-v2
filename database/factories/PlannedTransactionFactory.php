@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Factories;
 
+use App\Enums\PlannedTransactionType;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
@@ -77,10 +78,43 @@ final class PlannedTransactionFactory extends Factory
     public function transfer(): self
     {
         return $this->state(fn (array $attributes) => [
-            'transfer_to_account_id' => Account::factory()->for(
-                User::find($attributes['user_id'])
-            ),
+            'transfer_to_account_id' => fn (array $attributes) => Account::factory()
+                ->create(['user_id' => $attributes['user_id']])->id,
             'direction' => TransactionDirection::Debit,
+        ]);
+    }
+
+    public function bill(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'type' => PlannedTransactionType::Bill,
+            'direction' => TransactionDirection::Debit,
+        ]);
+    }
+
+    public function subscription(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'type' => PlannedTransactionType::Subscription,
+            'direction' => TransactionDirection::Debit,
+            'autopay' => true,
+        ]);
+    }
+
+    public function installment(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'type' => PlannedTransactionType::Installment,
+            'direction' => TransactionDirection::Debit,
+            'autopay' => true,
+        ]);
+    }
+
+    public function income(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'type' => PlannedTransactionType::Income,
+            'direction' => TransactionDirection::Credit,
         ]);
     }
 }
