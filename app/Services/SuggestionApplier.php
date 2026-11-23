@@ -6,7 +6,10 @@ namespace App\Services;
 
 use App\Enums\CategorySource;
 use App\Enums\PayFrequency;
+use App\Enums\PlannedTransactionType;
+use App\Enums\PlanOrigin;
 use App\Enums\SuggestionStatus;
+use App\Enums\TransactionDirection;
 use App\Models\AnalysisSuggestion;
 use App\Models\Payee;
 use App\Models\PlannedTransaction;
@@ -90,6 +93,10 @@ final readonly class SuggestionApplier
                 'account_id' => $payload['account_id'],
                 'amount' => $payload['amount'],
                 'direction' => $payload['direction'],
+                'type' => $payload['direction'] === TransactionDirection::Credit->value
+                    ? PlannedTransactionType::Income
+                    : PlannedTransactionType::Bill,
+                'origin' => PlanOrigin::Detected,
                 'description' => $payload['clean_description'],
                 'start_date' => $payload['start_date'],
                 'frequency' => $payload['frequency'],

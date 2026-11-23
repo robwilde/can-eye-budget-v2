@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\PayFrequency;
+use App\Enums\PlannedTransactionType;
 use App\Enums\TransactionDirection;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
@@ -70,6 +71,7 @@ final class PayCycleConfigurator
                     'category_id' => $this->salaryCategoryId($user),
                     'amount' => $payAmountCents,
                     'direction' => TransactionDirection::Credit,
+                    'type' => PlannedTransactionType::Income,
                     'description' => $description ?? 'Salary',
                     'start_date' => $nextPayDate,
                     'frequency' => $frequency->toRecurrenceFrequency(),

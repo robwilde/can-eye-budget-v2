@@ -9,6 +9,8 @@ use App\DTOs\RawEmail;
 use App\Enums\BnplOrderEventType;
 use App\Enums\BnplOrderStatus;
 use App\Enums\BnplProvider;
+use App\Enums\PlannedTransactionType;
+use App\Enums\PlanOrigin;
 use App\Enums\TransactionDirection;
 use App\Models\BnplOrder;
 use App\Models\PlannedTransaction;
@@ -123,6 +125,8 @@ final readonly class BnplOrderImporter
             'category_id' => $order->category_id,
             'amount' => $order->instalment_amount,
             'direction' => TransactionDirection::Debit,
+            'type' => PlannedTransactionType::Installment,
+            'origin' => PlanOrigin::Detected,
             'description' => $this->planDescription($order),
             'start_date' => $order->first_due_date,
             'frequency' => $order->frequency,
