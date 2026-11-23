@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Reports;
 
+use App\DTOs\EffectiveOccurrence;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionStatus;
 use App\Models\Category;
@@ -11,6 +12,7 @@ use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\CurrencyConverter;
+use App\Services\Recurring\OccurrenceSchedule;
 use App\Support\Transactions\CategoryAttribution;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -200,31 +202,17 @@ final class ReportAggregator
     }
 
     /**
-     * Due dates of a plan inside [$start, $end]. It seeks to $start rather than
-     * walking from the plan's start date, so an old, high-frequency plan is neither slow nor truncated.
+     * Effective dates of a plan's occurrences inside [$start, $end]: a skipped occurrence is left out and
+     * a snoozed one is at its snooze date.
      *
      * @return list<CarbonImmutable>
      */
     public function planOccurrences(PlannedTransaction $plan, CarbonImmutable $start, CarbonImmutable $end): array
     {
-        if (! $plan->is_active) {
-            return [];
-        }
-
-        $reach = $end->addDays(PlannedTransaction::WEEKEND_ADJUSTMENT_REACH_DAYS);
-        $dates = [];
-
-        foreach ($plan->schedule($start) as $scheduled) {
-            if ($scheduled->original->greaterThan($reach)) {
-                break;
-            }
-
-            if ($scheduled->due->between($start, $end)) {
-                $dates[] = $scheduled->due;
-            }
-        }
-
-        return $dates;
+        return array_map(
+            static fn (EffectiveOccurrence $item): CarbonImmutable => $item->date,
+            (new OccurrenceSchedule)->between(collect([$plan]), $start, $end)[$plan->id],
+        );
     }
 
     /**
@@ -461,10 +449,10 @@ final class ReportAggregator
         $atoms = [];
         $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
 
-        foreach ($plans as $plan) {
-            $amount = abs($plan->amount);
+        $occurrencesByPlan = (new OccurrenceSchedule)->between($plans->collect(), $start, $end);
 
-            if ($amount === 0) {
+        foreach ($plans as $plan) {
+            if (abs($plan->amount) === 0) {
                 continue;
             }
 
@@ -478,7 +466,9 @@ final class ReportAggregator
 
             $categoryId = $plan->category_id;
 
-            foreach ($this->planOccurrences($plan, $start, $end) as $date) {
+            foreach ($occurrencesByPlan[$plan->id] as $occurrence) {
+                $date = $occurrence->date;
+                $amount = $occurrence->amount;
                 $ym = $date->format('Y-m');
                 $key = $ym.'|'.$direction.'|'.($categoryId ?? 'null');
 

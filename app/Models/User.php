@@ -10,6 +10,7 @@ use App\DTOs\UserPreferences;
 use App\Enums\PayFrequency;
 use App\Enums\RedbarkTransport;
 use App\Services\CurrencyConverter;
+use App\Services\Recurring\OccurrenceSchedule;
 use App\Support\Currencies;
 use Carbon\CarbonImmutable;
 use Closure;
@@ -336,15 +337,19 @@ final class User extends Authenticatable
             ->with(['account:id,currency,is_tracked,exclude_from_reports', 'transferToAccount:id,is_tracked,exclude_from_reports'])
             ->get()
             ->filter(static fn (PlannedTransaction $plan): bool => $plan->drawsFromAvailable())
-            ->sum(function (PlannedTransaction $plan) use ($today, $bounds, $converter): int {
-                $occurrences = $plan->occurrencesBetween($today, $bounds['end']);
-                $amount = abs($plan->amount);
+            ->pipe(function (Collection $plans) use ($today, $bounds, $converter): int {
+                $total = 0;
+                $byId = $plans->keyBy('id');
 
-                if ($converter === null) {
-                    return $occurrences->count() * $amount;
+                foreach ((new OccurrenceSchedule)->flat($plans, $today, $bounds['end']) as $occurrence) {
+                    $plan = $byId[$occurrence->planId];
+
+                    $total += $converter === null
+                        ? $occurrence->amount
+                        : $converter->convert($occurrence->amount, $plan->account->currency, $this->base_currency, $occurrence->date);
                 }
 
-                return (int) $occurrences->sum(fn (CarbonImmutable $date): int => $converter->convert($amount, $plan->account->currency, $this->base_currency, $date));
+                return $total;
             });
     }
 

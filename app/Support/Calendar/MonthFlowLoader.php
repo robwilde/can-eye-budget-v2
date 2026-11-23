@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Support\Calendar;
 
-use App\Enums\OccurrenceStatus;
+use App\DTOs\EffectiveOccurrence;
 use App\Enums\Side;
 use App\Enums\TransactionDirection;
-use App\Models\PlannedOccurrence;
 use App\Models\PlannedTransaction;
 use App\Models\User;
+use App\Services\Recurring\OccurrenceSchedule;
 use Carbon\CarbonImmutable;
 
 final readonly class MonthFlowLoader
@@ -78,28 +78,10 @@ final readonly class MonthFlowLoader
             ->where(static fn ($q) => $q->whereNull('until_date')->orWhere('until_date', '>=', $monthStart))
             ->get();
 
-        $stored = $this->storedOccurrences($plans->modelKeys(), $monthStart, $monthEnd);
+        $occurrencesByPlan = (new OccurrenceSchedule)->between($plans->collect(), $monthStart, $monthEnd);
 
         foreach ($plans as $plan) {
-            $total = 0;
-
-            foreach ($plan->scheduledBetween($monthStart, $monthEnd) as $scheduled) {
-                $row = $stored[$plan->id.'|'.$scheduled->original->format('Y-m-d')] ?? null;
-
-                if ($row !== null && ($row->status === OccurrenceStatus::Skipped || $row->snoozed_until !== null)) {
-                    continue;
-                }
-
-                $total += abs($row->expected_amount ?? $plan->amount);
-            }
-
-            foreach ($stored as $key => $row) {
-                $inMonth = $row->snoozed_until !== null && $row->snoozed_until->between($monthStart, $monthEnd);
-
-                if ($row->planned_transaction_id === $plan->id && $inMonth && $row->status !== OccurrenceStatus::Skipped) {
-                    $total += abs($row->expected_amount ?? $plan->amount);
-                }
-            }
+            $total = array_sum(array_map(static fn (EffectiveOccurrence $item): int => $item->amount, $occurrencesByPlan[$plan->id]));
 
             if ($plan->direction === TransactionDirection::Credit) {
                 $income += $total;
@@ -109,30 +91,5 @@ final readonly class MonthFlowLoader
         }
 
         return [$income, $expense];
-    }
-
-    /**
-     * @param  list<int>  $planIds
-     * @return array<string, PlannedOccurrence> keyed by plan id and original date
-     */
-    private function storedOccurrences(array $planIds, CarbonImmutable $monthStart, CarbonImmutable $monthEnd): array
-    {
-        if ($planIds === []) {
-            return [];
-        }
-
-        $stored = [];
-
-        PlannedOccurrence::query()
-            ->whereIn('planned_transaction_id', $planIds)
-            ->where(static fn ($query) => $query
-                ->whereBetween('original_date', [$monthStart->subDays(3)->startOfDay(), $monthEnd->addDays(3)])
-                ->orWhereBetween('snoozed_until', [$monthStart->startOfDay(), $monthEnd]))
-            ->get()
-            ->each(static function (PlannedOccurrence $occurrence) use (&$stored): void {
-                $stored[$occurrence->planned_transaction_id.'|'.$occurrence->original_date->format('Y-m-d')] = $occurrence;
-            });
-
-        return $stored;
     }
 }

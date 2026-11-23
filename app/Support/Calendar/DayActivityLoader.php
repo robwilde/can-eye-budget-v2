@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support\Calendar;
 
-use App\Enums\OccurrenceStatus;
+use App\DTOs\EffectiveOccurrence;
 use App\Enums\TransactionDirection;
 use App\Livewire\Dashboard\Data\PayCyclePip;
 use App\Models\Category;
@@ -12,6 +12,7 @@ use App\Models\PlannedOccurrence;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Services\ReconciliationPolicy;
+use App\Services\Recurring\OccurrenceSchedule;
 use App\Services\Recurring\OccurrenceStateResolver;
 use Carbon\CarbonImmutable;
 use Closure;
@@ -101,15 +102,8 @@ final readonly class DayActivityLoader
             : new EloquentCollection;
         $transferPlannedIds = array_flip($transferPlanned->modelKeys());
         $plannedTransactions = $ordinaryPlanned->concat($transferPlanned);
-        $storedOccurrences = $this->storedOccurrences($plannedTransactions, $start, $end, $tolerance);
         $resolver = new OccurrenceStateResolver;
-        $snoozedByPlan = [];
-
-        foreach ($storedOccurrences as $stored) {
-            if ($stored->status === OccurrenceStatus::Scheduled && $stored->snoozed_until !== null) {
-                $snoozedByPlan[$stored->planned_transaction_id][] = $stored;
-            }
-        }
+        $occurrencesByPlan = (new OccurrenceSchedule)->between($plannedTransactions->collect(), $start->subDays($tolerance), $end->addDays($tolerance), openOnly: true);
 
         $linkedCategories = Category::allWithLinkedParents($userId)->keyBy('id');
         $linked = static fn (?Category $category): ?Category => $category === null
@@ -203,31 +197,13 @@ final readonly class DayActivityLoader
             }
 
             $candidates = $reconciledByPlanned[$planned->id] ?? [];
-            $items = [];
-            $seen = [];
+            $items = $occurrencesByPlan[$planned->id] ?? [];
 
-            foreach ($planned->scheduledBetween($start->subDays($tolerance), $end->addDays($tolerance)) as $item) {
-                $stored = $storedOccurrences[$planned->id.'|'.$item->original->format('Y-m-d')] ?? null;
+            $matchedKeys = $this->matchedOccurrenceKeys($candidates, collect($items)->map(static fn (EffectiveOccurrence $item): CarbonImmutable => $item->date));
 
-                if ($stored !== null) {
-                    $seen[$stored->id] = true;
-                }
-
-                if ($stored === null || $stored->status === OccurrenceStatus::Scheduled) {
-                    $items[] = [$stored, $stored->snoozed_until ?? $item->due];
-                }
-            }
-
-            foreach ($snoozedByPlan[$planned->id] ?? [] as $stored) {
-                if (! isset($seen[$stored->id])) {
-                    $items[] = [$stored, $stored->snoozed_until];
-                }
-            }
-
-            $matchedKeys = $this->matchedOccurrenceKeys($candidates, collect($items)->map(static fn (array $item): CarbonImmutable => $item[1]));
-
-            foreach ($items as [$stored, $effective]) {
-                $key = $effective->format('Y-m-d');
+            foreach ($items as $item) {
+                $stored = $item->stored;
+                $key = $item->date->format('Y-m-d');
 
                 if (isset($matchedKeys[$key])) {
                     continue;
@@ -360,36 +336,6 @@ final readonly class DayActivityLoader
         $clean = mb_trim($tx->clean_description ?? '');
 
         return $clean !== '' ? $clean : null;
-    }
-
-    /**
-     * The stored occurrences that can shape the pips in the range: those whose original date is near it
-     * and those snoozed into it, keyed by plan and original date.
-     *
-     * @param  Collection<int, PlannedTransaction>|EloquentCollection<int, PlannedTransaction>  $plans
-     * @return array<string, PlannedOccurrence>
-     */
-    private function storedOccurrences(Collection|EloquentCollection $plans, CarbonImmutable $start, CarbonImmutable $end, int $tolerance): array
-    {
-        if ($plans->isEmpty()) {
-            return [];
-        }
-
-        $byPlan = $plans->keyBy('id');
-        $stored = [];
-
-        PlannedOccurrence::query()
-            ->whereIn('planned_transaction_id', $byPlan->keys()->all())
-            ->where(static fn ($query) => $query
-                ->whereBetween('original_date', [$start->subDays($tolerance + 3)->startOfDay(), $end->addDays($tolerance + 3)])
-                ->orWhereBetween('snoozed_until', [$start->startOfDay(), $end]))
-            ->get()
-            ->each(static function (PlannedOccurrence $occurrence) use ($byPlan, &$stored): void {
-                $occurrence->setRelation('plannedTransaction', $byPlan[$occurrence->planned_transaction_id]);
-                $stored[$occurrence->planned_transaction_id.'|'.$occurrence->original_date->format('Y-m-d')] = $occurrence;
-            });
-
-        return $stored;
     }
 
     /**

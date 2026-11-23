@@ -146,7 +146,8 @@ it('does not walk from the start date to reach a far window', function (Recurren
 })->with(array_filter(RecurrenceFrequency::cases(), fn (RecurrenceFrequency $frequency): bool => $frequency !== RecurrenceFrequency::DontRepeat));
 
 it('reads a far window of a long running plan through the report path', function () {
-    $plan = seekPlan('2006-01-01', RecurrenceFrequency::Everyday);
+    Illuminate\Support\Facades\Bus::fake([App\Jobs\GeneratePlannedOccurrencesJob::class]);
+    $plan = PlannedTransaction::factory()->create(['start_date' => '2006-01-01', 'frequency' => RecurrenceFrequency::Everyday, 'until_date' => null]);
 
     $dates = app(App\Services\Reports\ReportAggregator::class)->planOccurrences($plan, $this->today, $this->today->addDays(30));
 

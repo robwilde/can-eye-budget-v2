@@ -6,7 +6,7 @@
         <div class="planned-row flex items-center justify-between py-1 text-sm">
             <span class="font-medium">{{ $row['planned']->description }}</span>
             <span class="text-gray-600">{{ $row['next']->format('M j') }}</span>
-            <span class="font-bold">{{ MoneyCast::format(abs((int) $row['planned']->amount)) }}</span>
+            <span class="font-bold">{{ MoneyCast::format($row['amount']) }}</span>
         </div>
     @empty
         <p class="text-sm text-gray-500">Nothing planned.</p>

@@ -22,6 +22,7 @@ use App\Models\RedbarkFeed;
 use App\Models\User;
 use App\Services\Budgets\BudgetPlanCalculator;
 use App\Services\FirstImportSummary;
+use App\Services\Recurring\OccurrenceSchedule;
 use App\Services\Transfers\TransferReviewQueue;
 use App\Support\Dashboard\DashboardPeriod;
 use App\Support\Transactions\CategoryAttribution;
@@ -229,7 +230,7 @@ final class Dashboard extends Component
     }
 
     /**
-     * @return Collection<int, array{planned: PlannedTransaction, next: CarbonImmutable}>
+     * @return Collection<int, array{planned: PlannedTransaction, next: CarbonImmutable, amount: int}>
      */
     #[Computed]
     public function nextThreePlanned(): Collection
@@ -238,15 +239,18 @@ final class Dashboard extends Component
         $today = $user->today();
         $horizon = $today->addMonths(3);
 
-        return $user
+        $plans = $user
             ->plannedTransactions()
             ->upcoming($today)
             ->with(['account', 'category'])
             ->limit(20)
-            ->get()
-            ->map(static fn (PlannedTransaction $plan): ?array => ($next = $plan->occurrencesBetween($today, $horizon)->first()) === null
+            ->get();
+        $nextByPlan = (new OccurrenceSchedule)->nextFor($plans->collect(), $today);
+
+        return $plans
+            ->map(static fn (PlannedTransaction $plan): ?array => ($next = $nextByPlan[$plan->id]) === null || $next->date->greaterThan($horizon)
                 ? null
-                : ['planned' => $plan, 'next' => $next])
+                : ['planned' => $plan, 'next' => $next->date, 'amount' => $next->amount])
             ->filter()
             ->sortBy(static fn (array $row): string => $row['next']->toDateString())
             ->take(3)
