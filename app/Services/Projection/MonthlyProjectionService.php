@@ -7,6 +7,7 @@ namespace App\Services\Projection;
 use App\Enums\TransactionDirection;
 use App\Models\PlannedTransaction;
 use App\Models\User;
+use App\Services\Recurring\OccurrenceSchedule;
 
 final readonly class MonthlyProjectionService
 {
@@ -34,6 +35,8 @@ final readonly class MonthlyProjectionService
 
         $dailyBuckets = [];
 
+        $occurrencesByPlan = (new OccurrenceSchedule)->between($plannedTransactions->collect(), $today, $endDate);
+
         foreach ($plannedTransactions as $planned) {
             $direction = $planned->countedDirection();
 
@@ -41,22 +44,18 @@ final readonly class MonthlyProjectionService
                 continue;
             }
 
-            $signedAmount = $direction === TransactionDirection::Credit
-                ? abs((int) $planned->amount)
-                : -abs((int) $planned->amount);
-
-            foreach ($planned->occurrencesBetween($today, $endDate) as $occurrence) {
-                $key = $occurrence->format('Y-m-d');
+            foreach ($occurrencesByPlan[$planned->id] as $occurrence) {
+                $key = $occurrence->date->format('Y-m-d');
 
                 if (! isset($dailyBuckets[$key])) {
                     $dailyBuckets[$key] = [
-                        'date' => $occurrence,
+                        'date' => $occurrence->date,
                         'netCents' => 0,
                         'descriptions' => [],
                     ];
                 }
 
-                $dailyBuckets[$key]['netCents'] += $signedAmount;
+                $dailyBuckets[$key]['netCents'] += $direction === TransactionDirection::Credit ? $occurrence->amount : -$occurrence->amount;
                 $dailyBuckets[$key]['descriptions'][] = $planned->description;
             }
         }

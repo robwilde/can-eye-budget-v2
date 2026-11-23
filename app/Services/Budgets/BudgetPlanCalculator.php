@@ -6,6 +6,7 @@ namespace App\Services\Budgets;
 
 use App\DTOs\BudgetLineSummaryDto;
 use App\DTOs\BudgetPlanSummaryDto;
+use App\DTOs\EffectiveOccurrence;
 use App\Enums\BudgetLineStatus;
 use App\Enums\TransactionDirection;
 use App\Models\Budget;
@@ -16,6 +17,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Services\CurrencyConverter;
 use App\Services\ReconciliationPolicy;
+use App\Services\Recurring\OccurrenceSchedule;
 use App\Services\Reports\ReportAggregator;
 use App\Support\Budget\AllocationTree;
 use App\Support\Transactions\CategoryAttribution;
@@ -516,13 +518,13 @@ final readonly class BudgetPlanCalculator
         $base = $converter === null ? null : (string) User::query()->whereKey($plan->user_id)->value('base_currency');
         $reserved = 0;
 
-        foreach ($plans as $planned) {
-            $amount = abs($planned->amount);
+        $occurrencesByPlan = (new OccurrenceSchedule)->between($plans->collect(), $plan->period_start->subDays($tolerance * 2), $plan->period_end->addDays($tolerance * 2));
 
-            foreach ($this->unpaidOccurrences($planned, $postingsByPlan->get($planned->id)?->values()->all() ?? [], $plan, $tolerance) as $date) {
+        foreach ($plans as $planned) {
+            foreach ($this->unpaidOccurrences($occurrencesByPlan[$planned->id], $postingsByPlan->get($planned->id)?->values()->all() ?? [], $plan, $tolerance) as $occurrence) {
                 $reserved += $converter === null
-                    ? $amount
-                    : $converter->convert($amount, $planned->account->currency, (string) $base, $date);
+                    ? $occurrence->amount
+                    : $converter->convert($occurrence->amount, $planned->account->currency, (string) $base, $occurrence->date);
             }
         }
 
@@ -534,25 +536,20 @@ final readonly class BudgetPlanCalculator
      * occurrence even when a competing one lies outside the period, and returns the occurrences
      * inside the period that no posting paid.
      *
+     * @param  list<EffectiveOccurrence>  $occurrences
      * @param  list<Transaction>  $postings
-     * @return list<CarbonImmutable>
+     * @return list<EffectiveOccurrence>
      */
-    private function unpaidOccurrences(PlannedTransaction $planned, array $postings, BudgetPlan $plan, int $tolerance): array
+    private function unpaidOccurrences(array $occurrences, array $postings, BudgetPlan $plan, int $tolerance): array
     {
-        $occurrences = $this->reports->planOccurrences(
-            $planned,
-            $plan->period_start->subDays($tolerance * 2),
-            $plan->period_end->addDays($tolerance * 2),
-        );
-
         $pairs = [];
 
-        foreach ($occurrences as $occurrence) {
+        foreach ($occurrences as $index => $occurrence) {
             foreach ($postings as $posting) {
-                $gap = ReconciliationPolicy::dayDiff($posting->post_date, $occurrence);
+                $gap = ReconciliationPolicy::dayDiff($posting->post_date, $occurrence->date);
 
                 if ($gap <= $tolerance) {
-                    $pairs[] = [$gap, $occurrence->toDateString(), $posting->id];
+                    $pairs[] = [$gap, $index, $posting->id];
                 }
             }
         }
@@ -562,17 +559,18 @@ final readonly class BudgetPlanCalculator
         $paid = [];
         $used = [];
 
-        foreach ($pairs as [, $date, $postingId]) {
-            if (! isset($paid[$date]) && ! isset($used[$postingId])) {
-                $paid[$date] = true;
+        foreach ($pairs as [, $index, $postingId]) {
+            if (! isset($paid[$index]) && ! isset($used[$postingId])) {
+                $paid[$index] = true;
                 $used[$postingId] = true;
             }
         }
 
         return array_values(array_filter(
             $occurrences,
-            static fn (CarbonImmutable $occurrence): bool => ! isset($paid[$occurrence->toDateString()])
-                && $occurrence->between($plan->period_start, $plan->period_end),
+            static fn (EffectiveOccurrence $occurrence, int $index): bool => ! isset($paid[$index])
+                && $occurrence->date->between($plan->period_start, $plan->period_end),
+            ARRAY_FILTER_USE_BOTH,
         ));
     }
 
