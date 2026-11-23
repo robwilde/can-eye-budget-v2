@@ -383,3 +383,112 @@ function useAppTimezone(string $timezone): void
     config(['app.timezone' => $timezone]);
     date_default_timezone_set($timezone);
 }
+
+/**
+ * SQLite ignores FOR UPDATE, so the test grammar notes each lock the query builder asks for: the table,
+ * the ids it asked for and whether it asked in ascending id order.
+ *
+ * @return list<array{table: string, ids: list<int>, ascending: bool}>
+ */
+function lockLog(Closure $run): array
+{
+    $connection = DB::connection();
+    $original = $connection->getQueryGrammar();
+    $recorder = new class($connection) extends Illuminate\Database\Query\Grammars\SQLiteGrammar
+    {
+        /** @var list<array{table: string, ids: list<int>, ascending: bool}> */
+        public array $locks = [];
+
+        protected function compileLock(Illuminate\Database\Query\Builder $query, $value)
+        {
+            $ids = in_array($query->from, ['transactions', 'planned_occurrences', 'planned_transactions'], true)
+                ? $query->cloneWithout(['columns', 'lock'])->pluck($query->from.'.id')->map(intval(...))->all()
+                : [];
+
+            $this->locks[] = [
+                'table' => (string) $query->from,
+                'ids' => array_map(intval(...), $ids),
+                'ascending' => collect($query->orders)->contains(fn (array $order): bool => $order['column'] === 'id' && $order['direction'] === 'asc'),
+            ];
+
+            return '';
+        }
+    };
+
+    $connection->setQueryGrammar($recorder);
+
+    try {
+        $run();
+    } finally {
+        $connection->setQueryGrammar($original);
+    }
+
+    return $recorder->locks;
+}
+
+/** A transaction lock may follow an occurrence lock only when the transaction was already locked before it. */
+function expectTransactionsFirst(array $locks): void
+{
+    $heldTransactions = [];
+    $heldPlans = [];
+    $occurrenceLocked = false;
+
+    foreach ($locks as $lock) {
+        if ($lock['table'] === 'planned_occurrences') {
+            $occurrenceLocked = true;
+
+            continue;
+        }
+
+        if ($lock['table'] === 'planned_transactions') {
+            if ($occurrenceLocked) {
+                expect(array_diff($lock['ids'], $heldPlans))->toBe([], 'a plan was locked after an occurrence');
+            }
+
+            $heldPlans = array_merge($heldPlans, $lock['ids']);
+
+            continue;
+        }
+
+        if ($lock['table'] !== 'transactions') {
+            continue;
+        }
+
+        if ($occurrenceLocked) {
+            expect(array_diff($lock['ids'], $heldTransactions))->toBe([], 'a transaction was locked after an occurrence');
+        }
+
+        $heldTransactions = array_merge($heldTransactions, $lock['ids']);
+    }
+}
+
+function lockTables(array $locks): array
+{
+    return array_map(fn (array $lock): string => $lock['table'], $locks);
+}
+
+/**
+ * Every transaction the batch handled was locked before the first occurrence was: the first occurrence lock
+ * may only follow locks that already cover all of $transactionIds.
+ *
+ * @param  list<array{table: string, ids: list<int>, ascending: bool}>  $locks
+ * @param  list<int>  $transactionIds
+ */
+function expectBatchLockedFirst(array $locks, array $transactionIds): void
+{
+    $held = [];
+
+    foreach ($locks as $lock) {
+        if ($lock['table'] === 'planned_occurrences') {
+            expect(array_diff($transactionIds, $held))->toBe([], 'an occurrence was locked before the whole batch was');
+
+            return;
+        }
+
+        if ($lock['table'] === 'transactions') {
+            $held = array_merge($held, $lock['ids']);
+        }
+    }
+
+    expect(false)->toBeTrue('no occurrence was locked');
+}

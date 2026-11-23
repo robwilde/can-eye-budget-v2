@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Observers;
 
-use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\TransactionAttachment;
 use App\Services\Recurring\OccurrencePaymentRecorder;
+use App\Services\Recurring\PaymentSettlementDeferral;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Storage;
 use WeakMap;
@@ -26,21 +26,13 @@ final class TransactionObserver
     public function updated(Transaction $transaction): void
     {
         if ($transaction->wasChanged(['planned_transaction_id', 'amount', 'currency', 'direction'])) {
-            app(OccurrencePaymentRecorder::class)->revalidate($transaction, $transaction->wasChanged('planned_transaction_id'));
+            app(PaymentSettlementDeferral::class)->transactionChanged($transaction, $transaction->wasChanged('planned_transaction_id'));
         }
     }
 
     public function restored(Transaction $transaction): void
     {
-        if ($transaction->planned_transaction_id === null) {
-            return;
-        }
-
-        $plan = PlannedTransaction::query()->where('user_id', $transaction->user_id)->find($transaction->planned_transaction_id);
-
-        if ($plan instanceof PlannedTransaction) {
-            app(OccurrencePaymentRecorder::class)->claim($transaction, $plan);
-        }
+        app(PaymentSettlementDeferral::class)->transactionRestored($transaction);
     }
 
     public function forceDeleting(Transaction $transaction): void
@@ -58,7 +50,7 @@ final class TransactionObserver
             $this->handBackToResurfacingParent($transaction);
         }
 
-        app(OccurrencePaymentRecorder::class)->release($transaction);
+        app(PaymentSettlementDeferral::class)->transactionDeleted($transaction);
 
         $attachments = self::pending()[$transaction] ?? $this->attachmentsOf($transaction);
 

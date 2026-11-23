@@ -21,10 +21,7 @@ use App\Services\Recurring\OccurrencePaymentRecorder;
 use App\Services\RuleActionExecutor;
 use App\Services\SuggestionApplier;
 use Carbon\CarbonImmutable;
-use Illuminate\Database\Query\Builder;
-use Illuminate\Database\Query\Grammars\SQLiteGrammar;
 use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -35,89 +32,6 @@ beforeEach(function () {
     $this->account = Account::factory()->for($this->user)->create();
     $this->recorder = app(OccurrencePaymentRecorder::class);
 });
-
-/**
- * SQLite ignores FOR UPDATE, so the test grammar notes each lock the query builder asks for: the table,
- * the ids it asked for and whether it asked in ascending id order.
- *
- * @return list<array{table: string, ids: list<int>, ascending: bool}>
- */
-function lockLog(Closure $run): array
-{
-    $connection = DB::connection();
-    $original = $connection->getQueryGrammar();
-    $recorder = new class($connection) extends SQLiteGrammar
-    {
-        /** @var list<array{table: string, ids: list<int>, ascending: bool}> */
-        public array $locks = [];
-
-        protected function compileLock(Builder $query, $value)
-        {
-            $where = collect($query->wheres)->first(fn (array $where): bool => str_ends_with((string) ($where['column'] ?? ''), '.id') && (isset($where['values']) || isset($where['value'])));
-            $ids = $where['values'] ?? (isset($where['value']) ? [$where['value']] : []);
-
-            $this->locks[] = [
-                'table' => (string) $query->from,
-                'ids' => array_map(intval(...), $ids),
-                'ascending' => collect($query->orders)->contains(fn (array $order): bool => $order['column'] === 'id' && $order['direction'] === 'asc'),
-            ];
-
-            return '';
-        }
-    };
-
-    $connection->setQueryGrammar($recorder);
-
-    try {
-        $run();
-    } finally {
-        $connection->setQueryGrammar($original);
-    }
-
-    return $recorder->locks;
-}
-
-/** A transaction lock may follow an occurrence lock only when the transaction was already locked before it. */
-function expectTransactionsFirst(array $locks): void
-{
-    $heldTransactions = [];
-    $heldPlans = [];
-    $occurrenceLocked = false;
-
-    foreach ($locks as $lock) {
-        if ($lock['table'] === 'planned_occurrences') {
-            $occurrenceLocked = true;
-
-            continue;
-        }
-
-        if ($lock['table'] === 'planned_transactions') {
-            if ($occurrenceLocked) {
-                expect(array_diff($lock['ids'], $heldPlans))->toBe([], 'a plan was locked after an occurrence');
-            }
-
-            $heldPlans = array_merge($heldPlans, $lock['ids']);
-
-            continue;
-        }
-
-        if ($lock['table'] !== 'transactions') {
-            continue;
-        }
-
-        if ($occurrenceLocked) {
-            expect($lock['ids'])->not->toBe([], 'a transaction lock with unknown ids followed an occurrence lock')
-                ->and(array_diff($lock['ids'], $heldTransactions))->toBe([], 'a transaction was locked after an occurrence');
-        }
-
-        $heldTransactions = array_merge($heldTransactions, $lock['ids']);
-    }
-}
-
-function lockTables(array $locks): array
-{
-    return array_map(fn (array $lock): string => $lock['table'], $locks);
-}
 
 function lockPlan(object $test, array $attributes = []): PlannedTransaction
 {

@@ -7,6 +7,7 @@ namespace App\Services\Transactions;
 use App\Enums\TransactionSource;
 use App\Models\Transaction;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
+use App\Services\Recurring\OccurrencePaymentRecorder;
 use App\Services\Transfers\TransferLinker;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -28,6 +29,7 @@ final readonly class TransactionDeleter
     public function __construct(
         private TransferLinker $transfers,
         private AccountBalanceHistoryBuilder $history,
+        private OccurrencePaymentRecorder $payments,
     ) {}
 
     /**
@@ -64,6 +66,7 @@ final readonly class TransactionDeleter
 
         return DB::transaction(function () use ($deletable, $accountIds): int {
             $this->history->lockAccounts(...$accountIds);
+            $this->payments->lockTransactionBatch((clone $deletable)->pluck('id')->all());
 
             $deleted = [];
 
