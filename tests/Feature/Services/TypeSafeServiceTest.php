@@ -95,3 +95,28 @@ test('rejects a malformed answer', function (Closure $mutate) {
         $answer['probabilities']['a'] = 'high';
     }],
 ]);
+
+test('a client built for a person waiting never retries and takes the timeout it is given', function () {
+    $timeouts = [];
+    Http::fake(function (Request $request, array $options) use (&$timeouts) {
+        $timeouts[] = $options['timeout'] ?? null;
+
+        return Http::response([], 529);
+    });
+
+    expect(fn () => (new TypeSafeService('ts_key', timeoutSeconds: 5, backoffMs: []))->choose(['merchant_name' => 'ALDI'], 'Which?', ['a' => 'A', 'b' => 'B']))
+        ->toThrow(TypeSafeException::class)
+        ->and($timeouts)->toBe([5]);
+});
+
+test('the default client still retries an overloaded answer after its backoff', function () {
+    $requests = 0;
+    Http::fake(function () use (&$requests) {
+        $requests++;
+
+        return Http::response([], 529);
+    });
+
+    expect(fn () => (new TypeSafeService('ts_key'))->choose(['merchant_name' => 'ALDI'], 'Which?', ['a' => 'A', 'b' => 'B']))->toThrow(TypeSafeException::class)
+        ->and($requests)->toBe(5);
+});

@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace App\Livewire;
 
+use App\Casts\MoneyCast;
+use App\DTOs\PlanSmartFillSuggestion;
 use App\Enums\PlanAmountStrategy;
 use App\Enums\PlannedTransactionType;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Exceptions\TypeSafe\TypeSafeException;
 use App\Livewire\Concerns\EditsPlanSeries;
 use App\Models\Account;
 use App\Models\Category;
@@ -21,6 +24,8 @@ use App\Services\Recurring\OccurrenceActions;
 use App\Services\Recurring\OccurrenceSchedule;
 use App\Services\Recurring\OccurrenceStateResolver;
 use App\Services\Recurring\PlannedOccurrenceGenerator;
+use App\Services\Recurring\PlanSmartFiller;
+use Carbon\CarbonImmutable;
 use Closure;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
@@ -29,6 +34,7 @@ use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
@@ -71,6 +77,13 @@ final class PlannedTransactionManager extends Component
     /** @var array<int, string> */
     public array $occurrenceAmounts = [];
 
+    public ?int $smartConfigurePlanId = null;
+
+    public string $smartConfigureNotice = '';
+
+    /** @var list<array{field: string, current: string, suggested: string}> */
+    public array $smartConfigureChanges = [];
+
     public bool $showDeleteModal = false;
 
     public ?int $deletingId = null;
@@ -98,6 +111,54 @@ final class PlannedTransactionManager extends Component
     public function showDeclaredPlan(int $accountId): void
     {
         $this->accountId = $accountId;
+    }
+
+    /**
+     * Lists only the fields smart fill would set differently from the plan today. Nothing is changed.
+     */
+    public function smartConfigure(int $id): void
+    {
+        abort_unless(PlanSmartFiller::available(), 404);
+
+        $plan = $this->findUserPlan($id);
+
+        if (! $plan || ! $this->guardEditablePlan($plan)) {
+            return;
+        }
+
+        $user = $this->authenticatedUser();
+        $this->resetValidation();
+        $this->smartConfigurePlanId = $plan->id;
+        $this->smartConfigureNotice = '';
+        $this->smartConfigureChanges = [];
+        $filler = app(PlanSmartFiller::class);
+
+        if (! $filler->allow($user)) {
+            $this->addError('smartConfigure', __('You have used smart configure a lot this hour. Try again a little later.'));
+
+            return;
+        }
+
+        try {
+            $suggestion = $filler->suggest($user, $plan->description, $plan->direction, $plan->account->currency, withName: false);
+        } catch (TypeSafeException $exception) {
+            Log::warning('Plan smart configure failed', ['user_id' => $user->id, 'plan_id' => $plan->id, 'exception' => $exception::class]);
+            $this->addError('smartConfigure', __('Smart configure could not run just now. Your plan is unchanged.'));
+
+            return;
+        }
+
+        if ($suggestion === null) {
+            $this->smartConfigureNotice = __('No past charge matches this plan, so there was nothing to compare with.');
+
+            return;
+        }
+
+        $this->smartConfigureChanges = $this->contradictions($plan, $suggestion);
+
+        if ($this->smartConfigureChanges === []) {
+            $this->smartConfigureNotice = __('Nothing in your past charges contradicts this plan.');
+        }
     }
 
     public function openEdit(int $id): void
@@ -165,6 +226,12 @@ final class PlannedTransactionManager extends Component
 
         if ($this->categoryPicked && $categoryId !== null) {
             app(RecentCategoryPicks::class)->record($this->authenticatedUser(), $categoryId);
+        }
+
+        if ($plan->id === $this->smartConfigurePlanId) {
+            $this->smartConfigurePlanId = null;
+            $this->smartConfigureChanges = [];
+            $this->smartConfigureNotice = '';
         }
 
         Flux::toast(text: 'Planned transaction updated', variant: 'success');
@@ -267,6 +334,7 @@ final class PlannedTransactionManager extends Component
         return view('livewire.planned-transaction-manager', [
             'typeChoices' => $this->typeChoices($direction, $editing?->transfer_to_account_id !== null),
             'amountStrategies' => PlanAmountStrategy::cases(),
+            'smartFillAvailable' => PlanSmartFiller::available(),
             'merchants' => Merchant::query()->where('user_id', $user->id)->orderBy('name')->get(['id', 'name']),
             'accounts' => $this->accountsForUser($user),
             'plans' => $this->plannedTransactionsForSelectedAccount($user),
@@ -277,6 +345,76 @@ final class PlannedTransactionManager extends Component
             'occurrenceStates' => new OccurrenceStateResolver,
             'today' => $user->today(),
         ]);
+    }
+
+    /**
+     * @return list<array{field: string, current: string, suggested: string}>
+     */
+    private function contradictions(PlannedTransaction $plan, PlanSmartFillSuggestion $suggestion): array
+    {
+        $changes = [];
+        $add = static function (string $field, string $current, string $suggested) use (&$changes): void {
+            $changes[] = ['field' => $field, 'current' => $current, 'suggested' => $suggested];
+        };
+
+        if ($suggestion->amount !== null && $suggestion->amount !== abs($plan->amount)) {
+            $add(__('Amount'), MoneyCast::format(abs($plan->amount)), MoneyCast::format($suggestion->amount));
+        }
+
+        $frequency = $suggestion->frequency === null ? null : RecurrenceFrequency::tryFrom($suggestion->frequency);
+
+        if ($frequency !== null && $frequency !== $plan->frequency) {
+            $add(__('Repeats'), $plan->frequency->label($plan->recurrence_interval), $frequency->label());
+        }
+
+        $type = $suggestion->type === null ? null : PlannedTransactionType::tryFrom($suggestion->type);
+
+        if ($type !== null && $type !== $plan->type && $plan->transfer_to_account_id === null) {
+            $add(__('Type'), $plan->type->label(), $type->label());
+        }
+
+        if ($suggestion->categoryId !== null && $plan->category_id !== null && $suggestion->categoryId !== $plan->category_id) {
+            $categories = Category::allWithLinkedParents($plan->user_id)->keyBy('id');
+
+            if ($categories->has($suggestion->categoryId) && $categories->has($plan->category_id)) {
+                $add(__('Category'), $categories[$plan->category_id]->fullPath(), $categories[$suggestion->categoryId]->fullPath());
+            }
+        }
+
+        if ($suggestion->autopay !== null && $plan->direction === TransactionDirection::Debit && $suggestion->autopay !== $plan->autopay) {
+            $add(__('Autopay'), $plan->autopay ? __('On') : __('Off'), $suggestion->autopay ? __('On') : __('Off'));
+        }
+
+        $monthly = [RecurrenceFrequency::EveryMonth, RecurrenceFrequency::Every3Months, RecurrenceFrequency::Every6Months, RecurrenceFrequency::EveryYear];
+
+        if ($suggestion->startDate !== null && $frequency === $plan->frequency && in_array($plan->frequency, $monthly, true)) {
+            $suggested = CarbonImmutable::parse($suggestion->startDate);
+            $current = $this->scheduledOnOrAfter($plan, $suggested->startOfMonth());
+
+            if ($current !== null && ! $current->isSameDay($suggested)) {
+                $add(__('Next due'), $current->toDateString(), $suggested->toDateString());
+            }
+        }
+
+        return $changes;
+    }
+
+    /** The plan's own scheduled date on or after the given day, before any weekend adjustment. */
+    private function scheduledOnOrAfter(PlannedTransaction $plan, CarbonImmutable $from): ?CarbonImmutable
+    {
+        $read = 0;
+
+        foreach ($plan->schedule($from) as $scheduled) {
+            if ($scheduled->original->greaterThanOrEqualTo($from)) {
+                return $scheduled->original;
+            }
+
+            if (++$read >= 400) {
+                break;
+            }
+        }
+
+        return null;
     }
 
     private function changeOccurrence(Closure $change): void

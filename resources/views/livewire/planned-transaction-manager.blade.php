@@ -100,6 +100,11 @@
                                             <flux:button variant="ghost" size="sm" wire:click="$set('occurrencesPlanId', {{ $occurrencesPlanId === $plan->id ? 'null' : $plan->id }})" data-testid="plan-occurrences-toggle-{{ $plan->id }}">
                                                 {{ __('Occurrences') }}
                                             </flux:button>
+                                            @if($smartFillAvailable)
+                                                <flux:button variant="ghost" size="sm" wire:click="smartConfigure({{ $plan->id }})" wire:loading.attr="disabled" wire:target="smartConfigure" data-testid="plan-smart-configure-{{ $plan->id }}">
+                                                    {{ __('Smart configure') }}
+                                                </flux:button>
+                                            @endif
                                             <flux:button variant="ghost" size="sm" wire:click="toggleActive({{ $plan->id }})">
                                                 {{ $plan->is_active ? 'Deactivate' : 'Activate' }}
                                             </flux:button>
@@ -110,6 +115,26 @@
                                     </div>
                                 </td>
                             </tr>
+                            @if($smartConfigurePlanId === $plan->id)
+                                <tr wire:key="planned-transaction-{{ $plan->id }}-smart-configure" data-testid="plan-smart-configure-result">
+                                    <td colspan="9" class="bg-neutral-50 px-4 py-3">
+                                        <div role="status" aria-live="polite">
+                                            <flux:error name="smartConfigure" />
+                                            @if($smartConfigureNotice !== '')
+                                                <flux:text size="sm" class="text-zinc-600" data-testid="plan-smart-configure-notice">{{ $smartConfigureNotice }}</flux:text>
+                                            @endif
+                                        </div>
+                                        @foreach($smartConfigureChanges as $change)
+                                            <div class="flex flex-wrap items-center gap-3 border-b border-neutral-200 py-2 text-sm" data-testid="plan-smart-configure-change">
+                                                <span class="w-32 font-medium">{{ $change['field'] }}</span>
+                                                <span class="text-zinc-500"><span class="sr-only">{{ __('Now:') }}</span> {{ $change['current'] }}</span>
+                                                <span aria-hidden="true">→</span>
+                                                <span><span class="sr-only">{{ __('Suggested:') }}</span> {{ $change['suggested'] }}</span>
+                                            </div>
+                                        @endforeach
+                                    </td>
+                                </tr>
+                            @endif
                             @if($occurrencesPlanId === $plan->id)
                                 <tr wire:key="planned-transaction-{{ $plan->id }}-occurrences" data-testid="plan-occurrences">
                                     <td colspan="9" class="bg-neutral-50 px-4 py-3">

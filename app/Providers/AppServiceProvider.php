@@ -35,6 +35,7 @@ use App\Services\PipelineStages\RuleMiningStage;
 use App\Services\PipelineStages\SetPayCycleStage;
 use App\Services\PipelineStages\TransferDetectionStage;
 use App\Services\PipelineStages\UserRulesStage;
+use App\Services\Recurring\PlanSmartFiller;
 use App\Services\RedbarkClientFactory;
 use App\Services\RuleAiCategorisationQueue;
 use App\Services\SimpleFinClaimer;
@@ -89,6 +90,20 @@ final class AppServiceProvider extends ServiceProvider
                 apiKey: $apiKey,
                 baseUrl: (string) config('services.typesafe.base_url'),
                 model: (string) config('services.typesafe.model'),
+            );
+        });
+
+        $this->app->when(PlanSmartFiller::class)->needs(TypeSafeServiceContract::class)->give(function (): TypeSafeService {
+            $apiKey = (string) config('services.typesafe.api_key');
+
+            throw_if(blank($apiKey), RuntimeException::class, 'TYPESAFE_API_KEY is not configured.');
+
+            return new TypeSafeService(
+                apiKey: $apiKey,
+                baseUrl: (string) config('services.typesafe.base_url'),
+                model: (string) config('services.typesafe.model'),
+                timeoutSeconds: (int) config('services.typesafe.interactive_timeout'),
+                backoffMs: [],
             );
         });
 

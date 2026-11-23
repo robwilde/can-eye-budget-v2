@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\DTOs\PlanPattern;
+use App\DTOs\PlanSmartFillSuggestion;
+use App\Enums\PlannedTransactionType;
 use App\Enums\PlanOrigin;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Exceptions\TypeSafe\TypeSafeException;
 use App\Livewire\Concerns\EditsPlanSeries;
 use App\Models\Account;
 use App\Models\Category;
@@ -18,14 +21,16 @@ use App\Models\User;
 use App\Services\RecentCategoryPicks;
 use App\Services\Recurring\PlanDuplicateGuard;
 use App\Services\Recurring\PlanPatternPicker;
+use App\Services\Recurring\PlanSmartFiller;
 use App\Services\Recurring\PlanTransactionSearch;
-use App\Support\Recurrence\ScheduleGenerator;
+use App\Support\Recurrence\NextDueDate;
 use Carbon\CarbonImmutable;
 use Flux\Flux;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
@@ -65,6 +70,8 @@ final class PlanDeclarationForm extends Component
 
     public string $searchTerm = '';
 
+    public string $smartFillNotice = '';
+
     #[On('declare-plan')]
     public function open(string $kind): void
     {
@@ -73,6 +80,7 @@ final class PlanDeclarationForm extends Component
         $this->resetValidation();
         $this->resetSeriesFields();
         $this->kind = $kind === self::KIND_INCOME ? self::KIND_INCOME : self::KIND_BILL;
+        $this->planType = $this->defaultPlanType();
         $this->description = '';
         $this->amount = '';
         $this->startDate = $user->today()->toDateString();
@@ -84,6 +92,7 @@ final class PlanDeclarationForm extends Component
         $this->merchantId = null;
         $this->notes = '';
         $this->searchTerm = '';
+        $this->smartFillNotice = '';
         $this->resetPage('searchPage');
         unset($this->patterns);
         $this->showModal = true;
@@ -119,6 +128,58 @@ final class PlanDeclarationForm extends Component
             : app(PlanTransactionSearch::class)->search($this->authenticatedUser(), $this->searchTerm);
     }
 
+    /**
+     * Proposes values from the user's past charges into the form without saving anything. A failed
+     * or unsure call leaves the form as it was and shows a soft notice.
+     */
+    public function smartFill(): void
+    {
+        abort_unless(PlanSmartFiller::available(), 404);
+
+        $user = $this->authenticatedUser();
+        $this->resetValidation();
+        $this->smartFillNotice = '';
+        $description = mb_trim($this->description);
+
+        if ($description === '') {
+            $this->addError('smartFill', __('Type a description first, then use smart fill.'));
+
+            return;
+        }
+
+        $filler = app(PlanSmartFiller::class);
+
+        if (! $filler->allow($user)) {
+            $this->addError('smartFill', __('You have used smart fill a lot this hour. Try again a little later.'));
+
+            return;
+        }
+
+        try {
+            $suggestion = $filler->suggest($user, $description, $this->declaredDirection(), $this->selectedCurrency($user));
+        } catch (TypeSafeException $exception) {
+            Log::warning('Plan smart fill failed', ['user_id' => $user->id, 'exception' => $exception::class]);
+            $this->addError('smartFill', __('Smart fill could not run just now. Your form is unchanged.'));
+
+            return;
+        }
+
+        if ($suggestion === null) {
+            $this->smartFillNotice = __('No past charge matches that description, so there was nothing to fill from.');
+
+            return;
+        }
+
+        if ($suggestion->isEmpty()) {
+            $this->smartFillNotice = __('Smart fill was not sure about anything, so nothing changed.');
+
+            return;
+        }
+
+        $this->applySuggestion($suggestion, $user);
+        $this->smartFillNotice = __('Smart fill proposed these values. Review them: nothing is saved until you add the plan.');
+    }
+
     public function usePattern(string $key): void
     {
         $pattern = $this->patterns->firstWhere('key', $key); // @phpstan-ignore property.notFound
@@ -141,7 +202,7 @@ final class PlanDeclarationForm extends Component
             $candidate->categoryId,
             null,
             $candidate->frequency,
-            $this->nextDueAfter($candidate->frequency, $pattern->latestDate, $user->today()),
+            NextDueDate::after($candidate->frequency, $pattern->latestDate, $user->today()),
         );
     }
 
@@ -165,7 +226,7 @@ final class PlanDeclarationForm extends Component
             $transaction->category_id,
             $transaction->merchant_id,
             $frequency,
-            $this->nextDueAfter($frequency, $transaction->post_date->toImmutable(), $user->today()),
+            NextDueDate::after($frequency, $transaction->post_date->toImmutable(), $user->today()),
         );
     }
 
@@ -232,6 +293,8 @@ final class PlanDeclarationForm extends Component
             'categories' => Category::visibleSortedByFullPath($user->id),
             'merchants' => Merchant::query()->where('user_id', $user->id)->orderBy('name')->get(['id', 'name']),
             'frequencies' => RecurrenceFrequency::selectable(),
+            'smartFillAvailable' => PlanSmartFiller::available(),
+            'typeOptions' => $this->typeChoices($this->declaredDirection(), false)['options'],
             'patterns' => $this->showModal ? $this->patterns : collect(), // @phpstan-ignore property.notFound
             'results' => $this->showModal ? $this->searchResults : null, // @phpstan-ignore property.notFound
         ]);
@@ -274,10 +337,12 @@ final class PlanDeclarationForm extends Component
     ): void {
         $user = $this->authenticatedUser();
         $kind = $direction === TransactionDirection::Credit ? self::KIND_INCOME : self::KIND_BILL;
+        $this->smartFillNotice = '';
 
         if ($kind !== $this->kind) {
             $this->kind = $kind;
             $this->resetSeriesFields();
+            $this->planType = $this->defaultPlanType();
             unset($this->patterns);
         }
 
@@ -292,22 +357,53 @@ final class PlanDeclarationForm extends Component
         $this->startDate = $startDate->toDateString();
     }
 
-    /** The first date of the cadence after the last charge that is not in the past; today when there is none. */
-    private function nextDueAfter(RecurrenceFrequency $frequency, CarbonImmutable $last, CarbonImmutable $today): CarbonImmutable
+    private function selectedCurrency(User $user): ?string
     {
-        $read = 0;
+        $currency = Account::query()->where('user_id', $user->id)->whereKey($this->resolvedId($this->accountId))->value('currency');
 
-        foreach (ScheduleGenerator::dates($frequency, $last, 1, null, $today) as $date) {
-            if ($date->greaterThan($last) && $date->greaterThanOrEqualTo($today)) {
-                return $date;
-            }
+        return is_string($currency) && $currency !== '' ? $currency : null;
+    }
 
-            if (++$read >= 400) {
-                break;
-            }
+    private function applySuggestion(PlanSmartFillSuggestion $suggestion, User $user): void
+    {
+        $direction = $this->declaredDirection();
+
+        if ($suggestion->description !== null) {
+            $this->description = mb_substr(mb_trim($suggestion->description), 0, 255);
         }
 
-        return $today;
+        if ($suggestion->amount !== null) {
+            $this->amount = number_format($suggestion->amount / 100, 2, '.', '');
+        }
+
+        $frequency = $suggestion->frequency === null ? null : RecurrenceFrequency::tryFrom($suggestion->frequency);
+
+        if ($frequency !== null && in_array($frequency, RecurrenceFrequency::selectable(), true)) {
+            $this->frequency = $frequency->value;
+        }
+
+        if ($suggestion->startDate !== null) {
+            $this->startDate = $suggestion->startDate;
+        }
+
+        if ($suggestion->categoryId !== null && Category::query()->where('user_id', $user->id)->visible()->whereKey($suggestion->categoryId)->exists()) {
+            $this->categoryId = $suggestion->categoryId;
+        }
+
+        $type = $suggestion->type === null ? null : PlannedTransactionType::tryFrom($suggestion->type);
+
+        if ($type !== null && in_array($type, PlannedTransactionType::selectableFor($direction), true)) {
+            $this->planType = $type->value;
+        }
+
+        if ($suggestion->autopay !== null && $direction === TransactionDirection::Debit) {
+            $this->autopay = $suggestion->autopay;
+        }
+    }
+
+    private function defaultPlanType(): string
+    {
+        return ($this->kind === self::KIND_INCOME ? PlannedTransactionType::Income : PlannedTransactionType::Bill)->value;
     }
 
     private function declaredDirection(): TransactionDirection

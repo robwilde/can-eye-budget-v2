@@ -63,6 +63,21 @@
                     <flux:error name="description" />
                 </flux:field>
 
+                @if($smartFillAvailable)
+                    <div class="space-y-1" data-testid="declare-smart-fill">
+                        <flux:button size="sm" wire:click="smartFill" wire:loading.attr="disabled" wire:target="smartFill" data-testid="declare-smart-fill-button">
+                            <span wire:loading.remove wire:target="smartFill">{{ __('Smart fill from my past charges') }}</span>
+                            <span wire:loading wire:target="smartFill">{{ __('Looking at your charges...') }}</span>
+                        </flux:button>
+                        <div role="status" aria-live="polite">
+                            @if($smartFillNotice !== '')
+                                <flux:text size="sm" class="text-zinc-600" data-testid="declare-smart-fill-notice">{{ $smartFillNotice }}</flux:text>
+                            @endif
+                            <flux:error name="smartFill" />
+                        </div>
+                    </div>
+                @endif
+
                 <div class="grid grid-cols-2 gap-3">
                     <flux:field>
                         <flux:label>{{ __('Amount') }}</flux:label>
@@ -85,6 +100,16 @@
                         @endforeach
                     </flux:select>
                     <flux:error name="frequency" />
+                </flux:field>
+
+                <flux:field>
+                    <flux:label>{{ __('Type') }}</flux:label>
+                    <flux:select wire:model="planType" data-testid="declare-type">
+                        @foreach($typeOptions as $typeOption)
+                            <flux:select.option value="{{ $typeOption->value }}">{{ $typeOption->label() }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                    <flux:error name="planType" />
                 </flux:field>
 
                 <flux:field>
