@@ -12,6 +12,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Carbon\Exceptions\InvalidFormatException;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -19,9 +20,9 @@ use Illuminate\Validation\ValidationException;
 /**
  * The only writer of occurrence payments, and the owner of the rules that close and reopen an occurrence
  * because of them. Every write re-scopes to the user, runs in one database transaction and locks the
- * occurrence first and the transaction second. The cap is read under the transaction's lock, so two
- * attaches of one transaction cannot both see the same free amount. (Deleting a transaction locks it
- * before this service locks occurrences; a deadlock there is the database's to detect and retry.)
+ * transaction first, then the plan, then the occurrences, always through lockRows(), which is why deleting, unlinking
+ * or editing a transaction and attaching it cannot deadlock. The cap is read under the transaction's lock, so
+ * two attaches of one transaction cannot both see the same free amount.
  *
  * An occurrence closes as paid, automatically, when the payments reach what it expects (within a cent),
  * or when a single payment lands within the plan's tolerance of it. An automatic close is undone when
@@ -47,16 +48,14 @@ final readonly class OccurrencePaymentRecorder
      */
     public function attach(User $user, int $transactionId, int $occurrenceId, ?int $amount = null): PlannedPayment
     {
-        return DB::transaction(function () use ($user, $transactionId, $occurrenceId, $amount): PlannedPayment {
-            $occurrence = $this->lockOccurrence($user, $occurrenceId);
-            $this->requireOpen($occurrence);
+        $planId = PlannedOccurrence::query()->forUser($user)->whereKey($occurrenceId)->value('planned_transaction_id')
+            ?? throw (new ModelNotFoundException)->setModel(PlannedOccurrence::class);
 
-            $transaction = Transaction::query()
-                ->where('user_id', $user->id)
-                ->current()
-                ->whereKey($transactionId)
-                ->lockForUpdate()
-                ->firstOrFail();
+        return DB::transaction(function () use ($user, $transactionId, $occurrenceId, $amount, $planId): PlannedPayment {
+            [$transactions, $occurrences] = $this->lockRows([$transactionId], [$occurrenceId], $user, live: true, planIds: [$planId]);
+            $occurrence = $occurrences->first() ?? throw (new ModelNotFoundException)->setModel(PlannedOccurrence::class);
+            $transaction = $transactions->first() ?? throw (new ModelNotFoundException)->setModel(Transaction::class);
+            $this->requireOpen($occurrence);
 
             if ($transaction->currency !== $occurrence->plannedTransaction->account->currency) {
                 $this->refuse(__('A payment in another currency cannot be applied to this bill yet.'));
@@ -179,12 +178,13 @@ final readonly class OccurrencePaymentRecorder
      */
     public function removePayment(User $user, int $paymentId): PlannedOccurrence
     {
-        $occurrenceId = PlannedPayment::query()->forUser($user)->whereKey($paymentId)->firstOrFail()->planned_occurrence_id;
+        $payment = PlannedPayment::query()->forUser($user)->whereKey($paymentId)->firstOrFail();
 
-        return DB::transaction(function () use ($user, $paymentId, $occurrenceId): PlannedOccurrence {
-            $occurrence = $this->lockOccurrence($user, $occurrenceId);
+        return DB::transaction(function () use ($user, $payment): PlannedOccurrence {
+            [, $occurrences] = $this->lockRows($payment->transaction_id === null ? [] : [$payment->transaction_id], [$payment->planned_occurrence_id], $user);
+            $occurrence = $occurrences->first() ?? throw (new ModelNotFoundException)->setModel(PlannedOccurrence::class);
 
-            PlannedPayment::query()->where('planned_occurrence_id', $occurrence->id)->whereKey($paymentId)->delete();
+            PlannedPayment::query()->where('planned_occurrence_id', $occurrence->id)->whereKey($payment->id)->delete();
             $this->reopenIfDisqualified($occurrence);
 
             return $occurrence;
@@ -197,8 +197,8 @@ final readonly class OccurrencePaymentRecorder
     public function reconcile(PlannedOccurrence $occurrence): void
     {
         DB::transaction(function () use ($occurrence): void {
-            $locked = PlannedOccurrence::query()->whereKey($occurrence->id)->lockForUpdate()->firstOrFail();
-            $locked->load('plannedTransaction');
+            [, $locked] = $this->lockRows([], [$occurrence->id]);
+            $locked = $locked->first() ?? throw (new ModelNotFoundException)->setModel(PlannedOccurrence::class);
 
             if ($locked->status === OccurrenceStatus::Scheduled) {
                 $this->closeIfSettled($locked);
@@ -215,41 +215,64 @@ final readonly class OccurrencePaymentRecorder
      */
     public function claim(Transaction $transaction, PlannedTransaction $plan): ?PlannedPayment
     {
-        if ($transaction->user_id !== $plan->user_id || PlannedPayment::query()->where('transaction_id', $transaction->id)->exists()) {
+        if ($transaction->user_id !== $plan->user_id) {
             return null;
         }
 
-        $post = CarbonImmutable::instance($transaction->post_date)->startOfDay();
-        $user = User::query()->find($plan->user_id);
+        return DB::transaction(function () use ($transaction, $plan): ?PlannedPayment {
+            [$transactions] = $this->lockRows([$transaction->id], [], planIds: [$plan->id]);
 
-        if (! $user instanceof User) {
-            return null;
-        }
+            $user = User::query()->find($plan->user_id);
 
-        $candidates = $plan->scheduledBetween($post->subDays($plan->match_late_days), $post->addDays($plan->match_early_days))
-            ->sortBy(static fn ($scheduled): int => abs((int) $post->diffInDays($scheduled->due, false)))
-            ->values();
-
-        foreach ($candidates as $scheduled) {
-            $this->generator->generate($plan, $scheduled->due, $scheduled->due);
-
-            $occurrence = PlannedOccurrence::query()
-                ->where('planned_transaction_id', $plan->id)
-                ->whereDate('original_date', $scheduled->original)
-                ->first();
-
-            if (! $occurrence instanceof PlannedOccurrence || $occurrence->status !== OccurrenceStatus::Scheduled) {
-                continue;
-            }
-
-            try {
-                return $this->attach($user, $transaction->id, $occurrence->id);
-            } catch (ValidationException|ModelNotFoundException) {
+            if ($transactions->isEmpty() || ! $user instanceof User || PlannedPayment::query()->where('transaction_id', $transaction->id)->exists()) {
                 return null;
             }
-        }
 
-        return null;
+            $post = CarbonImmutable::instance($transaction->post_date)->startOfDay();
+
+            $candidates = $plan->scheduledBetween($post->subDays($plan->match_late_days), $post->addDays($plan->match_early_days))
+                ->sortBy(static fn ($scheduled): int => abs((int) $post->diffInDays($scheduled->due, false)))
+                ->values();
+
+            foreach ($candidates as $scheduled) {
+                $this->generator->generate($plan, $scheduled->due, $scheduled->due);
+
+                $occurrence = PlannedOccurrence::query()
+                    ->where('planned_transaction_id', $plan->id)
+                    ->whereDate('original_date', $scheduled->original)
+                    ->first();
+
+                if (! $occurrence instanceof PlannedOccurrence || $occurrence->status !== OccurrenceStatus::Scheduled) {
+                    continue;
+                }
+
+                try {
+                    return $this->attach($user, $transaction->id, $occurrence->id);
+                } catch (ValidationException|ModelNotFoundException) {
+                    return null;
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Claims for several transactions that were just linked to the plan together (an accepted detected plan):
+     * every transaction row is locked first, in ascending id, before any occurrence is.
+     *
+     * @param  Collection<int, Transaction>  $transactions
+     */
+    public function claimAll(Collection $transactions, PlannedTransaction $plan): void
+    {
+        DB::transaction(function () use ($transactions, $plan): void {
+            $this->lockRows($transactions->modelKeys(), [], planIds: [$plan->id]);
+
+            foreach ($transactions->sortBy('post_date') as $transaction) {
+                $this->release($transaction, $plan->id);
+                $this->claim($transaction, $plan);
+            }
+        });
     }
 
     /**
@@ -258,29 +281,38 @@ final readonly class OccurrencePaymentRecorder
      */
     public function claimFor(Transaction $transaction, PlannedTransaction $plan, string $occurrenceDate): ?PlannedPayment
     {
-        $user = User::query()->find($plan->user_id);
-
-        if (! $user instanceof User || $transaction->user_id !== $plan->user_id) {
+        if ($transaction->user_id !== $plan->user_id) {
             return null;
         }
 
         $date = $this->parseDate($occurrenceDate);
-        $occurrence = $this->occurrenceOn($plan, $date);
 
-        if (! $occurrence instanceof PlannedOccurrence) {
-            $this->generator->generate($plan, $date, $date);
+        return DB::transaction(function () use ($transaction, $plan, $date): ?PlannedPayment {
+            [$transactions] = $this->lockRows([$transaction->id], [], planIds: [$plan->id]);
+
+            $user = User::query()->find($plan->user_id);
+
+            if ($transactions->isEmpty() || ! $user instanceof User) {
+                return null;
+            }
+
             $occurrence = $this->occurrenceOn($plan, $date);
-        }
 
-        if (! $occurrence instanceof PlannedOccurrence) {
-            return $this->claim($transaction, $plan);
-        }
+            if (! $occurrence instanceof PlannedOccurrence) {
+                $this->generator->generate($plan, $date, $date);
+                $occurrence = $this->occurrenceOn($plan, $date);
+            }
 
-        try {
-            return $occurrence->status === OccurrenceStatus::Scheduled ? $this->attach($user, $transaction->id, $occurrence->id) : null;
-        } catch (ValidationException|ModelNotFoundException) {
-            return null;
-        }
+            if (! $occurrence instanceof PlannedOccurrence) {
+                return $this->claim($transaction, $plan);
+            }
+
+            try {
+                return $occurrence->status === OccurrenceStatus::Scheduled ? $this->attach($user, $transaction->id, $occurrence->id) : null;
+            } catch (ValidationException|ModelNotFoundException) {
+                return null;
+            }
+        });
     }
 
     /**
@@ -291,30 +323,47 @@ final readonly class OccurrencePaymentRecorder
      */
     public function revalidate(Transaction $transaction, bool $linkChanged): void
     {
-        $payments = PlannedPayment::query()->where('transaction_id', $transaction->id)->with('occurrence.plannedTransaction.account')->get();
+        DB::transaction(function () use ($transaction, $linkChanged): void {
+            $this->lockRows([$transaction->id], [], planIds: $transaction->planned_transaction_id === null ? [] : [$transaction->planned_transaction_id]);
 
-        if ($payments->isEmpty()) {
-            return;
-        }
+            $payments = PlannedPayment::query()->where('transaction_id', $transaction->id)->with('occurrence.plannedTransaction.account')->get();
 
-        $fits = $payments->sum('amount') <= abs($transaction->amount)
-            && $payments->every(static fn (PlannedPayment $payment): bool => (! $linkChanged || $payment->occurrence->plannedTransaction->id === $transaction->planned_transaction_id)
-                && $payment->occurrence->plannedTransaction->account->currency === $transaction->currency
-                && $payment->occurrence->plannedTransaction->direction === $transaction->direction);
+            if ($payments->isEmpty()) {
+                return;
+            }
 
-        if ($fits) {
-            return;
-        }
+            $fits = $payments->sum('amount') <= abs($transaction->amount)
+                && $payments->every(static fn (PlannedPayment $payment): bool => (! $linkChanged || $payment->occurrence->plannedTransaction->id === $transaction->planned_transaction_id)
+                    && $payment->occurrence->plannedTransaction->account->currency === $transaction->currency
+                    && $payment->occurrence->plannedTransaction->direction === $transaction->direction);
 
-        $this->release($transaction);
+            if ($fits) {
+                return;
+            }
 
-        $plan = $transaction->planned_transaction_id === null
-            ? null
-            : PlannedTransaction::query()->where('user_id', $transaction->user_id)->find($transaction->planned_transaction_id);
+            $this->release($transaction);
 
-        if ($plan instanceof PlannedTransaction) {
-            $this->claim($transaction, $plan);
-        }
+            $plan = $transaction->planned_transaction_id === null
+                ? null
+                : PlannedTransaction::query()->where('user_id', $transaction->user_id)->find($transaction->planned_transaction_id);
+
+            if ($plan instanceof PlannedTransaction) {
+                $this->claim($transaction, $plan);
+            }
+        });
+    }
+
+    /**
+     * Moves every payment of one transaction version to another (an edit creates a new version, deleting
+     * it hands them back).
+     */
+    public function carryPayments(int $fromTransactionId, int $toTransactionId): void
+    {
+        DB::transaction(function () use ($fromTransactionId, $toTransactionId): void {
+            $this->lockRows([$fromTransactionId, $toTransactionId], []);
+
+            PlannedPayment::query()->where('transaction_id', $fromTransactionId)->update(['transaction_id' => $toTransactionId]);
+        });
     }
 
     /**
@@ -323,21 +372,19 @@ final readonly class OccurrencePaymentRecorder
      */
     public function release(Transaction $transaction, ?int $keepPlanId = null): void
     {
-        $payments = PlannedPayment::query()
-            ->where('transaction_id', $transaction->id)
-            ->when($keepPlanId !== null, fn ($query) => $query->whereHas('occurrence', fn ($occurrence) => $occurrence->where('planned_transaction_id', '!=', $keepPlanId)))
-            ->get();
+        DB::transaction(function () use ($transaction, $keepPlanId): void {
+            $this->lockRows([$transaction->id], []);
 
-        if ($payments->isEmpty()) {
-            return;
-        }
-
-        DB::transaction(function () use ($payments): void {
-            $occurrences = PlannedOccurrence::query()
-                ->whereKey($payments->pluck('planned_occurrence_id')->unique()->all())
-                ->orderBy('id')
-                ->lockForUpdate()
+            $payments = PlannedPayment::query()
+                ->where('transaction_id', $transaction->id)
+                ->when($keepPlanId !== null, fn ($query) => $query->whereHas('occurrence', fn ($occurrence) => $occurrence->where('planned_transaction_id', '!=', $keepPlanId)))
                 ->get();
+
+            if ($payments->isEmpty()) {
+                return;
+            }
+
+            [, $occurrences] = $this->lockRows([], $payments->pluck('planned_occurrence_id')->all());
 
             PlannedPayment::query()->whereKey($payments->modelKeys())->delete();
 
@@ -457,15 +504,50 @@ final readonly class OccurrencePaymentRecorder
 
     private function lockOccurrence(User $user, int $occurrenceId): PlannedOccurrence
     {
-        $occurrence = PlannedOccurrence::query()
-            ->forUser($user)
-            ->whereKey($occurrenceId)
-            ->lockForUpdate()
-            ->firstOrFail();
+        [, $occurrences] = $this->lockRows([], [$occurrenceId], $user);
 
-        $occurrence->load('plannedTransaction.account');
+        return $occurrences->first() ?? throw (new ModelNotFoundException)->setModel(PlannedOccurrence::class);
+    }
 
-        return $occurrence;
+    /**
+     * The one lock order of every payment write: the transaction rows first, in ascending id, then the plan
+     * rows (a write that creates occurrences or learns from a payment changes the plan), then the occurrence
+     * rows, in ascending id. Nothing else in the payment code locks rows, so two writers that
+     * touch the same transaction and occurrence always queue in the same direction and cannot deadlock.
+     * With $user the rows must be that user's; with $live the transactions must be current, undeleted
+     * versions, otherwise deleted ones are locked too (a delete is releasing their payments).
+     *
+     * @param  list<int>  $transactionIds
+     * @param  list<int>  $occurrenceIds
+     * @param  list<int>  $planIds
+     * @return array{0: Collection<int, Transaction>, 1: Collection<int, PlannedOccurrence>}
+     */
+    private function lockRows(array $transactionIds, array $occurrenceIds, ?User $user = null, bool $live = false, array $planIds = []): array
+    {
+        $transactions = $transactionIds === []
+            ? new Collection
+            : ($live ? Transaction::query()->current() : Transaction::withTrashed())
+                ->when($user !== null, fn ($query) => $query->where('user_id', $user->id))
+                ->whereKey(array_values(array_unique($transactionIds)))
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
+
+        if ($planIds !== []) {
+            PlannedTransaction::query()->whereKey(array_values(array_unique($planIds)))->orderBy('id')->lockForUpdate()->get();
+        }
+
+        $occurrences = $occurrenceIds === []
+            ? new Collection
+            : PlannedOccurrence::query()
+                ->when($user !== null, fn ($query) => $query->forUser($user))
+                ->whereKey(array_values(array_unique($occurrenceIds)))
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->load('plannedTransaction.account');
+
+        return [$transactions, $occurrences];
     }
 
     private function requireOpen(PlannedOccurrence $occurrence): void
