@@ -153,7 +153,7 @@ final readonly class SubscriptionAuditGenerator implements InsightGenerator
             return $step;
         }
 
-        foreach ($plan->schedule() as $scheduled) {
+        foreach ($plan->schedule($date) as $scheduled) {
             if ($scheduled->original->greaterThan($date)) {
                 return $scheduled->original;
             }
