@@ -162,3 +162,38 @@ test('continues persisting later candidates after skipping an earlier one', func
         ->and(AnalysisSuggestion::query()->where('pipeline_run_id', $this->run->id)->count())->toBe(1);
     expectWriterSkippedAudit($this->run, 'noise', 'ROUND UP TRANSFER TO SAV', $this->account);
 });
+
+test('names the reason a candidate is skipped without writing anything', function () {
+    PlannedTransaction::factory()->for($this->user)->for($this->account)->create([
+        'description' => 'Spotify',
+        'amount' => 1199,
+        'direction' => TransactionDirection::Debit,
+        'frequency' => RecurrenceFrequency::EveryMonth,
+        'is_active' => true,
+    ]);
+    AnalysisSuggestion::factory()->for($this->user)->create([
+        'type' => SuggestionType::RecurringTransaction,
+        'status' => SuggestionStatus::Rejected,
+        'resolved_at' => now()->subDays(10),
+        'payload' => ['description' => 'GYM', 'account_id' => $this->account->id],
+    ]);
+
+    expect($this->writer->skipReason($this->user, writerCandidate($this->account, 'ROUND UP TO NETFLIX')))->toBe('noise')
+        ->and($this->writer->skipReason($this->user, writerCandidate($this->account, 'SPOTIFY', 1199)))->toBe('existing_planned_transaction')
+        ->and($this->writer->skipReason($this->user, writerCandidate($this->account, 'GYM', 4000)))->toBe('recently_rejected')
+        ->and($this->writer->skipReason($this->user, writerCandidate($this->account)))->toBeNull()
+        ->and(PipelineAuditEntry::query()->count())->toBe(0);
+});
+
+test('treats a stored negative debit amount as the same size as a declared bill', function () {
+    PlannedTransaction::factory()->for($this->user)->for($this->account)->create([
+        'description' => 'Spotify',
+        'amount' => 1199,
+        'direction' => TransactionDirection::Debit,
+        'frequency' => RecurrenceFrequency::EveryMonth,
+        'is_active' => true,
+    ]);
+
+    expect($this->writer->skipReason($this->user, writerCandidate($this->account, 'SPOTIFY', -1199)))->toBe('existing_planned_transaction')
+        ->and($this->writer->skipReason($this->user, writerCandidate($this->account, 'SPOTIFY', -2500)))->toBeNull();
+});

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Livewire;
 
+use App\DTOs\PlanPattern;
 use App\Enums\PlanOrigin;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
@@ -12,20 +13,30 @@ use App\Models\Account;
 use App\Models\Category;
 use App\Models\Merchant;
 use App\Models\PlannedTransaction;
+use App\Models\Transaction;
 use App\Models\User;
 use App\Services\RecentCategoryPicks;
 use App\Services\Recurring\PlanDuplicateGuard;
+use App\Services\Recurring\PlanPatternPicker;
+use App\Services\Recurring\PlanTransactionSearch;
+use App\Support\Recurrence\ScheduleGenerator;
+use Carbon\CarbonImmutable;
 use Flux\Flux;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Contracts\View\View;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Component;
+use Livewire\WithPagination;
 
 final class PlanDeclarationForm extends Component
 {
     use EditsPlanSeries;
+    use WithPagination;
 
     public const string KIND_BILL = 'bill';
 
@@ -52,6 +63,8 @@ final class PlanDeclarationForm extends Component
 
     public string $notes = '';
 
+    public string $searchTerm = '';
+
     #[On('declare-plan')]
     public function open(string $kind): void
     {
@@ -70,7 +83,90 @@ final class PlanDeclarationForm extends Component
         $this->categoryId = null;
         $this->merchantId = null;
         $this->notes = '';
+        $this->searchTerm = '';
+        $this->resetPage('searchPage');
+        unset($this->patterns);
         $this->showModal = true;
+    }
+
+    public function updatedSearchTerm(): void
+    {
+        $this->resetPage('searchPage');
+    }
+
+    /**
+     * The patterns the detector found for what is being declared, that the user has not declared.
+     * Kept between requests so typing in the search does not run the detector again; open() clears it.
+     *
+     * @return Collection<int, PlanPattern>
+     */
+    #[Computed(persist: true)]
+    public function patterns(): Collection
+    {
+        return app(PlanPatternPicker::class)->patterns($this->authenticatedUser(), $this->declaredDirection());
+    }
+
+    /**
+     * The user's own transactions matching the search, a page at a time; nothing until something is typed.
+     *
+     * @return LengthAwarePaginator<int, Transaction>|null
+     */
+    #[Computed]
+    public function searchResults(): ?LengthAwarePaginator
+    {
+        return mb_trim($this->searchTerm) === ''
+            ? null
+            : app(PlanTransactionSearch::class)->search($this->authenticatedUser(), $this->searchTerm);
+    }
+
+    public function usePattern(string $key): void
+    {
+        $pattern = $this->patterns->firstWhere('key', $key); // @phpstan-ignore property.notFound
+
+        if ($pattern === null) {
+            $this->addError('pattern', __('That pattern is no longer available.'));
+
+            return;
+        }
+
+        $candidate = $pattern->candidate;
+        $user = $this->authenticatedUser();
+
+        $this->resetValidation();
+        $this->prefill(
+            $candidate->direction,
+            $candidate->cleanDescription,
+            abs($candidate->amount),
+            $candidate->accountId,
+            $candidate->categoryId,
+            null,
+            $candidate->frequency,
+            $this->nextDueAfter($candidate->frequency, $pattern->latestDate, $user->today()),
+        );
+    }
+
+    public function startFromTransaction(int $id): void
+    {
+        $user = $this->authenticatedUser();
+        $transaction = app(PlanTransactionSearch::class)->find($user, $id);
+
+        abort_if($transaction === null, 404);
+
+        $frequency = $transaction->direction === TransactionDirection::Credit
+            ? RecurrenceFrequency::Every2Weeks
+            : RecurrenceFrequency::EveryMonth;
+
+        $this->resetValidation();
+        $this->prefill(
+            $transaction->direction,
+            $transaction->merchant_name ?: ($transaction->clean_description ?: (string) $transaction->description),
+            abs($transaction->amount),
+            $transaction->account_id,
+            $transaction->category_id,
+            $transaction->merchant_id,
+            $frequency,
+            $this->nextDueAfter($frequency, $transaction->post_date->toImmutable(), $user->today()),
+        );
     }
 
     public function save(): void
@@ -136,6 +232,8 @@ final class PlanDeclarationForm extends Component
             'categories' => Category::visibleSortedByFullPath($user->id),
             'merchants' => Merchant::query()->where('user_id', $user->id)->orderBy('name')->get(['id', 'name']),
             'frequencies' => RecurrenceFrequency::selectable(),
+            'patterns' => $this->showModal ? $this->patterns : collect(), // @phpstan-ignore property.notFound
+            'results' => $this->showModal ? $this->searchResults : null, // @phpstan-ignore property.notFound
         ]);
     }
 
@@ -162,6 +260,54 @@ final class PlanDeclarationForm extends Component
             'accountId.required' => __('Choose the account this is paid from.'),
             'accountId.exists' => __('Choose one of your own accounts.'),
         ];
+    }
+
+    private function prefill(
+        TransactionDirection $direction,
+        string $description,
+        int $cents,
+        int $accountId,
+        ?int $categoryId,
+        ?int $merchantId,
+        RecurrenceFrequency $frequency,
+        CarbonImmutable $startDate,
+    ): void {
+        $user = $this->authenticatedUser();
+        $kind = $direction === TransactionDirection::Credit ? self::KIND_INCOME : self::KIND_BILL;
+
+        if ($kind !== $this->kind) {
+            $this->kind = $kind;
+            $this->resetSeriesFields();
+            unset($this->patterns);
+        }
+
+        $this->description = mb_substr(mb_trim($description), 0, 255);
+        $this->amount = number_format($cents / 100, 2, '.', '');
+        $this->accountId = Account::query()->where('user_id', $user->id)->active()->tracked()->whereKey($accountId)->exists() ? $accountId : $this->defaultAccountId($user);
+        $this->categoryId = $categoryId !== null && Category::query()->where('user_id', $user->id)->visible()->whereKey($categoryId)->exists() ? $categoryId : null;
+        $this->merchantId = $merchantId !== null && Merchant::query()->where('user_id', $user->id)->whereKey($merchantId)->exists() ? $merchantId : null;
+        $this->frequency = in_array($frequency, RecurrenceFrequency::selectable(), true)
+            ? $frequency->value
+            : ($kind === self::KIND_INCOME ? RecurrenceFrequency::Every2Weeks->value : RecurrenceFrequency::EveryMonth->value);
+        $this->startDate = $startDate->toDateString();
+    }
+
+    /** The first date of the cadence after the last charge that is not in the past; today when there is none. */
+    private function nextDueAfter(RecurrenceFrequency $frequency, CarbonImmutable $last, CarbonImmutable $today): CarbonImmutable
+    {
+        $read = 0;
+
+        foreach (ScheduleGenerator::dates($frequency, $last, 1, null, $today) as $date) {
+            if ($date->greaterThan($last) && $date->greaterThanOrEqualTo($today)) {
+                return $date;
+            }
+
+            if (++$read >= 400) {
+                break;
+            }
+        }
+
+        return $today;
     }
 
     private function declaredDirection(): TransactionDirection

@@ -51,50 +51,40 @@ final readonly class RecurringSuggestionWriter
         return $suggestionIds;
     }
 
+    /**
+     * Why the candidate should not be offered: noise, an accepted suggestion, an active plan already
+     * covering it, or a rejection in the last 90 days. Null when it can be offered. The one place
+     * these rules live, so suggestions and the plan picker never disagree.
+     */
+    public function skipReason(User $user, RecurringCandidate $candidate): ?string
+    {
+        return match (true) {
+            $this->isNoise($candidate->description) => 'noise',
+            $this->hasAcceptedSuggestion($user, $candidate->description, $candidate->accountId) => 'existing_accepted_suggestion',
+            $this->hasMatchingPlannedTransaction(
+                $user,
+                $candidate->description,
+                $candidate->accountId,
+                $candidate->direction,
+                $candidate->frequency,
+                $candidate->amount,
+            ) => 'existing_planned_transaction',
+            $this->hasRecentRejection($user, $candidate->description, $candidate->accountId) => 'recently_rejected',
+            default => null,
+        };
+    }
+
     private function shouldSkip(User $user, RecurringCandidate $candidate, int $pipelineRunId): bool
     {
-        if ($this->isNoise($candidate->description)) {
-            $this->createSkipAudit($pipelineRunId, 'noise', $candidate->description, $candidate->accountId);
+        $reason = $this->skipReason($user, $candidate);
 
-            return true;
+        if ($reason === null) {
+            return false;
         }
 
-        if ($this->hasAcceptedSuggestion($user, $candidate->description, $candidate->accountId)) {
-            $this->createSkipAudit(
-                $pipelineRunId,
-                'existing_accepted_suggestion',
-                $candidate->description,
-                $candidate->accountId,
-            );
+        $this->createSkipAudit($pipelineRunId, $reason, $candidate->description, $candidate->accountId);
 
-            return true;
-        }
-
-        if ($this->hasMatchingPlannedTransaction(
-            $user,
-            $candidate->description,
-            $candidate->accountId,
-            $candidate->direction,
-            $candidate->frequency,
-            $candidate->amount,
-        )) {
-            $this->createSkipAudit(
-                $pipelineRunId,
-                'existing_planned_transaction',
-                $candidate->description,
-                $candidate->accountId,
-            );
-
-            return true;
-        }
-
-        if ($this->hasRecentRejection($user, $candidate->description, $candidate->accountId)) {
-            $this->createSkipAudit($pipelineRunId, 'recently_rejected', $candidate->description, $candidate->accountId);
-
-            return true;
-        }
-
-        return false;
+        return true;
     }
 
     private function isNoise(string $signature): bool
@@ -140,11 +130,14 @@ final readonly class RecurringSuggestionWriter
 
     private function amountsMatch(int $plannedAmount, int $medianAmount): bool
     {
-        if ($medianAmount === 0) {
-            return $plannedAmount === 0;
+        $planned = abs($plannedAmount);
+        $median = abs($medianAmount);
+
+        if ($median === 0) {
+            return $planned === 0;
         }
 
-        return abs($plannedAmount - $medianAmount) / abs($medianAmount) <= self::AMOUNT_TOLERANCE;
+        return abs($planned - $median) / $median <= self::AMOUNT_TOLERANCE;
     }
 
     private function descriptionsRelated(string $a, string $b): bool

@@ -1,9 +1,62 @@
+@php
+    use App\Casts\MoneyCast;
+@endphp
+
 <div>
     <flux:modal wire:model="showModal" class="max-w-lg" data-testid="plan-declaration-modal">
         <div class="space-y-4">
             <flux:heading size="lg">{{ $kind === 'income' ? __('Add income') : __('Add bill') }}</flux:heading>
 
             <div class="max-h-[60vh] space-y-4 overflow-y-auto px-1">
+                @if($patterns->isNotEmpty())
+                    <div class="space-y-2" data-testid="declare-patterns">
+                        <flux:text size="sm" class="font-medium">{{ $kind === 'income' ? __('Looks like regular income') : __('Looks like regular bills') }}</flux:text>
+                        <ul class="space-y-1">
+                            @foreach($patterns as $pattern)
+                                <li wire:key="pattern-{{ $pattern->key }}">
+                                    <button type="button" wire:click="usePattern('{{ $pattern->key }}')" class="flex w-full items-center justify-between gap-3 rounded-lg border border-neutral-200 px-3 py-2 text-left text-sm hover:bg-neutral-50" data-testid="declare-pattern">
+                                        <span class="font-medium">{{ $pattern->candidate->cleanDescription }}</span>
+                                        <span class="text-zinc-500">{{ MoneyCast::format(abs($pattern->candidate->amount)) }} · {{ $pattern->candidate->frequency->label() }}</span>
+                                    </button>
+                                </li>
+                            @endforeach
+                        </ul>
+                        <flux:error name="pattern" />
+                    </div>
+                @endif
+
+                <details wire:ignore.self class="rounded-lg border border-neutral-200 px-3 py-2" data-testid="declare-search-panel" @if($searchTerm !== '') open @endif>
+                    <summary class="cursor-pointer text-sm font-medium">{{ __("Not seeing what you're looking for?") }}</summary>
+
+                    <div class="mt-3 space-y-2">
+                        <flux:input wire:model.live.debounce.400ms="searchTerm" type="search" maxlength="100" :placeholder="__('Search your transactions')" :aria-label="__('Search your transactions')" data-testid="declare-search" />
+
+                        @if($results !== null)
+                            @forelse($results as $transaction)
+                                <button type="button" wire:key="found-{{ $transaction->id }}" wire:click="startFromTransaction({{ $transaction->id }})" class="flex w-full items-center justify-between gap-3 rounded-lg border border-neutral-200 px-3 py-2 text-left text-sm hover:bg-neutral-50" data-testid="declare-found">
+                                    <span>
+                                        <span class="font-medium">{{ $transaction->merchant_name ?: $transaction->description }}</span>
+                                        <span class="block text-xs text-zinc-500">{{ $transaction->post_date->format('j M Y') }}</span>
+                                        @if($transaction->plannedTransaction !== null)
+                                            <span class="block text-xs text-zinc-600" data-testid="declare-found-plan">{{ __('Part of :plan', ['plan' => $transaction->plannedTransaction->description]) }}</span>
+                                        @endif
+                                    </span>
+                                    <span class="text-zinc-500">{{ MoneyCast::format(abs($transaction->amount)) }}</span>
+                                </button>
+                            @empty
+                                <flux:text size="sm" class="text-zinc-500" data-testid="declare-found-none">{{ __('No matching transactions.') }}</flux:text>
+                            @endforelse
+
+                            @if($results->hasPages())
+                                <div class="flex items-center justify-between text-sm">
+                                    <flux:button size="xs" variant="ghost" wire:click="previousPage('searchPage')" :disabled="$results->onFirstPage()">{{ __('Newer') }}</flux:button>
+                                    <flux:button size="xs" variant="ghost" wire:click="nextPage('searchPage')" :disabled="! $results->hasMorePages()" data-testid="declare-found-next">{{ __('Older') }}</flux:button>
+                                </div>
+                            @endif
+                        @endif
+                    </div>
+                </details>
+
                 <flux:field>
                     <flux:label>{{ __('Description') }}</flux:label>
                     <flux:input wire:model="description" type="text" maxlength="255" placeholder="{{ $kind === 'income' ? __('Salary') : __('Rent') }}" data-testid="declare-description" />
