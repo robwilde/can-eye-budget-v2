@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Casts\MoneyCast;
+use App\Enums\PlanAmountStrategy;
+use App\Enums\PlannedTransactionType;
+use App\Enums\PlanOrigin;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Events\PlannedTransactionCategoryUpdated;
@@ -18,6 +21,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Validator;
 
 /**
  * @property int $id
@@ -27,10 +31,26 @@ use Illuminate\Support\Collection;
  * @property int|null $category_id
  * @property int $amount
  * @property TransactionDirection $direction
+ * @property PlannedTransactionType $type
+ * @property PlanOrigin $origin
  * @property string $description
+ * @property string|null $merchant_key
+ * @property string|null $payment_url
+ * @property string|null $notes
+ * @property bool $autopay
  * @property CarbonImmutable $start_date
  * @property RecurrenceFrequency $frequency
  * @property CarbonImmutable|null $until_date
+ * @property int|null $end_after_count
+ * @property CarbonImmutable|null $renewal_on
+ * @property CarbonImmutable|null $trial_ends_on
+ * @property CarbonImmutable|null $cancelled_on
+ * @property int $reminder_days
+ * @property int $grace_days
+ * @property int $amount_tolerance_bps
+ * @property int $match_early_days
+ * @property int $match_late_days
+ * @property PlanAmountStrategy $amount_strategy
  * @property bool $is_active
  * @property bool|null $is_pay_cycle_income
  * @property CarbonImmutable|null $last_generated_date
@@ -52,13 +72,44 @@ final class PlannedTransaction extends Model
         'category_id',
         'amount',
         'direction',
+        'type',
+        'origin',
         'description',
+        'merchant_key',
+        'payment_url',
+        'notes',
+        'autopay',
         'start_date',
         'frequency',
         'until_date',
+        'end_after_count',
+        'renewal_on',
+        'trial_ends_on',
+        'cancelled_on',
+        'reminder_days',
+        'grace_days',
+        'amount_tolerance_bps',
+        'match_early_days',
+        'match_late_days',
+        'amount_strategy',
         'is_active',
         'is_pay_cycle_income',
         'last_generated_date',
+    ];
+
+    /**
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'type' => 'bill',
+        'origin' => 'declared',
+        'autopay' => false,
+        'reminder_days' => 3,
+        'grace_days' => 3,
+        'amount_tolerance_bps' => 750,
+        'match_early_days' => 2,
+        'match_late_days' => 7,
+        'amount_strategy' => 'fixed',
     ];
 
     /** @return BelongsTo<User, $this> */
@@ -322,6 +373,23 @@ final class PlannedTransaction extends Model
 
     protected static function booted(): void
     {
+        self::saving(static function (PlannedTransaction $plannedTransaction): void {
+            Validator::make($plannedTransaction->only(['account_id', 'transfer_to_account_id', 'end_after_count']), [
+                'transfer_to_account_id' => ['nullable', 'integer', 'different:account_id'],
+                'end_after_count' => ['nullable', 'integer', 'min:1', 'max:600'],
+            ])->validate();
+
+            if ($plannedTransaction->transfer_to_account_id !== null) {
+                $plannedTransaction->type = PlannedTransactionType::Transfer;
+            } elseif ($plannedTransaction->exists
+                && $plannedTransaction->isDirty('transfer_to_account_id')
+                && $plannedTransaction->type === PlannedTransactionType::Transfer) {
+                $plannedTransaction->type = $plannedTransaction->direction === TransactionDirection::Credit
+                    ? PlannedTransactionType::Income
+                    : PlannedTransactionType::Bill;
+            }
+        });
+
         self::created(static function (PlannedTransaction $plannedTransaction): void {
             event(new PlannedTransactionCreated($plannedTransaction));
         });
@@ -341,10 +409,23 @@ final class PlannedTransaction extends Model
     {
         return [
             'direction' => TransactionDirection::class,
+            'type' => PlannedTransactionType::class,
+            'origin' => PlanOrigin::class,
             'frequency' => RecurrenceFrequency::class,
             'amount' => MoneyCast::class,
+            'autopay' => 'boolean',
             'start_date' => 'date',
             'until_date' => 'date',
+            'end_after_count' => 'integer',
+            'renewal_on' => 'date',
+            'trial_ends_on' => 'date',
+            'cancelled_on' => 'date',
+            'reminder_days' => 'integer',
+            'grace_days' => 'integer',
+            'amount_tolerance_bps' => 'integer',
+            'match_early_days' => 'integer',
+            'match_late_days' => 'integer',
+            'amount_strategy' => PlanAmountStrategy::class,
             'last_generated_date' => 'date',
             'is_active' => 'boolean',
             'is_pay_cycle_income' => 'boolean',
