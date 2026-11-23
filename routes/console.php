@@ -47,6 +47,12 @@ Schedule::command('securities:sync-prices')
     ->withoutOverlapping()
     ->onOneServer();
 
+Schedule::command('app:generate-planned-occurrences')
+    ->dailyAt('03:00')
+    ->name('planned-occurrences:generate')
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('goals:maintain')
     ->dailyAt('02:00')
     ->name('goals:maintain')
