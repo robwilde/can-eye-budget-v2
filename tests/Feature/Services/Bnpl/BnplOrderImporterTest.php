@@ -8,6 +8,8 @@ use App\DTOs\ParsedSchedule;
 use App\DTOs\RawEmail;
 use App\Enums\BnplOrderStatus;
 use App\Enums\BnplProvider;
+use App\Enums\PlannedTransactionType;
+use App\Enums\PlanOrigin;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
@@ -70,6 +72,13 @@ test('the first receipt of a loan creates the order and one fortnightly plan', f
         ->and($plan->until_date->toDateString())->toBe('2026-09-01')
         ->and($plan->occurrencesBetween(CarbonImmutable::parse('2026-07-01'), CarbonImmutable::parse('2026-09-30'))
             ->map->toDateString()->all())->toBe(['2026-07-21', '2026-08-04', '2026-08-18', '2026-09-01']);
+});
+
+test('the plan created for a loan is a detected installment', function () {
+    $plan = importReceipt($this->user, payPalReceiptEmail())->plannedTransaction->fresh();
+
+    expect($plan->origin)->toBe(PlanOrigin::Detected)
+        ->and($plan->type)->toBe(PlannedTransactionType::Installment);
 });
 
 test('a later receipt for a known loan creates nothing', function () {
