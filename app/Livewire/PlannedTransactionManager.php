@@ -31,6 +31,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Locked;
+use Livewire\Attributes\On;
 use Livewire\Component;
 
 final class PlannedTransactionManager extends Component
@@ -91,6 +92,12 @@ final class PlannedTransactionManager extends Component
         $firstAccountId = $primaryId ?? (clone $usable)->orderBy('id')->value('id');
 
         $this->accountId = $firstAccountId === null ? null : (int) $firstAccountId;
+    }
+
+    #[On('plan-declared')]
+    public function showDeclaredPlan(int $accountId): void
+    {
+        $this->accountId = $accountId;
     }
 
     public function openEdit(int $id): void
