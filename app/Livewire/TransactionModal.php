@@ -11,6 +11,8 @@ use App\Enums\AccountClass;
 use App\Enums\AccountStatus;
 use App\Enums\CleanDescriptionSource;
 use App\Enums\ExclusionSource;
+use App\Enums\PlanAmountStrategy;
+use App\Enums\PlannedTransactionType;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionKind;
@@ -24,6 +26,7 @@ use App\Exceptions\PendingMergeRefusedException;
 use App\Exceptions\TransactionSplitRefusedException;
 use App\Exceptions\TransferAlreadyLinkedException;
 use App\Exceptions\TransferLinkRefusedException;
+use App\Livewire\Concerns\EditsPlanSeries;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Merchant;
@@ -51,6 +54,7 @@ use App\Support\AmountParseResult;
 use App\Support\Categories\ProtectedCategories;
 use Carbon\CarbonImmutable;
 use Carbon\Exceptions\InvalidFormatException;
+use Closure;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -68,6 +72,7 @@ use Throwable;
 
 final class TransactionModal extends Component
 {
+    use EditsPlanSeries;
     use WithFileUploads;
 
     private const int RATE_LOOKUP_TTL_SECONDS = 300;
@@ -420,10 +425,16 @@ final class TransactionModal extends Component
         $this->date = $occurrenceDate ?? $planned->start_date->format('Y-m-d');
         $this->frequency = $planned->frequency->value;
 
-        if ($planned->until_date !== null) {
+        if ($planned->end_after_count !== null) {
+            $this->untilType = 'after-count';
+        } elseif ($planned->until_date !== null) {
             $this->untilType = 'until-date';
             $this->untilDate = $planned->until_date->format('Y-m-d');
         }
+
+        $this->merchantId = $this->merchantIdForKey($planned->user_id, $planned->merchant_key);
+        $this->notes = $planned->notes ?? '';
+        $this->fillSeriesFrom($planned);
 
         $this->showModal = true;
     }
@@ -626,7 +637,7 @@ final class TransactionModal extends Component
 
     public function updatedTransactionType(): void
     {
-        if ($this->transactionType !== 'transfer' && ! $this->isBankFeedTransaction) {
+        if ($this->transactionType !== 'transfer' && ! $this->isBankFeedTransaction && $this->mode !== 'plan') {
             $this->notes = '';
         }
 
@@ -999,6 +1010,11 @@ final class TransactionModal extends Component
             'recentCategories' => $recentCategories,
             'tags' => Tag::query()->where('user_id', auth()->id())->orderBy('name')->get(['id', 'name', 'colour']),
             'merchants' => Merchant::query()->where('user_id', auth()->id())->orderBy('name')->get(['id', 'name']),
+            'typeChoices' => $this->typeChoices(
+                $this->transactionType === 'income' ? TransactionDirection::Credit : TransactionDirection::Debit,
+                $this->transactionType === 'transfer',
+            ),
+            'amountStrategies' => PlanAmountStrategy::cases(),
             'formatMoney' => MoneyCast::format(...),
             'parsedAmount' => $parsed->amount ?? 0,
             'parsedDescription' => $parsed->description ?? '',
@@ -1768,7 +1784,9 @@ final class TransactionModal extends Component
             return false;
         }
 
-        PlannedTransaction::query()->create($this->buildPlannedTransactionData($parsed));
+        DB::transaction(function () use ($parsed): void {
+            $this->copyPaymentUrlToMatching(PlannedTransaction::query()->create($this->buildPlannedTransactionData($parsed)));
+        });
 
         return true;
     }
@@ -1786,7 +1804,11 @@ final class TransactionModal extends Component
         $data = $this->buildPlannedTransactionData($parsed);
         unset($data['user_id'], $data['is_active']);
 
-        $planned->update($data);
+        DB::transaction(function () use ($planned, $data): void {
+            $planned->update($data);
+
+            $this->copyPaymentUrlToMatching($planned);
+        });
 
         return true;
     }
@@ -2176,6 +2198,8 @@ final class TransactionModal extends Component
         DB::transaction(function () use ($transaction, $parsed, $isPlainSource): void {
             $planned = PlannedTransaction::query()->create($this->buildPlannedTransactionData($parsed));
 
+            $this->copyPaymentUrlToMatching($planned);
+
             if ($isPlainSource) {
                 $transaction->update(['planned_transaction_id' => $planned->id]);
             }
@@ -2540,8 +2564,15 @@ final class TransactionModal extends Component
             'description' => $parsed->description,
             'start_date' => $this->date,
             'frequency' => RecurrenceFrequency::from($this->frequency),
-            'until_date' => $this->untilType === 'until-date' ? $this->untilDate : null,
             'is_active' => true,
+            ...$this->seriesAttributes(
+                $direction,
+                $this->transactionType === 'transfer',
+                $this->merchantId,
+                $this->notes,
+                $this->untilType,
+                $this->untilDate,
+            ),
         ];
     }
 
@@ -2561,14 +2592,19 @@ final class TransactionModal extends Component
 
         [$transaction, $parsed] = $resolved;
 
-        PlannedTransaction::query()->create([
-            ...$this->buildPlannedTransactionData($parsed),
-            'transfer_to_account_id' => null,
-            'amount' => abs($transaction->amount),
-            'direction' => $transaction->direction,
-            'account_id' => $transaction->account_id,
-            'description' => filled($transaction->clean_description) ? $transaction->clean_description : $transaction->description,
-        ]);
+        DB::transaction(function () use ($parsed, $transaction): void {
+            $planned = PlannedTransaction::query()->create([
+                ...$this->buildPlannedTransactionData($parsed),
+                'type' => PlannedTransactionType::resolve(PlannedTransactionType::tryFrom($this->planType), $transaction->direction, false),
+                'transfer_to_account_id' => null,
+                'amount' => abs($transaction->amount),
+                'direction' => $transaction->direction,
+                'account_id' => $transaction->account_id,
+                'description' => filled($transaction->clean_description) ? $transaction->clean_description : $transaction->description,
+            ]);
+
+            $this->copyPaymentUrlToMatching($planned);
+        });
 
         $this->applyCategoriseMatching($transaction);
 
@@ -2883,6 +2919,7 @@ final class TransactionModal extends Component
         $this->frequency = 'every-month';
         $this->untilType = 'always';
         $this->untilDate = null;
+        $this->resetSeriesFields();
         $this->resetValidation();
     }
 
@@ -2977,10 +3014,20 @@ final class TransactionModal extends Component
 
         if ($this->mode === 'plan') {
             $rules['frequency'] = ['required', Rule::in(array_column(RecurrenceFrequency::cases(), 'value'))];
-            $rules['untilType'] = ['required', Rule::in(['always', 'until-date'])];
+            $rules['untilType'] = ['required', Rule::in(['always', 'until-date', 'after-count'])];
             $rules['untilDate'] = $this->untilType === 'until-date'
                 ? ['required', 'date_format:Y-m-d', 'after_or_equal:date']
                 : ['nullable'];
+            $rules['descriptionInput'][] = static function (string $attribute, mixed $value, Closure $fail): void {
+                if (is_string($value) && AmountParser::hasExcessDecimals($value)) {
+                    $fail(__('Use at most 2 decimal places.'));
+                }
+            };
+
+            return [...$rules, ...$this->seriesRules($this->untilType, $this->resolvedSeriesType(
+                $this->transactionType === 'income' ? TransactionDirection::Credit : TransactionDirection::Debit,
+                $this->transactionType === 'transfer',
+            ))];
         }
 
         return $rules;
