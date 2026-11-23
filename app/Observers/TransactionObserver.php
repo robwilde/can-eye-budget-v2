@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Observers;
 
-use App\Models\PlannedPayment;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\TransactionAttachment;
@@ -102,11 +101,9 @@ final class TransactionObserver
             ->exists();
 
         if ($resurfaces) {
-            TransactionAttachment::query()
-                ->where('transaction_id', $transaction->id)
-                ->update(['transaction_id' => $transaction->parent_transaction_id]);
+            app(OccurrencePaymentRecorder::class)->carryPayments($transaction->id, $transaction->parent_transaction_id);
 
-            PlannedPayment::query()
+            TransactionAttachment::query()
                 ->where('transaction_id', $transaction->id)
                 ->update(['transaction_id' => $transaction->parent_transaction_id]);
         }

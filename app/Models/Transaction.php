@@ -645,12 +645,13 @@ final class Transaction extends Model
                 $child->tags()->attach($tagIds->all());
             }
 
+            app(OccurrencePaymentRecorder::class)->carryPayments($this->id, $child->id);
             $this->attachments()->update(['transaction_id' => $child->id]);
-            $this->payments()->update(['transaction_id' => $child->id]);
-            app(OccurrencePaymentRecorder::class)->revalidate($child, $child->planned_transaction_id !== $this->planned_transaction_id);
 
             self::query()->where('split_parent_id', $this->id)->update(['split_parent_id' => $child->id]);
             self::query()->where('transfer_fee_for_id', $this->id)->update(['transfer_fee_for_id' => $child->id]);
+
+            app(OccurrencePaymentRecorder::class)->revalidate($child, $child->planned_transaction_id !== $this->planned_transaction_id);
 
             return $child;
         });

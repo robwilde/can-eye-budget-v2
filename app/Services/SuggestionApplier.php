@@ -119,11 +119,11 @@ final readonly class SuggestionApplier
                     ->where('user_id', $user->id)
                     ->update($updateData);
 
-                $this->claimOccurrences($matchedIds, $user, $planned);
-
                 if ($categoryId !== null) {
                     $this->categoriseMerchantsOf($matchedIds, $user, $categoryId);
                 }
+
+                $this->claimOccurrences($matchedIds, $user, $planned);
             }
 
             $this->markAccepted($suggestion);
@@ -172,18 +172,10 @@ final readonly class SuggestionApplier
      */
     private function claimOccurrences(array $matchedIds, User $user, PlannedTransaction $planned): void
     {
-        $recorder = app(OccurrencePaymentRecorder::class);
-
-        Transaction::query()
-            ->where('user_id', $user->id)
-            ->current()
-            ->whereKey($matchedIds)
-            ->orderBy('post_date')
-            ->get()
-            ->each(static function (Transaction $transaction) use ($recorder, $planned): void {
-                $recorder->release($transaction, $planned->id);
-                $recorder->claim($transaction, $planned);
-            });
+        app(OccurrencePaymentRecorder::class)->claimAll(
+            Transaction::query()->where('user_id', $user->id)->current()->whereKey($matchedIds)->get(),
+            $planned,
+        );
     }
 
     private function markAccepted(AnalysisSuggestion $suggestion): void
