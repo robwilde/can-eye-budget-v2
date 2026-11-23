@@ -1,5 +1,6 @@
 @php
     use App\Casts\MoneyCast;
+    use App\Rules\PaymentUrl;
     use Illuminate\Support\Str;
 @endphp
 
@@ -31,6 +32,7 @@
                     <thead>
                         <tr class="border-b border-neutral-200 text-left text-zinc-500">
                             <th class="px-4 py-3 font-medium">Description</th>
+                            <th class="px-4 py-3 font-medium">Type</th>
                             <th class="px-4 py-3 text-right font-medium">Amount</th>
                             <th class="px-4 py-3 font-medium">Direction</th>
                             <th class="px-4 py-3 font-medium">Frequency</th>
@@ -52,7 +54,16 @@
                                         @if($plan->is_pay_cycle_income)
                                             <flux:badge size="sm" color="green">Income</flux:badge>
                                         @endif
+                                        @if($plan->autopay)
+                                            <flux:badge size="sm" color="zinc">Autopay</flux:badge>
+                                        @endif
                                     </div>
+                                    @if(PaymentUrl::isSafe($plan->payment_url))
+                                        <a href="{{ $plan->payment_url }}" target="_blank" rel="noopener noreferrer" class="text-sm text-blue-700 underline" data-testid="plan-payment-link">Pay online</a>
+                                    @endif
+                                </td>
+                                <td class="px-4 py-3 align-top">
+                                    <flux:text data-testid="plan-type">{{ $plan->type->label() }}</flux:text>
                                 </td>
                                 <td class="px-4 py-3 text-right align-top">
                                     <flux:text class="tabular-nums font-medium text-zinc-900">{{ MoneyCast::format($plan->amount) }}</flux:text>
@@ -106,50 +117,80 @@
         <div class="space-y-4">
             <flux:heading size="lg">Edit planned transaction</flux:heading>
 
-            <flux:field>
-                <flux:label>Amount</flux:label>
-                <flux:input wire:model="amount" type="number" step="0.01" min="0.01" placeholder="0.00" />
-                <flux:error name="amount" />
-            </flux:field>
+            <div class="max-h-[60vh] space-y-4 overflow-y-auto px-1">
 
-            <flux:field>
-                <flux:label>Frequency</flux:label>
-                <flux:select wire:model="frequency">
-                    <flux:select.option value="">Select frequency</flux:select.option>
-                    @foreach($frequencies as $recurrenceFrequency)
-                        <flux:select.option value="{{ $recurrenceFrequency->value }}">{{ $recurrenceFrequency->label() }}</flux:select.option>
-                    @endforeach
-                </flux:select>
-                <flux:error name="frequency" />
-            </flux:field>
+                <flux:field>
+                    <flux:label>Amount</flux:label>
+                    <flux:input wire:model="amount" type="number" step="0.01" min="0.01" placeholder="0.00" />
+                    <flux:error name="amount" />
+                </flux:field>
 
-            <flux:field>
-                <flux:label>Direction</flux:label>
-                <flux:select wire:model="direction">
-                    <flux:select.option value="">Select direction</flux:select.option>
-                    @foreach($directions as $transactionDirection)
-                        <flux:select.option value="{{ $transactionDirection->value }}">{{ Str::headline($transactionDirection->value) }}</flux:select.option>
-                    @endforeach
-                </flux:select>
-                <flux:error name="direction" />
-            </flux:field>
+                <flux:field>
+                    <flux:label>Frequency</flux:label>
+                    <flux:select wire:model="frequency">
+                        <flux:select.option value="">Select frequency</flux:select.option>
+                        @foreach($frequencies as $recurrenceFrequency)
+                            <flux:select.option value="{{ $recurrenceFrequency->value }}">{{ $recurrenceFrequency->label() }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                    <flux:error name="frequency" />
+                </flux:field>
 
-            <x-category-combobox
-                wire:model="categoryId"
-                :categories="$categories"
-                label="Category"
-                placeholder="No category"
-            />
+                <flux:field>
+                    <flux:label>Direction</flux:label>
+                    <flux:select wire:model.live="direction">
+                        <flux:select.option value="">Select direction</flux:select.option>
+                        @foreach($directions as $transactionDirection)
+                            <flux:select.option value="{{ $transactionDirection->value }}">{{ Str::headline($transactionDirection->value) }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                    <flux:error name="direction" />
+                </flux:field>
 
-            <flux:field>
-                <flux:label>Until date</flux:label>
-                <flux:input wire:model="untilDate" type="date" />
-                <flux:error name="untilDate" />
-            </flux:field>
+                <x-category-combobox
+                    wire:model="categoryId"
+                    :categories="$categories"
+                    label="Category"
+                    placeholder="No category"
+                />
 
-            <flux:field>
-                <flux:checkbox wire:model="isActive" label="Active" />
-            </flux:field>
+                <div class="grid grid-cols-2 gap-3">
+                    <flux:field>
+                        <flux:label>Until date</flux:label>
+                        <flux:input wire:model="untilDate" type="date" />
+                        <flux:error name="untilDate" />
+                    </flux:field>
+
+                    <flux:field>
+                        <flux:label>End after (payments)</flux:label>
+                        <flux:input wire:model="endAfterCount" type="number" min="1" max="600" step="1" placeholder="Never" data-testid="plan-end-after-count" />
+                        <flux:error name="endAfterCount" />
+                    </flux:field>
+                </div>
+
+                <flux:field>
+                    <flux:label>Merchant</flux:label>
+                    <flux:select wire:model="merchantId" data-testid="plan-merchant-select">
+                        <flux:select.option value="">No merchant</flux:select.option>
+                        @foreach($merchants as $merchant)
+                            <flux:select.option value="{{ $merchant->id }}">{{ $merchant->name }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                    <flux:error name="merchantId" />
+                </flux:field>
+
+                <flux:field>
+                    <flux:label>Notes</flux:label>
+                    <flux:textarea wire:model="notes" rows="2" maxlength="1000" />
+                    <flux:error name="notes" />
+                </flux:field>
+
+                <x-plan-series-fields :type-choices="$typeChoices" :amount-strategies="$amountStrategies" :has-link="filled($paymentUrl)" />
+
+                <flux:field>
+                    <flux:checkbox wire:model="isActive" label="Active" />
+                </flux:field>
+            </div>
 
             <div class="flex justify-end gap-2">
                 <flux:button variant="ghost" wire:click="$set('showEditModal', false)">Cancel</flux:button>
