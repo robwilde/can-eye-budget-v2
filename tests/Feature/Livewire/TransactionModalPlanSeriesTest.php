@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Enums\AuditOutcome;
 use App\Enums\PlannedTransactionType;
+use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Livewire\TransactionModal;
 use App\Models\Account;
@@ -408,4 +409,79 @@ it('does not force an end count on a plan that is no longer an installment', fun
     expect($fresh->type)->toBe(PlannedTransactionType::Income)
         ->and($fresh->end_after_count)->toBeNull()
         ->and($fresh->until_date?->toDateString())->toBe('2027-06-30');
+});
+
+it('starts a plan made from a month end entry on the next month end', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-03-10'));
+    $transaction = Transaction::factory()->for($this->user)->for($this->account)->manual()->create([
+        'amount' => 1200,
+        'direction' => TransactionDirection::Debit,
+        'post_date' => '2026-01-31',
+    ]);
+
+    Livewire::actingAs($this->user)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('mode', 'plan')
+        ->set('frequency', 'every-month')
+        ->assertSet('date', '2026-03-31');
+});
+
+it('offers only the fixed cadences when planning', function () {
+    modalNewPlan($this)
+        ->assertSeeHtml('value="every-month"')
+        ->assertDontSeeHtml('value="semimonthly"')
+        ->assertDontSeeHtml('value="every-n-weeks"');
+});
+
+it('fills a plan start date that passes its own rule for a user west of the server', function () {
+    useAppTimezone('Australia/Brisbane');
+    $this->travelTo(CarbonImmutable::parse('2026-03-10 00:30:00', 'Australia/Brisbane'));
+    $perth = User::factory()->withTimezone('Australia/Perth')->create();
+    $account = Account::factory()->for($perth)->create();
+    $transaction = Transaction::factory()->for($perth)->for($account)->manual()->create([
+        'amount' => 1200,
+        'direction' => TransactionDirection::Debit,
+        'post_date' => '2026-03-03',
+    ]);
+
+    Livewire::actingAs($perth)
+        ->test(TransactionModal::class)
+        ->dispatch('edit-transaction', id: $transaction->id)
+        ->set('mode', 'plan')
+        ->set('frequency', 'every-week')
+        ->assertSet('date', '2026-03-10')
+        ->set('descriptionInput', '12 Gym')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(PlannedTransaction::query()->where('user_id', $perth->id)->sole()->start_date->toDateString())->toBe('2026-03-10');
+});
+
+it('shows a plan on a custom cadence as kept as is and keeps its schedule when saved', function () {
+    $plan = modalPlan($this, ['frequency' => RecurrenceFrequency::EveryNMonths, 'recurrence_interval' => 5]);
+
+    modalEditing($this, $plan)
+        ->assertSeeHtml('value="every-n-months"')
+        ->assertSee('Custom schedule (kept as is)')
+        ->set('autopay', true)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $fresh = $plan->fresh();
+
+    expect($fresh->frequency)->toBe(RecurrenceFrequency::EveryNMonths)
+        ->and($fresh->recurrence_interval)->toBe(5);
+});
+
+it('clears the interval and days when a custom cadence is changed to a fixed one', function () {
+    $plan = modalPlan($this, ['frequency' => RecurrenceFrequency::Semimonthly, 'days_of_month' => [15, 'last']]);
+
+    modalEditing($this, $plan)->set('frequency', 'every-month')->call('save')->assertHasNoErrors();
+
+    $fresh = $plan->fresh();
+
+    expect($fresh->frequency)->toBe(RecurrenceFrequency::EveryMonth)
+        ->and($fresh->days_of_month)->toBeNull()
+        ->and($fresh->recurrence_interval)->toBe(1);
 });

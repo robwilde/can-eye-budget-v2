@@ -6,6 +6,7 @@
 declare(strict_types=1);
 
 use App\Enums\PlannedTransactionType;
+use App\Enums\RecurrenceFrequency;
 use App\Models\Account;
 use App\Models\PlannedTransaction;
 use App\Models\User;
@@ -161,5 +162,27 @@ test('the copy link option appears once a payment link is typed in the rules pag
 
     $page->wait(1)
         ->assertPresent('[data-testid="plan-copy-payment-url"]')
+        ->assertNoJavaScriptErrors();
+});
+
+test('the rules page lists a plan on a new cadence with its label and next date', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $user->update(['primary_account_id' => $account->id]);
+    PlannedTransaction::factory()->for($user)->for($account)->create([
+        'description' => 'Insurance',
+        'frequency' => RecurrenceFrequency::EveryNMonths,
+        'recurrence_interval' => 5,
+        'start_date' => now()->addDays(10)->toDateString(),
+    ]);
+
+    $this->actingAs($user);
+
+    $page = visit('/rules');
+
+    $page->assertSee('Insurance')
+        ->assertSee('Every 5 months')
+        ->assertSee(now()->addDays(10)->toDateString())
+        ->screenshot(filename: 'plan-list-new-cadence')
         ->assertNoJavaScriptErrors();
 });

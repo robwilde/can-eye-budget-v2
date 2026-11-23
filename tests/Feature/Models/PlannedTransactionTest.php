@@ -370,8 +370,8 @@ test('monthly on 31st handles short months', function () {
     expect($dates)->toHaveCount(4)
         ->and($dates[0]->toDateString())->toBe('2026-01-31')
         ->and($dates[1]->toDateString())->toBe('2026-02-28')
-        ->and($dates[2]->toDateString())->toBe('2026-03-28')
-        ->and($dates[3]->toDateString())->toBe('2026-04-28');
+        ->and($dates[2]->toDateString())->toBe('2026-03-31')
+        ->and($dates[3]->toDateString())->toBe('2026-04-30');
 });
 
 test('occurrence on exact range boundary dates are included', function () {

@@ -10,6 +10,7 @@ use App\Enums\InsightType;
 use App\Enums\OccurrenceStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Enums\WeekendAdjustment;
 use App\Models\PlannedTransaction;
 use App\Models\User;
 use App\Services\InsightRecorder;
@@ -72,19 +73,19 @@ final readonly class SubscriptionAuditGenerator implements InsightGenerator
             }
 
             $lastPaidOn = CarbonImmutable::parse((string) $paid);
-            $expected = $plan->frequency->nextOccurrence($lastPaidOn);
+            $expected = $this->stepAfter($plan, $lastPaidOn);
             $finalDate = $plan->lastOccurrenceDate();
 
             if ($expected === null || ($finalDate !== null && $expected->greaterThan($finalDate))) {
                 continue;
             }
 
-            $following = $plan->frequency->nextOccurrence($expected);
+            $following = $this->stepAfter($plan, $expected);
             $cycles = 0;
 
             while ($following !== null && $following->lessThanOrEqualTo($today) && ($finalDate === null || $following->lessThanOrEqualTo($finalDate)) && $cycles < self::MAX_CYCLES) {
                 $cycles++;
-                $following = $plan->frequency->nextOccurrence($following);
+                $following = $this->stepAfter($plan, $following);
             }
 
             if ($cycles < 1) {
@@ -116,9 +117,9 @@ final readonly class SubscriptionAuditGenerator implements InsightGenerator
                     '%s (%s %s) was last paid on %s and is now more than a full %s cycle late. If you cancelled it, you can remove it from your plan.',
                     $plan->description,
                     InsightMoney::format(abs($plan->amount), $plan->account->currency),
-                    mb_strtolower($plan->frequency->label()),
+                    mb_strtolower($plan->frequencyLabel()),
                     $paid->format('j M Y'),
-                    mb_strtolower($plan->frequency->label()),
+                    mb_strtolower($plan->frequencyLabel()),
                 ),
                 figures: [
                     'planned_transaction_id' => $plan->id,
@@ -137,5 +138,27 @@ final readonly class SubscriptionAuditGenerator implements InsightGenerator
         }
 
         return $keys;
+    }
+
+    /**
+     * One cadence after a date: a plain step for the fixed cadences, otherwise the first scheduled
+     * date after it. A plan with a weekend rule or a cadence that has no single step is stepped
+     * through its schedule's original dates, which is what a paid occurrence is identified by.
+     */
+    private function stepAfter(PlannedTransaction $plan, CarbonImmutable $date): ?CarbonImmutable
+    {
+        $step = $plan->weekend_adjustment === WeekendAdjustment::None ? $plan->frequency->nextOccurrence($date) : null;
+
+        if ($step !== null) {
+            return $step;
+        }
+
+        foreach ($plan->schedule() as $scheduled) {
+            if ($scheduled->original->greaterThan($date)) {
+                return $scheduled->original;
+            }
+        }
+
+        return null;
     }
 }

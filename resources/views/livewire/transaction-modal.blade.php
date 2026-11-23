@@ -430,9 +430,9 @@
                     />
 
                     <flux:select wire:model.live="frequency" :label="__('Frequency')" required>
-                        @foreach(RecurrenceFrequency::cases() as $freq)
+                        @foreach($frequencyOptions as $freq)
                             <flux:select.option value="{{ $freq->value }}">
-                                {{ $freq->label() }}
+                                {{ in_array($freq, RecurrenceFrequency::selectable(), true) ? $freq->label() : __('Custom schedule (kept as is)') }}
                             </flux:select.option>
                         @endforeach
                     </flux:select>

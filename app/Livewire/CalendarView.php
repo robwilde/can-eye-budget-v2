@@ -35,8 +35,9 @@ final class CalendarView extends Component
 
     public function mount(): void
     {
-        $this->currentMonth = CarbonImmutable::now()->format('Y-m');
-        $this->selectedDate = CarbonImmutable::today()->format('Y-m-d');
+        $today = $this->authenticatedUser()->today();
+        $this->currentMonth = $today->format('Y-m');
+        $this->selectedDate = $today->format('Y-m-d');
     }
 
     public function selectDate(string $date): void
@@ -45,7 +46,7 @@ final class CalendarView extends Component
 
         $this->selectedDate = $parsed instanceof CarbonImmutable
             ? $parsed->format('Y-m-d')
-            : CarbonImmutable::today()->format('Y-m-d');
+            : $this->authenticatedUser()->today()->format('Y-m-d');
 
         unset($this->selectedDay); // @phpstan-ignore property.notFound
     }
@@ -75,8 +76,9 @@ final class CalendarView extends Component
 
     public function goToToday(): void
     {
-        $this->currentMonth = CarbonImmutable::now()->format('Y-m');
-        $this->selectedDate = CarbonImmutable::today()->format('Y-m-d');
+        $today = $this->authenticatedUser()->today();
+        $this->currentMonth = $today->format('Y-m');
+        $this->selectedDate = $today->format('Y-m-d');
         $this->bustCache();
     }
 
@@ -104,7 +106,7 @@ final class CalendarView extends Component
     {
         $monthStart = $this->monthStart();
         $monthEnd = $monthStart->endOfMonth();
-        $today = CarbonImmutable::today();
+        $today = $this->authenticatedUser()->today();
 
         $gridStart = $monthStart->startOfWeek(UnitValue::MONDAY);
         $gridEnd = $monthEnd->endOfWeek(UnitValue::SUNDAY);
@@ -112,7 +114,7 @@ final class CalendarView extends Component
         $userId = (int) auth()->id();
         $user = auth()->user();
 
-        $activity = (new DayActivityLoader)->load($gridStart, $gridEnd, $userId, includeTransfers: true);
+        $activity = (new DayActivityLoader)->load($gridStart, $gridEnd, $userId, includeTransfers: true, today: $today);
 
         $paydays = $user instanceof User
             ? $this->paydaysWithinGrid($gridStart, $gridEnd, $user)
@@ -254,7 +256,7 @@ final class CalendarView extends Component
 
         $toCome = $this->plannedToCome; // @phpstan-ignore property.notFound
 
-        return app(MonthFlowLoader::class)->load($user, $this->monthStart(), CarbonImmutable::today(), $toCome['income'], $toCome['spend']);
+        return app(MonthFlowLoader::class)->load($user, $this->monthStart(), $this->authenticatedUser()->today(), $toCome['income'], $toCome['spend']);
     }
 
     #[Computed]
@@ -308,7 +310,7 @@ final class CalendarView extends Component
     public function headerLabel(): array
     {
         $month = $this->monthStart();
-        $today = CarbonImmutable::today();
+        $today = $this->authenticatedUser()->today();
 
         return [
             'label' => $month->format('F Y'),
@@ -352,7 +354,7 @@ final class CalendarView extends Component
         }
 
         $frequency = $user->pay_frequency;
-        $today = CarbonImmutable::today();
+        $today = $this->authenticatedUser()->today();
         $anchor = CarbonImmutable::instance($user->next_pay_date);
 
         $step = static fn (CarbonImmutable $date, int $direction): CarbonImmutable => match ($frequency) {

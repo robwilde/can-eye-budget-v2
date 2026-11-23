@@ -117,7 +117,8 @@ final readonly class ReconciliationMatcher
         foreach ($plans as $plan) {
             $claimed = $claimedByPlan->get($plan->id) ?? collect();
 
-            foreach ($plan->occurrencesBetween($windowStart, $windowEnd) as $occurrence) {
+            foreach ($plan->scheduledBetween($windowStart, $windowEnd) as $scheduled) {
+                $occurrence = $scheduled->due;
                 $diff = ReconciliationPolicy::dayDiff($postDate, $occurrence);
 
                 if ($diff > $tolerance) {
@@ -129,7 +130,7 @@ final readonly class ReconciliationMatcher
                 );
 
                 if (! $alreadyClaimed) {
-                    $occurrences->push(new PlanOccurrence($plan, $occurrence, $diff));
+                    $occurrences->push(new PlanOccurrence($plan, $occurrence, $diff, $scheduled->original));
                 }
             }
         }
