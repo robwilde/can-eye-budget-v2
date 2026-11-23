@@ -41,6 +41,7 @@ use App\Services\ExchangeRateLookup;
 use App\Services\PendingMergeService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\RecentCategoryPicks;
+use App\Services\Recurring\PlanDuplicateGuard;
 use App\Services\RulePromptGate;
 use App\Services\Tags\TransactionTagger;
 use App\Services\TransactionIdempotency;
@@ -574,6 +575,12 @@ final class TransactionModal extends Component
      */
     public function updatedMode(): void
     {
+        if ($this->mode === 'plan' && $this->planAlreadyExists()) {
+            $this->mode = 'enter';
+
+            return;
+        }
+
         if ($this->editingTransactionId === null) {
             return;
         }
@@ -1018,6 +1025,7 @@ final class TransactionModal extends Component
             'amountStrategies' => PlanAmountStrategy::cases(),
             'frequencyOptions' => $this->frequencyOptions(),
             'formatMoney' => MoneyCast::format(...),
+            'planExists' => $this->planAlreadyExists(),
             'parsedAmount' => $parsed->amount ?? 0,
             'parsedDescription' => $parsed->description ?? '',
             'attachments' => $this->currentAttachments(),
@@ -1687,6 +1695,12 @@ final class TransactionModal extends Component
             return false;
         }
 
+        if ($this->mode === 'plan' && $this->planAlreadyExists()) {
+            $this->addError('mode', __('A plan like this already exists.'));
+
+            return false;
+        }
+
         if ($this->editingTransactionId && $this->mode === 'plan') {
             return $this->isBankFeedTransaction
                 ? $this->planFromBankFeedRow()
@@ -1776,6 +1790,76 @@ final class TransactionModal extends Component
         return true;
     }
 
+    /**
+     * Whether the user already has a plan for what the form describes: same account, direction and
+     * amount, and the same merchant or description. Transfers and plan edits never count.
+     */
+    private function planAlreadyExists(): bool
+    {
+        if ($this->editingPlannedTransactionId !== null) {
+            return false;
+        }
+
+        $row = $this->isBankFeedTransaction ? $this->editingOwnedTransaction() : null;
+
+        if ($row !== null) {
+            return app(PlanDuplicateGuard::class)->exists(
+                $this->authenticatedUser(),
+                $row->account_id,
+                $row->amount,
+                $row->direction,
+                $this->merchantId,
+                filled($row->clean_description) ? $row->clean_description : (string) $row->description,
+            );
+        }
+
+        if ($this->transactionType === 'transfer' || $this->accountId === null || $this->descriptionInput === '') {
+            return false;
+        }
+
+        $parsed = AmountParser::parse($this->descriptionInput);
+
+        if ($parsed->amount <= 0) {
+            return false;
+        }
+
+        return app(PlanDuplicateGuard::class)->exists(
+            $this->authenticatedUser(),
+            $this->accountId,
+            $parsed->amount,
+            $this->transactionType === 'income' ? TransactionDirection::Credit : TransactionDirection::Debit,
+            $this->merchantId,
+            $parsed->description,
+        );
+    }
+
+    /**
+     * Run a plan-creating write under a lock on the user row, re-checking for a matching plan inside the
+     * lock so two saves at once cannot both create it. False, with the error added, when the plan exists.
+     *
+     * @param  Closure(): void  $create
+     */
+    private function createUnlessPlanExists(Closure $create): bool
+    {
+        $exists = DB::transaction(function () use ($create): bool {
+            User::query()->whereKey(auth()->id())->lockForUpdate()->first();
+
+            if ($this->planAlreadyExists()) {
+                return true;
+            }
+
+            $create();
+
+            return false;
+        });
+
+        if ($exists) {
+            $this->addError('mode', __('A plan like this already exists.'));
+        }
+
+        return ! $exists;
+    }
+
     private function createPlannedTransaction(): bool
     {
         $parsed = AmountParser::parse($this->descriptionInput);
@@ -1786,11 +1870,9 @@ final class TransactionModal extends Component
             return false;
         }
 
-        DB::transaction(function () use ($parsed): void {
+        return $this->createUnlessPlanExists(function () use ($parsed): void {
             $this->copyPaymentUrlToMatching(PlannedTransaction::query()->create($this->buildPlannedTransactionData($parsed)));
         });
-
-        return true;
     }
 
     private function updatePlannedTransaction(): bool
@@ -2202,7 +2284,7 @@ final class TransactionModal extends Component
         // double-counted on the calendar; its own fields are left untouched.
         $isPlainSource = $this->transactionType !== 'transfer' && $transaction->transfer_pair_id === null;
 
-        DB::transaction(function () use ($transaction, $parsed, $isPlainSource): void {
+        $created = $this->createUnlessPlanExists(function () use ($transaction, $parsed, $isPlainSource): void {
             $planned = PlannedTransaction::query()->create($this->buildPlannedTransactionData($parsed));
 
             $this->copyPaymentUrlToMatching($planned);
@@ -2211,6 +2293,10 @@ final class TransactionModal extends Component
                 $transaction->update(['planned_transaction_id' => $planned->id]);
             }
         });
+
+        if (! $created) {
+            return false;
+        }
 
         $this->applyCategoriseMatching($transaction);
 
@@ -2599,7 +2685,7 @@ final class TransactionModal extends Component
 
         [$transaction, $parsed] = $resolved;
 
-        DB::transaction(function () use ($parsed, $transaction): void {
+        $created = $this->createUnlessPlanExists(function () use ($parsed, $transaction): void {
             $planned = PlannedTransaction::query()->create([
                 ...$this->buildPlannedTransactionData($parsed),
                 'type' => PlannedTransactionType::resolve(PlannedTransactionType::tryFrom($this->planType), $transaction->direction, false),
@@ -2612,6 +2698,10 @@ final class TransactionModal extends Component
 
             $this->copyPaymentUrlToMatching($planned);
         });
+
+        if (! $created) {
+            return false;
+        }
 
         $this->applyCategoriseMatching($transaction);
 
