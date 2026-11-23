@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Services\Recurring;
 
+use App\Enums\TransactionDirection;
 use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 
 /**
  * Finds the user's own transactions to start a plan from: by description, notes or merchant name, newest
@@ -37,6 +39,35 @@ final class PlanTransactionSearch
             ->orderByDesc('post_date')
             ->orderByDesc('id')
             ->paginate(self::PER_PAGE, pageName: $pageName);
+    }
+
+    /**
+     * The user's most recent charges that look like the description: same direction (and currency when
+     * given), matching the description, the clean description or the merchant name.
+     *
+     * @return Collection<int, Transaction>
+     */
+    public function matching(User $user, string $description, TransactionDirection $direction, int $limit, ?string $currency = null): Collection
+    {
+        $term = mb_substr(mb_trim($description), 0, self::MAX_TERM_LENGTH);
+
+        if ($term === '') {
+            return new Collection;
+        }
+
+        $like = '%'.$this->escapeLike($term).'%';
+
+        return $this->query($user)
+            ->where('direction', $direction->value)
+            ->when($currency !== null, fn (Builder $query): Builder => $query->where('currency', $currency))
+            ->where(fn (Builder $query): Builder => $query
+                ->whereRaw("description LIKE ? ESCAPE '".self::LIKE_ESCAPE."'", [$like])
+                ->orWhereRaw("clean_description LIKE ? ESCAPE '".self::LIKE_ESCAPE."'", [$like])
+                ->orWhereRaw("merchant_name LIKE ? ESCAPE '".self::LIKE_ESCAPE."'", [$like]))
+            ->orderByDesc('post_date')
+            ->orderByDesc('id')
+            ->limit($limit)
+            ->get();
     }
 
     /** One of the user's searchable transactions by id; null for anything else. */
