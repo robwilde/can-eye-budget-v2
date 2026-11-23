@@ -65,6 +65,9 @@ return [
         'api_key' => env('TYPESAFE_API_KEY'),
         'base_url' => env('TYPESAFE_BASE_URL') ?: 'https://api.typesafe.ai',
         'model' => env('TYPESAFE_MODEL') ?: 'jev-latest',
+        // Seconds one request may take when a person is waiting on it (the plan smart fill); it is
+        // never retried, so a slow or failing call gives way to the plain form quickly.
+        'interactive_timeout' => (int) env('TYPESAFE_INTERACTIVE_TIMEOUT', 10),
     ],
 
     'exchange_rates' => [

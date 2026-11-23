@@ -33,10 +33,16 @@ final readonly class TypeSafeService implements TypeSafeServiceContract
     /** Sleeps (ms) before each retry of a 429/529; one retry per entry. */
     private const array BACKOFF_MS = [500, 1000, 2000, 4000];
 
+    /**
+     * @param  int  $timeoutSeconds  how long one request may take before it fails
+     * @param  list<int>  $backoffMs  sleeps before each retry of a 429/529; empty means never retry
+     */
     public function __construct(
         private string $apiKey,
         private string $baseUrl = 'https://api.typesafe.ai',
         private string $model = 'jev-latest',
+        private int $timeoutSeconds = 30,
+        private array $backoffMs = self::BACKOFF_MS,
     ) {}
 
     public function choose(array $state, string $instructions, array $options): TypeSafeChoiceAnswer
@@ -56,9 +62,9 @@ final readonly class TypeSafeService implements TypeSafeServiceContract
         try {
             $response = Http::withToken($this->apiKey)
                 ->acceptJson()
-                ->timeout(30)
+                ->timeout($this->timeoutSeconds)
                 ->retry(
-                    self::BACKOFF_MS,
+                    $this->backoffMs === [] ? 1 : $this->backoffMs,
                     when: static fn (Throwable $e): bool => $e instanceof RequestException
                         && in_array($e->response->status(), [429, 529], true),
                     throw: false,

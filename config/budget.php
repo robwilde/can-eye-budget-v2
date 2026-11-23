@@ -53,6 +53,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Plan Smart Fill
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, and services.typesafe.api_key is set, the add-bill form can
+    | propose a plan's name, amount, cadence, due day, category, type and autopay
+    | from the user's past charges, and the plans page can list the fields a plan
+    | contradicts. A person waits on each call, so it is bounded by
+    | services.typesafe.interactive_timeout and never blocks the plain form. Off by default.
+    |
+    */
+
+    'plan_smart_fill' => (bool) env('BUDGET_PLAN_SMART_FILL', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | BNPL Email Import
     |--------------------------------------------------------------------------
     |
