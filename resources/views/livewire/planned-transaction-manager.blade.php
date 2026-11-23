@@ -92,6 +92,9 @@
                                             <flux:button variant="ghost" size="sm" wire:click="openEdit({{ $plan->id }})">
                                                 <flux:icon.pencil class="size-4" />
                                             </flux:button>
+                                            <flux:button variant="ghost" size="sm" wire:click="$set('occurrencesPlanId', {{ $occurrencesPlanId === $plan->id ? 'null' : $plan->id }})" data-testid="plan-occurrences-toggle-{{ $plan->id }}">
+                                                {{ __('Occurrences') }}
+                                            </flux:button>
                                             <flux:button variant="ghost" size="sm" wire:click="toggleActive({{ $plan->id }})">
                                                 {{ $plan->is_active ? 'Deactivate' : 'Activate' }}
                                             </flux:button>
@@ -102,6 +105,35 @@
                                     </div>
                                 </td>
                             </tr>
+                            @if($occurrencesPlanId === $plan->id)
+                                <tr wire:key="planned-transaction-{{ $plan->id }}-occurrences" data-testid="plan-occurrences">
+                                    <td colspan="9" class="bg-neutral-50 px-4 py-3">
+                                        @error('occurrence')
+                                            <p class="mb-2 text-sm text-red-700" data-testid="occurrence-error" role="alert">{{ $message }}</p>
+                                        @enderror
+                                        @forelse($occurrences as $occurrence)
+                                            @php($state = $occurrenceStates->resolve($occurrence, $today))
+                                            <div class="flex flex-wrap items-center gap-3 border-b border-neutral-200 py-2 text-sm" wire:key="occurrence-{{ $occurrence->id }}" data-testid="occurrence-{{ $occurrence->id }}">
+                                                <span class="w-28 tabular-nums">{{ $occurrence->effectiveDueDate()->format('Y-m-d') }}</span>
+                                                <flux:badge size="sm" :color="match($state->value) { 'overdue' => 'red', 'due' => 'amber', 'skipped', 'missed' => 'zinc', 'dormant' => 'yellow', default => 'green' }" data-testid="occurrence-state">{{ $state->label() }}</flux:badge>
+                                                <span class="w-24 tabular-nums">{{ MoneyCast::format(abs($occurrence->effectiveExpectedAmount())) }}</span>
+                                                @if($occurrence->status === \App\Enums\OccurrenceStatus::Scheduled)
+                                                    <flux:button size="sm" variant="ghost" wire:click="skipOccurrence({{ $occurrence->id }})" data-testid="occurrence-skip">{{ __('Skip') }}</flux:button>
+                                                    <flux:button size="sm" variant="ghost" wire:click="markOccurrenceMissed({{ $occurrence->id }})" data-testid="occurrence-missed">{{ __('Mark missed') }}</flux:button>
+                                                    <input type="date" class="rounded border border-neutral-300 px-1 py-0.5" wire:model="snoozeDates.{{ $occurrence->id }}" aria-label="{{ __('Snooze until') }}" data-testid="occurrence-snooze-date">
+                                                    <flux:button size="sm" variant="ghost" wire:click="snoozeOccurrence({{ $occurrence->id }})" data-testid="occurrence-snooze">{{ __('Snooze') }}</flux:button>
+                                                    <input type="text" inputmode="decimal" class="w-24 rounded border border-neutral-300 px-1 py-0.5" wire:model="occurrenceAmounts.{{ $occurrence->id }}" placeholder="{{ __('Amount') }}" aria-label="{{ __('Expected amount') }}" data-testid="occurrence-amount">
+                                                    <flux:button size="sm" variant="ghost" wire:click="setOccurrenceAmount({{ $occurrence->id }})" data-testid="occurrence-amount-set">{{ __('Set amount') }}</flux:button>
+                                                @else
+                                                    <flux:button size="sm" variant="ghost" wire:click="reopenOccurrence({{ $occurrence->id }})" data-testid="occurrence-reopen">{{ __('Reopen') }}</flux:button>
+                                                @endif
+                                            </div>
+                                        @empty
+                                            <flux:text size="sm" class="text-zinc-500">{{ __('No stored occurrences from the current cycle on.') }}</flux:text>
+                                        @endforelse
+                                    </td>
+                                </tr>
+                            @endif
                         @endforeach
                     </tbody>
                 </table>
