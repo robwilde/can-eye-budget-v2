@@ -73,15 +73,16 @@ final readonly class SubscriptionAuditGenerator implements InsightGenerator
 
             $lastPaidOn = CarbonImmutable::parse((string) $paid);
             $expected = $plan->frequency->nextOccurrence($lastPaidOn);
+            $finalDate = $plan->lastOccurrenceDate();
 
-            if ($expected === null) {
+            if ($expected === null || ($finalDate !== null && $expected->greaterThan($finalDate))) {
                 continue;
             }
 
             $following = $plan->frequency->nextOccurrence($expected);
             $cycles = 0;
 
-            while ($following !== null && $following->lessThanOrEqualTo($today) && $cycles < self::MAX_CYCLES) {
+            while ($following !== null && $following->lessThanOrEqualTo($today) && ($finalDate === null || $following->lessThanOrEqualTo($finalDate)) && $cycles < self::MAX_CYCLES) {
                 $cycles++;
                 $following = $plan->frequency->nextOccurrence($following);
             }

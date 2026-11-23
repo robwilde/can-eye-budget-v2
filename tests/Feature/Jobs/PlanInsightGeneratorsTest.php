@@ -499,3 +499,12 @@ it('words amounts in the right currency in goal, subscription and net-worth insi
 arch('the current budget risk reader uses model queries, not the DB facade')
     ->expect('App\Services\Budgets\CurrentBudgetRisk')
     ->not->toUse('Illuminate\Support\Facades\DB');
+
+it('does not flag a plan whose end count is used up in the subscription audit', function () {
+    $plan = monthlyBill($this->user, $this->account, 'Phone instalments', ['end_after_count' => 8]);
+    paidOn($plan, '2026-08-11');
+
+    GenerateInsightsJob::dispatchSync($this->user);
+
+    expect(insightsOf($this->user, InsightType::SubscriptionAudit))->toHaveCount(0);
+});

@@ -215,6 +215,7 @@ final class ReportAggregator
         }
 
         $dates = [];
+        $endsOn = $plan->endsOn();
         $maxIterations = (int) ceil($start->diffInDays($end)) + 2;
 
         for ($i = 0; $i < $maxIterations; $i++) {
@@ -222,7 +223,7 @@ final class ReportAggregator
                 break;
             }
 
-            if ($plan->until_date !== null && $current->greaterThan($plan->until_date)) {
+            if ($endsOn !== null && $current->greaterThan($endsOn)) {
                 break;
             }
 

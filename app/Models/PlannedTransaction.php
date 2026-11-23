@@ -12,6 +12,7 @@ use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Events\PlannedTransactionCategoryUpdated;
 use App\Events\PlannedTransactionCreated;
+use App\Rules\PaymentUrl;
 use Carbon\CarbonImmutable;
 use Closure;
 use Database\Factories\PlannedTransactionFactory;
@@ -301,6 +302,10 @@ final class PlannedTransaction extends Model
         }
 
         for ($i = 0; $i < $maxIterations; $i++) {
+            if ($this->end_after_count !== null && $i >= $this->end_after_count) {
+                break;
+            }
+
             if ($current->greaterThan($end)) {
                 break;
             }
@@ -323,6 +328,44 @@ final class PlannedTransaction extends Model
         }
 
         return $dates;
+    }
+
+    /**
+     * The final date an end count allows, or null when the plan has no end count.
+     */
+    public function lastOccurrenceDate(): ?CarbonImmutable
+    {
+        if ($this->end_after_count === null) {
+            return null;
+        }
+
+        $current = $this->start_date;
+
+        for ($i = 1; $i < $this->end_after_count; $i++) {
+            $next = $this->frequency->nextOccurrence($current);
+
+            if ($next === null) {
+                break;
+            }
+
+            $current = $next;
+        }
+
+        return $current;
+    }
+
+    /**
+     * The last date the plan can fall on: the earlier of until_date and the end count's final date.
+     */
+    public function endsOn(): ?CarbonImmutable
+    {
+        $counted = $this->lastOccurrenceDate();
+
+        if ($counted === null || $this->until_date === null) {
+            return $counted ?? $this->until_date;
+        }
+
+        return $counted->lessThan($this->until_date) ? $counted : $this->until_date;
     }
 
     /**
@@ -351,6 +394,10 @@ final class PlannedTransaction extends Model
         $maxIterations = (int) abs($this->start_date->diffInDays($from)) + 367;
 
         for ($i = 0; $i < $maxIterations; $i++) {
+            if ($this->end_after_count !== null && $i >= $this->end_after_count) {
+                return null;
+            }
+
             if ($this->until_date !== null && $current->greaterThan($this->until_date)) {
                 return null;
             }
@@ -374,9 +421,12 @@ final class PlannedTransaction extends Model
     protected static function booted(): void
     {
         self::saving(static function (PlannedTransaction $plannedTransaction): void {
-            Validator::make($plannedTransaction->only(['account_id', 'transfer_to_account_id', 'end_after_count']), [
+            $plannedTransaction->payment_url = PaymentUrl::normalise($plannedTransaction->payment_url);
+
+            Validator::make($plannedTransaction->only(['account_id', 'transfer_to_account_id', 'end_after_count', 'payment_url']), [
                 'transfer_to_account_id' => ['nullable', 'integer', 'different:account_id'],
                 'end_after_count' => ['nullable', 'integer', 'min:1', 'max:600'],
+                'payment_url' => ['nullable', 'string', new PaymentUrl],
             ])->validate();
 
             if ($plannedTransaction->transfer_to_account_id !== null) {

@@ -17,6 +17,7 @@ use App\Models\PlannedTransaction;
 use App\Models\User;
 use App\Services\PayCycleConfigurator;
 use App\Services\SuggestionApplier;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\MariaDbConnection;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
@@ -267,3 +268,74 @@ it('keeps plan type migration identifiers within the MariaDB limit', function ()
     expect($identifiers->filter(fn (string $name) => in_array($name, ['amount_tolerance_bps', 'end_after_count'], true)))->not->toBeEmpty()
         ->and($identifiers->filter(fn (string $name) => mb_strlen($name) > 64)->values()->all())->toBeEmpty();
 });
+
+it('normalises a payment link on save', function () {
+    $plan = PlannedTransaction::factory()->create(['payment_url' => 'example.com/pay']);
+
+    expect($plan->fresh()->payment_url)->toBe('https://example.com/pay');
+});
+
+it('refuses a payment link that is not http or https', function (string $link) {
+    expect(fn () => PlannedTransaction::factory()->create(['payment_url' => $link]))
+        ->toThrow(ValidationException::class)
+        ->and(PlannedTransaction::query()->count())->toBe(0);
+})->with(['javascript:alert(1)', 'data:text/html,x', 'ftp://example.com']);
+
+it('stops generating dates after the end count', function () {
+    $plan = PlannedTransaction::factory()->weekly()->create(['start_date' => '2026-03-02', 'end_after_count' => 3]);
+
+    $dates = $plan->occurrencesBetween(CarbonImmutable::parse('2026-03-01'), CarbonImmutable::parse('2026-12-31'))
+        ->map(fn (CarbonImmutable $date): string => $date->toDateString())
+        ->all();
+
+    expect($dates)->toBe(['2026-03-02', '2026-03-09', '2026-03-16']);
+});
+
+it('has no next occurrence once the end count is used up', function () {
+    $plan = PlannedTransaction::factory()->weekly()->create(['start_date' => '2026-03-02', 'end_after_count' => 3]);
+
+    expect($plan->nextOccurrenceOnOrAfter(CarbonImmutable::parse('2026-03-10'))?->toDateString())->toBe('2026-03-16')
+        ->and($plan->nextOccurrenceOnOrAfter(CarbonImmutable::parse('2026-03-17')))->toBeNull();
+});
+
+it('runs a plan with no end count without a cap', function () {
+    $plan = PlannedTransaction::factory()->weekly()->create(['start_date' => '2026-03-02', 'end_after_count' => null]);
+
+    expect($plan->occurrencesBetween(CarbonImmutable::parse('2026-03-01'), CarbonImmutable::parse('2026-06-30')))->toHaveCount(18);
+});
+
+it('counts occurrences before the window towards the end count', function () {
+    $plan = PlannedTransaction::factory()->weekly()->create(['start_date' => '2026-03-02', 'end_after_count' => 3]);
+
+    $dates = $plan->occurrencesBetween(CarbonImmutable::parse('2026-03-10'), CarbonImmutable::parse('2026-12-31'))
+        ->map(fn (CarbonImmutable $date): string => $date->toDateString())
+        ->all();
+
+    expect($dates)->toBe(['2026-03-16']);
+});
+
+it('reports the final date an end count allows', function () {
+    $counted = PlannedTransaction::factory()->weekly()->create(['start_date' => '2026-03-02', 'end_after_count' => 3]);
+    $single = PlannedTransaction::factory()->noRepeat()->create(['start_date' => '2026-03-02', 'end_after_count' => 5]);
+    $uncapped = PlannedTransaction::factory()->weekly()->create(['start_date' => '2026-03-02']);
+
+    expect($counted->lastOccurrenceDate()?->toDateString())->toBe('2026-03-16')
+        ->and($single->lastOccurrenceDate()?->toDateString())->toBe('2026-03-02')
+        ->and($uncapped->lastOccurrenceDate())->toBeNull();
+});
+
+it('ends on the earlier of the end date and the end count', function (?string $until, ?int $count, ?string $expected) {
+    $plan = PlannedTransaction::factory()->weekly()->create([
+        'start_date' => '2026-03-02',
+        'until_date' => $until,
+        'end_after_count' => $count,
+    ]);
+
+    expect($plan->endsOn()?->toDateString())->toBe($expected);
+})->with([
+    'neither' => [null, null, null],
+    'date only' => ['2026-06-01', null, '2026-06-01'],
+    'count only' => [null, 3, '2026-03-16'],
+    'count first' => ['2026-06-01', 3, '2026-03-16'],
+    'date first' => ['2026-03-10', 3, '2026-03-10'],
+]);

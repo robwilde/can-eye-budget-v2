@@ -4,15 +4,20 @@ declare(strict_types=1);
 
 namespace App\Livewire;
 
+use App\Enums\PlanAmountStrategy;
+use App\Enums\PlannedTransactionType;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Livewire\Concerns\EditsPlanSeries;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\Merchant;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\RecentCategoryPicks;
 use Carbon\CarbonImmutable;
+use Closure;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
@@ -24,6 +29,8 @@ use Livewire\Component;
 
 final class PlannedTransactionManager extends Component
 {
+    use EditsPlanSeries;
+
     public ?int $accountId = null;
 
     public bool $showEditModal = false;
@@ -44,6 +51,10 @@ final class PlannedTransactionManager extends Component
     public bool $isActive = true;
 
     public ?string $untilDate = null;
+
+    public int|string|null $merchantId = null;
+
+    public string $notes = '';
 
     public bool $showDeleteModal = false;
 
@@ -85,6 +96,9 @@ final class PlannedTransactionManager extends Component
         $this->direction = $plan->direction->value;
         $this->isActive = $plan->is_active;
         $this->untilDate = $plan->until_date?->format('Y-m-d');
+        $this->merchantId = $this->merchantIdForKey($plan->user_id, $plan->merchant_key);
+        $this->notes = $plan->notes ?? '';
+        $this->fillSeriesFrom($plan);
         $this->showEditModal = true;
     }
 
@@ -104,15 +118,27 @@ final class PlannedTransactionManager extends Component
 
         $categoryId = $this->resolvedCategoryId();
 
-        DB::transaction(function () use ($plan, $categoryId): void {
+        $direction = TransactionDirection::from($this->direction);
+        $merchantId = $this->resolvedMerchantId();
+
+        DB::transaction(function () use ($plan, $categoryId, $direction, $merchantId): void {
             $plan->update([
                 'amount' => (int) round((float) $this->amount * 100),
                 'frequency' => $this->frequency,
                 'category_id' => $categoryId,
-                'direction' => $this->direction,
-                'until_date' => $this->untilDate !== null && $this->untilDate !== '' ? $this->untilDate : null,
+                'direction' => $direction,
                 'is_active' => $this->isActive,
+                ...$this->seriesAttributes(
+                    $direction,
+                    $plan->transfer_to_account_id !== null,
+                    $merchantId,
+                    $this->notes,
+                    $this->effectiveUntilType(),
+                    $this->untilDate,
+                ),
             ]);
+
+            $this->copyPaymentUrlToMatching($plan);
         });
 
         if ($this->categoryPicked && $categoryId !== null) {
@@ -172,8 +198,13 @@ final class PlannedTransactionManager extends Component
     public function render(): View
     {
         $user = $this->authenticatedUser();
+        $direction = TransactionDirection::tryFrom($this->direction) ?? TransactionDirection::Debit;
+        $editing = $this->editingId === null ? null : $this->findUserPlan($this->editingId);
 
         return view('livewire.planned-transaction-manager', [
+            'typeChoices' => $this->typeChoices($direction, $editing?->transfer_to_account_id !== null),
+            'amountStrategies' => PlanAmountStrategy::cases(),
+            'merchants' => Merchant::query()->where('user_id', $user->id)->orderBy('name')->get(['id', 'name']),
             'accounts' => $this->accountsForUser($user),
             'plans' => $this->plannedTransactionsForSelectedAccount($user),
             'categories' => Category::visibleSortedByFullPath($user->id),
@@ -273,8 +304,46 @@ final class PlannedTransactionManager extends Component
             'amount' => ['required', 'numeric', 'decimal:0,2', 'min:0.01'],
             'frequency' => ['required', 'string', Rule::in($this->frequencyValues())],
             'direction' => ['required', 'string', Rule::in($this->directionValues())],
-            'untilDate' => ['nullable', 'date'],
+            'untilDate' => ['nullable', 'date', $this->singleEndRule()],
+            'merchantId' => ['nullable', Rule::exists('merchants', 'id')->where('user_id', auth()->id())],
+            'notes' => ['nullable', 'string', 'max:1000'],
+            ...$this->seriesRules($this->effectiveUntilType(), $this->editedType()),
         ];
+    }
+
+    private function editedType(): PlannedTransactionType
+    {
+        $plan = $this->editingId === null ? null : $this->findUserPlan($this->editingId);
+
+        return $this->resolvedSeriesType(
+            TransactionDirection::tryFrom($this->direction) ?? TransactionDirection::Debit,
+            $plan?->transfer_to_account_id !== null,
+        );
+    }
+
+    /** A payment count ends the plan after that many payments; otherwise an end date does, or nothing. */
+    private function effectiveUntilType(): string
+    {
+        return match (true) {
+            mb_trim($this->endAfterCount) !== '' => 'after-count',
+            filled($this->untilDate) => 'until-date',
+            default => 'always',
+        };
+    }
+
+    /** An installment's payment count replaces its end date; any other plan must pick one. */
+    private function singleEndRule(): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail): void {
+            if (mb_trim($this->endAfterCount) !== '' && $this->editedType() !== PlannedTransactionType::Installment) {
+                $fail('Choose an end date or a payment count, not both.');
+            }
+        };
+    }
+
+    private function resolvedMerchantId(): ?int
+    {
+        return $this->merchantId === null || $this->merchantId === '' ? null : (int) $this->merchantId;
     }
 
     private function resolvedCategoryId(): ?int
@@ -322,6 +391,9 @@ final class PlannedTransactionManager extends Component
         $this->direction = '';
         $this->isActive = true;
         $this->untilDate = null;
+        $this->merchantId = null;
+        $this->notes = '';
+        $this->resetSeriesFields();
     }
 
     private function resetDeleteForm(): void

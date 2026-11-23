@@ -341,7 +341,7 @@
                 </flux:field>
             @endif
 
-            @if($transactionType !== 'transfer' && $mode === 'enter')
+            @if($transactionType !== 'transfer')
                 <div class="space-y-2" data-testid="merchant-picker">
                     <flux:select wire:model="merchantId" :label="__('Merchant')" data-testid="merchant-select">
                         <flux:select.option value="">{{ __('No merchant') }}</flux:select.option>
@@ -452,7 +452,27 @@
                                 wire:click="$set('untilType', 'until-date')">
                             {{ __('Until date') }}
                         </button>
+                        <button type="button"
+                                aria-pressed="{{ $untilType === 'after-count' ? 'true' : 'false' }}"
+                                class="{{ $untilType === 'after-count' ? 'active' : '' }}"
+                                data-testid="until-after-count"
+                                wire:click="$set('untilType', 'after-count')">
+                            {{ __('After N payments') }}
+                        </button>
                     </div>
+
+                    @if($untilType === 'after-count' || $planType === 'installment')
+                        <flux:input
+                            wire:model="endAfterCount"
+                            :label="__('Number of payments')"
+                            type="number"
+                            min="1"
+                            max="600"
+                            step="1"
+                            data-testid="plan-end-after-count"
+                            :required="$untilType === 'after-count'"
+                        />
+                    @endif
 
                     @if($untilType === 'until-date')
                         <flux:input
@@ -463,6 +483,8 @@
                         />
                     @endif
                 </div>
+
+                <x-plan-series-fields :type-choices="$typeChoices" :amount-strategies="$amountStrategies" :has-link="filled($paymentUrl)" />
             @endif
 
             @if($mode === 'enter' && $transactionType !== 'transfer' && ! $originalWasTransfer && $editingPlannedTransactionId === null)
@@ -514,7 +536,7 @@
             @endif
 
             {{-- Transfer / bank-feed notes, plus any existing notes (e.g. folded intl-fee note) --}}
-            @if($transactionType === 'transfer' || $isBankFeedTransaction || $notes !== '')
+            @if($transactionType === 'transfer' || $isBankFeedTransaction || $notes !== '' || $mode === 'plan')
                 <hr class="panel-rule">
 
                 <flux:textarea
