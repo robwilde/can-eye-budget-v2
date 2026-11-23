@@ -258,6 +258,44 @@ final readonly class OccurrencePaymentRecorder
     }
 
     /**
+     * Locks, in ascending id, the transaction rows a batch is about to change and the rows its deletes reach: the
+     * rows themselves, their split children, version parents and children, suggested pairs, transfer partners (and
+     * their parents), the fees of their legs (and the fees' split children). A batch that
+     * handles many transactions in one database transaction calls this first, inside that transaction, so every
+     * transaction lock comes before any occurrence lock its payment work takes later.
+     *
+     * @param  list<int|string>  $transactionIds
+     */
+    public function lockTransactionBatch(array $transactionIds): void
+    {
+        $ids = array_values(array_unique(array_map(intval(...), $transactionIds)));
+
+        if ($ids === []) {
+            return;
+        }
+
+        $reached = Transaction::withTrashed()
+            ->where(fn ($query) => $query->whereKey($ids)->orWhereIn('split_parent_id', $ids)->orWhereIn('parent_transaction_id', $ids)->orWhereIn('suggested_pair_id', $ids))
+            ->get(['id', 'transfer_pair_id', 'parent_transaction_id']);
+
+        $partners = $reached->pluck('transfer_pair_id')->filter()->all();
+        $parents = $reached->pluck('parent_transaction_id')->filter()->all();
+        $legs = array_values(array_unique(array_merge($ids, $partners)));
+
+        $fees = Transaction::withTrashed()
+            ->where(fn ($query) => $query->whereIn('transfer_fee_for_id', $legs)->orWhereIn('transfer_pair_id', $parents))
+            ->get(['id', 'parent_transaction_id']);
+
+        $feeChildren = Transaction::withTrashed()->whereIn('split_parent_id', $fees->pluck('id')->all())->pluck('id')->all();
+        $partnerParents = Transaction::withTrashed()->whereKey($partners)->pluck('parent_transaction_id')->filter()->all();
+
+        $this->lockRows(
+            array_merge($ids, $reached->pluck('id')->all(), $partners, $parents, $fees->pluck('id')->all(), $feeChildren, $partnerParents),
+            [],
+        );
+    }
+
+    /**
      * Claims for several transactions that were just linked to the plan together (an accepted detected plan):
      * every transaction row is locked first, in ascending id, before any occurrence is.
      *
