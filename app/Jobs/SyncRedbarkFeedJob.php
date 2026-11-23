@@ -26,6 +26,7 @@ use App\Models\RedbarkSyncLog;
 use App\Models\Transaction;
 use App\Services\FeedCategoryMatcher;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
+use App\Services\Recurring\PaymentSettlementDeferral;
 use App\Services\RedbarkClientFactory;
 use App\Services\RedbarkTransactionMatcher;
 use App\Services\TransactionIngestor;
@@ -798,52 +799,54 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
                 continue;
             }
 
-            $account->getConnection()->transaction(function () use ($ingestor, $matcher, $categoryMatcher, $redbarkAccount, $account, &$created, &$updated, &$matched): void {
-                $link = RedbarkAccount::query()->whereKey($redbarkAccount->id)->lockForUpdate()->first();
+            app(PaymentSettlementDeferral::class)->deferring(function () use ($ingestor, $matcher, $categoryMatcher, $redbarkAccount, $account, &$created, &$updated, &$matched): void {
+                $account->getConnection()->transaction(function () use ($ingestor, $matcher, $categoryMatcher, $redbarkAccount, $account, &$created, &$updated, &$matched): void {
+                    $link = RedbarkAccount::query()->whereKey($redbarkAccount->id)->lockForUpdate()->first();
 
-                if (! $link instanceof RedbarkAccount || $link->account_id !== $account->id || $link->ignored) {
-                    return;
-                }
-
-                app(AccountBalanceHistoryBuilder::class)->lockAccounts($account->id);
-
-                $rows = $redbarkAccount->raw_transactions_payload ?? [];
-                $payloadIds = array_values(array_filter(
-                    array_map(static fn (array $row): mixed => $row['id'] ?? null, $rows),
-                    static fn (mixed $id): bool => is_string($id) && $id !== '',
-                ));
-                $earliestStored = $this->earliestStoredDate($account, $payloadIds);
-                $rowsChanged = false;
-
-                foreach ($rows as $row) {
-                    $result = $this->applyRow($ingestor, $matcher, $categoryMatcher, $redbarkAccount, $row, $payloadIds);
-
-                    if ($result === 'created') {
-                        $created++;
-                    } elseif ($result === 'updated') {
-                        $updated++;
-                    } elseif ($result === 'matched') {
-                        $matched++;
+                    if (! $link instanceof RedbarkAccount || $link->account_id !== $account->id || $link->ignored) {
+                        return;
                     }
 
-                    $rowsChanged = $rowsChanged || $result !== 'skipped';
-                }
+                    app(AccountBalanceHistoryBuilder::class)->lockAccounts($account->id);
 
-                $balanceChanged = false;
+                    $rows = $redbarkAccount->raw_transactions_payload ?? [];
+                    $payloadIds = array_values(array_filter(
+                        array_map(static fn (array $row): mixed => $row['id'] ?? null, $rows),
+                        static fn (mixed $id): bool => is_string($id) && $id !== '',
+                    ));
+                    $earliestStored = $this->earliestStoredDate($account, $payloadIds);
+                    $rowsChanged = false;
 
-                if ($redbarkAccount->current_balance !== null) {
-                    $account->update([
-                        'balance' => $redbarkAccount->current_balance,
-                        'balance_source' => ImportSource::Redbark,
-                        'balance_updated_at' => now(),
-                        'currency' => $redbarkAccount->currency,
-                    ]);
-                    $balanceChanged = $account->wasChanged('balance');
-                }
+                    foreach ($rows as $row) {
+                        $result = $this->applyRow($ingestor, $matcher, $categoryMatcher, $redbarkAccount, $row, $payloadIds);
 
-                if ($balanceChanged || $rowsChanged) {
-                    $this->rebuildHistory($account, $rows, $earliestStored);
-                }
+                        if ($result === 'created') {
+                            $created++;
+                        } elseif ($result === 'updated') {
+                            $updated++;
+                        } elseif ($result === 'matched') {
+                            $matched++;
+                        }
+
+                        $rowsChanged = $rowsChanged || $result !== 'skipped';
+                    }
+
+                    $balanceChanged = false;
+
+                    if ($redbarkAccount->current_balance !== null) {
+                        $account->update([
+                            'balance' => $redbarkAccount->current_balance,
+                            'balance_source' => ImportSource::Redbark,
+                            'balance_updated_at' => now(),
+                            'currency' => $redbarkAccount->currency,
+                        ]);
+                        $balanceChanged = $account->wasChanged('balance');
+                    }
+
+                    if ($balanceChanged || $rowsChanged) {
+                        $this->rebuildHistory($account, $rows, $earliestStored);
+                    }
+                });
             });
         }
 

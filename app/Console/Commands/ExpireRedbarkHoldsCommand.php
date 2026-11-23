@@ -10,6 +10,7 @@ use App\Jobs\SyncRedbarkFeedJob;
 use App\Models\RedbarkAccount;
 use App\Models\Transaction;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
+use App\Services\Recurring\OccurrencePaymentRecorder;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
@@ -58,6 +59,10 @@ final class ExpireRedbarkHoldsCommand extends Command
                     ->chunkById(500, function ($transactions) use ($redbarkAccount, $dryRun, $history, &$expired, &$reverted): void {
                         Transaction::query()->getConnection()->transaction(function () use ($transactions, $redbarkAccount, $dryRun, $history, &$expired, &$reverted): void {
                             $dryRun || $history->lockAccounts($redbarkAccount->account_id);
+                            if (! $dryRun) {
+                                app(OccurrencePaymentRecorder::class)->lockTransactionBatch($transactions->modelKeys());
+                                $transactions = Transaction::query()->whereKey($transactions->modelKeys())->where('status', TransactionStatus::Pending)->get();
+                            }
 
                             foreach ($transactions as $transaction) {
                                 if ($transaction->source === TransactionSource::Redbark) {
