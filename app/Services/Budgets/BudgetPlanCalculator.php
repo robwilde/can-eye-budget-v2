@@ -473,7 +473,8 @@ final readonly class BudgetPlanCalculator
      * linked as a transfer between tracked accounts, or changed to income, reserves it again. A
      * payment split into child transactions still settles it through its children. Each posting
      * pays at most one occurrence, nearest date first within the reconciliation tolerance, as the
-     * calendar pairs them.
+     * calendar pairs them. A posting that already funded occurrence payments is left out: its effect is in
+     * the occurrences' paid state.
      *
      * @param  list<int>  $categoryIds
      */
@@ -504,6 +505,7 @@ final readonly class BudgetPlanCalculator
             ->current()
             ->where('direction', TransactionDirection::Debit->value)
             ->whereIn('planned_transaction_id', $plans->modelKeys())
+            ->whereDoesntHave('payments')
             ->where(fn (EloquentBuilder $payment): EloquentBuilder => $payment
                 ->whereIn('id', $counted)
                 ->orWhere(fn (EloquentBuilder $split): EloquentBuilder => $split

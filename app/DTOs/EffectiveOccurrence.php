@@ -15,6 +15,8 @@ final class EffectiveOccurrence extends Dto
         public readonly CarbonImmutable $original,
         public readonly CarbonImmutable $date,
         public readonly int $amount,
+        public readonly int $paid,
+        public readonly int $expected,
         public readonly ?PlannedOccurrence $stored,
     ) {}
 }

@@ -72,6 +72,7 @@ final readonly class DayActivityLoader
             ->current()
             ->excludingTransfers()
             ->whereBetween('post_date', [$start->subDays($tolerance), $end->addDays($tolerance)])
+            ->withExists('payments')
             ->with([...self::CATEGORY_EAGER_LOAD, ...self::LINKED_PLAN_EAGER_LOAD, ...self::SPLIT_EAGER_LOAD])
             ->orderBy('post_date')
             ->get();
@@ -123,7 +124,7 @@ final readonly class DayActivityLoader
         $transferIds = array_flip($transferRows->modelKeys());
 
         foreach ($withinTolerance->concat($transferRows) as $tx) {
-            if ($tx->planned_transaction_id === null || $tx->excluded) {
+            if ($tx->planned_transaction_id === null || $tx->excluded || $tx->payments_exists) {
                 continue;
             }
 
@@ -215,7 +216,7 @@ final readonly class DayActivityLoader
                     continue;
                 }
 
-                $plannedPipsByDate[$key][] = $this->plannedPip($planned, $stored, $key, $isTransfer, $planFlow, $resolver, $todayDate, $iconFor, $pathFor);
+                $plannedPipsByDate[$key][] = $this->plannedPip($planned, $stored, $item->amount, $key, $isTransfer, $planFlow, $resolver, $todayDate, $iconFor, $pathFor);
             }
         }
 
@@ -345,6 +346,7 @@ final readonly class DayActivityLoader
     private function plannedPip(
         PlannedTransaction $planned,
         ?PlannedOccurrence $stored,
+        int $amount,
         string $key,
         bool $isTransfer,
         ?string $planFlow,
@@ -357,7 +359,7 @@ final readonly class DayActivityLoader
             kind: 'plan',
             tone: $isTransfer ? 'xfer' : ($planned->direction === TransactionDirection::Credit ? 'inc' : 'out'),
             name: $planned->category?->name ?? $planned->description, // @phpstan-ignore nullsafe.neverNull
-            amount: abs($stored->expected_amount ?? (int) $planned->amount),
+            amount: $amount,
             icon: $iconFor($planned->category),
             transactionId: null,
             plannedTransactionId: $planned->id,
@@ -388,6 +390,7 @@ final readonly class DayActivityLoader
             ->onTrackedAccounts()
             ->whereNotIn('id', $ordinaryIds)
             ->whereBetween('post_date', [$start->subDays($tolerance), $end->addDays($tolerance)])
+            ->withExists('payments')
             ->with([
                 ...self::CATEGORY_EAGER_LOAD,
                 ...self::LINKED_PLAN_EAGER_LOAD,

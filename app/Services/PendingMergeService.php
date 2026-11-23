@@ -7,10 +7,12 @@ namespace App\Services;
 use App\Enums\TransactionStatus;
 use App\Exceptions\PendingMergeRefusedException;
 use App\Models\Account;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\TransactionAttachment;
 use App\Models\User;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
+use App\Services\Recurring\OccurrencePaymentRecorder;
 use App\Services\Transfers\TransferLinker;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -106,6 +108,7 @@ final readonly class PendingMergeService
             $child->tags()->syncWithoutDetaching($pending->tags()->pluck('tags.id')->all());
 
             $this->retire($lineage, $child);
+            $this->claimPlanOf($child);
 
             $account = Account::query()->where('user_id', $user->id)->find($posted->account_id);
 
@@ -179,6 +182,20 @@ final readonly class PendingMergeService
         foreach ($lineage as $row) {
             $row->forceFill(['folded_into_transaction_id' => $child->id])->save();
             $row->delete();
+        }
+    }
+
+    /** The merged row pays the plan it carries, now that the pending rows' own payments are gone. */
+    private function claimPlanOf(Transaction $child): void
+    {
+        if ($child->planned_transaction_id === null) {
+            return;
+        }
+
+        $plan = PlannedTransaction::query()->where('user_id', $child->user_id)->find($child->planned_transaction_id);
+
+        if ($plan instanceof PlannedTransaction) {
+            app(OccurrencePaymentRecorder::class)->claim($child, $plan);
         }
     }
 

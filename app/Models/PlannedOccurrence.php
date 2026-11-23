@@ -6,12 +6,14 @@ namespace App\Models;
 
 use App\Casts\MoneyCast;
 use App\Enums\OccurrenceStatus;
+use App\Services\Recurring\PlanAmountResolver;
 use Carbon\CarbonImmutable;
 use Database\Factories\PlannedOccurrenceFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property int $id
@@ -23,6 +25,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int|null $expected_amount
  * @property CarbonImmutable|null $closed_at
  * @property bool $closed_manually
+ * @property int|string|null $payments_sum_amount
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
  */
@@ -75,9 +78,29 @@ final class PlannedOccurrence extends Model
         );
     }
 
+    /** @return HasMany<PlannedPayment, $this> */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(PlannedPayment::class);
+    }
+
+    /** What has been paid against this occurrence, in cents; reads the preloaded sum when there is one. */
+    public function paidCents(): int
+    {
+        return array_key_exists('payments_sum_amount', $this->attributes)
+            ? (int) $this->payments_sum_amount
+            : (int) $this->payments()->sum('amount');
+    }
+
+    /**
+     * What the occurrence expects: its own amount, else what a history-following plan has paid before
+     * (this occurrence left out), else the plan's amount. The one rule every reader uses.
+     */
     public function effectiveExpectedAmount(): int
     {
-        return $this->expected_amount ?? $this->plannedTransaction->amount;
+        return $this->expected_amount
+            ?? app(PlanAmountResolver::class)->fromHistory($this->plannedTransaction, $this->id)
+            ?? $this->plannedTransaction->amount;
     }
 
     public function effectiveDueDate(): CarbonImmutable

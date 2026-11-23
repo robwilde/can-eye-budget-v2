@@ -449,7 +449,7 @@ final class ReportAggregator
         $atoms = [];
         $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
 
-        $occurrencesByPlan = (new OccurrenceSchedule)->between($plans->collect(), $start, $end);
+        $occurrencesByPlan = (new OccurrenceSchedule)->between($plans->collect(), $start, $end, includeSettled: true);
 
         foreach ($plans as $plan) {
             if (abs($plan->amount) === 0) {
@@ -468,7 +468,7 @@ final class ReportAggregator
 
             foreach ($occurrencesByPlan[$plan->id] as $occurrence) {
                 $date = $occurrence->date;
-                $amount = $occurrence->amount;
+                $amount = $occurrence->expected;
                 $ym = $date->format('Y-m');
                 $key = $ym.'|'.$direction.'|'.($categoryId ?? 'null');
 

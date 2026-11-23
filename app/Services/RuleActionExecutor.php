@@ -12,6 +12,7 @@ use App\Models\Account;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
+use App\Services\Recurring\OccurrencePaymentRecorder;
 use App\Services\Tags\TransactionTagger;
 use App\Services\Transfers\TransferDetector;
 use App\Support\CleanDescriptionDeriver;
@@ -290,6 +291,8 @@ final readonly class RuleActionExecutor
 
         if ($transaction->isDirty()) {
             $transaction->save();
+
+            $this->claimLinkedOccurrence($transaction);
         }
 
         foreach ($transferActions as $accountId) {
@@ -528,6 +531,20 @@ final readonly class RuleActionExecutor
         $transaction->notes = $value;
 
         return true;
+    }
+
+    /** A transaction the rule just linked to a plan pays that plan's nearest open occurrence. */
+    private function claimLinkedOccurrence(Transaction $transaction): void
+    {
+        if (! $transaction->wasChanged('planned_transaction_id') || $transaction->planned_transaction_id === null) {
+            return;
+        }
+
+        $plan = PlannedTransaction::query()->where('user_id', $transaction->user_id)->find($transaction->planned_transaction_id);
+
+        if ($plan instanceof PlannedTransaction) {
+            app(OccurrencePaymentRecorder::class)->claim($transaction, $plan);
+        }
     }
 
     private function linkToPlannedTransaction(Transaction $transaction, string $value, ?RuleActionLookups $lookups = null): bool

@@ -25,15 +25,17 @@ final class OccurrenceSchedule
 
     /**
      * Each plan's occurrences whose effective date falls in [$start, $end], in date order, keyed by plan id.
-     * With $openOnly only occurrences still scheduled are returned; otherwise a missed or paid one stays,
-     * as it stays in a month's plan.
+     * With $openOnly only occurrences still scheduled are returned; otherwise a missed one stays. A settled
+     * (paid) occurrence counts 0, so it is left out unless $includeSettled asks for the whole schedule, as a
+     * plan-against-actual figure does. `amount` is what is still owed; `expected` is the whole of it.
      *
      * @param  Collection<int, PlannedTransaction>  $plans
      * @return array<int, list<EffectiveOccurrence>>
      */
-    public function between(Collection $plans, CarbonImmutable $start, CarbonImmutable $end, bool $openOnly = false): array
+    public function between(Collection $plans, CarbonImmutable $start, CarbonImmutable $end, bool $openOnly = false, bool $includeSettled = false): array
     {
         $stored = $this->stored($plans, $start, $end);
+        $histories = $this->histories($plans);
         $result = [];
 
         foreach ($plans as $plan) {
@@ -53,16 +55,16 @@ final class OccurrenceSchedule
                     $seen[$row->id] = true;
                 }
 
-                $items[] = $this->item($plan, $scheduled->original, $row->snoozed_until ?? $scheduled->due, $row);
+                $items[] = $this->item($plan, $scheduled->original, $row->snoozed_until ?? $scheduled->due, $row, $histories[$plan->id] ?? null);
             }
 
             foreach ($stored as $row) {
                 if ($row->planned_transaction_id === $plan->id && ! isset($seen[$row->id]) && $row->snoozed_until !== null) {
-                    $items[] = $this->item($plan, $row->original_date, $row->snoozed_until, $row);
+                    $items[] = $this->item($plan, $row->original_date, $row->snoozed_until, $row, $histories[$plan->id] ?? null);
                 }
             }
 
-            $result[$plan->id] = $this->inRange($items, $start, $end, $openOnly);
+            $result[$plan->id] = $this->inRange($items, $start, $end, $openOnly, $includeSettled);
         }
 
         return $result;
@@ -74,9 +76,9 @@ final class OccurrenceSchedule
      * @param  Collection<int, PlannedTransaction>  $plans
      * @return list<EffectiveOccurrence>
      */
-    public function flat(Collection $plans, CarbonImmutable $start, CarbonImmutable $end, bool $openOnly = false): array
+    public function flat(Collection $plans, CarbonImmutable $start, CarbonImmutable $end, bool $openOnly = false, bool $includeSettled = false): array
     {
-        return array_merge(...array_values($this->between($plans, $start, $end, $openOnly))) ?: [];
+        return array_merge(...array_values($this->between($plans, $start, $end, $openOnly, $includeSettled))) ?: [];
     }
 
     /**
@@ -98,10 +100,11 @@ final class OccurrenceSchedule
     public function nextFor(Collection $plans, CarbonImmutable $from): array
     {
         $stored = $this->storedFrom($plans, $from);
+        $histories = $this->histories($plans);
         $result = [];
 
         foreach ($plans as $plan) {
-            $result[$plan->id] = $plan->is_active ? $this->firstOpen($plan, $from, $stored[$plan->id] ?? []) : null;
+            $result[$plan->id] = $plan->is_active ? $this->firstOpen($plan, $from, $stored[$plan->id] ?? [], $histories[$plan->id] ?? null) : null;
         }
 
         return $result;
@@ -110,7 +113,7 @@ final class OccurrenceSchedule
     /**
      * @param  array<string, PlannedOccurrence>  $stored  keyed by original date
      */
-    private function firstOpen(PlannedTransaction $plan, CarbonImmutable $from, array $stored): ?EffectiveOccurrence
+    private function firstOpen(PlannedTransaction $plan, CarbonImmutable $from, array $stored, ?int $history): ?EffectiveOccurrence
     {
         $earliest = $from->subDays(self::STORED_REACH_DAYS);
         $best = null;
@@ -139,7 +142,7 @@ final class OccurrenceSchedule
             $date = $row->snoozed_until ?? $scheduled->due;
 
             if ($date->greaterThanOrEqualTo($from) && ($best === null || $date->lessThan($best->date))) {
-                $best = $this->item($plan, $scheduled->original, $date, $row);
+                $best = $this->item($plan, $scheduled->original, $date, $row, $history);
             }
 
             if ($best !== null && $scheduled->original->greaterThan($best->date->addDays(self::STORED_REACH_DAYS))) {
@@ -152,7 +155,7 @@ final class OccurrenceSchedule
 
             if (! isset($seen[$row->id]) && $row->status === OccurrenceStatus::Scheduled && $date !== null
                 && $date->greaterThanOrEqualTo($from) && ($best === null || $date->lessThan($best->date))) {
-                $best = $this->item($plan, $row->original_date, $date, $row);
+                $best = $this->item($plan, $row->original_date, $date, $row, $history);
             }
         }
 
@@ -163,13 +166,14 @@ final class OccurrenceSchedule
      * @param  list<EffectiveOccurrence>  $items
      * @return list<EffectiveOccurrence>
      */
-    private function inRange(array $items, CarbonImmutable $start, CarbonImmutable $end, bool $openOnly): array
+    private function inRange(array $items, CarbonImmutable $start, CarbonImmutable $end, bool $openOnly, bool $includeSettled): array
     {
-        $kept = array_values(array_filter($items, static function (EffectiveOccurrence $item) use ($start, $end, $openOnly): bool {
+        $kept = array_values(array_filter($items, static function (EffectiveOccurrence $item) use ($start, $end, $openOnly, $includeSettled): bool {
             $status = $item->stored?->status;
 
             return $item->date->between($start, $end)
                 && $status !== OccurrenceStatus::Skipped
+                && ($includeSettled || $status !== OccurrenceStatus::Paid)
                 && (! $openOnly || $status === null || $status === OccurrenceStatus::Scheduled);
         }));
 
@@ -178,15 +182,19 @@ final class OccurrenceSchedule
         return $kept;
     }
 
-    private function item(PlannedTransaction $plan, CarbonImmutable $original, CarbonImmutable $date, ?PlannedOccurrence $row): EffectiveOccurrence
+    private function item(PlannedTransaction $plan, CarbonImmutable $original, CarbonImmutable $date, ?PlannedOccurrence $row, ?int $history): EffectiveOccurrence
     {
         $row?->setRelation('plannedTransaction', $plan);
+        $expected = abs($row->expected_amount ?? $history ?? $plan->amount);
+        $paid = $row === null ? 0 : $row->paidCents();
 
         return new EffectiveOccurrence(
             planId: $plan->id,
             original: $original,
             date: $date,
-            amount: abs($row->expected_amount ?? $plan->amount),
+            amount: max($expected - $paid, 0),
+            paid: $paid,
+            expected: $expected,
             stored: $row,
         );
     }
@@ -204,6 +212,7 @@ final class OccurrenceSchedule
         $stored = [];
 
         PlannedOccurrence::query()
+            ->withSum('payments', 'amount')
             ->whereIn('planned_transaction_id', $plans->pluck('id')->all())
             ->where(static fn ($query) => $query
                 ->whereBetween('original_date', [$start->subDays(self::STORED_REACH_DAYS)->startOfDay(), $end->addDays(self::STORED_REACH_DAYS)])
@@ -229,6 +238,7 @@ final class OccurrenceSchedule
         $stored = [];
 
         PlannedOccurrence::query()
+            ->withSum('payments', 'amount')
             ->whereIn('planned_transaction_id', $plans->pluck('id')->all())
             ->where(static fn ($query) => $query
                 ->where('original_date', '>=', $from->subDays(self::STORED_REACH_DAYS)->startOfDay())
@@ -239,5 +249,16 @@ final class OccurrenceSchedule
             });
 
         return $stored;
+    }
+
+    /**
+     * What each plan with a history-based amount strategy expects, by plan id, in one query.
+     *
+     * @param  Collection<int, PlannedTransaction>  $plans
+     * @return array<int, int>
+     */
+    private function histories(Collection $plans): array
+    {
+        return (new PlanAmountResolver)->forPlans($plans->filter(static fn (PlannedTransaction $plan): bool => $plan->is_active));
     }
 }

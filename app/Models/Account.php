@@ -11,6 +11,7 @@ use App\Enums\AccountStatus;
 use App\Enums\ImportSource;
 use App\Enums\StatementReconciliationStatus;
 use App\Enums\StatementReviewStatus;
+use App\Services\Recurring\OccurrencePaymentRecorder;
 use App\Support\Redbark\InitialSyncWindow;
 use Carbon\CarbonImmutable;
 use Database\Factories\AccountFactory;
@@ -315,6 +316,10 @@ final class Account extends Model
     protected static function booted(): void
     {
         self::deleting(static function (self $account): void {
+            $recorder = app(OccurrencePaymentRecorder::class);
+
+            Transaction::withTrashed()->where('account_id', $account->id)->whereHas('payments')->get()->each(static fn (Transaction $transaction) => $recorder->release($transaction));
+
             TransactionAttachment::remember($account, TransactionAttachment::query()
                 ->whereIn('transaction_id', Transaction::withTrashed()->where('account_id', $account->id)->select('id'))
                 ->get(['disk', 'path']));

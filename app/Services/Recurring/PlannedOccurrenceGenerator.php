@@ -127,7 +127,7 @@ final class PlannedOccurrenceGenerator
 
     /**
      * Removes the user's occurrences from before the current cycle that are still open: scheduled,
-     * not closed, not snoozed into the cycle and without an amount of their own. They are deleted,
+     * not closed, not snoozed into the cycle and without an amount of their own or any payment. They are deleted,
      * never marked missed.
      */
     public function rebuildHistory(User $user): int
@@ -139,6 +139,7 @@ final class PlannedOccurrenceGenerator
             ->where('status', OccurrenceStatus::Scheduled->value)
             ->whereNull('closed_at')
             ->whereNull('expected_amount')
+            ->whereDoesntHave('payments')
             ->where(static fn ($query) => $query
                 ->where(static fn ($unsnoozed) => $unsnoozed->whereNull('snoozed_until')->where('due_date', '<', $cycleStart))
                 ->orWhere('snoozed_until', '<', $cycleStart))

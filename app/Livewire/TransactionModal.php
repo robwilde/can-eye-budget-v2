@@ -41,6 +41,7 @@ use App\Services\ExchangeRateLookup;
 use App\Services\PendingMergeService;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\RecentCategoryPicks;
+use App\Services\Recurring\OccurrencePaymentRecorder;
 use App\Services\Recurring\PlanDuplicateGuard;
 use App\Services\RulePromptGate;
 use App\Services\Tags\TransactionTagger;
@@ -2492,12 +2493,16 @@ final class TransactionModal extends Component
         [$planned, $parsed] = $resolved;
 
         if ($this->transactionType === 'transfer') {
-            DB::transaction(fn () => $this->createTransferPair($parsed, $planned->id));
+            $leg = DB::transaction(fn () => $this->createTransferPair($parsed, $planned->id));
+
+            app(OccurrencePaymentRecorder::class)->claimFor($leg, $planned, (string) $this->occurrenceDate);
 
             return true;
         }
 
-        $this->createSingleTransaction($parsed, $planned->id);
+        $created = $this->createSingleTransaction($parsed, $planned->id);
+
+        app(OccurrencePaymentRecorder::class)->claimFor($created, $planned, (string) $this->occurrenceDate);
 
         return true;
     }
@@ -2579,13 +2584,15 @@ final class TransactionModal extends Component
         return [$debitSide, $creditSide, $parsed];
     }
 
-    private function createSingleTransaction(AmountParseResult $parsed, ?int $plannedTransactionId = null): void
+    private function createSingleTransaction(AmountParseResult $parsed, ?int $plannedTransactionId = null): Transaction
     {
-        Transaction::query()->getConnection()->transaction(function () use ($parsed, $plannedTransactionId): void {
+        return Transaction::query()->getConnection()->transaction(function () use ($parsed, $plannedTransactionId): Transaction {
             app(AccountBalanceHistoryBuilder::class)->lockAccounts($this->accountId);
             $transaction = Transaction::query()->create($this->manualSingleAttributes($parsed, $plannedTransactionId));
 
             app(AccountBalanceHistoryBuilder::class)->rebuildForTransactions($transaction);
+
+            return $transaction;
         });
     }
 
