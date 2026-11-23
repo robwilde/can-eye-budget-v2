@@ -33,6 +33,33 @@ final class AmountParser
         return new AmountParseResult($cents, $description, $hasAmount);
     }
 
+    /**
+     * Whether the leading amount expression cannot be stored exactly in cents: a number typed with
+     * more than two decimal places, or a sum, product or quotient that works out to a fraction of a cent.
+     */
+    public static function hasExcessDecimals(string $input): bool
+    {
+        $stripped = $input;
+
+        while (preg_match('/\([^()]*\)/', $stripped)) {
+            $stripped = preg_replace('/\([^()]*\)/', '', $stripped);
+        }
+
+        if (! preg_match('/^([\d.\s*+\-\/]+)/', mb_trim($stripped), $matches)) {
+            return false;
+        }
+
+        $expression = (string) preg_replace('/\s+/', '', $matches[1]);
+
+        if (preg_match('/\.\d{3,}/', $expression) === 1) {
+            return true;
+        }
+
+        $cents = self::evaluate($expression) * 100;
+
+        return abs($cents - round($cents)) > 1e-6;
+    }
+
     private static function evaluate(string $expression): float
     {
         $tokens = self::tokenize($expression);
