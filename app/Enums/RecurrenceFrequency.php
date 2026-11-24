@@ -117,6 +117,17 @@ enum RecurrenceFrequency: string
         };
     }
 
+    /** Days between two occurrences, roughly: a month is thirty days. Twice a month is fifteen, a workday one, a weekend seven. */
+    public function cycleDays(int $interval = 1): int
+    {
+        return match ($this) {
+            self::Semimonthly => 15,
+            self::EveryWorkday => 1,
+            self::EveryWeekend => 7,
+            default => $this->dayStep($interval) ?? ($this->monthStep($interval) ?? 1) * 30,
+        };
+    }
+
     public function label(int $interval = 1): string
     {
         return match ($this) {

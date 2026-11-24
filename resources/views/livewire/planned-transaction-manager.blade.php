@@ -247,6 +247,17 @@
                     <flux:error name="merchantId" />
                 </flux:field>
 
+                @if($priceChanges->isNotEmpty())
+                    <div data-testid="plan-price-changes">
+                        <flux:heading size="sm">{{ __('Price changes') }}</flux:heading>
+                        @foreach($priceChanges as $change)
+                            <flux:text size="sm" class="text-zinc-600" wire:key="price-change-{{ $change->id }}">
+                                {{ $change->effective_on->format('Y-m-d') }}: {{ MoneyCast::format(abs($change->previous_amount)) }} → {{ MoneyCast::format(abs($change->new_amount)) }}
+                            </flux:text>
+                        @endforeach
+                    </div>
+                @endif
+
                 <flux:field>
                     <flux:label>Notes</flux:label>
                     <flux:textarea wire:model="notes" rows="2" maxlength="1000" />

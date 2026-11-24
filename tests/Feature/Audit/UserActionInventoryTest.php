@@ -15,6 +15,7 @@ use App\Jobs\GeneratePlannedOccurrencesJob;
 use App\Jobs\ImportCsvTransactionsJob;
 use App\Jobs\IndexDocumentJob;
 use App\Jobs\MaintainGoalsJob;
+use App\Jobs\RecurringMaintenanceJob;
 use App\Jobs\ResolveMerchantBrandJob;
 use App\Jobs\RunTransactionAnalysisJob;
 use App\Jobs\SendRuleMatchDigestJob;
@@ -211,6 +212,7 @@ test('every queued job is in the inventory and carries the audit middleware as d
         SyncRedbarkFeedJob::class => [new SyncRedbarkFeedJob(RedbarkFeed::factory()->create()), true],
         MaintainGoalsJob::class => [new MaintainGoalsJob($user), false],
         GeneratePlannedOccurrencesJob::class => [new GeneratePlannedOccurrencesJob($user), false],
+        RecurringMaintenanceJob::class => [new RecurringMaintenanceJob($user), false],
         SyncSecurityPricesJob::class => [new SyncSecurityPricesJob($user), false],
         SendRuleMatchDigestJob::class => [new SendRuleMatchDigestJob($user), true],
         CategoriseRuleMatchesJob::class => [new CategoriseRuleMatchesJob($user, []), true],

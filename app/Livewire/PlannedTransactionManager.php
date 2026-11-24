@@ -354,6 +354,7 @@ final class PlannedTransactionManager extends Component
             'occurrences' => $this->occurrencesOfSelectedPlan($user),
             'occurrenceStates' => new OccurrenceStateResolver,
             'today' => $user->today(),
+            'priceChanges' => $editing instanceof PlannedTransaction ? $editing->priceChanges()->orderByDesc('effective_on')->limit(10)->get() : collect(),
         ]);
     }
 
