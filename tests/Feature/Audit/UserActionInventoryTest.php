@@ -18,6 +18,7 @@ use App\Jobs\MaintainGoalsJob;
 use App\Jobs\RecurringMaintenanceJob;
 use App\Jobs\ResolveMerchantBrandJob;
 use App\Jobs\RunTransactionAnalysisJob;
+use App\Jobs\SendBillAlertsJob;
 use App\Jobs\SendRuleMatchDigestJob;
 use App\Jobs\SyncRedbarkFeedJob;
 use App\Jobs\SyncSecurityPricesJob;
@@ -216,6 +217,7 @@ test('every queued job is in the inventory and carries the audit middleware as d
         MaintainGoalsJob::class => [new MaintainGoalsJob($user), false],
         GeneratePlannedOccurrencesJob::class => [new GeneratePlannedOccurrencesJob($user), false],
         RecurringMaintenanceJob::class => [new RecurringMaintenanceJob($user), false],
+        SendBillAlertsJob::class => [new SendBillAlertsJob($user), false],
         SyncSecurityPricesJob::class => [new SyncSecurityPricesJob($user), false],
         SendRuleMatchDigestJob::class => [new SendRuleMatchDigestJob($user), true],
         CategoriseRuleMatchesJob::class => [new CategoriseRuleMatchesJob($user, []), true],
