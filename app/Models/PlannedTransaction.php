@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Casts\DaysOfMonthCast;
 use App\Casts\MoneyCast;
 use App\DTOs\ScheduledDate;
+use App\Enums\AccountClass;
 use App\Enums\PlanAmountStrategy;
 use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
@@ -359,6 +360,24 @@ final class PlannedTransaction extends Model
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('status', PlannedTransactionStatus::Active->value);
+    }
+
+    /**
+     * Plans that are bills: active or paused debits that are not income and either pay no one in particular or
+     * pay a credit card, loan or mortgage (a transfer to any other account is not a bill).
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopePayable(Builder $query): Builder
+    {
+        return $query
+            ->visible()
+            ->where('direction', TransactionDirection::Debit->value)
+            ->where('type', '!=', PlannedTransactionType::Income->value)
+            ->where(fn (Builder $plans): Builder => $plans
+                ->whereNull('transfer_to_account_id')
+                ->orWhereHas('transferToAccount', fn (Builder $destination): Builder => $destination->whereIn('type', [AccountClass::CreditCard->value, AccountClass::Loan->value, AccountClass::Mortgage->value])));
     }
 
     /**

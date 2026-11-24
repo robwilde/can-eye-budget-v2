@@ -128,6 +128,23 @@ enum RecurrenceFrequency: string
         };
     }
 
+    /**
+     * How many times a year the cadence falls, on average. A one-off plan falls zero times. A cadence that lists
+     * days of the month falls once for each listed day in every cycle month.
+     */
+    public function timesPerYear(int $interval = 1, int $daysPerMonth = 1): float
+    {
+        return match ($this) {
+            self::DontRepeat => 0.0,
+            self::EveryWorkday => 260.0,
+            self::EveryWeekend => 104.0,
+            self::Semimonthly => 24.0,
+            default => ($step = $this->monthStep($interval)) !== null
+                ? 12 / $step * max(1, $daysPerMonth)
+                : 365.25 / ($this->dayStep($interval) ?? 365.25),
+        };
+    }
+
     public function label(int $interval = 1): string
     {
         return match ($this) {
