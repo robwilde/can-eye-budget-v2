@@ -147,6 +147,30 @@ final class PlannedOccurrenceGenerator
     }
 
     /**
+     * After a schedule edit: deletes the plan's occurrences that are still empty and in the future (due and
+     * original date after today, scheduled, not snoozed, no amount of their own, no payment, never skipped,
+     * missed or paid), so the generator can lay the new schedule over them. Everything else stays. The plan row
+     * is locked first, as every payment write takes it before any occurrence.
+     */
+    public function rebuildFuture(PlannedTransaction $plan, CarbonImmutable $today): int
+    {
+        return DB::transaction(function () use ($plan, $today): int {
+            app(OccurrencePaymentRecorder::class)->lockPlan($plan->id);
+
+            return PlannedOccurrence::query()
+                ->where('planned_transaction_id', $plan->id)
+                ->where('status', OccurrenceStatus::Scheduled->value)
+                ->whereNull('closed_at')
+                ->whereNull('snoozed_until')
+                ->whereNull('expected_amount')
+                ->whereDoesntHave('payments')
+                ->whereDate('due_date', '>', $today->toDateString())
+                ->whereDate('original_date', '>', $today->toDateString())
+                ->delete();
+        });
+    }
+
+    /**
      * The first day of the user's current pay cycle, or of the current month without one. A pay cycle
      * that has not started yet (the next pay date is more than one interval away) does not count.
      */

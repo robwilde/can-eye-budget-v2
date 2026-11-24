@@ -257,6 +257,12 @@ final readonly class OccurrencePaymentRecorder
         });
     }
 
+    /** Locks one plan row through the one lock helper, before any of its occurrences are written. */
+    public function lockPlan(int $planId): void
+    {
+        $this->lockRows([], [], planIds: [$planId]);
+    }
+
     /**
      * Locks, in ascending id, the transaction rows a batch is about to change and the rows its deletes reach: the
      * rows themselves, their split children, version parents and children, suggested pairs, transfer partners (and
