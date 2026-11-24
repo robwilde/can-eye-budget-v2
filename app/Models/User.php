@@ -43,11 +43,14 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * @property string|null $timezone
  * @property int|null $month_start_day
  * @property UserPreferences $preferences
+ * @property string|null $avatar_path
  */
 final class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable, TwoFactorAuthenticatable;
+
+    public const string AVATAR_DISK = 'public';
 
     private const string UNKNOWN_TIMEZONE_CACHE_PREFIX = 'user-timezone-unknown:';
 
@@ -75,6 +78,7 @@ final class User extends Authenticatable
         'timezone',
         'month_start_day',
         'preferences',
+        'avatar_path',
     ];
 
     /**
@@ -97,6 +101,11 @@ final class User extends Authenticatable
      */
     /** @var array<int, list<string>> */
     private static array $documentPathsToPurge = [];
+
+    public function avatarUrl(): ?string
+    {
+        return $this->avatar_path === null ? null : Storage::disk(self::AVATAR_DISK)->url($this->avatar_path);
+    }
 
     /**
      * Get the user's initials
@@ -472,6 +481,7 @@ final class User extends Authenticatable
             Statement::purgeRemembered($user);
             Storage::disk('local')->delete(self::$documentPathsToPurge[$user->id] ?? []);
             Storage::disk('local')->deleteDirectory('exports/'.$user->id);
+            Storage::disk(self::AVATAR_DISK)->deleteDirectory('avatars/'.$user->id);
             unset(self::$documentPathsToPurge[$user->id]);
         });
     }
