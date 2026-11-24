@@ -61,6 +61,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Bill alerts
+    |--------------------------------------------------------------------------
+    |
+    | A daily email about bills left unpaid for a whole cycle and about cash
+    | projected to fall below low_balance_threshold (cents) within 30 days.
+    | Off by default.
+    |
+    */
+
+    'bill_alerts' => (bool) env('BUDGET_BILL_ALERTS', false),
+
+    'low_balance_threshold' => (int) env('BUDGET_LOW_BALANCE_THRESHOLD', 5000),
+
+    /*
+    |--------------------------------------------------------------------------
     | Material price change (basis points)
     |--------------------------------------------------------------------------
     |

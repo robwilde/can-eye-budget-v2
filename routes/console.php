@@ -59,6 +59,12 @@ Schedule::command('securities:sync-prices')
     ->withoutOverlapping()
     ->onOneServer();
 
+Schedule::command('app:send-bill-alerts')
+    ->dailyAt('08:00')
+    ->name('bill-alerts:send')
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('app:generate-planned-occurrences')
     ->dailyAt('03:00')
     ->name('planned-occurrences:generate')
