@@ -2873,7 +2873,8 @@ The remaining features have no ordering constraint beyond the conventions above.
 - **Existing:**
   - Deployment-wide flags `budget.recurring_detection`, `budget.jev_categorisation` and `budget.bnpl_email_import`, plus `services.context_dev.enrichment_enabled`.
   - BnplOrderReview renders nothing when its flag is off, and its actions return 404.
-- **Gap:** The flags are environment settings for the whole install, not something each user opts into. A gated feature is hidden or its actions return 404; it does not redirect with a notice.
+  - The Preferences page has an audited Preview features switch (`UserPreferences::previewFeatures`, #735). `User::hasPreviewFeatures()` is true only for an explicit opt-in and `User::withPreviewFeatures()` selects opted-in users for background jobs. The `preview` route middleware (`preview` or `preview:budget.some_flag`) answers 404 when the named deployment flag is off and otherwise redirects a user who has not opted in to the dashboard with a flashed notice; the `RequiresPreviewFeatures` Livewire concern applies the same check to a component's first render and its actions (403 for an update from a user who has since opted out).
+- **Gap:** No page applies the `preview` middleware yet; each feature applies it when it is built. The existing `budget.*` flags still hide or 404 as before.
 - **Build it like:** a preview-features boolean stored in the F44 preference store, checked together with the `budget.*` flag (C5, C6) and switched from a settings page with an audited action (C3).
 
 ### F48. Admin and self-hosting
