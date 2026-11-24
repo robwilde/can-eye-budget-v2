@@ -117,6 +117,7 @@
         </div>
     @endif
 
+    <livewire:bill-drawer :plan-id="$openPlanId" />
     <livewire:plan-declaration-form />
     <livewire:occurrence-payment-panel />
 </div>

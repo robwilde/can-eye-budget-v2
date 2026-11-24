@@ -22,6 +22,7 @@ use Flux\Flux;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -65,11 +66,21 @@ final class Bills extends Component
 
     public string $notice = '';
 
+    #[Locked]
+    public ?int $openPlanId = null;
+
     /** @var array<string, string> */
     protected $listeners = [
         'occurrence-payment-changed' => '$refresh',
         'plan-declared' => '$refresh',
     ];
+
+    public function mount(): void
+    {
+        $requested = (int) request()->query('plan');
+
+        $this->openPlanId = $requested > 0 ? $requested : null;
+    }
 
     public function showTab(string $tab): void
     {
