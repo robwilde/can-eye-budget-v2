@@ -7,14 +7,15 @@ declare(strict_types=1);
 use App\Enums\SuggestionType;
 
 test('all suggestion type cases exist', function () {
-    expect(SuggestionType::cases())->toHaveCount(4);
+    expect(SuggestionType::cases())->toHaveCount(5);
 });
 
 test('suggestion type has correct backing values', function () {
     expect(SuggestionType::PrimaryAccount->value)->toBe('primary-account')
         ->and(SuggestionType::PayCycle->value)->toBe('pay-cycle')
         ->and(SuggestionType::RecurringTransaction->value)->toBe('recurring-transaction')
-        ->and(SuggestionType::UserRule->value)->toBe('user-rule');
+        ->and(SuggestionType::UserRule->value)->toBe('user-rule')
+        ->and(SuggestionType::PlannedPaymentMatch->value)->toBe('planned-payment-match');
 });
 
 test('suggestion type resolves from backing value', function () {

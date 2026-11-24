@@ -7,8 +7,10 @@ namespace App\Services;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Recurring\PlannedPaymentMatcher;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Matches imported transactions to the active planned items they fulfil, tagging each with
@@ -94,12 +96,7 @@ final readonly class PlannedTransactionMatcher
                     continue;
                 }
 
-                $affected = Transaction::query()
-                    ->whereKey($candidate->id)
-                    ->whereNull('planned_transaction_id')
-                    ->update(['planned_transaction_id' => $plan->id]);
-
-                if ($affected === 1) {
+                if ($this->link($candidate->id, $plan)) {
                     $consumedIds[$candidate->id] = true;
                     $matched++;
                     $this->releaseExcludedLinks($user, $plan, $occurrence, $tolerance);
@@ -108,6 +105,25 @@ final readonly class PlannedTransactionMatcher
         }
 
         return $matched;
+    }
+
+    /**
+     * Links one still unlinked row through the model, so the plan link records its payment, and settles any
+     * suggestion for it in the same database transaction.
+     */
+    private function link(int $transactionId, PlannedTransaction $plan): bool
+    {
+        return DB::transaction(function () use ($transactionId, $plan): bool {
+            $transaction = Transaction::query()->where('user_id', $plan->user_id)->whereNull('planned_transaction_id')->whereKey($transactionId)->lockForUpdate()->first();
+
+            if (! $transaction instanceof Transaction) {
+                return false;
+            }
+
+            app(PlannedPaymentMatcher::class)->linkToPlan($transaction, $plan);
+
+            return true;
+        });
     }
 
     /**
