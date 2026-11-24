@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Recurring;
 
+use App\DTOs\MatchScore;
 use App\Enums\OccurrenceStatus;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
@@ -77,7 +78,7 @@ final readonly class PlannedPaymentMatcher
                     continue;
                 }
 
-                $pairs[] = ['transaction' => $transaction, 'occurrence' => $occurrence, 'score' => $score->total()];
+                $pairs[] = ['transaction' => $transaction, 'occurrence' => $occurrence, 'score' => $score->total(), 'signals' => $score];
                 $byTransaction[$transaction->id][$occurrence->id] = $score->total();
             }
         }
@@ -88,7 +89,7 @@ final readonly class PlannedPaymentMatcher
         $usedOccurrences = [];
 
         foreach ($pairs as $pair) {
-            ['transaction' => $transaction, 'occurrence' => $occurrence, 'score' => $score] = $pair;
+            ['transaction' => $transaction, 'occurrence' => $occurrence, 'score' => $score, 'signals' => $signals] = $pair;
 
             if (isset($usedTransactions[$transaction->id]) || isset($usedOccurrences[$occurrence->id])) {
                 continue;
@@ -103,7 +104,7 @@ final readonly class PlannedPaymentMatcher
             if ($confident && $this->link($user, $transaction, $occurrence)) {
                 $result['linked']++;
             } elseif ($occurrence->plannedTransaction->direction === TransactionDirection::Debit) {
-                $result['suggestionIds'][] = $this->suggest($user, $run, $transaction, $occurrence, $score);
+                $result['suggestionIds'][] = $this->suggest($user, $run, $transaction, $occurrence, $score, $signals);
                 $result['suggested']++;
             } else {
                 continue;
@@ -130,13 +131,14 @@ final readonly class PlannedPaymentMatcher
         });
     }
 
-    public function supersedeSuggestions(User $user, int $transactionId): void
+    public function supersedeSuggestions(User $user, int $transactionId, ?int $except = null): void
     {
         AnalysisSuggestion::query()
             ->where('user_id', $user->id)
             ->ofType(SuggestionType::PlannedPaymentMatch)
             ->pending()
             ->where('payload->transaction_id', $transactionId)
+            ->when($except !== null, fn (Builder $query): Builder => $query->whereKeyNot($except))
             ->update(['status' => SuggestionStatus::Superseded, 'resolved_at' => now()]);
     }
 
@@ -197,7 +199,7 @@ final readonly class PlannedPaymentMatcher
         return true;
     }
 
-    private function suggest(User $user, PipelineRun $run, Transaction $transaction, PlannedOccurrence $occurrence, float $score): int
+    private function suggest(User $user, PipelineRun $run, Transaction $transaction, PlannedOccurrence $occurrence, float $score, MatchScore $signals): int
     {
         $existing = AnalysisSuggestion::query()
             ->where('user_id', $user->id)
@@ -220,7 +222,9 @@ final readonly class PlannedPaymentMatcher
                 'transaction_id' => $transaction->id,
                 'planned_transaction_id' => $occurrence->planned_transaction_id,
                 'planned_occurrence_id' => $occurrence->id,
+                'account_id' => $occurrence->plannedTransaction->account_id,
                 'score' => $score,
+                'signals' => ['identity' => $signals->identity, 'amount' => $signals->amount, 'date' => $signals->date, 'account' => $signals->account],
             ],
         ])->id;
     }
