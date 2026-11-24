@@ -122,6 +122,7 @@ test('every callable Livewire method, in class and view-based components, is aud
         'pages::settings.exports::pollStatus',
         'App\\Livewire\\PdfImportReview::pollStatus',
         'App\\Livewire\\PlannedTransactionManager::refreshAfterPayment',
+        'App\\Livewire\\RecurringTransactionReview::refreshAfterPayment',
         'App\\Livewire\\TransactionList::pollMerchantBrands',
         'App\\Livewire\\UserRuleManager::confirmApplyAll',
         'App\\Livewire\\UserRuleManager::confirmApplyRule',
