@@ -4,24 +4,34 @@ declare(strict_types=1);
 
 namespace App\Livewire;
 
+use App\Enums\OccurrenceStatus;
 use App\Enums\PipelineRunStatus;
 use App\Enums\PipelineTrigger;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
+use App\Livewire\Attributes\NotAudited;
 use App\Livewire\Concerns\RecordsHandPickedCategories;
 use App\Models\Account;
 use App\Models\AnalysisSuggestion;
 use App\Models\Category;
 use App\Models\PipelineRun;
+use App\Models\PlannedOccurrence;
+use App\Models\PlannedTransaction;
+use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Recurring\PlannedPaymentReview;
 use App\Services\Recurring\RecurringSuggestionWriter;
 use App\Services\Recurring\RecurringTransactionDetector;
 use App\Services\SuggestionApplier;
 use Carbon\CarbonImmutable;
+use Closure;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
+use Livewire\Attributes\On;
 use Livewire\Component;
 use Throwable;
 
@@ -122,6 +132,20 @@ final class RecurringTransactionReview extends Component
         Flux::toast(text: $categoryId !== null ? 'Recurring transaction created and all matching transactions categorised' : 'Recurring transaction created', variant: 'success');
     }
 
+    public function confirmPlannedPayment(int $suggestionId, PlannedPaymentReview $review): void
+    {
+        $this->decidePlannedPayment($suggestionId, fn (User $user) => $review->confirm($user, $suggestionId), 'Payment applied');
+    }
+
+    public function rejectPlannedPayment(int $suggestionId, PlannedPaymentReview $review): void
+    {
+        $this->decidePlannedPayment($suggestionId, fn (User $user) => $review->reject($user, $suggestionId), 'Match rejected. It will not be suggested again.');
+    }
+
+    #[NotAudited]
+    #[On('occurrence-payment-changed')]
+    public function refreshAfterPayment(): void {}
+
     public function dismiss(int $suggestionId): void
     {
         $suggestion = $this->findPendingSuggestion($suggestionId);
@@ -157,8 +181,80 @@ final class RecurringTransactionReview extends Component
         return view('livewire.recurring-transaction-review', [
             'accounts' => $accounts,
             'suggestions' => $suggestions,
+            'paymentSuggestions' => $this->paymentSuggestionsForSelectedAccount(),
             'categories' => Category::visibleSortedByFullPath($this->authenticatedUser()->id),
         ]);
+    }
+
+    private function decidePlannedPayment(int $suggestionId, Closure $decide, string $toast): void
+    {
+        $this->resetErrorBag('plannedPayment');
+
+        if ($this->settledSuggestion($suggestionId)) {
+            $this->addError('plannedPayment', __('This suggestion changed in the meantime. The list has been refreshed.'));
+
+            return;
+        }
+
+        try {
+            $decide($this->authenticatedUser());
+        } catch (ValidationException $refused) {
+            $this->addError('plannedPayment', (string) collect($refused->errors())->flatten()->first());
+
+            return;
+        } catch (ModelNotFoundException) {
+            abort(404);
+        }
+
+        Flux::toast(text: $toast, variant: 'success');
+        $this->dispatch('occurrence-payment-changed');
+    }
+
+    private function settledSuggestion(int $suggestionId): bool
+    {
+        return AnalysisSuggestion::query()
+            ->where('user_id', auth()->id())
+            ->ofType(SuggestionType::PlannedPaymentMatch)
+            ->whereKey($suggestionId)
+            ->where('status', '!=', SuggestionStatus::Pending)
+            ->exists();
+    }
+
+    /**
+     * Pending suggested plan payments of the selected account, most confident first, each with the plan,
+     * transaction and occurrence it names. One whose records are gone is left out.
+     *
+     * @return Collection<int, array{suggestion: AnalysisSuggestion, plan: PlannedTransaction, transaction: Transaction, occurrence: PlannedOccurrence}>
+     */
+    private function paymentSuggestionsForSelectedAccount(): Collection
+    {
+        if ($this->accountId === null) {
+            return collect();
+        }
+
+        $user = $this->authenticatedUser();
+        $suggestions = AnalysisSuggestion::query()
+            ->where('user_id', $user->id)
+            ->ofType(SuggestionType::PlannedPaymentMatch)
+            ->pending()
+            ->where('payload->account_id', $this->accountId)
+            ->get()
+            ->sortBy([fn (AnalysisSuggestion $a, AnalysisSuggestion $b): int => ((float) ($b->payload['score'] ?? 0)) <=> ((float) ($a->payload['score'] ?? 0)), fn (AnalysisSuggestion $a, AnalysisSuggestion $b): int => $a->id <=> $b->id]);
+
+        $transactions = Transaction::query()->where('user_id', $user->id)->current()->whereNull('planned_transaction_id')->whereDoesntHave('payments')->whereKey($suggestions->pluck('payload.transaction_id')->all())->get()->keyBy('id');
+        $occurrences = PlannedOccurrence::query()->forUser($user)->where('status', OccurrenceStatus::Scheduled->value)->with('plannedTransaction')->whereKey($suggestions->pluck('payload.planned_occurrence_id')->all())->get()->keyBy('id');
+
+        return $suggestions
+            ->map(static function (AnalysisSuggestion $suggestion) use ($transactions, $occurrences): ?array {
+                $transaction = $transactions->get($suggestion->payload['transaction_id'] ?? 0);
+                $occurrence = $occurrences->get($suggestion->payload['planned_occurrence_id'] ?? 0);
+
+                return $transaction instanceof Transaction && $occurrence instanceof PlannedOccurrence
+                    ? ['suggestion' => $suggestion, 'plan' => $occurrence->plannedTransaction, 'transaction' => $transaction, 'occurrence' => $occurrence]
+                    : null;
+            })
+            ->filter()
+            ->values();
     }
 
     private function authenticatedUser(): User

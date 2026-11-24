@@ -10,6 +10,7 @@ use App\Models\PlannedOccurrence;
 use App\Models\User;
 use App\Services\Recurring\OccurrencePaymentRecorder;
 use App\Services\Recurring\PaymentCandidateFinder;
+use App\Services\Recurring\PlannedPaymentReview;
 use Closure;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -106,6 +107,11 @@ final class OccurrencePaymentPanel extends Component
     public function markPaid(): void
     {
         $this->change(fn (User $user, int $occurrenceId) => app(OccurrencePaymentRecorder::class)->markPaid($user, $occurrenceId));
+    }
+
+    public function unlinkPayment(int $paymentId): void
+    {
+        $this->change(fn (User $user) => app(PlannedPaymentReview::class)->unlink($user, $paymentId));
     }
 
     public function removePayment(int $paymentId): void

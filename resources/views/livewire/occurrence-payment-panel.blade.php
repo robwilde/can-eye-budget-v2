@@ -48,6 +48,9 @@
                                     {{ $payment->transaction->description }}
                                 @endif
                             </span>
+                            @if($payment->transaction !== null && ! $payment->transaction->trashed() && $payment->transaction->planned_transaction_id === $plan->id)
+                                <flux:button size="sm" variant="ghost" wire:click="unlinkPayment({{ $payment->id }})" wire:confirm="{{ __('Unlink this transaction from the plan? It will not be matched to it again.') }}" data-testid="payment-unlink">{{ __('Unlink') }}</flux:button>
+                            @endif
                             <flux:button size="sm" variant="ghost" wire:click="removePayment({{ $payment->id }})" wire:confirm="{{ __('Remove this payment?') }}" data-testid="payment-remove">{{ __('Remove') }}</flux:button>
                         </div>
                     @empty
