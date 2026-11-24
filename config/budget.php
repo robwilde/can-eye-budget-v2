@@ -46,6 +46,18 @@ return [
 
     'bills_page' => (bool) env('BUDGET_BILLS_PAGE', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Material price change (basis points)
+    |--------------------------------------------------------------------------
+    |
+    | A recorded price change at or above this share of the old price, in basis
+    | points (1000 = 10%), is flagged material on the Bills overview notices.
+    |
+    */
+
+    'material_price_change_bps' => (int) env('BUDGET_MATERIAL_PRICE_CHANGE_BPS', 1000),
+
     'jev_categorisation' => env('BUDGET_JEV_CATEGORISATION', false),
 
     /*
