@@ -6,6 +6,7 @@ namespace App\Services\Recurring;
 
 use App\DTOs\MatchScore;
 use App\Enums\OccurrenceStatus;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
 use App\Enums\TransactionDirection;
@@ -149,7 +150,7 @@ final readonly class PlannedPaymentMatcher
             ->where('status', OccurrenceStatus::Scheduled->value)
             ->whereDate('due_date', '>=', $today->subDays(self::LOOKBACK_DAYS + self::LOOKAHEAD_DAYS)->toDateString())
             ->whereDate('due_date', '<=', $today->addDays(self::LOOKAHEAD_DAYS)->toDateString())
-            ->whereHas('plannedTransaction', static fn (Builder $plans): Builder => $plans->where('user_id', $user->id)->where('is_active', true))
+            ->whereHas('plannedTransaction', static fn (Builder $plans): Builder => $plans->where('user_id', $user->id)->where('status', PlannedTransactionStatus::Active->value))
             ->with('plannedTransaction')
             ->orderBy('id')
             ->get();

@@ -8,9 +8,12 @@ use App\Casts\DaysOfMonthCast;
 use App\Casts\MoneyCast;
 use App\DTOs\ScheduledDate;
 use App\Enums\PlanAmountStrategy;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
 use App\Enums\PlanOrigin;
 use App\Enums\RecurrenceFrequency;
+use App\Enums\SuggestionStatus;
+use App\Enums\SuggestionType;
 use App\Enums\TransactionDirection;
 use App\Enums\WeekendAdjustment;
 use App\Events\PlannedTransactionAmountChanged;
@@ -64,7 +67,7 @@ use Illuminate\Support\Facades\Validator;
  * @property int $match_late_days
  * @property PlanAmountStrategy $amount_strategy
  * @property array{descriptions?: list<string>, merchant_keys?: list<string>}|null $learned_aliases
- * @property bool $is_active
+ * @property PlannedTransactionStatus $status
  * @property bool|null $is_pay_cycle_income
  * @property CarbonImmutable|null $last_generated_date
  * @property CarbonImmutable $created_at
@@ -86,7 +89,7 @@ final class PlannedTransaction extends Model
         'weekend_adjustment',
         'until_date',
         'end_after_count',
-        'is_active',
+        'status',
     ];
 
     /** The schedule columns a cadence or end-condition edit changes; pausing a plan is not one. */
@@ -137,7 +140,7 @@ final class PlannedTransaction extends Model
         'match_early_days',
         'match_late_days',
         'amount_strategy',
-        'is_active',
+        'status',
         'is_pay_cycle_income',
         'last_generated_date',
     ];
@@ -158,6 +161,7 @@ final class PlannedTransaction extends Model
         'match_early_days' => 2,
         'match_late_days' => 7,
         'amount_strategy' => 'fixed',
+        'status' => 'active',
     ];
 
     /** @return BelongsTo<User, $this> */
@@ -313,6 +317,54 @@ final class PlannedTransaction extends Model
     }
 
     /**
+     * Removes a plan the user deleted: a declared plan goes with its occurrences and payments, a detected plan
+     * becomes an ended tombstone (so detection never brings it back) and its pending payment suggestions are
+     * superseded, as nothing may be applied to it any more.
+     */
+    public function discard(): void
+    {
+        if ($this->origin !== PlanOrigin::Detected) {
+            $this->delete();
+
+            return;
+        }
+
+        $this->update(['status' => PlannedTransactionStatus::Ended]);
+
+        AnalysisSuggestion::query()
+            ->where('user_id', $this->user_id)
+            ->ofType(SuggestionType::PlannedPaymentMatch)
+            ->pending()
+            ->where('payload->planned_transaction_id', $this->id)
+            ->update(['status' => SuggestionStatus::Superseded, 'resolved_at' => now()]);
+    }
+
+    public function isActive(): bool
+    {
+        return $this->status === PlannedTransactionStatus::Active;
+    }
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->where('status', PlannedTransactionStatus::Active->value);
+    }
+
+    /**
+     * Every plan but the tombstones of deleted detected plans, which only detection looks at.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeVisible(Builder $query): Builder
+    {
+        return $query->where('status', '!=', PlannedTransactionStatus::Ended->value);
+    }
+
+    /**
      * @param  Builder<self>  $query
      * @return Builder<self>
      */
@@ -321,7 +373,7 @@ final class PlannedTransaction extends Model
         $today ??= CarbonImmutable::today();
 
         return $query
-            ->where('is_active', true)
+            ->active()
             ->where(function (Builder $q) use ($today): void {
                 $q->whereNull('until_date')->orWhere('until_date', '>=', $today);
             })
@@ -351,7 +403,7 @@ final class PlannedTransaction extends Model
     {
         $dates = collect();
 
-        if (! $this->is_active) {
+        if (! $this->isActive()) {
             return $dates;
         }
 
@@ -425,7 +477,7 @@ final class PlannedTransaction extends Model
 
     public function nextScheduledOnOrAfter(CarbonImmutable $from): ?ScheduledDate
     {
-        if (! $this->is_active) {
+        if (! $this->isActive()) {
             return null;
         }
 
@@ -548,7 +600,7 @@ final class PlannedTransaction extends Model
             'match_late_days' => 'integer',
             'amount_strategy' => PlanAmountStrategy::class,
             'last_generated_date' => 'date',
-            'is_active' => 'boolean',
+            'status' => PlannedTransactionStatus::class,
             'is_pay_cycle_income' => 'boolean',
         ];
     }

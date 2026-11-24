@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Events\PlannedTransactionCreated;
@@ -44,7 +45,7 @@ test('default factory creates monthly frequency', function () {
 test('default factory creates active planned transaction', function () {
     $planned = PlannedTransaction::factory()->create();
 
-    expect($planned->is_active)->toBeTrue();
+    expect($planned->status)->toBe(PlannedTransactionStatus::Active);
 });
 
 // ── Relationships ─────────────────────────────────────────────────
@@ -173,10 +174,10 @@ test('until_date is cast to date', function () {
     expect($planned->until_date)->toBeInstanceOf(CarbonImmutable::class);
 });
 
-test('is_active is cast to boolean', function () {
+test('status is cast to the status enum and defaults to active', function () {
     $planned = PlannedTransaction::factory()->create();
 
-    expect($planned->is_active)->toBeBool();
+    expect($planned->status)->toBe(PlannedTransactionStatus::Active)->and($planned->isActive())->toBeTrue();
 });
 
 // ── Factory States ────────────────────────────────────────────────
@@ -206,10 +207,10 @@ test('withEndDate state sets until_date', function () {
         ->and($planned->until_date)->toBeInstanceOf(CarbonImmutable::class);
 });
 
-test('inactive state sets is_active to false', function () {
+test('inactive state sets the status to inactive', function () {
     $planned = PlannedTransaction::factory()->inactive()->create();
 
-    expect($planned->is_active)->toBeFalse();
+    expect($planned->status)->toBe(PlannedTransactionStatus::Inactive);
 });
 
 // ── occurrencesBetween() ──────────────────────────────────────────
@@ -311,7 +312,7 @@ test('respects until_date boundary', function () {
         ->and($dates[1]->toDateString())->toBe('2026-02-15');
 });
 
-test('respects is_active flag', function () {
+test('an inactive plan has no occurrences', function () {
     $planned = PlannedTransaction::factory()->inactive()->create([
         'start_date' => '2026-03-01',
         'frequency' => RecurrenceFrequency::EveryMonth,
@@ -424,7 +425,7 @@ test('upcoming scope includes active plans with no until_date', function () {
 
     PlannedTransaction::factory()->for($user)->for($account)->create([
         'start_date' => now()->subDays(7),
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'until_date' => null,
     ]);
 
@@ -437,7 +438,7 @@ test('upcoming scope includes active plans with future until_date', function () 
 
     PlannedTransaction::factory()->for($user)->for($account)->create([
         'start_date' => now()->subDays(7),
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'until_date' => now()->addMonths(2),
     ]);
 
@@ -462,7 +463,7 @@ test('upcoming scope excludes plans whose until_date has passed', function () {
 
     PlannedTransaction::factory()->for($user)->for($account)->create([
         'start_date' => now()->subMonths(2),
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'until_date' => now()->subDays(1),
     ]);
 
@@ -532,7 +533,7 @@ test('nextOccurrenceOnOrAfter resolves for a long-running daily plan with an old
         'frequency' => RecurrenceFrequency::Everyday,
         'start_date' => CarbonImmutable::parse('2018-01-01'),
         'until_date' => null,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $next = $plan->nextOccurrenceOnOrAfter(CarbonImmutable::parse('2026-06-27'));

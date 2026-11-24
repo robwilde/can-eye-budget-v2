@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
@@ -79,7 +80,7 @@ test('plan covers only plans live in the month', function () {
     monthFlowPlan($this->user, $this->account, TransactionDirection::Debit, 1000, '2026-08-01');
     monthFlowPlan($this->user, $this->account, TransactionDirection::Debit, 2000, '2026-05-01', overrides: ['until_date' => '2026-06-30']);
     monthFlowPlan($this->user, $this->account, TransactionDirection::Debit, 3000, '2026-07-31', RecurrenceFrequency::DontRepeat);
-    monthFlowPlan($this->user, $this->account, TransactionDirection::Debit, 4000, '2026-07-02', overrides: ['is_active' => false]);
+    monthFlowPlan($this->user, $this->account, TransactionDirection::Debit, 4000, '2026-07-02', overrides: ['status' => PlannedTransactionStatus::Inactive]);
 
     expect(loadMonthFlow($this->user)->planExpense)->toBe(3000);
 });

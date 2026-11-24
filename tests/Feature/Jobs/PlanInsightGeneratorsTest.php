@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Enums\InsightPriority;
 use App\Enums\InsightStatus;
 use App\Enums\InsightType;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\WeekendAdjustment;
@@ -345,7 +346,7 @@ function monthlyBill(User $user, Account $account, string $description, array $o
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::EveryMonth,
         'start_date' => '2026-01-11',
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ], $overrides));
 }
 
@@ -390,7 +391,7 @@ it('leaves out one-off, ended, inactive, income and never-paid plans from the su
     foreach ([
         ['One off', ['frequency' => RecurrenceFrequency::DontRepeat]],
         ['Ended', ['until_date' => '2026-10-01']],
-        ['Inactive', ['is_active' => false]],
+        ['Inactive', ['status' => PlannedTransactionStatus::Inactive]],
         ['Salary', ['direction' => TransactionDirection::Credit]],
     ] as [$name, $overrides]) {
         paidOn(monthlyBill($this->user, $this->account, $name, $overrides), '2026-08-01');

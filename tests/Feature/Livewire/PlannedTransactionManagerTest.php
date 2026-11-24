@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Enums\AuditOutcome;
 use App\Enums\PlanAmountStrategy;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
@@ -80,7 +81,7 @@ test('save updates amount frequency category direction and until date on the pla
         'category_id' => $this->category->id,
         'direction' => TransactionDirection::Debit,
         'until_date' => null,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     Livewire::actingAs($this->user)
@@ -103,19 +104,19 @@ test('save updates amount frequency category direction and until date on the pla
         ->and($freshPlan->category_id)->toBe($newCategory->id)
         ->and($freshPlan->direction)->toBe(TransactionDirection::Credit)
         ->and($freshPlan->until_date?->toDateString())->toBe('2026-09-30')
-        ->and($freshPlan->is_active)->toBeFalse();
+        ->and($freshPlan->status)->toBe(PlannedTransactionStatus::Inactive);
 });
 
-test('toggleActive flips is_active', function () {
+test('toggleActive pauses an active plan', function () {
     $plan = PlannedTransaction::factory()->for($this->user)->for($this->primaryAccount)->create([
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     Livewire::actingAs($this->user)
         ->test(PlannedTransactionManager::class)
         ->call('toggleActive', $plan->id);
 
-    expect($plan->fresh()->is_active)->toBeFalse();
+    expect($plan->fresh()->status)->toBe(PlannedTransactionStatus::Inactive);
 });
 
 test('delete removes the plan', function () {

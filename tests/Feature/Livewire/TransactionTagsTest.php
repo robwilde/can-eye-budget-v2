@@ -8,6 +8,7 @@ declare(strict_types=1);
 
 use App\Enums\AuditOutcome;
 use App\Enums\ImportSource;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Livewire\TransactionList;
@@ -515,7 +516,7 @@ test('puts the chosen tags on every instalment of a split BNPL debit', function 
             'start_date' => '2026-08-07',
             'until_date' => '2026-09-18',
             'frequency' => RecurrenceFrequency::Every2Weeks,
-            'is_active' => true,
+            'status' => PlannedTransactionStatus::Active,
         ]);
 
         BnplOrder::factory()->autoApproved()->create([

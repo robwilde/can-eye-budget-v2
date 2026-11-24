@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\PayFrequency;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
 use App\Enums\TransactionDirection;
 use App\Models\Category;
@@ -76,7 +77,7 @@ final class PayCycleConfigurator
                     'start_date' => $nextPayDate,
                     'frequency' => $frequency->toRecurrenceFrequency(),
                     'until_date' => null,
-                    'is_active' => true,
+                    'status' => PlannedTransactionStatus::Active,
                 ],
             );
 

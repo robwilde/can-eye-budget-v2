@@ -7,6 +7,7 @@ namespace App\Livewire;
 use App\Casts\MoneyCast;
 use App\Enums\BnplOrderEventType;
 use App\Enums\BnplOrderStatus;
+use App\Enums\PlannedTransactionStatus;
 use App\Livewire\Concerns\RecordsHandPickedCategories;
 use App\Models\BnplOrder;
 use App\Models\Category;
@@ -99,7 +100,9 @@ final class BnplOrderReview extends Component
                 'status' => BnplOrderStatus::Rejected,
                 'reviewed_at' => now(),
             ]);
-            $order->plannedTransaction?->update(['is_active' => false]);
+            if ($order->plannedTransaction?->isActive()) {
+                $order->plannedTransaction->update(['status' => PlannedTransactionStatus::Inactive]);
+            }
             $order->recordEvent(BnplOrderEventType::Rejected, [], (string) Auth::id());
         });
 

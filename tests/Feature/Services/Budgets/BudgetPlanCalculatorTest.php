@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\DTOs\BudgetLineSummaryDto;
 use App\DTOs\TransactionSplitLine;
 use App\Enums\BudgetLineStatus;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
@@ -551,7 +552,7 @@ it('reserves bills only from the plans counted for the user', function () {
         'category_id' => $groceries->id,
         'amount' => 9999,
         'start_date' => '2026-01-10',
-        'is_active' => false,
+        'status' => PlannedTransactionStatus::Inactive,
     ]);
 
     expect(app(BudgetPlanCalculator::class)->drilldown($plan, $line->id)->billsReserved)->toBe(6500);

@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Enums\AuditOutcome;
 use App\Enums\OccurrenceStatus;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Livewire\PlannedTransactionManager;
 use App\Models\Account;
@@ -149,7 +150,7 @@ it('lists only the occurrences of the opened plan and the user', function () {
 });
 
 it('shows open occurrences of a paused plan as paused', function () {
-    $this->plan->update(['is_active' => false]);
+    $this->plan->update(['status' => PlannedTransactionStatus::Inactive]);
 
     Livewire::actingAs($this->user)->test(PlannedTransactionManager::class)->set('occurrencesPlanId', $this->plan->id)->assertSee('Paused');
 });

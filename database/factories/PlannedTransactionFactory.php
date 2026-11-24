@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Factories;
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
@@ -36,7 +37,7 @@ final class PlannedTransactionFactory extends Factory
             ]),
             'start_date' => fake()->dateTimeBetween('-1 month', 'now'),
             'frequency' => RecurrenceFrequency::EveryMonth,
-            'is_active' => true,
+            'status' => PlannedTransactionStatus::Active,
         ];
     }
 
@@ -71,7 +72,14 @@ final class PlannedTransactionFactory extends Factory
     public function inactive(): self
     {
         return $this->state(fn (array $attributes) => [
-            'is_active' => false,
+            'status' => PlannedTransactionStatus::Inactive,
+        ]);
+    }
+
+    public function ended(): self
+    {
+        return $this->state(fn (array $attributes) => [
+            'status' => PlannedTransactionStatus::Ended,
         ]);
     }
 

@@ -7,6 +7,7 @@ namespace App\Livewire;
 use App\Casts\MoneyCast;
 use App\DTOs\PlanSmartFillSuggestion;
 use App\Enums\PlanAmountStrategy;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
@@ -179,7 +180,7 @@ final class PlannedTransactionManager extends Component
         $this->categoryId = $plan->category_id;
         $this->categoryPicked = false;
         $this->direction = $plan->direction->value;
-        $this->isActive = $plan->is_active;
+        $this->isActive = $plan->isActive();
         $this->untilDate = $plan->until_date?->format('Y-m-d');
         $this->merchantId = $this->merchantIdForKey($plan->user_id, $plan->merchant_key);
         $this->notes = $plan->notes ?? '';
@@ -215,7 +216,7 @@ final class PlannedTransactionManager extends Component
                 ...($this->cadenceChanged($plan, RecurrenceFrequency::from($this->frequency)) ? ['schedule_pinned' => true] : []),
                 'category_id' => $categoryId,
                 'direction' => $direction,
-                'is_active' => $this->isActive,
+                'status' => $this->isActive ? PlannedTransactionStatus::Active : PlannedTransactionStatus::Inactive,
                 ...$this->seriesAttributes(
                     $direction,
                     $plan->transfer_to_account_id !== null,
@@ -298,7 +299,7 @@ final class PlannedTransactionManager extends Component
             return;
         }
 
-        DB::transaction(fn (): bool => $plan->update(['is_active' => ! $plan->is_active]));
+        DB::transaction(fn (): bool => $plan->update(['status' => $plan->status->toggled()]));
     }
 
     public function confirmDelete(int $id): void
@@ -326,7 +327,7 @@ final class PlannedTransactionManager extends Component
             return;
         }
 
-        DB::transaction(fn (): ?bool => $plan->delete());
+        DB::transaction(fn () => $plan->discard());
 
         Flux::toast(text: 'Planned transaction deleted', variant: 'success');
 
@@ -513,6 +514,7 @@ final class PlannedTransactionManager extends Component
 
         $plans = PlannedTransaction::query()
             ->where('user_id', $user->id)
+            ->visible()
             ->where('account_id', $this->accountId)
             ->with(['category.parent.parent'])
             ->withCount([
@@ -521,7 +523,7 @@ final class PlannedTransactionManager extends Component
                     return $query->current();
                 },
             ])
-            ->orderByDesc('is_active')
+            ->orderBy('status')
             ->orderBy('description')
             ->get();
 

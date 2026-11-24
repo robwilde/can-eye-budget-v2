@@ -118,7 +118,7 @@ final class PlannedOccurrenceGenerator
      */
     public function backfillHistory(PlannedTransaction $plan, CarbonImmutable $today): int
     {
-        if (! $plan->is_active) {
+        if (! $plan->isActive()) {
             return 0;
         }
 
@@ -186,7 +186,7 @@ final class PlannedOccurrenceGenerator
      */
     private function activePlans(User $user): Builder
     {
-        return PlannedTransaction::query()->where('user_id', $user->id)->where('is_active', true);
+        return PlannedTransaction::query()->where('user_id', $user->id)->active();
     }
 
     private function throughNextAnnual(PlannedTransaction $plan, CarbonImmutable $today, CarbonImmutable $to): CarbonImmutable

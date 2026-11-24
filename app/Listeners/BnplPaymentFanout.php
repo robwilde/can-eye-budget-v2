@@ -80,7 +80,7 @@ final class BnplPaymentFanout
             ->where('user_id', $debit->user_id)
             ->where('account_id', $debit->account_id)
             ->where('direction', TransactionDirection::Debit)
-            ->where('is_active', true)
+            ->active()
             ->whereIn('id', BnplOrder::query()
                 ->where('user_id', $debit->user_id)
                 ->where('provider', $provider)

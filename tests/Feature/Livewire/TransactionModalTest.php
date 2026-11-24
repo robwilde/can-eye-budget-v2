@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Enums\AccountStatus;
 use App\Enums\CategorySource;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
@@ -2428,7 +2429,7 @@ test('converting an entered expense to a plan keeps and reconciles the source', 
         ->direction->toBe(TransactionDirection::Debit)
         ->description->toBe('gym membership')
         ->frequency->toBe(RecurrenceFrequency::EveryMonth)
-        ->is_active->toBeTrue();
+        ->status->toBe(PlannedTransactionStatus::Active);
 
     // The source transaction is kept and reconciled to the new plan (not deleted).
     expect(Transaction::query()->find($transaction->id))->not->toBeNull()
@@ -3567,7 +3568,7 @@ test('a manual entry on a plan occurrence day reconciles to the plan', function 
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::DontRepeat,
         'start_date' => '2026-03-15',
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     Livewire::actingAs($user)
@@ -3598,7 +3599,7 @@ test('a manual entry with no matching plan is left entered (unlinked)', function
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::DontRepeat,
         'start_date' => '2026-03-15',
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     Livewire::actingAs($user)

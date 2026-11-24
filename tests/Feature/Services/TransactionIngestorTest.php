@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Events\TransactionEntered;
@@ -28,7 +29,7 @@ function ingestorRentPlan(User $user, Account $account, string $startDate = '202
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::DontRepeat,
         'start_date' => $startDate,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 }
 

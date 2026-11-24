@@ -12,6 +12,7 @@ use App\Enums\AccountStatus;
 use App\Enums\CleanDescriptionSource;
 use App\Enums\ExclusionSource;
 use App\Enums\PlanAmountStrategy;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
@@ -1180,7 +1181,7 @@ final class TransactionModal extends Component
             return;
         }
 
-        $planned->delete();
+        DB::transaction(fn () => $planned->discard());
 
         $this->showModal = false;
         $this->resetForm();
@@ -1907,7 +1908,7 @@ final class TransactionModal extends Component
         [$planned, $parsed] = $resolved;
 
         $data = $this->buildPlannedTransactionData($parsed);
-        unset($data['user_id'], $data['is_active']);
+        unset($data['user_id'], $data['status']);
 
         if (! $this->cadenceChanged($planned, $data['frequency'])) {
             unset($data['schedule_pinned']);
@@ -2491,7 +2492,7 @@ final class TransactionModal extends Component
                 $this->createSingleTransaction($parsed);
             }
 
-            $planned->delete();
+            $planned->discard();
         });
 
         return true;
@@ -2687,7 +2688,7 @@ final class TransactionModal extends Component
             'description' => $parsed->description,
             'start_date' => $this->date,
             'frequency' => RecurrenceFrequency::from($this->frequency),
-            'is_active' => true,
+            'status' => PlannedTransactionStatus::Active,
             'schedule_pinned' => true,
             ...$this->cadenceAttributes(RecurrenceFrequency::from($this->frequency), $this->editedPlannedTransaction()),
             ...$this->seriesAttributes(

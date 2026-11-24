@@ -7,6 +7,7 @@
 declare(strict_types=1);
 
 use App\Enums\BankImportStatus;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionSource;
@@ -293,7 +294,7 @@ test('a csv row matching an active plan is reconciled at import and renders a si
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::DontRepeat,
         'start_date' => '2026-06-05',
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $csv = <<<'CSV'
@@ -341,7 +342,7 @@ test('a csv row with no matching plan is left entered (unlinked)', function () {
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::DontRepeat,
         'start_date' => '2026-06-05',
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $csv = <<<'CSV'
@@ -422,7 +423,7 @@ test('a fanned-out bnpl debit stays split when the csv is re-imported', function
             'start_date' => '2026-08-07',
             'until_date' => '2026-09-18',
             'frequency' => RecurrenceFrequency::Every2Weeks,
-            'is_active' => true,
+            'status' => PlannedTransactionStatus::Active,
         ]);
 
         BnplOrder::factory()->autoApproved()->create([

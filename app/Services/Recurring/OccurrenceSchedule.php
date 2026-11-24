@@ -39,7 +39,7 @@ final class OccurrenceSchedule
         $result = [];
 
         foreach ($plans as $plan) {
-            if (! $plan->is_active) {
+            if (! $plan->isActive()) {
                 $result[$plan->id] = [];
 
                 continue;
@@ -104,7 +104,7 @@ final class OccurrenceSchedule
         $result = [];
 
         foreach ($plans as $plan) {
-            $result[$plan->id] = $plan->is_active ? $this->firstOpen($plan, $from, $stored[$plan->id] ?? [], $histories[$plan->id] ?? null) : null;
+            $result[$plan->id] = $plan->isActive() ? $this->firstOpen($plan, $from, $stored[$plan->id] ?? [], $histories[$plan->id] ?? null) : null;
         }
 
         return $result;
@@ -259,6 +259,6 @@ final class OccurrenceSchedule
      */
     private function histories(Collection $plans): array
     {
-        return (new PlanAmountResolver)->forPlans($plans->filter(static fn (PlannedTransaction $plan): bool => $plan->is_active));
+        return (new PlanAmountResolver)->forPlans($plans->filter(static fn (PlannedTransaction $plan): bool => $plan->isActive()));
     }
 }

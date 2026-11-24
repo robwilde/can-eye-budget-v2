@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Casts\MoneyCast;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Livewire\CategoryReport;
@@ -194,7 +195,7 @@ test('plan mode reports planned amounts that are absent from real mode', functio
         'direction' => TransactionDirection::Debit,
         'start_date' => now()->startOfMonth(),
         'frequency' => RecurrenceFrequency::EveryMonth,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     Livewire::actingAs($user)

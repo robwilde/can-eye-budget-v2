@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\DTOs\PipelineContext;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
@@ -37,7 +38,7 @@ test('tags a matching transaction with the same merchant and returns a successfu
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::DontRepeat,
         'start_date' => '2026-06-10',
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $tx = Transaction::factory()->for($this->user)->debit()->create([

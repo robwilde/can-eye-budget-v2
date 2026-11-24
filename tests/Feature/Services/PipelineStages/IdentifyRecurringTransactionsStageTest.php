@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\DTOs\PipelineContext;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\SuggestionType;
 use App\Enums\TransactionDirection;
@@ -404,7 +405,7 @@ test('skips when matching active PlannedTransaction exists', function () {
         'description' => 'Netflix',
         'frequency' => RecurrenceFrequency::EveryMonth,
         'amount' => 1699,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     createMonthlyGroup($this->user, $this->account, 'Netflix', 1699, 3);
@@ -458,7 +459,7 @@ test('PlannedTransaction match uses 5 percent amount tolerance', function () {
         'description' => 'Netflix',
         'frequency' => RecurrenceFrequency::EveryMonth,
         'amount' => 1750,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     createMonthlyGroup($this->user, $this->account, 'Netflix', 1699, 3);
@@ -480,7 +481,7 @@ test('skips a credit already configured as pay-cycle income despite a differentl
         'direction' => TransactionDirection::Credit,
         'frequency' => RecurrenceFrequency::Every2Weeks,
         'amount' => 570660,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'is_pay_cycle_income' => true,
     ]);
 
@@ -517,7 +518,7 @@ test('still suggests a different credit that only shares amount and frequency wi
         'direction' => TransactionDirection::Credit,
         'frequency' => RecurrenceFrequency::Every2Weeks,
         'amount' => 570660,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'is_pay_cycle_income' => true,
     ]);
 

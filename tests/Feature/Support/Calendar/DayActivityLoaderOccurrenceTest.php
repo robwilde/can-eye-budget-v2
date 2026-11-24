@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Enums\OccurrenceStatus;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Jobs\GeneratePlannedOccurrencesJob;
 use App\Models\Account;
@@ -147,7 +148,7 @@ it('does not render an overdue occurrence that a posted transaction already sett
 
 it('does not render the open occurrences of an inactive plan', function () {
     $this->plan->update(['start_date' => '2026-01-02']);
-    $this->plan->update(['is_active' => false]);
+    $this->plan->update(['status' => PlannedTransactionStatus::Inactive]);
     dayOccurrence($this, '2026-03-02');
 
     expect(loadDays($this))->not->toHaveKey('2026-03-02');

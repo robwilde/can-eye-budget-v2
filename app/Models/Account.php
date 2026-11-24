@@ -318,6 +318,8 @@ final class Account extends Model
         self::deleting(static function (self $account): void {
             $recorder = app(OccurrencePaymentRecorder::class);
 
+            PlannedTransaction::query()->where('user_id', $account->user_id)->where('transfer_to_account_id', $account->id)->get()->each(static fn (PlannedTransaction $plan): bool => $plan->update(['transfer_to_account_id' => null]));
+
             Transaction::withTrashed()->where('account_id', $account->id)->whereHas('payments')->get()->each(static fn (Transaction $transaction) => $recorder->release($transaction));
 
             TransactionAttachment::remember($account, TransactionAttachment::query()

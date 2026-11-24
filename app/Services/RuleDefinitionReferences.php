@@ -205,7 +205,7 @@ final class RuleDefinitionReferences
                     ->mapWithKeys(fn (Category $category): array => [(string) $category->id => $category->fullPath()])->all(),
                 self::ACCOUNT => Account::where('user_id', $this->userId)->pluck('name', 'id')->mapWithKeys(fn (string $name, int|string $id): array => [(string) $id => $name])->all(),
                 self::TAG => Tag::where('user_id', $this->userId)->pluck('name', 'id')->mapWithKeys(fn (string $name, int|string $id): array => [(string) $id => $name])->all(),
-                default => PlannedTransaction::where('user_id', $this->userId)->pluck('description', 'id')->mapWithKeys(fn (string $name, int|string $id): array => [(string) $id => $name])->all(),
+                default => PlannedTransaction::visible()->where('user_id', $this->userId)->pluck('description', 'id')->mapWithKeys(fn (string $name, int|string $id): array => [(string) $id => $name])->all(),
             };
         }
 

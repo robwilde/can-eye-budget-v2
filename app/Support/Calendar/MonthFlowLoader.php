@@ -71,7 +71,7 @@ final readonly class MonthFlowLoader
 
         $plans = PlannedTransaction::query()
             ->where('user_id', $user->id)
-            ->where('is_active', true)
+            ->active()
             ->excludingTransfers()
             ->whereHas('account', static fn ($account) => $account->where('exclude_from_reports', false))
             ->where('start_date', '<=', $monthEnd)

@@ -363,6 +363,7 @@ final class PayCycleCalendar extends Component
     private function latestIncomeDepositDate(User $user): ?CarbonImmutable
     {
         $income = $user->plannedTransactions()
+            ->visible()
             ->where('is_pay_cycle_income', true)
             ->first();
 

@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\WeekendAdjustment;
 use App\Models\PlannedTransaction;
@@ -19,7 +20,7 @@ function seekPlan(string $start, RecurrenceFrequency $frequency, array $attribut
     return new PlannedTransaction([
         'start_date' => $start,
         'frequency' => $frequency,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         ...$attributes,
     ]);
 }
@@ -162,7 +163,7 @@ it('reads a window before the start date and at the start date', function () {
 });
 
 it('reads no dates for an inactive plan', function () {
-    $inactive = seekPlan('2016-01-01', RecurrenceFrequency::Everyday, ['is_active' => false]);
+    $inactive = seekPlan('2016-01-01', RecurrenceFrequency::Everyday, ['status' => PlannedTransactionStatus::Inactive]);
 
     expect(seekDates($inactive, CarbonImmutable::parse('2026-11-23'), CarbonImmutable::parse('2026-12-23')))->toBe([])
         ->and($inactive->nextOccurrenceOnOrAfter(CarbonImmutable::parse('2026-11-23')))->toBeNull();

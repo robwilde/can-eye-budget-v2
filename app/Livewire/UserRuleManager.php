@@ -801,7 +801,7 @@ final class UserRuleManager extends Component
             'actionTypes' => $this->offeredActionTypes(),
             'transferAccounts' => Account::where('user_id', auth()->id())->active()->orderBy('name')->get(),
             'plannedTransactions' => PlannedTransaction::where('user_id', auth()->id())
-                ->where('is_active', true)
+                ->active()
                 ->orderBy('description')
                 ->get(),
         ]);

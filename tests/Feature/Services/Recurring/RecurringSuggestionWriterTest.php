@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\DTOs\RecurringCandidate;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
@@ -122,7 +123,7 @@ test('skips matching active planned transactions with audit reason', function ()
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::EveryMonth,
         'amount' => 1699,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $ids = $this->writer->writeForRun($this->user, $this->run, collect([writerCandidate($this->account)]));
@@ -169,7 +170,7 @@ test('names the reason a candidate is skipped without writing anything', functio
         'amount' => 1199,
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::EveryMonth,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
     AnalysisSuggestion::factory()->for($this->user)->create([
         'type' => SuggestionType::RecurringTransaction,
@@ -191,7 +192,7 @@ test('treats a stored negative debit amount as the same size as a declared bill'
         'amount' => 1199,
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::EveryMonth,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     expect($this->writer->skipReason($this->user, writerCandidate($this->account, 'SPOTIFY', -1199)))->toBe('existing_planned_transaction')

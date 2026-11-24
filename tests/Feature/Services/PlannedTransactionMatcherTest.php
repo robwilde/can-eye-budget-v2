@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
@@ -29,7 +30,7 @@ function activeRentPlan(User $user, Account $account, string $startDate = '2026-
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::DontRepeat,
         'start_date' => $startDate,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 }
 
@@ -314,7 +315,7 @@ test('on a short cadence a released excluded link leaves the next occurrence fre
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::Every4Days,
         'start_date' => '2026-06-06',
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $excluded = Transaction::factory()->for($this->user)->debit()->create([

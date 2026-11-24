@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Enums\PayFrequency;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\SuggestionStatus;
 use App\Enums\TransactionDirection;
@@ -455,7 +456,7 @@ test('accept recurring transaction creates planned transaction with correct attr
         ->and($planned->direction)->toBe(TransactionDirection::Debit)
         ->and($planned->description)->toBe('Netflix')
         ->and($planned->frequency)->toBe(RecurrenceFrequency::EveryMonth)
-        ->and($planned->is_active)->toBeTrue()
+        ->and($planned->status)->toBe(PlannedTransactionStatus::Active)
         ->and($planned->category_id)->toBe($category->id)
         ->and($suggestion->fresh()->status)->toBe(SuggestionStatus::Accepted);
 });

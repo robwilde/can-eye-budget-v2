@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Enums\CategorySource;
 use App\Enums\PayeeStatus;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
@@ -154,7 +155,7 @@ test('accept creates an active planned transaction and links matched transaction
         ->first();
 
     expect($planned)->not->toBeNull()
-        ->and($planned->is_active)->toBeTrue()
+        ->and($planned->status)->toBe(PlannedTransactionStatus::Active)
         ->and($planned->amount)->toBe(1699)
         ->and($planned->frequency)->toBe(RecurrenceFrequency::EveryMonth)
         ->and($planned->account_id)->toBe($account->id)

@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
 use App\Models\Merchant;
@@ -53,7 +54,7 @@ it('matches a stored amount whatever the sign of the one asked about', function 
 });
 
 it('matches an inactive plan', function () {
-    $this->plan->update(['is_active' => false]);
+    $this->plan->update(['status' => PlannedTransactionStatus::Inactive]);
 
     expect(duplicateExists($this))->toBeTrue();
 });

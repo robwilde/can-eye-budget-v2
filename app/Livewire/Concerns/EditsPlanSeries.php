@@ -182,6 +182,7 @@ trait EditsPlanSeries
 
         PlannedTransaction::query()
             ->where('user_id', $plan->user_id)
+            ->visible()
             ->whereKeyNot($plan->id)
             ->where(fn (Builder $query): Builder => $query->whereNull('is_pay_cycle_income')->orWhere('is_pay_cycle_income', false))
             ->where(fn (Builder $query): Builder => $query

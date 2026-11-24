@@ -91,7 +91,7 @@ final readonly class DayActivityLoader
 
         $ordinaryPlanned = PlannedTransaction::query()
             ->where('user_id', $userId)
-            ->where('is_active', true)
+            ->active()
             ->excludingTransfers()
             ->where('start_date', '<=', $end)
             ->where(static fn ($q) => $q->whereNull('until_date')->orWhere('until_date', '>=', $start))
@@ -409,7 +409,7 @@ final readonly class DayActivityLoader
     {
         return PlannedTransaction::query()
             ->where('user_id', $userId)
-            ->where('is_active', true)
+            ->active()
             ->whereNotIn('id', $ordinaryIds)
             ->where('start_date', '<=', $end)
             ->where(static fn ($q) => $q->whereNull('until_date')->orWhere('until_date', '>=', $start))

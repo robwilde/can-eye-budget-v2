@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Enums\PayFrequency;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
@@ -69,7 +70,7 @@ test('creates exactly one income planned transaction with the correct attributes
         ->and($income->frequency)->toBe(RecurrenceFrequency::EveryMonth)
         ->and($income->start_date->format('Y-m-d'))->toBe($nextPay)
         ->and($income->account_id)->toBe($this->account->id)
-        ->and($income->is_active)->toBeTrue()
+        ->and($income->status)->toBe(PlannedTransactionStatus::Active)
         ->and($income->until_date)->toBeNull()
         ->and($income->description)->toBe('ACME PAYROLL');
 });
