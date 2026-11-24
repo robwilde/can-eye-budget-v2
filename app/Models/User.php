@@ -332,7 +332,7 @@ final class User extends Authenticatable
         $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
 
         return (int) $this->plannedTransactions()
-            ->where('is_active', true)
+            ->active()
             ->where(static fn ($query) => $query->countable()->orWhere(static fn ($transfers) => $transfers->intoExcludedAccount()))
             ->with(['account:id,currency,is_tracked,exclude_from_reports', 'transferToAccount:id,is_tracked,exclude_from_reports'])
             ->get()

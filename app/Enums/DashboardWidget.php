@@ -154,7 +154,7 @@ enum DashboardWidget: string
             self::NetWorthChart, self::BalanceSheet => Account::query()->where('user_id', $user->id)->exists(),
             self::PayCycleCalendar => $user->hasPayCycleConfigured(),
             self::BudgetsThisCycle => $user->budgets()->exists(),
-            self::UpcomingPlans => $user->plannedTransactions()->exists(),
+            self::UpcomingPlans => $user->plannedTransactions()->visible()->exists(),
             self::RecentSpending, self::MoneyFlow, self::SpendingTrend, self::CashFlow, self::Outflows => Transaction::query()->where('user_id', $user->id)->exists(),
             self::MonthlyProjection => $user->primary_account_id !== null,
             self::InvestmentSummary => app(InvestmentReport::class)->hasData($user),
