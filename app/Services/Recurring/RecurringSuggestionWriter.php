@@ -9,12 +9,13 @@ use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
-use App\Enums\TransactionDirection;
 use App\Models\AnalysisSuggestion;
 use App\Models\PipelineAuditEntry;
 use App\Models\PipelineRun;
 use App\Models\PlannedTransaction;
+use App\Models\Transaction;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
 final readonly class RecurringSuggestionWriter
@@ -53,8 +54,8 @@ final readonly class RecurringSuggestionWriter
     }
 
     /**
-     * Why the candidate should not be offered: noise, an accepted suggestion, an active plan or a tombstone
-     * already covering it, or a rejection in the last 90 days. Null when it can be offered. The one place
+     * Why the candidate should not be offered: noise, an accepted suggestion, a plan of any status
+     * already covering it, or a rejection (permanent). Null when it can be offered. The one place
      * these rules live, so suggestions and the plan picker never disagree.
      */
     public function skipReason(User $user, RecurringCandidate $candidate): ?string
@@ -62,17 +63,27 @@ final readonly class RecurringSuggestionWriter
         return match (true) {
             $this->isNoise($candidate->description) => 'noise',
             $this->hasAcceptedSuggestion($user, $candidate->description, $candidate->accountId) => 'existing_accepted_suggestion',
-            $this->hasMatchingPlannedTransaction(
-                $user,
-                $candidate->description,
-                $candidate->accountId,
-                $candidate->direction,
-                $candidate->frequency,
-                $candidate->amount,
-            ) => 'existing_planned_transaction',
-            $this->hasRecentRejection($user, $candidate->description, $candidate->accountId) => 'recently_rejected',
+            $this->claimingPlan($user, $candidate) instanceof PlannedTransaction => 'existing_planned_transaction',
+            $this->hasRejection($user, $candidate->description, $candidate->accountId) => 'rejected',
             default => null,
         };
+    }
+
+    /**
+     * The nearest plan of the user on this account and direction whose amount is within tolerance and whose name
+     * relates to the pattern, whatever its status or origin: it already covers the pattern, so none is suggested.
+     */
+    public function claimingPlan(User $user, RecurringCandidate $candidate): ?PlannedTransaction
+    {
+        return PlannedTransaction::query()
+            ->where('user_id', $user->id)
+            ->where('account_id', $candidate->accountId)
+            ->where('direction', $candidate->direction)
+            ->get()
+            ->filter(fn (PlannedTransaction $planned): bool => $this->amountsMatch($planned->amount, $candidate->amount)
+                && $this->descriptionsRelated($planned->description, $candidate->description))
+            ->sortBy(static fn (PlannedTransaction $planned): int => abs(abs($planned->amount) - abs($candidate->amount)))
+            ->first();
     }
 
     private function shouldSkip(User $user, RecurringCandidate $candidate, int $pipelineRunId): bool
@@ -81,6 +92,10 @@ final readonly class RecurringSuggestionWriter
 
         if ($reason === null) {
             return false;
+        }
+
+        if (in_array($reason, ['existing_accepted_suggestion', 'existing_planned_transaction'], true)) {
+            $this->refreshClaimingPlan($user, $candidate);
         }
 
         $this->createSkipAudit($pipelineRunId, $reason, $candidate->description, $candidate->accountId);
@@ -110,23 +125,32 @@ final readonly class RecurringSuggestionWriter
             ->exists();
     }
 
-    private function hasMatchingPlannedTransaction(
-        User $user,
-        string $description,
-        int $accountId,
-        TransactionDirection $direction,
-        RecurrenceFrequency $frequency,
-        int $medianAmount,
-    ): bool {
-        return PlannedTransaction::query()
-            ->where('user_id', $user->id)
-            ->where('account_id', $accountId)
-            ->where('direction', $direction)
-            ->where('frequency', $frequency)
-            ->whereIn('status', [PlannedTransactionStatus::Active, PlannedTransactionStatus::Ended])
-            ->get()
-            ->contains(fn (PlannedTransaction $planned): bool => $this->amountsMatch($planned->amount, $medianAmount)
-                && $this->descriptionsRelated($planned->description, $description));
+    /**
+     * Re-detecting a pattern that a plan claims refreshes the due day of an unpinned monthly plan and never
+     * touches its amount or status.
+     */
+    private function refreshClaimingPlan(User $user, RecurringCandidate $candidate): void
+    {
+        $plan = $this->claimingPlan($user, $candidate);
+
+        if (! $plan instanceof PlannedTransaction) {
+            return;
+        }
+
+        if (! $plan->schedule_pinned
+            && $plan->status !== PlannedTransactionStatus::Ended
+            && $plan->frequency === RecurrenceFrequency::EveryMonth
+            && $candidate->frequency === RecurrenceFrequency::EveryMonth
+            && ($plan->days_of_month ?? [$plan->start_date->day]) !== [$day = $this->latestDay($candidate)]) {
+            $plan->update(['days_of_month' => [$day]]);
+        }
+    }
+
+    private function latestDay(RecurringCandidate $candidate): int
+    {
+        $latest = $candidate->matchedTransactionIds === [] ? null : Transaction::query()->whereKey($candidate->matchedTransactionIds)->max('post_date');
+
+        return $latest === null ? $candidate->startDate->day : CarbonImmutable::parse($latest)->day;
     }
 
     private function amountsMatch(int $plannedAmount, int $medianAmount): bool
@@ -164,13 +188,12 @@ final readonly class RecurringSuggestionWriter
         return array_values(array_unique($matches[0]));
     }
 
-    private function hasRecentRejection(User $user, string $description, int $accountId): bool
+    private function hasRejection(User $user, string $description, int $accountId): bool
     {
         return AnalysisSuggestion::query()
             ->where('user_id', $user->id)
             ->ofType(SuggestionType::RecurringTransaction)
             ->where('status', SuggestionStatus::Rejected)
-            ->where('resolved_at', '>=', now()->subDays(90))
             ->where('payload->description', $description)
             ->where('payload->account_id', $accountId)
             ->exists();
