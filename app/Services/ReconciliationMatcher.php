@@ -60,7 +60,7 @@ final readonly class ReconciliationMatcher
             ->where('user_id', $transaction->user_id)
             ->where('account_id', $transaction->account_id)
             ->where('direction', $transaction->direction)
-            ->where('is_active', true)
+            ->active()
             ->where('start_date', '<=', $windowEnd)
             ->where(static function ($query) use ($windowStart): void {
                 $query->whereNull('until_date')->orWhere('until_date', '>=', $windowStart);

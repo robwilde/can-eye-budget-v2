@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Enums\PlannedTransactionStatus;
 use App\Models\User;
 use App\Services\PlannedTransactionMatcher;
 use Illuminate\Console\Command;
@@ -36,7 +37,7 @@ final class MatchPlannedTransactionsCommand extends Command
         $matched = 0;
 
         User::query()
-            ->whereHas('plannedTransactions', fn ($query) => $query->where('is_active', true))
+            ->whereHas('plannedTransactions', fn ($query) => $query->where('status', PlannedTransactionStatus::Active->value))
             ->chunkById(100, function (Collection $users) use ($matcher, &$matched): void {
                 foreach ($users as $user) {
                     $matched += $matcher->matchForUser($user);

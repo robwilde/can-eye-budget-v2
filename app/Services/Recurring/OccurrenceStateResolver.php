@@ -37,7 +37,7 @@ final class OccurrenceStateResolver
 
         $plan = $occurrence->plannedTransaction;
 
-        if (! $plan->is_active) {
+        if (! $plan->isActive()) {
             return OccurrenceState::Dormant;
         }
 

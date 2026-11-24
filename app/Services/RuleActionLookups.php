@@ -28,6 +28,6 @@ final class RuleActionLookups
 
     public function planIsOwnedBy(int $plannedId, int $userId): bool
     {
-        return $this->ownedPlans["{$plannedId}:{$userId}"] ??= PlannedTransaction::where('id', $plannedId)->where('user_id', $userId)->exists();
+        return $this->ownedPlans["{$plannedId}:{$userId}"] ??= PlannedTransaction::visible()->where('id', $plannedId)->where('user_id', $userId)->exists();
     }
 }

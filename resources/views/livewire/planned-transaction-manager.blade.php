@@ -54,7 +54,7 @@
                                 <td class="px-4 py-3 align-top">
                                     <div class="flex flex-wrap items-center gap-2">
                                         <flux:text class="font-medium text-zinc-900">{{ $plan->description }}</flux:text>
-                                        @unless($plan->is_active)
+                                        @unless($plan->isActive())
                                             <flux:badge size="sm" color="yellow">Inactive</flux:badge>
                                         @endunless
                                         @if($plan->is_pay_cycle_income)
@@ -105,10 +105,10 @@
                                                     {{ __('Smart configure') }}
                                                 </flux:button>
                                             @endif
-                                            <flux:button variant="ghost" size="sm" wire:click="toggleActive({{ $plan->id }})">
-                                                {{ $plan->is_active ? 'Deactivate' : 'Activate' }}
+                                            <flux:button variant="ghost" size="sm" wire:click="toggleActive({{ $plan->id }})" data-testid="plan-toggle-{{ $plan->id }}">
+                                                {{ $plan->isActive() ? 'Deactivate' : 'Activate' }}
                                             </flux:button>
-                                            <flux:button variant="ghost" size="sm" wire:click="confirmDelete({{ $plan->id }})">
+                                            <flux:button variant="ghost" size="sm" wire:click="confirmDelete({{ $plan->id }})" data-testid="plan-delete-{{ $plan->id }}">
                                                 <flux:icon.trash class="size-4" />
                                             </flux:button>
                                         @endif
@@ -273,10 +273,11 @@
         <div class="space-y-4">
             <flux:heading size="lg">Delete planned transaction</flux:heading>
             <flux:text>Are you sure you want to delete <strong>{{ $deletingDescription }}</strong>?</flux:text>
+            <flux:text size="sm" class="text-zinc-500">{{ __('A plan you declared is removed with its occurrences and payments. A plan found by detection is kept out of sight so it is not suggested again.') }}</flux:text>
 
             <div class="flex justify-end gap-2">
                 <flux:button variant="ghost" wire:click="$set('showDeleteModal', false)">Cancel</flux:button>
-                <flux:button variant="danger" wire:click="delete">Delete</flux:button>
+                <flux:button variant="danger" wire:click="delete" data-testid="plan-delete-confirm">Delete</flux:button>
             </div>
         </div>
     </flux:modal>

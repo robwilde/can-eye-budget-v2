@@ -49,7 +49,7 @@ final readonly class SubscriptionAuditGenerator implements InsightGenerator
 
         $plans = PlannedTransaction::query()
             ->where('user_id', $user->id)
-            ->where('is_active', true)
+            ->active()
             ->where('direction', TransactionDirection::Debit)
             ->whereNull('transfer_to_account_id')
             ->where('frequency', '!=', RecurrenceFrequency::DontRepeat)

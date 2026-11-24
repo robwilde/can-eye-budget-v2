@@ -24,7 +24,7 @@ final readonly class MonthlyProjectionService
 
         $plannedTransactions = PlannedTransaction::query()
             ->where('user_id', $user->id)
-            ->where('is_active', true)
+            ->active()
             ->countable()
             ->with(['account:id,is_tracked,exclude_from_reports', 'transferToAccount:id,is_tracked,exclude_from_reports'])
             ->where('start_date', '<=', $endDate)

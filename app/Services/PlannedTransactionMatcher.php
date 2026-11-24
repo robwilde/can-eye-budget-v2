@@ -36,7 +36,7 @@ final readonly class PlannedTransactionMatcher
 
         $plans = PlannedTransaction::query()
             ->where('user_id', $user->id)
-            ->where('is_active', true)
+            ->active()
             ->excludingTransfers()
             ->orderBy('id')
             ->get();

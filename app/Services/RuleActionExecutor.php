@@ -551,7 +551,7 @@ final readonly class RuleActionExecutor
     {
         $plannedId = (int) $value;
 
-        if ($lookups?->planIsOwnedBy($plannedId, $transaction->user_id) ?? PlannedTransaction::where('id', $plannedId)->where('user_id', $transaction->user_id)->exists()) {
+        if ($lookups?->planIsOwnedBy($plannedId, $transaction->user_id) ?? PlannedTransaction::visible()->where('id', $plannedId)->where('user_id', $transaction->user_id)->exists()) {
             $transaction->planned_transaction_id = $plannedId;
         }
 

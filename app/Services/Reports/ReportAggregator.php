@@ -439,7 +439,7 @@ final class ReportAggregator
     {
         $plans = PlannedTransaction::query()
             ->where('user_id', $user->id)
-            ->where('is_active', true)
+            ->active()
             ->when($includeTransfers, fn ($q) => $q->countable(), fn ($q) => $q->excludingTransfers())
             ->with(['account:id,currency,is_tracked,exclude_from_reports', 'transferToAccount:id,is_tracked,exclude_from_reports'])
             ->get()

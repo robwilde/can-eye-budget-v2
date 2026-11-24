@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Recurring;
 
 use App\DTOs\RecurringCandidate;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
@@ -52,8 +53,8 @@ final readonly class RecurringSuggestionWriter
     }
 
     /**
-     * Why the candidate should not be offered: noise, an accepted suggestion, an active plan already
-     * covering it, or a rejection in the last 90 days. Null when it can be offered. The one place
+     * Why the candidate should not be offered: noise, an accepted suggestion, an active plan or a tombstone
+     * already covering it, or a rejection in the last 90 days. Null when it can be offered. The one place
      * these rules live, so suggestions and the plan picker never disagree.
      */
     public function skipReason(User $user, RecurringCandidate $candidate): ?string
@@ -122,7 +123,7 @@ final readonly class RecurringSuggestionWriter
             ->where('account_id', $accountId)
             ->where('direction', $direction)
             ->where('frequency', $frequency)
-            ->where('is_active', true)
+            ->whereIn('status', [PlannedTransactionStatus::Active, PlannedTransactionStatus::Ended])
             ->get()
             ->contains(fn (PlannedTransaction $planned): bool => $this->amountsMatch($planned->amount, $medianAmount)
                 && $this->descriptionsRelated($planned->description, $description));

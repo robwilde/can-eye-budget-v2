@@ -6,6 +6,7 @@ namespace App\Livewire;
 
 use App\DTOs\PlanPattern;
 use App\DTOs\PlanSmartFillSuggestion;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
 use App\Enums\PlanOrigin;
 use App\Enums\RecurrenceFrequency;
@@ -266,7 +267,7 @@ final class PlanDeclarationForm extends Component
                 'schedule_pinned' => true,
                 ...$this->cadenceAttributes(RecurrenceFrequency::from($validated['frequency'])),
                 'origin' => PlanOrigin::Declared,
-                'is_active' => true,
+                'status' => PlannedTransactionStatus::Active,
                 ...$this->seriesAttributes($direction, false, $merchantId, $this->notes, 'always', null),
             ]);
         });

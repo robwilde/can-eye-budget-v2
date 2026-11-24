@@ -482,7 +482,7 @@ final readonly class BudgetPlanCalculator
     {
         $plans = PlannedTransaction::query()
             ->where('user_id', $plan->user_id)
-            ->where('is_active', true)
+            ->active()
             ->whereIn('category_id', $categoryIds)
             ->countable()
             ->with(['account:id,currency,is_tracked', 'transferToAccount:id,is_tracked'])

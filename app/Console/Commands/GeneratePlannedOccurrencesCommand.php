@@ -21,7 +21,7 @@ final class GeneratePlannedOccurrencesCommand extends Command
         $queued = 0;
 
         User::query()
-            ->whereIn('id', PlannedTransaction::query()->where('is_active', true)->select('user_id'))
+            ->whereIn('id', PlannedTransaction::query()->active()->select('user_id'))
             ->chunkById(100, function (Collection $users) use (&$queued): void {
                 foreach ($users as $user) {
                     GeneratePlannedOccurrencesJob::dispatch($user);

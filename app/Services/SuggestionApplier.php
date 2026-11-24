@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Enums\CategorySource;
 use App\Enums\PayFrequency;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
 use App\Enums\PlanOrigin;
 use App\Enums\SuggestionStatus;
@@ -101,7 +102,7 @@ final readonly class SuggestionApplier
                 'description' => $payload['clean_description'],
                 'start_date' => $payload['start_date'],
                 'frequency' => $payload['frequency'],
-                'is_active' => true,
+                'status' => PlannedTransactionStatus::Active,
                 'category_id' => $categoryId,
             ]);
 

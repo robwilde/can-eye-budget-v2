@@ -9,6 +9,7 @@ use App\DTOs\RawEmail;
 use App\Enums\BnplOrderEventType;
 use App\Enums\BnplOrderStatus;
 use App\Enums\BnplProvider;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
 use App\Enums\PlanOrigin;
 use App\Enums\TransactionDirection;
@@ -131,7 +132,7 @@ final readonly class BnplOrderImporter
             'start_date' => $order->first_due_date,
             'frequency' => $order->frequency,
             'until_date' => $order->last_due_date,
-            'is_active' => true,
+            'status' => PlannedTransactionStatus::Active,
         ]);
 
         $order->update(['planned_transaction_id' => $plan->id]);

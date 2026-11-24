@@ -28,6 +28,7 @@ final class PlanDuplicateGuard
 
         return PlannedTransaction::query()
             ->where('user_id', $user->id)
+            ->visible()
             ->where('account_id', $accountId)
             ->whereNull('transfer_to_account_id')
             ->where('direction', $direction->value)
