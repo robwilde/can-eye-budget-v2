@@ -10,6 +10,16 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
 
 @vite(['resources/css/app.css', 'resources/js/app.js'])
-{{-- CIB design system is light-only; override system/user pref before Flux reads it. --}}
-<script>try { window.localStorage.setItem('flux.appearance', 'light'); } catch (e) {}</script>
+@php($appearance ??= auth()->user()?->preferences->theme ?? \App\Enums\Theme::Light)
+<script data-appearance="{{ $appearance->value }}">
+    try {
+        @if($appearance === \App\Enums\Theme::System)
+            window.localStorage.removeItem('flux.appearance');
+        @else
+            window.localStorage.setItem('flux.appearance', '{{ $appearance->value }}');
+        @endif
+    } catch (e) {}
+    if (window.Flux && 'appearance' in window.Flux) { window.Flux.appearance = '{{ $appearance->value }}'; }
+</script>
 @fluxAppearance
+<script>window.addEventListener('theme-changed', (event) => { window.Flux.appearance = event.detail.theme; });</script>
