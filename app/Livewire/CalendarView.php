@@ -7,6 +7,7 @@ namespace App\Livewire;
 use App\Casts\MoneyCast;
 use App\Enums\PayFrequency;
 use App\Enums\TransactionStatus;
+use App\Livewire\Attributes\NotAudited;
 use App\Livewire\Dashboard\Data\PayCyclePip;
 use App\Livewire\Data\CalendarDayData;
 use App\Models\PlannedTransaction;
@@ -359,6 +360,13 @@ final class CalendarView extends Component
         return view('livewire.calendar-view', [
             'formatMoney' => MoneyCast::format(...),
         ]);
+    }
+
+    #[NotAudited]
+    #[On('occurrence-payment-changed')]
+    public function refreshAfterPayment(): void
+    {
+        $this->bustCache();
     }
 
     /**

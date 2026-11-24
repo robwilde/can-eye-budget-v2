@@ -11,6 +11,7 @@ use App\Enums\PlannedTransactionType;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Exceptions\TypeSafe\TypeSafeException;
+use App\Livewire\Attributes\NotAudited;
 use App\Livewire\Concerns\EditsPlanSeries;
 use App\Livewire\Concerns\PicksCadence;
 use App\Models\Account;
@@ -243,6 +244,10 @@ final class PlannedTransactionManager extends Component
         $this->showEditModal = false;
         $this->resetEditForm();
     }
+
+    #[NotAudited]
+    #[On('occurrence-payment-changed')]
+    public function refreshAfterPayment(): void {}
 
     public function skipOccurrence(int $occurrenceId): void
     {
