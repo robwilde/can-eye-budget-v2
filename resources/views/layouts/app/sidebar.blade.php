@@ -35,6 +35,11 @@
             <flux:sidebar.item icon="banknotes" :href="route('budget')" :current="request()->routeIs('budget')" wire:navigate :class="$navItem">
                 {{ __('Budget') }}
             </flux:sidebar.item>
+            @if (config('budget.bills_page') && \App\Services\Recurring\RecurringGate::enabled(auth()->user()))
+                <flux:sidebar.item icon="receipt-percent" :href="route('bills')" :current="request()->routeIs('bills')" wire:navigate :class="$navItem" data-testid="nav-bills">
+                    {{ __('Bills') }}
+                </flux:sidebar.item>
+            @endif
             @if (config('budget.goals_enabled'))
                 <flux:sidebar.item icon="flag" :href="route('goals')" :current="request()->routeIs('goals', 'goals.*')" wire:navigate :class="$navItem">
                     {{ __('Goals') }}

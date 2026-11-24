@@ -67,6 +67,16 @@
             >
                 {{ __('Budget') }}
             </flux:menu.item>
+            @if (config('budget.bills_page') && \App\Services\Recurring\RecurringGate::enabled(auth()->user()))
+                <flux:menu.item
+                    :href="route('bills')"
+                    icon="receipt-percent"
+                    wire:navigate
+                    class="data-active:bg-cib-yellow-400 data-active:text-cib-black data-active:font-black"
+                >
+                    {{ __('Bills') }}
+                </flux:menu.item>
+            @endif
             @if (config('budget.goals_enabled'))
                 <flux:menu.item
                     :href="route('goals')"

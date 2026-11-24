@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 use App\Http\Controllers\StatementDownloadController;
 use App\Http\Controllers\TransactionAttachmentController;
+use App\Http\Middleware\EnsureBillsPageEnabled;
 use App\Http\Middleware\EnsureGoalsEnabled;
 use App\Http\Middleware\EnsureInsightsEnabled;
+use App\Http\Middleware\EnsureRecurringEnabled;
 use App\Livewire\AccountShow;
 use App\Livewire\PdfImportReview;
 use App\Livewire\ReconcileStatement;
@@ -33,6 +35,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('goals', 'goals')->middleware(EnsureGoalsEnabled::class)->name('goals');
     Route::view('goals/{goal}', 'goal-show')->whereNumber('goal')->middleware(EnsureGoalsEnabled::class)->name('goals.show');
     Route::view('accounts', 'accounts')->name('accounts');
+    Route::view('bills', 'bills')->middleware([EnsureBillsPageEnabled::class, EnsureRecurringEnabled::class])->name('bills');
     Route::view('rules', 'rules')->name('rules');
     Route::view('tags', 'tags')->name('tags');
     Route::view('merchants', 'merchants')->name('merchants');
