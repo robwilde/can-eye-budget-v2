@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Enums\PayFrequency;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Jobs\GeneratePlannedOccurrencesJob;
@@ -463,7 +464,7 @@ test('planned transactions render as plan pips on occurrence dates', function ()
         'amount' => 60000,
         'start_date' => $nextPay->subDay(),
         'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     /** @var list<PayCycleDayData> $days */
@@ -1196,7 +1197,7 @@ test('a plan due on the user local date still shows on the calendar when the ser
         'amount' => 60000,
         'start_date' => '2026-03-31',
         'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     /** @var list<PayCycleDayData> $days */
@@ -1223,7 +1224,7 @@ test('an unmatched plan with no stored occurrence from the user local yesterday 
         'amount' => 60000,
         'start_date' => '2026-04-17',
         'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     /** @var list<PayCycleDayData> $days */
@@ -1248,7 +1249,7 @@ test('an unmatched plan with a stored occurrence from the user local yesterday i
         'amount' => 60000,
         'start_date' => '2026-04-17',
         'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     /** @var list<PayCycleDayData> $days */

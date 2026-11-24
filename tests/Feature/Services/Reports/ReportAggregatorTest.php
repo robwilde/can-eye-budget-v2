@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\WeekendAdjustment;
@@ -71,7 +72,7 @@ test('a monthly plan is expanded into one occurrence per month in range', functi
         'direction' => TransactionDirection::Debit,
         'start_date' => '2026-05-01',
         'frequency' => RecurrenceFrequency::EveryMonth,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $atoms = app(ReportAggregator::class)->atoms(
@@ -98,7 +99,7 @@ test('an old high-frequency plan is not truncated before the selected window', f
         'direction' => TransactionDirection::Debit,
         'start_date' => '2022-01-01',
         'frequency' => RecurrenceFrequency::Everyday,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $atoms = app(ReportAggregator::class)->atoms(
@@ -126,7 +127,7 @@ test('plan occurrences honour the exact selected window rather than whole months
         'direction' => TransactionDirection::Debit,
         'start_date' => '2026-01-10',
         'frequency' => RecurrenceFrequency::EveryMonth,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $atoms = app(ReportAggregator::class)->atoms(
@@ -211,7 +212,7 @@ test('a long daily plan range is expanded without truncation', function () {
         'direction' => TransactionDirection::Debit,
         'start_date' => '2016-01-01',
         'frequency' => RecurrenceFrequency::Everyday,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $start = CarbonImmutable::parse('2016-01-01');
@@ -458,7 +459,7 @@ test('planned occurrences stop at the end count', function () {
         'direction' => TransactionDirection::Debit,
         'start_date' => '2026-07-06',
         'end_after_count' => 3,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $atoms = app(ReportAggregator::class)->atoms($user, 'plan', CarbonImmutable::parse('2026-07-01'), CarbonImmutable::parse('2026-07-31')->endOfDay());

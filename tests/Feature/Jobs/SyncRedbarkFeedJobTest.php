@@ -7,6 +7,7 @@
 declare(strict_types=1);
 
 use App\Enums\ImportSource;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\RedbarkFeedStatus;
 use App\Enums\RefreshStatus;
@@ -273,7 +274,7 @@ test('a fanned-out bnpl debit stays split across resyncs', function () {
             'start_date' => '2026-08-07',
             'until_date' => '2026-09-18',
             'frequency' => RecurrenceFrequency::Every2Weeks,
-            'is_active' => true,
+            'status' => PlannedTransactionStatus::Active,
         ]);
 
         BnplOrder::factory()->autoApproved()->create([

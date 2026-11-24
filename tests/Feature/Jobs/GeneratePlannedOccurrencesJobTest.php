@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Enums\OccurrenceStatus;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\WeekendAdjustment;
 use App\Events\PlannedTransactionCreated;
@@ -121,7 +122,7 @@ it('queues one job per user with an active plan from the nightly command', funct
     $withInactive = User::factory()->create();
     User::factory()->create();
     jobPlan($withPlan);
-    jobPlan($withInactive, ['is_active' => false]);
+    jobPlan($withInactive, ['status' => PlannedTransactionStatus::Inactive]);
     Bus::fake([GeneratePlannedOccurrencesJob::class]);
 
     $this->artisan('app:generate-planned-occurrences')->expectsOutputToContain('Queued occurrence generation for 1 user(s).')->assertSuccessful();
@@ -162,7 +163,7 @@ it('queues a rebuild when a plan schedule is edited', function (string $column, 
     'cadence' => ['frequency', RecurrenceFrequency::EveryWeek],
     'end date' => ['until_date', '2026-12-01'],
     'end count' => ['end_after_count', 6],
-    'active' => ['is_active', false],
+    'status' => ['status', PlannedTransactionStatus::Inactive],
     'interval' => ['recurrence_interval', 2],
     'days' => ['days_of_month', [1, 15]],
     'weekend' => ['weekend_adjustment', WeekendAdjustment::After],

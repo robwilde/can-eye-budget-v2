@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Livewire\PlanDeclarationForm;
@@ -54,7 +55,7 @@ it('offers only patterns not covered by a plan', function () {
         'amount' => 1199,
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::EveryMonth,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $form = pickerForm($this);

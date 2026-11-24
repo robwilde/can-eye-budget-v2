@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\StatementLineKind;
 use App\Enums\StatementLineResolution;
@@ -309,7 +310,7 @@ test('resolveImport creates a csv transaction through the ingestor', function ()
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::DontRepeat,
         'start_date' => '2026-01-05',
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
     stmtBuild($reconciliation);
     $line = stmtLine($reconciliation, StatementLineKind::StatementOnly);

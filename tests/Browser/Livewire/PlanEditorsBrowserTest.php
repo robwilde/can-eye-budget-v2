@@ -29,6 +29,7 @@ test('the rules page plan editor saves the type, payment link and end count and 
         ->assertSee('Edit planned transaction')
         ->assertPresent('[data-testid="plan-series-fields"]')
         ->select('[data-testid="plan-type-select"]', 'subscription')
+        ->wait(1)
         ->fill('[data-testid="plan-payment-url"]', 'netflix.example/pay')
         ->fill('[data-testid="plan-end-after-count"]', '12')
         ->screenshot(filename: 'plan-editor-manager-open')

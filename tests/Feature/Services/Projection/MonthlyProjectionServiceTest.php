@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Enums\AccountClass;
 use App\Enums\PayFrequency;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
@@ -70,7 +71,7 @@ test('one credit-direction DontRepeat planned transaction steps balance up by ex
         'amount' => 50000,
         'start_date' => CarbonImmutable::today()->addDays(3),
         'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
@@ -90,7 +91,7 @@ test('one debit-direction DontRepeat planned transaction steps balance down by e
         'amount' => 30000,
         'start_date' => CarbonImmutable::today()->addDays(2),
         'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
@@ -110,7 +111,7 @@ test('recurring monthly credit produces one event per month within the window', 
         'amount' => 100000,
         'start_date' => CarbonImmutable::today()->addDays(1),
         'frequency' => RecurrenceFrequency::EveryMonth,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $projection = app(MonthlyProjectionService::class)->forUser($user->fresh(), 12);
@@ -129,7 +130,7 @@ test('planned transactions whose only occurrences fall outside the window are ex
         'amount' => 99999,
         'start_date' => CarbonImmutable::today()->addYears(2),
         'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
@@ -150,7 +151,7 @@ test('transfer-categorised planned transactions are excluded via the excludingTr
         'amount' => 50000,
         'start_date' => CarbonImmutable::today()->addDays(1),
         'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
@@ -168,7 +169,7 @@ test('firstNegativeDate is null when balance never crosses below zero', function
         'amount' => 25000,
         'start_date' => CarbonImmutable::today()->addDays(5),
         'frequency' => RecurrenceFrequency::EveryMonth,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
@@ -188,7 +189,7 @@ test('firstNegativeDate equals the date of the first event that takes balance be
         'amount' => 80000,
         'start_date' => $crashDate,
         'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
@@ -209,7 +210,7 @@ test('aggregates same-day credit and debit into a single net point', function ()
         'amount' => 200000,
         'start_date' => $sameDay,
         'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     PlannedTransaction::factory()->for($user)->for($account)->create([
@@ -217,7 +218,7 @@ test('aggregates same-day credit and debit into a single net point', function ()
         'amount' => 150000,
         'start_date' => $sameDay,
         'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
@@ -241,7 +242,7 @@ test('firstNegativeDate uses net daily balance and is not influenced by intra-da
         'amount' => 150000,
         'start_date' => $sameDay,
         'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     PlannedTransaction::factory()->for($user)->for($account)->create([
@@ -249,7 +250,7 @@ test('firstNegativeDate uses net daily balance and is not influenced by intra-da
         'amount' => 200000,
         'start_date' => $sameDay,
         'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
@@ -270,7 +271,7 @@ test('user isolation — another users planned transactions do not leak into thi
         'amount' => 99999,
         'start_date' => CarbonImmutable::today()->addDays(1),
         'frequency' => RecurrenceFrequency::EveryMonth,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
@@ -329,7 +330,7 @@ test('planned transfers move the projection only across the tracked boundary and
         'amount' => $amount,
         'start_date' => CarbonImmutable::today()->addDays($days),
         'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $plan($account, $hidden, 30000, 1);

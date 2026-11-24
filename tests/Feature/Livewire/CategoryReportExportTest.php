@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Casts\MoneyCast;
 use App\Enums\AuditOutcome;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionStatus;
@@ -218,7 +219,7 @@ it('exports the plan mode report and prints it without the real-mode filters', f
         'category_id' => $this->groceries->id,
         'direction' => TransactionDirection::Debit,
         'amount' => 25000,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'start_date' => '2026-03-20',
         'frequency' => RecurrenceFrequency::DontRepeat,
     ]);

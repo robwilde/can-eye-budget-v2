@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
@@ -27,7 +28,7 @@ function seedMatchableRent(): Transaction
         'direction' => TransactionDirection::Debit,
         'frequency' => RecurrenceFrequency::DontRepeat,
         'start_date' => '2026-06-10',
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     return Transaction::factory()->for($user)->debit()->create([

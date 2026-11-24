@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Models\PlannedTransaction;
 use Carbon\CarbonImmutable;
@@ -66,7 +67,7 @@ dataset('cadence pins', [
 ]);
 
 it('computes each frequency over a year from its start date', function (string $start, RecurrenceFrequency $frequency, array $pin, ?string $next) {
-    $plan = new PlannedTransaction(['start_date' => $start, 'frequency' => $frequency, 'is_active' => true]);
+    $plan = new PlannedTransaction(['start_date' => $start, 'frequency' => $frequency, 'status' => PlannedTransactionStatus::Active]);
     $from = CarbonImmutable::parse($start);
     $dates = $plan->occurrencesBetween($from, $from->addYear())->map(fn (CarbonImmutable $date): string => $date->toDateString())->all();
 

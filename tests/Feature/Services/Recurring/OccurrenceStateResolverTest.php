@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Enums\OccurrenceState;
 use App\Enums\OccurrenceStatus;
+use App\Enums\PlannedTransactionStatus;
 use App\Jobs\GeneratePlannedOccurrencesJob;
 use App\Models\PlannedOccurrence;
 use App\Models\PlannedTransaction;
@@ -52,7 +53,7 @@ it('shows a snoozed overdue occurrence as upcoming', function () {
 });
 
 it('shows open occurrences of an inactive plan as dormant', function () {
-    $occurrence = stateOccurrence($this, '2026-02-28', ['is_active' => false]);
+    $occurrence = stateOccurrence($this, '2026-02-28', ['status' => PlannedTransactionStatus::Inactive]);
 
     expect($this->resolver->resolve($occurrence, $this->today))->toBe(OccurrenceState::Dormant);
 });
@@ -88,7 +89,7 @@ it('reports a closed occurrence by its status', function (OccurrenceStatus $stat
 ]);
 
 it('does not make a closed occurrence of a paused plan dormant', function () {
-    $occurrence = stateOccurrence($this, '2026-03-02', ['is_active' => false], ['status' => OccurrenceStatus::Skipped]);
+    $occurrence = stateOccurrence($this, '2026-03-02', ['status' => PlannedTransactionStatus::Inactive], ['status' => OccurrenceStatus::Skipped]);
 
     expect($this->resolver->resolve($occurrence, $this->today))->toBe(OccurrenceState::Skipped);
 });

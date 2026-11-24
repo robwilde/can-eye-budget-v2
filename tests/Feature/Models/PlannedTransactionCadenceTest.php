@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\WeekendAdjustment;
@@ -19,7 +20,7 @@ function cadencePlan(string $start, RecurrenceFrequency $frequency, array $attri
     return new PlannedTransaction([
         'start_date' => $start,
         'frequency' => $frequency,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         ...$attributes,
     ]);
 }
@@ -289,7 +290,7 @@ it('counts dates before the window towards the end count for a monthly plan', fu
 });
 
 it('returns nothing for an inactive plan on the new cadences', function () {
-    $plan = cadencePlan('2026-01-01', RecurrenceFrequency::Semimonthly, ['is_active' => false]);
+    $plan = cadencePlan('2026-01-01', RecurrenceFrequency::Semimonthly, ['status' => PlannedTransactionStatus::Inactive]);
 
     expect(cadenceDates($plan, '2026-01-01', '2026-12-31'))->toBe([])
         ->and($plan->nextOccurrenceOnOrAfter(CarbonImmutable::parse('2026-01-01')))->toBeNull();

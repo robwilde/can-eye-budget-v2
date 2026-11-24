@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Enums\OccurrenceStatus;
 use App\Enums\PayFrequency;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\WeekendAdjustment;
 use App\Jobs\GeneratePlannedOccurrencesJob;
@@ -201,7 +202,7 @@ it('generates an annual plan through its next date', function () {
 });
 
 it('skips inactive plans and plans of other users', function () {
-    $inactive = occurrencePlan($this, ['is_active' => false]);
+    $inactive = occurrencePlan($this, ['status' => PlannedTransactionStatus::Inactive]);
     $other = User::factory()->create();
     $theirs = PlannedTransaction::factory()->for($other)->for(Account::factory()->for($other))->create(['frequency' => RecurrenceFrequency::EveryMonth, 'start_date' => '2026-01-15']);
 

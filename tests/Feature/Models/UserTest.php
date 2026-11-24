@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Enums\AccountClass;
 use App\Enums\PayFrequency;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
@@ -171,7 +172,7 @@ test('bufferUntilNextPay returns available minus planned spend until payday', fu
     PlannedTransaction::factory()->for($user)->for($account)->create([
         'direction' => TransactionDirection::Debit,
         'amount' => 50000,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'start_date' => now()->addDays(3),
         'frequency' => RecurrenceFrequency::DontRepeat,
     ]);
@@ -312,7 +313,7 @@ test('totalNeededUntilPayday excludes planned transfers', function () {
         'direction' => TransactionDirection::Debit,
         'amount' => 25000,
         'category_id' => $billCategory->id,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'start_date' => now()->addDay(),
         'frequency' => RecurrenceFrequency::DontRepeat,
     ]);
@@ -320,7 +321,7 @@ test('totalNeededUntilPayday excludes planned transfers', function () {
         'direction' => TransactionDirection::Debit,
         'amount' => 250000,
         'category_id' => $transferChild->id,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'start_date' => now()->addDay(),
         'frequency' => RecurrenceFrequency::DontRepeat,
     ]);
@@ -340,7 +341,7 @@ test('totalNeededUntilPayday excludes planned transfers categorised at the paren
         'direction' => TransactionDirection::Debit,
         'amount' => 25000,
         'category_id' => $billCategory->id,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'start_date' => now()->addDay(),
         'frequency' => RecurrenceFrequency::DontRepeat,
     ]);
@@ -348,7 +349,7 @@ test('totalNeededUntilPayday excludes planned transfers categorised at the paren
         'direction' => TransactionDirection::Debit,
         'amount' => 250000,
         'category_id' => $transferParent->id,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'start_date' => now()->addDay(),
         'frequency' => RecurrenceFrequency::DontRepeat,
     ]);

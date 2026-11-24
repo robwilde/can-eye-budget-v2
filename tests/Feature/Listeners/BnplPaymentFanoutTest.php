@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Enums\CategorySource;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionStatus;
@@ -35,7 +36,7 @@ function fanoutPlan(User $user, Account $account, ?Category $category, int $amou
         'start_date' => '2026-08-07',
         'until_date' => '2026-09-18',
         'frequency' => RecurrenceFrequency::Every2Weeks,
-        'is_active' => $active,
+        'status' => $active ? PlannedTransactionStatus::Active : PlannedTransactionStatus::Inactive,
     ]);
 
     BnplOrder::factory()->autoApproved()->create([

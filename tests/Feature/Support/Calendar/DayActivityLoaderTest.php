@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
@@ -656,7 +657,7 @@ test('planned reconciled then deactivated leaves only the posted pip', function 
         'planned_transaction_id' => $planned->id,
     ]);
 
-    $planned->update(['is_active' => false]);
+    $planned->update(['status' => PlannedTransactionStatus::Inactive]);
 
     $day = (new DayActivityLoader)->load(
         CarbonImmutable::create(2026, 6, 1),

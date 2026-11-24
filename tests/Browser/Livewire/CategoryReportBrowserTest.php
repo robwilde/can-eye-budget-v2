@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Models\Account;
@@ -61,7 +62,7 @@ test('switching to the plan tab surfaces planned-only categories', function () {
         'direction' => TransactionDirection::Debit,
         'start_date' => now()->startOfMonth(),
         'frequency' => RecurrenceFrequency::EveryMonth,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $this->actingAs($user);

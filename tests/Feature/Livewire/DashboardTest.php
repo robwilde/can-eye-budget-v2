@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Enums\AccountClass;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Livewire\Dashboard;
@@ -42,7 +43,7 @@ test('renders negative buffer with YOU ARE SHORT BY headline', function () {
     PlannedTransaction::factory()->for($user)->for($account)->create([
         'direction' => TransactionDirection::Debit,
         'amount' => 50000,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'start_date' => now()->addDay(),
         'frequency' => RecurrenceFrequency::DontRepeat,
     ]);
@@ -62,7 +63,7 @@ test('headline buffer equals available minus needed', function () {
     PlannedTransaction::factory()->for($user)->for($account)->create([
         'direction' => TransactionDirection::Debit,
         'amount' => 111390,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'start_date' => now()->addDay(),
         'frequency' => RecurrenceFrequency::DontRepeat,
     ]);
@@ -578,7 +579,7 @@ test('needed until payday counts a planned transfer to an untracked account but 
         'amount' => $amount,
         'start_date' => now()->addDays(2)->toDateString(),
         'frequency' => RecurrenceFrequency::DontRepeat,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $plan($tracked, $hidden, 9000);
@@ -638,7 +639,7 @@ test('refreshes pay-cycle figures when a transaction is saved elsewhere on the p
         'description' => 'Spotify Premium',
         'direction' => TransactionDirection::Debit,
         'amount' => 50000,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'start_date' => now()->addDay(),
         'frequency' => RecurrenceFrequency::DontRepeat,
     ]);
@@ -718,7 +719,7 @@ test('upcoming plans still due on the user local date are kept', function () {
         'start_date' => '2026-03-31',
         'until_date' => '2026-03-31',
         'frequency' => RecurrenceFrequency::EveryMonth,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
     ]);
 
     $upcoming = Livewire::actingAs($la)->test(Dashboard::class)->instance()->nextThreePlanned();

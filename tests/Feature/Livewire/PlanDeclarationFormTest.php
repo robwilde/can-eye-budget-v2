@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Enums\AuditOutcome;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
 use App\Enums\PlanOrigin;
 use App\Enums\RecurrenceFrequency;
@@ -48,7 +49,7 @@ it('stores a declared income as a credit plan every two weeks', function () {
         ->and($plan->type)->toBe(PlannedTransactionType::Income)
         ->and($plan->frequency)->toBe(RecurrenceFrequency::Every2Weeks)
         ->and($plan->origin)->toBe(PlanOrigin::Declared)
-        ->and($plan->is_active)->toBeTrue();
+        ->and($plan->status)->toBe(PlannedTransactionStatus::Active);
 });
 
 it('creates an active monthly bill due on the first due day', function () {
@@ -64,7 +65,7 @@ it('creates an active monthly bill due on the first due day', function () {
     expect($plan->direction)->toBe(TransactionDirection::Debit)
         ->and($plan->type)->toBe(PlannedTransactionType::Bill)
         ->and($plan->origin)->toBe(PlanOrigin::Declared)
-        ->and($plan->is_active)->toBeTrue()
+        ->and($plan->status)->toBe(PlannedTransactionStatus::Active)
         ->and($plan->amount)->toBe(10000)
         ->and($plan->occurrencesBetween(CarbonImmutable::parse('2026-03-01'), CarbonImmutable::parse('2026-06-30'))->map(fn (CarbonImmutable $date): string => $date->toDateString())->all())
         ->toBe(['2026-03-15', '2026-04-15', '2026-05-15', '2026-06-15']);

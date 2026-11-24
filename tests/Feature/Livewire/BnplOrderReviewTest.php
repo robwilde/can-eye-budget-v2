@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 use App\Enums\BnplOrderEventType;
 use App\Enums\BnplOrderStatus;
+use App\Enums\PlannedTransactionStatus;
 use App\Livewire\BnplOrderReview;
 use App\Livewire\BnplPendingBadge;
 use App\Models\BnplOrder;
@@ -100,7 +101,7 @@ test('rejecting marks the order rejected and deactivates its plan', function () 
     $order->refresh();
     expect($order->status)->toBe(BnplOrderStatus::Rejected)
         ->and($order->reviewed_at)->not->toBeNull()
-        ->and($plan->refresh()->is_active)->toBeFalse()
+        ->and($plan->refresh()->status)->toBe(PlannedTransactionStatus::Inactive)
         ->and(bnplEventNames($order))->toBe([BnplOrderEventType::Rejected])
         ->and($order->events()->value('actor'))->toBe((string) $user->id);
 });

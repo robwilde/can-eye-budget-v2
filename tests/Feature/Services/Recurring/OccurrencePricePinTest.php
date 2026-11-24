@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Enums\OccurrenceStatus;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Jobs\GeneratePlannedOccurrencesJob;
 use App\Models\Account;
@@ -123,7 +124,7 @@ it('only backfills the last twelve months and never before the start date', func
 });
 
 it('does not backfill an inactive plan', function () {
-    $this->plan->update(['is_active' => false]);
+    $this->plan->update(['status' => PlannedTransactionStatus::Inactive]);
 
     expect(app(PlannedOccurrenceGenerator::class)->backfillHistory($this->plan, $this->user->today()))->toBe(0);
 });

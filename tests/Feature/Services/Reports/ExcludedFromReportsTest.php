@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Livewire\Dashboard;
@@ -109,7 +110,7 @@ it('leaves planned debits of excluded-from-reports accounts out of the needed to
         'transfer_to_account_id' => $to?->id,
         'direction' => TransactionDirection::Debit,
         'amount' => $amount,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'start_date' => now()->addDay(),
         'frequency' => RecurrenceFrequency::DontRepeat,
     ]);
@@ -132,7 +133,7 @@ it('reserves a planned transfer into an excluded-from-reports account in the nee
         'transfer_to_account_id' => $to->id,
         'direction' => TransactionDirection::Debit,
         'amount' => $amount,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'start_date' => now()->addDay(),
         'frequency' => RecurrenceFrequency::DontRepeat,
     ]);
@@ -175,7 +176,7 @@ it('leaves plans of excluded-from-reports accounts out of the monthly projection
         'transfer_to_account_id' => $to?->id,
         'direction' => TransactionDirection::Debit,
         'amount' => $amount,
-        'is_active' => true,
+        'status' => PlannedTransactionStatus::Active,
         'start_date' => now()->addDays(2),
         'frequency' => RecurrenceFrequency::DontRepeat,
     ]);
