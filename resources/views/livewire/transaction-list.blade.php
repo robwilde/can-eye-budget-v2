@@ -48,6 +48,8 @@
         </div>
     </div>
 
+    <livewire:upcoming-recurring />
+
     <div class="flex flex-wrap items-center gap-3">
         <x-cib.filter-toggle
             :options="[

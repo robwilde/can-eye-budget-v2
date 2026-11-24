@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\DTOs\BillRow;
+use App\DTOs\BillsMonth;
 use App\DTOs\BillsOverview;
 use App\Enums\OccurrenceState;
 use App\Enums\PlannedTransactionType;
@@ -14,6 +15,7 @@ use App\Models\AnalysisSuggestion;
 use App\Models\PlannedPayment;
 use App\Models\PlannedTransaction;
 use App\Models\User;
+use App\Services\Bills\BillsCalendarService;
 use App\Services\Bills\BillsOverviewService;
 use App\Services\Recurring\PlannedPaymentReview;
 use App\Services\Recurring\RecurringGate;
@@ -32,6 +34,7 @@ use Livewire\Component;
  * occurrence payment panel. Everything is read through BillsOverviewService for the signed-in user.
  *
  * @property-read BillsOverview $overview
+ * @property-read BillsMonth $calendar
  * @property-read Collection<int, BillRow> $allBills
  * @property-read array<int, int> $reviewOccurrences
  * @property-read bool $hasBills
@@ -43,8 +46,13 @@ final class Bills extends Component
 
     public const string TAB_ALL = 'all';
 
+    public const string TAB_CALENDAR = 'calendar';
+
     #[Url(except: self::TAB_OVERVIEW)]
     public string $tab = self::TAB_OVERVIEW;
+
+    #[Url(except: '')]
+    public string $month = '';
 
     #[Url(except: '')]
     public string $search = '';
@@ -84,7 +92,26 @@ final class Bills extends Component
 
     public function showTab(string $tab): void
     {
-        $this->tab = $tab === self::TAB_ALL ? self::TAB_ALL : self::TAB_OVERVIEW;
+        $this->tab = match ($tab) {
+            self::TAB_ALL => self::TAB_ALL,
+            self::TAB_CALENDAR => self::TAB_CALENDAR,
+            default => self::TAB_OVERVIEW,
+        };
+    }
+
+    public function previousMonth(): void
+    {
+        $this->month = $this->calendarService()->resolveMonth($this->user(), $this->month)->subMonthNoOverflow()->format('Y-m');
+    }
+
+    public function nextMonth(): void
+    {
+        $this->month = $this->calendarService()->resolveMonth($this->user(), $this->month)->addMonthNoOverflow()->format('Y-m');
+    }
+
+    public function goToToday(): void
+    {
+        $this->month = '';
     }
 
     public function sortBy(string $sort): void
@@ -114,6 +141,12 @@ final class Bills extends Component
         if ($count !== null) {
             Flux::toast(text: $this->notice, variant: 'success');
         }
+    }
+
+    #[Computed]
+    public function calendar(): BillsMonth
+    {
+        return $this->calendarService()->month($this->user(), $this->month);
     }
 
     #[Computed]
@@ -177,6 +210,11 @@ final class Bills extends Component
     public function render(): View
     {
         return view('livewire.bills');
+    }
+
+    private function calendarService(): BillsCalendarService
+    {
+        return app(BillsCalendarService::class);
     }
 
     private function user(): User
