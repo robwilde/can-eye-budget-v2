@@ -27,6 +27,7 @@
             <flux:select wire:model.live="period" size="sm" class="w-auto">
                 <flux:select.option value="7d">Last 7 Days</flux:select.option>
                 <flux:select.option value="this-month">This Month</flux:select.option>
+                <flux:select.option value="budget-month">Budget Month</flux:select.option>
                 <flux:select.option value="3m">Last 3 Months</flux:select.option>
                 <flux:select.option value="6m">Last 6 Months</flux:select.option>
                 <flux:select.option value="1y">Last Year</flux:select.option>

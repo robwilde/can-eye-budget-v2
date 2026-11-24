@@ -43,6 +43,20 @@ enum TransactionPeriod: string
         ];
     }
 
+    /**
+     * The periods a user can save as the default for the transactions list and the reports, in the
+     * order those pages' selectors offer them. Pay cycle only applies once one is configured.
+     *
+     * @return list<self>
+     */
+    public static function defaultOptions(): array
+    {
+        return [
+            self::SevenDays, self::ThisMonth, self::BudgetMonth, self::ThreeMonths, self::SixMonths,
+            self::OneYear, self::PayCycle, self::All,
+        ];
+    }
+
     /** Whether both dates parse and the start is not after the end. */
     public static function validRange(?string $from, ?string $to): bool
     {

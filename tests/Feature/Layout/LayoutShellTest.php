@@ -73,11 +73,12 @@ it('ignores failed and pending Redbark syncs for the sync chip', function () {
         ->assertDontSee('data-testid="topbar-sync-chip"', false);
 });
 
-it('forces flux appearance to light to keep CIB surfaces readable', function () {
+it('leaves the appearance to the system for a user on the default theme', function () {
     $response = $this->get(route('dashboard'));
 
     $response->assertOk();
-    $response->assertSee("window.localStorage.setItem('flux.appearance', 'light')", false);
+    $response->assertSee('data-appearance="system"', false);
+    $response->assertDontSee('data-appearance="light"', false);
 });
 
 it('renders the mobile tabbar only below lg', function () {

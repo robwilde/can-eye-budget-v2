@@ -16,7 +16,7 @@ Everything else (transaction list, calendar, categories, rules, bank connection)
 
 > Fun, easy to remember, not too serious — like the logo. The app answers plain-language money questions in plain language.
 
-> **Implementation status (this repo).** This document is the brand bible; the system is already built. Tokens live in `resources/css/app.css` (`@theme`); the app shell, mobile tab bar and component CSS are in place. The app is **light-only** (`resources/views/partials/head.blade.php` forces `flux.appearance='light'`), so the dark-mode notes below are aspirational and currently unused. The React `ui_kits/` are reference-only — production is Blade + Flux. See `SKILL.md`.
+> **Implementation status (this repo).** This document is the brand bible; the system is already built. Tokens live in `resources/css/app.css` (`@theme`); the app shell, mobile tab bar and component CSS are in place. The head partial applies each user's saved theme (system, light or dark; guests get light) since #731, but the design was drawn light-only, so the dark-mode notes below are aspirational and no dark pass has been done. The React `ui_kits/` are reference-only — production is Blade + Flux. See `SKILL.md`.
 
 ## Source materials
 
@@ -130,7 +130,7 @@ Mobile rules:
 - **Accent:** Yellow `--cib-yellow-400 #F8C93A` — sparingly; highlights, celebratory toasts, "nice one" moments.
 - **Money semantic:** red `#E5484D` (owed), green `#2AAF46` (available), neutral dark (needed), amber `#F1A51C` (planned/suggested).
 - **Neutrals:** warm greys with a slight green undertone so teal and neutrals sit in the same family.
-- **Dark mode** — *aspirational, not shipped.* Tokens exist (`.dark` block in `colors_and_type.css`) but the live app is deliberately **light-only** (`partials/head.blade.php` forces `flux.appearance='light'`). If dark mode is revived, backgrounds are deep teal-tinted near-black (`#0B1513`) — never pure `#000`, never cool blue-black.
+- **Dark mode** — *aspirational, not shipped.* Tokens exist (`.dark` block in `colors_and_type.css`) but the app was designed **light-only**; users can now choose a dark theme in settings (#731) without a dark design pass. If dark mode is revived, backgrounds are deep teal-tinted near-black (`#0B1513`) — never pure `#000`, never cool blue-black.
 
 ### Typography
 
@@ -234,4 +234,4 @@ Mobile rules:
 
 1. **Dollar-sign green** — picked from the logo eyeballed as `#3DC85A`. Happy to resample from a high-res source.
 2. **Mascot use** — the cartoon can + eye + dollar is unforgettable but currently only used as a whole logo. Worth a call on whether we want standalone "reaction" stickers (scared can, celebrating eye) for empty/success states down the line.
-3. **Dark mode** — tokens exist (`.dark` block in `colors_and_type.css`) but the app is **light-only** today (`flux.appearance` forced to `light`). No dashboard dark pass; revisit only if the light-only decision is reversed.
+3. **Dark mode** — tokens exist (`.dark` block in `colors_and_type.css`) but the app was drawn **light-only**. Users can choose dark in settings (#731); no dashboard dark pass has been done.
