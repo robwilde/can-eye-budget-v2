@@ -5,26 +5,22 @@ declare(strict_types=1);
 namespace App\Livewire;
 
 use App\Enums\OccurrenceStatus;
-use App\Enums\PipelineRunStatus;
-use App\Enums\PipelineTrigger;
 use App\Enums\PlannedTransactionStatus;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
-use App\Jobs\RunTransactionAnalysisJob;
 use App\Livewire\Attributes\NotAudited;
 use App\Livewire\Concerns\RecordsHandPickedCategories;
 use App\Models\Account;
 use App\Models\AnalysisSuggestion;
 use App\Models\Category;
-use App\Models\PipelineRun;
 use App\Models\PlannedOccurrence;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Recurring\PlanHistoryBackfiller;
 use App\Services\Recurring\PlannedPaymentReview;
-use App\Services\Recurring\RecurringSuggestionWriter;
-use App\Services\Recurring\RecurringTransactionDetector;
+use App\Services\Recurring\RecurringGate;
+use App\Services\Recurring\RecurringScanner;
 use App\Services\SuggestionApplier;
 use Carbon\CarbonImmutable;
 use Closure;
@@ -32,8 +28,6 @@ use Flux\Flux;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -42,8 +36,6 @@ use Throwable;
 final class RecurringTransactionReview extends Component
 {
     use RecordsHandPickedCategories;
-
-    private const int SCAN_LOCK_SECONDS = 120;
 
     public ?int $accountId = null;
 
@@ -63,9 +55,15 @@ final class RecurringTransactionReview extends Component
         $this->accountId = $user->primary_account_id ?? ($firstAccountId === null ? null : (int) $firstAccountId);
     }
 
-    public function findRecurring(RecurringTransactionDetector $detector, RecurringSuggestionWriter $writer): void
+    public function findRecurring(RecurringScanner $scanner): void
     {
         $user = $this->authenticatedUser();
+
+        if (! RecurringGate::enabled($user)) {
+            Flux::toast(text: 'Recurring is switched off. Switch it on in Settings → Recurring.', variant: 'warning');
+
+            return;
+        }
 
         if (! $this->selectedAccountBelongsTo($user)) {
             Flux::toast(text: 'Select one of your accounts before scanning', variant: 'warning');
@@ -73,26 +71,15 @@ final class RecurringTransactionReview extends Component
             return;
         }
 
-        $lock = Cache::lock(RunTransactionAnalysisJob::lockKey($user->id), self::SCAN_LOCK_SECONDS);
+        $count = $scanner->run($user, $this->accountId);
 
-        if (! $lock->get()) {
+        if ($count === null) {
             Flux::toast(text: 'A scan is already running. Try again in a moment.', variant: 'warning');
 
             return;
         }
 
-        try {
-            $suggestionIds = $this->scan($detector, $writer, $user);
-        } finally {
-            $lock->release();
-        }
-
-        $count = count($suggestionIds);
-        $message = $count === 1
-            ? 'Found 1 new recurring suggestion'
-            : "Found {$count} new recurring suggestions";
-
-        Flux::toast(text: $message, variant: 'success');
+        Flux::toast(text: $count === 1 ? 'Found 1 new recurring suggestion' : "Found {$count} new recurring suggestions", variant: 'success');
     }
 
     /**
@@ -174,43 +161,6 @@ final class RecurringTransactionReview extends Component
             'paymentSuggestions' => $this->paymentSuggestionsForSelectedAccount(),
             'categories' => Category::visibleSortedByFullPath($this->authenticatedUser()->id),
         ]);
-    }
-
-    /** @return list<int> */
-    private function scan(RecurringTransactionDetector $detector, RecurringSuggestionWriter $writer, User $user): array
-    {
-        $candidates = $detector->detect($user, $this->accountId);
-
-        /** @var list<int> $suggestionIds */
-        $suggestionIds = DB::transaction(function () use ($writer, $user, $candidates): array {
-            $run = PipelineRun::create([
-                'user_id' => $user->id,
-                'trigger' => PipelineTrigger::Manual,
-                'status' => PipelineRunStatus::Running,
-                'started_at' => CarbonImmutable::now(),
-            ]);
-
-            AnalysisSuggestion::query()
-                ->where('user_id', $user->id)
-                ->ofType(SuggestionType::RecurringTransaction)
-                ->pending()
-                ->where('payload->account_id', $this->accountId)
-                ->update([
-                    'status' => SuggestionStatus::Superseded,
-                    'resolved_at' => CarbonImmutable::now(),
-                ]);
-
-            $ids = $writer->writeForRun($user, $run, $candidates);
-
-            $run->update([
-                'status' => PipelineRunStatus::Completed,
-                'completed_at' => CarbonImmutable::now(),
-            ]);
-
-            return $ids;
-        });
-
-        return $suggestionIds;
     }
 
     private function decidePlannedPayment(int $suggestionId, Closure $decide, string $toast): void

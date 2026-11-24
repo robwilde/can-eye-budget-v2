@@ -8,6 +8,7 @@ use App\Contracts\PipelineStageContract;
 use App\DTOs\PipelineContext;
 use App\DTOs\StageResult;
 use App\Models\PipelineAuditEntry;
+use App\Services\Recurring\RecurringGate;
 use App\Services\Recurring\RecurringSuggestionWriter;
 use App\Services\Recurring\RecurringTransactionDetector;
 
@@ -32,7 +33,7 @@ final readonly class IdentifyRecurringTransactionsStage implements PipelineStage
 
     public function shouldRun(PipelineContext $context): bool
     {
-        return (bool) config('budget.recurring_detection');
+        return (bool) config('budget.recurring_detection') && RecurringGate::enabled($context->user);
     }
 
     public function execute(PipelineContext $context): StageResult

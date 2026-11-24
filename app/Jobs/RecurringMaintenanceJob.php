@@ -6,6 +6,7 @@ namespace App\Jobs;
 
 use App\Models\User;
 use App\Services\Recurring\PriceChangeDetector;
+use App\Services\Recurring\RecurringGate;
 use App\Services\Recurring\StalePlanSweeper;
 use App\Support\Audit\AttributeJobToUser;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
@@ -47,6 +48,10 @@ final class RecurringMaintenanceJob implements ShouldBeUniqueUntilProcessing, Sh
 
     public function handle(PriceChangeDetector $prices, StalePlanSweeper $sweeper): void
     {
+        if (! RecurringGate::enabled($this->user)) {
+            return;
+        }
+
         $prices->detectForUser($this->user);
         $sweeper->sweepForUser($this->user);
     }

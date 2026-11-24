@@ -21,6 +21,7 @@ use App\Events\PlannedTransactionCategoryUpdated;
 use App\Events\PlannedTransactionCreated;
 use App\Events\PlannedTransactionScheduleChanged;
 use App\Rules\PaymentUrl;
+use App\Services\Recurring\RecurringGate;
 use App\Support\Recurrence\ScheduleGenerator;
 use Carbon\CarbonImmutable;
 use Closure;
@@ -33,6 +34,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 /**
  * @property int $id
@@ -544,6 +546,10 @@ final class PlannedTransaction extends Model
                     }
                 }],
             ])->validate();
+
+            if ($plannedTransaction->transfer_to_account_id !== null && $plannedTransaction->isDirty('transfer_to_account_id') && ! RecurringGate::enabled($plannedTransaction->user)) {
+                throw ValidationException::withMessages(['transfer_to_account_id' => __('Recurring transfers are off. Switch recurring on in Settings to add one.')]);
+            }
 
             if ($plannedTransaction->transfer_to_account_id !== null) {
                 $plannedTransaction->type = PlannedTransactionType::Transfer;
