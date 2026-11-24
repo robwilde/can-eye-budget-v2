@@ -434,7 +434,7 @@ test('skips when rejected suggestion within 90 days exists', function () {
     expect($result->suggestionIds)->toBeEmpty();
 });
 
-test('does not skip when rejection is older than 90 days', function () {
+test('still skips a rejection older than 90 days because rejections are permanent', function () {
     $existingRun = PipelineRun::factory()->for($this->user)->completed()->create();
     AnalysisSuggestion::factory()->recurringTransaction()->rejected()->create([
         'pipeline_run_id' => $existingRun->id,
@@ -450,7 +450,7 @@ test('does not skip when rejection is older than 90 days', function () {
 
     $result = $this->stage->execute($this->context);
 
-    expect($result->suggestionIds)->toHaveCount(1);
+    expect($result->suggestionIds)->toBeEmpty();
 });
 
 test('PlannedTransaction match uses 5 percent amount tolerance', function () {
