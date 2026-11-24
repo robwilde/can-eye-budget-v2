@@ -59,6 +59,7 @@ use Illuminate\Support\Facades\DB;
  * @property TransferLinkSource|null $transfer_link_source
  * @property int|null $suggested_pair_id
  * @property int|null $planned_transaction_id
+ * @property int|string|null $payments_sum_amount
  * @property bool|null $payments_exists
  * @property int|null $pdf_import_id
  * @property int|null $bank_import_id
