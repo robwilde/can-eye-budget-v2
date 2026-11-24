@@ -46,6 +46,7 @@
     <div class="flex gap-2" role="tablist" aria-label="{{ __('Bills views') }}" data-testid="bills-tabs">
         <flux:button size="sm" :variant="$tab === 'overview' ? 'primary' : 'ghost'" wire:click="showTab('overview')" role="tab" :aria-selected="$tab === 'overview' ? 'true' : 'false'" data-testid="tab-overview">{{ __('Overview') }}</flux:button>
         <flux:button size="sm" :variant="$tab === 'all' ? 'primary' : 'ghost'" wire:click="showTab('all')" role="tab" :aria-selected="$tab === 'all' ? 'true' : 'false'" data-testid="tab-all">{{ __('All bills') }}</flux:button>
+        <flux:button size="sm" :variant="$tab === 'calendar' ? 'primary' : 'ghost'" wire:click="showTab('calendar')" role="tab" :aria-selected="$tab === 'calendar' ? 'true' : 'false'" data-testid="tab-calendar">{{ __('Calendar') }}</flux:button>
     </div>
 
     @if($tab === 'overview')
@@ -84,6 +85,32 @@
                 @endforeach
             </div>
         @endif
+    @elseif($tab === 'calendar')
+        @php($calendar = $this->calendar)
+        <div class="space-y-3" data-testid="bills-calendar">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <flux:heading size="lg" data-testid="calendar-month">{{ $calendar->label }}</flux:heading>
+                <div class="flex gap-2">
+                    <flux:button size="sm" variant="ghost" wire:click="previousMonth" :disabled="! $calendar->canGoBack" data-testid="calendar-prev" aria-label="{{ __('Previous month') }}">←</flux:button>
+                    <flux:button size="sm" variant="ghost" wire:click="goToToday" :disabled="$calendar->isCurrent" data-testid="calendar-today">{{ __('Today') }}</flux:button>
+                    <flux:button size="sm" variant="ghost" wire:click="nextMonth" :disabled="! $calendar->canGoForward" data-testid="calendar-next" aria-label="{{ __('Next month') }}">→</flux:button>
+                </div>
+            </div>
+            <flux:text size="sm" data-testid="calendar-totals">{{ trans_choice(':count bill|:count bills', $calendar->count, ['count' => $calendar->count]) }} · {{ __('expected :expected', ['expected' => MoneyCast::format($calendar->expected)]) }} · {{ __('paid :paid', ['paid' => MoneyCast::format($calendar->paid)]) }}</flux:text>
+            <div class="grid grid-cols-7 gap-1 text-xs" data-testid="calendar-grid">
+                @foreach(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as $label)
+                    <div class="font-medium text-zinc-500">{{ $label }}</div>
+                @endforeach
+                @foreach($calendar->days as $day)
+                    <div class="min-h-16 rounded border border-neutral-200 p-1 {{ $day['inMonth'] ? '' : 'opacity-40' }}" wire:key="cal-{{ $day['date']->format('Y-m-d') }}" data-testid="calendar-day-{{ $day['date']->format('Y-m-d') }}">
+                        <div class="text-zinc-500">{{ $day['date']->day }}</div>
+                        @foreach($day['bills'] as $bill)
+                            <button type="button" class="mt-1 block w-full truncate rounded bg-neutral-100 px-1 text-left hover:underline" wire:click="$dispatch('open-bill-drawer', { planId: {{ $bill->planId }} })" wire:key="chip-{{ $bill->occurrenceId }}" data-testid="calendar-chip" title="{{ $bill->name }} · {{ MoneyCast::format($bill->expected) }}">{{ $bill->name }}</button>
+                        @endforeach
+                    </div>
+                @endforeach
+            </div>
+        </div>
     @else
         <div class="space-y-3" data-testid="all-bills">
             <div class="flex flex-wrap items-end gap-2">
