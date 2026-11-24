@@ -305,9 +305,9 @@ it('labels the interval cadences with their interval', function () {
         ->and(cadencePlan('2026-01-01', RecurrenceFrequency::EveryMonth)->frequencyLabel())->toBe('Every month');
 });
 
-it('offers only the fixed cadences in the editors for now', function () {
-    expect(RecurrenceFrequency::selectable())->each->not->toBeIn([RecurrenceFrequency::Semimonthly, RecurrenceFrequency::EveryNWeeks, RecurrenceFrequency::EveryNMonths, RecurrenceFrequency::EveryNYears])
-        ->and(RecurrenceFrequency::selectable())->toContain(RecurrenceFrequency::EveryMonth, RecurrenceFrequency::DontRepeat);
+it('offers every cadence but two on two off in the picker', function () {
+    expect(RecurrenceFrequency::pickable())->not->toContain(RecurrenceFrequency::TwoOnTwoOff)
+        ->and(RecurrenceFrequency::pickable())->toContain(RecurrenceFrequency::Semimonthly, RecurrenceFrequency::EveryNWeeks, RecurrenceFrequency::EveryMonth, RecurrenceFrequency::DontRepeat);
 });
 
 it('keeps the plan type untouched by cadence saves', function () {

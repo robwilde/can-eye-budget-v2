@@ -74,13 +74,14 @@ it('marks an occurrence missed only on request', function () {
 
 it('snoozes an occurrence and shows it as upcoming', function () {
     $this->plan->update(['start_date' => '2026-01-02']);
+    $next = $this->plan->occurrences()->whereDate('original_date', '2026-04-02')->sole();
     $overdue = $this->plan->occurrences()->whereDate('original_date', '2026-03-02')->sole();
 
-    managerOpen($this)->assertSeeHtmlInOrder(['data-testid="occurrence-'.$overdue->id.'"', 'Overdue', 'data-testid="occurrence-'.$this->occurrence->id.'"'])
+    managerOpen($this)->assertSeeHtmlInOrder(['data-testid="occurrence-'.$overdue->id.'"', 'Overdue', 'data-testid="occurrence-'.$next->id.'"'])
         ->set("snoozeDates.{$overdue->id}", '2026-03-20')
         ->call('snoozeOccurrence', $overdue->id)
         ->assertHasNoErrors()
-        ->assertSeeHtmlInOrder(['data-testid="occurrence-'.$overdue->id.'"', '2026-03-20', 'Upcoming', 'data-testid="occurrence-'.$this->occurrence->id.'"']);
+        ->assertSeeHtmlInOrder(['data-testid="occurrence-'.$overdue->id.'"', '2026-03-20', 'Upcoming', 'data-testid="occurrence-'.$next->id.'"']);
 
     expect($overdue->fresh()->snoozed_until->toDateString())->toBe('2026-03-20');
 });

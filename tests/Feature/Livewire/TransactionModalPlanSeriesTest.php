@@ -427,11 +427,12 @@ it('starts a plan made from a month end entry on the next month end', function (
         ->assertSet('date', '2026-03-31');
 });
 
-it('offers only the fixed cadences when planning', function () {
+it('offers every cadence the picker can express when planning', function () {
     modalNewPlan($this)
         ->assertSeeHtml('value="every-month"')
-        ->assertDontSeeHtml('value="semimonthly"')
-        ->assertDontSeeHtml('value="every-n-weeks"');
+        ->assertSeeHtml('value="semimonthly"')
+        ->assertSeeHtml('value="every-n-weeks"')
+        ->assertDontSeeHtml('value="two-on-two-off"');
 });
 
 it('fills a plan start date that passes its own rule for a user west of the server', function () {
@@ -458,30 +459,30 @@ it('fills a plan start date that passes its own rule for a user west of the serv
     expect(PlannedTransaction::query()->where('user_id', $perth->id)->sole()->start_date->toDateString())->toBe('2026-03-10');
 });
 
-it('shows a plan on a custom cadence as kept as is and keeps its schedule when saved', function () {
-    $plan = modalPlan($this, ['frequency' => RecurrenceFrequency::EveryNMonths, 'recurrence_interval' => 5]);
+it('shows an unsupported frequency as custom and keeps it on save', function () {
+    $plan = modalPlan($this, ['frequency' => RecurrenceFrequency::TwoOnTwoOff, 'recurrence_interval' => 5]);
 
     modalEditing($this, $plan)
-        ->assertSeeHtml('value="every-n-months"')
-        ->assertSee('Custom schedule (kept as is)')
+        ->assertSeeHtml('value="two-on-two-off"')
+        ->assertSee('Custom')
         ->set('autopay', true)
         ->call('save')
         ->assertHasNoErrors();
 
     $fresh = $plan->fresh();
 
-    expect($fresh->frequency)->toBe(RecurrenceFrequency::EveryNMonths)
+    expect($fresh->frequency)->toBe(RecurrenceFrequency::TwoOnTwoOff)
         ->and($fresh->recurrence_interval)->toBe(5);
 });
 
-it('clears the interval and days when a custom cadence is changed to a fixed one', function () {
+it('keeps the days when a day cadence is picked and clears them for a weekly one', function () {
     $plan = modalPlan($this, ['frequency' => RecurrenceFrequency::Semimonthly, 'days_of_month' => [15, 'last']]);
 
     modalEditing($this, $plan)->set('frequency', 'every-month')->call('save')->assertHasNoErrors();
 
-    $fresh = $plan->fresh();
+    expect($plan->fresh()->days_of_month)->toBe([15, 'last']);
 
-    expect($fresh->frequency)->toBe(RecurrenceFrequency::EveryMonth)
-        ->and($fresh->days_of_month)->toBeNull()
-        ->and($fresh->recurrence_interval)->toBe(1);
+    modalEditing($this, $plan->fresh())->set('frequency', 'every-week')->call('save')->assertHasNoErrors();
+
+    expect($plan->fresh()->days_of_month)->toBeNull()->and($plan->fresh()->recurrence_interval)->toBe(1);
 });
