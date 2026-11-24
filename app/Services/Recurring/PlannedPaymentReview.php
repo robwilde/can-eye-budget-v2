@@ -4,15 +4,19 @@ declare(strict_types=1);
 
 namespace App\Services\Recurring;
 
+use App\Enums\OccurrenceStatus;
+use App\Enums\PlannedTransactionStatus;
 use App\Enums\SuggestionStatus;
 use App\Enums\SuggestionType;
 use App\Models\AnalysisSuggestion;
 use App\Models\PlannedMatchRejection;
 use App\Models\PlannedOccurrence;
 use App\Models\PlannedPayment;
+use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -52,6 +56,39 @@ final readonly class PlannedPaymentReview
 
             $this->resolve($suggestion, SuggestionStatus::Accepted);
         });
+    }
+
+    /**
+     * Pending suggested plan payments that can still be confirmed, most confident first, each with the plan,
+     * transaction and occurrence it names: the transaction is current, unlinked and unpaid, the occurrence open
+     * and its plan active. With an account, only that account's. The one rule the rules page and Bills share.
+     *
+     * @return Collection<int, array{suggestion: AnalysisSuggestion, plan: PlannedTransaction, transaction: Transaction, occurrence: PlannedOccurrence}>
+     */
+    public function actionable(User $user, ?int $accountId = null): Collection
+    {
+        $suggestions = AnalysisSuggestion::query()
+            ->where('user_id', $user->id)
+            ->ofType(SuggestionType::PlannedPaymentMatch)
+            ->pending()
+            ->when($accountId !== null, fn ($query) => $query->where('payload->account_id', $accountId))
+            ->get()
+            ->sortBy([fn (AnalysisSuggestion $a, AnalysisSuggestion $b): int => ((float) ($b->payload['score'] ?? 0)) <=> ((float) ($a->payload['score'] ?? 0)), fn (AnalysisSuggestion $a, AnalysisSuggestion $b): int => $a->id <=> $b->id]);
+
+        $transactions = Transaction::query()->where('user_id', $user->id)->current()->whereNull('planned_transaction_id')->whereDoesntHave('payments')->whereKey($suggestions->pluck('payload.transaction_id')->all())->get()->keyBy('id');
+        $occurrences = PlannedOccurrence::query()->forUser($user)->where('status', OccurrenceStatus::Scheduled->value)->whereHas('plannedTransaction', fn ($plans) => $plans->where('status', PlannedTransactionStatus::Active->value))->with('plannedTransaction')->whereKey($suggestions->pluck('payload.planned_occurrence_id')->all())->get()->keyBy('id');
+
+        return $suggestions
+            ->map(static function (AnalysisSuggestion $suggestion) use ($transactions, $occurrences): ?array {
+                $transaction = $transactions->get($suggestion->payload['transaction_id'] ?? 0);
+                $occurrence = $occurrences->get($suggestion->payload['planned_occurrence_id'] ?? 0);
+
+                return $transaction instanceof Transaction && $occurrence instanceof PlannedOccurrence
+                    ? ['suggestion' => $suggestion, 'plan' => $occurrence->plannedTransaction, 'transaction' => $transaction, 'occurrence' => $occurrence]
+                    : null;
+            })
+            ->filter()
+            ->values();
     }
 
     /** @throws ModelNotFoundException */
