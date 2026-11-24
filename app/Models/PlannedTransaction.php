@@ -371,8 +371,19 @@ final class PlannedTransaction extends Model
      */
     public function scopePayable(Builder $query): Builder
     {
+        return $query->visible()->billShaped();
+    }
+
+    /**
+     * What makes a plan a bill whatever its status: a debit that is not income, paying no one in particular or a
+     * credit card, loan or mortgage. An ended bill keeps this shape, so its history stays reachable.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeBillShaped(Builder $query): Builder
+    {
         return $query
-            ->visible()
             ->where('direction', TransactionDirection::Debit->value)
             ->where('type', '!=', PlannedTransactionType::Income->value)
             ->where(fn (Builder $plans): Builder => $plans
