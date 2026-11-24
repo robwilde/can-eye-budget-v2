@@ -13,6 +13,7 @@
         class="flex w-full items-center gap-2 rounded-lg border-2 border-cib-black bg-cib-teal-400 px-2 py-2 text-start text-white shadow-pop-sm hover:bg-cib-teal-500"
     >
         <flux:avatar
+            :src="$user->avatarUrl()"
             :initials="$user->initials()"
             class="size-8 border-[1.5px] border-cib-black bg-cib-yellow-400! text-cib-black!"
         />

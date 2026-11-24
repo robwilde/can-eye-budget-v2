@@ -1,18 +1,24 @@
 <?php
 
 use App\Concerns\ProfileValidationRules;
+use App\Models\User;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Session;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 
 new #[Title('Profile settings')] class extends Component {
     use ProfileValidationRules;
+    use WithFileUploads;
 
     public string $name = '';
     public string $email = '';
+    public ?TemporaryUploadedFile $photo = null;
 
     /**
      * Mount the component.
@@ -41,6 +47,57 @@ new #[Title('Profile settings')] class extends Component {
         $user->save();
 
         $this->dispatch('profile-updated', name: $user->name);
+    }
+
+    /**
+     * Store a JPEG or PNG profile photo up to 10 MB, replacing and deleting the previous one.
+     */
+    public function savePhoto(): void
+    {
+        $this->validate([
+            'photo' => ['required', 'file', 'mimes:jpeg,png', 'max:10240'],
+        ]);
+
+        $user = Auth::user();
+        $previous = $user->avatar_path;
+        $path = $this->photo->store('avatars/'.$user->id, User::AVATAR_DISK);
+
+        if ($path === false) {
+            $this->addError('photo', __('The photo could not be saved.'));
+
+            return;
+        }
+
+        $user->update(['avatar_path' => $path]);
+
+        if ($previous !== null) {
+            Storage::disk(User::AVATAR_DISK)->delete($previous);
+        }
+
+        $this->photo = null;
+
+        Session::flash('status', __('Photo updated.'));
+
+        $this->redirect(route('profile.edit'), navigate: true);
+    }
+
+    /**
+     * Remove the profile photo and delete its file.
+     */
+    public function removePhoto(): void
+    {
+        $user = Auth::user();
+        $previous = $user->avatar_path;
+
+        $user->update(['avatar_path' => null]);
+
+        if ($previous !== null) {
+            Storage::disk(User::AVATAR_DISK)->delete($previous);
+        }
+
+        Session::flash('status', __('Photo removed.'));
+
+        $this->redirect(route('profile.edit'), navigate: true);
     }
 
     /**
@@ -81,6 +138,26 @@ new #[Title('Profile settings')] class extends Component {
     <flux:heading class="sr-only">{{ __('Profile settings') }}</flux:heading>
 
     <x-pages::settings.layout :heading="__('Profile')" :subheading="__('Update your name and email address')">
+        <div class="my-6 w-full space-y-4" data-test="profile-photo">
+            <div class="flex items-center gap-4">
+                <flux:avatar :src="auth()->user()->avatarUrl()" :initials="auth()->user()->initials()" size="xl" />
+
+                <div class="space-y-2">
+                    <input type="file" wire:model="photo" accept="image/jpeg,image/png" data-test="profile-photo-input" />
+                    <flux:text size="sm">{{ __('JPEG or PNG, up to 10 MB.') }}</flux:text>
+                    @error('photo') <flux:text size="sm" class="text-red-600" data-test="profile-photo-error">{{ $message }}</flux:text> @enderror
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <flux:button size="sm" variant="primary" wire:click="savePhoto" data-test="save-photo-button">{{ __('Upload photo') }}</flux:button>
+
+                @if (auth()->user()->avatar_path !== null)
+                    <flux:button size="sm" variant="ghost" wire:click="removePhoto" data-test="remove-photo-button">{{ __('Remove photo') }}</flux:button>
+                @endif
+            </div>
+        </div>
+
         <form wire:submit="updateProfileInformation" class="my-6 w-full space-y-6">
             <flux:input wire:model="name" :label="__('Name')" type="text" required autofocus autocomplete="name" />
 
@@ -118,6 +195,8 @@ new #[Title('Profile settings')] class extends Component {
                 </x-action-message>
             </div>
         </form>
+
+        <livewire:pages::settings.reset-data />
 
         @if ($this->showDeleteUser)
             <livewire:pages::settings.delete-user-form />
