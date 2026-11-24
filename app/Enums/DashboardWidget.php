@@ -8,6 +8,7 @@ use App\Models\Account;
 use App\Models\Insight;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Recurring\RecurringGate;
 use App\Services\Reports\InvestmentReport;
 use App\Services\Transfers\TransferReviewQueue;
 
@@ -35,6 +36,7 @@ enum DashboardWidget: string
     case PayCycleCalendar = 'pay-cycle-calendar';
     case BudgetsThisCycle = 'budgets-this-cycle';
     case UpcomingPlans = 'upcoming-plans';
+    case PaycheckPlan = 'paycheck-plan';
     case RecentSpending = 'recent-spending';
     case MonthlyProjection = 'monthly-projection';
 
@@ -55,6 +57,7 @@ enum DashboardWidget: string
             self::PayCycleCalendar => 'Pay cycle calendar',
             self::BudgetsThisCycle => 'Budgets this cycle',
             self::UpcomingPlans => 'Upcoming plans',
+            self::PaycheckPlan => 'Paycheck plan',
             self::RecentSpending => 'Recent spending',
             self::MonthlyProjection => 'Monthly projection',
         };
@@ -73,6 +76,7 @@ enum DashboardWidget: string
             self::Outflows => 'dashboard.outflows',
             self::PayCycleCalendar => 'dashboard.pay-cycle-calendar',
             self::MonthlyProjection => 'dashboard.monthly-projection',
+            self::PaycheckPlan => 'dashboard.paycheck-plan',
             default => null,
         };
     }
@@ -85,7 +89,7 @@ enum DashboardWidget: string
 
     public function lazy(): bool
     {
-        return in_array($this, [self::NetWorthChart, self::BalanceSheet, self::InvestmentSummary, self::MoneyFlow, self::SpendingTrend, self::CashFlow, self::Outflows, self::MonthlyProjection], true);
+        return in_array($this, [self::NetWorthChart, self::BalanceSheet, self::InvestmentSummary, self::MoneyFlow, self::SpendingTrend, self::CashFlow, self::Outflows, self::MonthlyProjection, self::PaycheckPlan], true);
     }
 
     /**
@@ -136,6 +140,7 @@ enum DashboardWidget: string
     {
         return match ($this) {
             self::InvestmentSummary => app(InvestmentReport::class)->hasData($user),
+            self::PaycheckPlan => RecurringGate::enabled($user),
             default => true,
         };
     }
@@ -159,6 +164,7 @@ enum DashboardWidget: string
             self::MonthlyProjection => $user->primary_account_id !== null,
             self::InvestmentSummary => app(InvestmentReport::class)->hasData($user),
             self::PaySummary => true,
+            self::PaycheckPlan => RecurringGate::enabled($user),
         };
     }
 }

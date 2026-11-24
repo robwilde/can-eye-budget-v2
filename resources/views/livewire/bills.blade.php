@@ -88,9 +88,21 @@
             @if($rows !== [])
                 <div data-testid="section-{{ $key }}">
                     <flux:heading size="lg">{{ $title }}</flux:heading>
-                    @foreach($rows as $row)
-                        @include('livewire.partials.bill-row', ['row' => $row, 'stateColor' => $stateColor])
-                    @endforeach
+                    @if($key === 'this-month' && $this->payMarkers !== [])
+                        @foreach($this->payMarkers as $marker)
+                            <div class="mt-2 flex flex-wrap items-center justify-between gap-2 rounded bg-neutral-100 px-2 py-1 text-sm" wire:key="pay-marker-{{ $marker['startsOn']->format('Y-m-d') }}" data-testid="pay-marker">
+                                <span class="font-medium">{{ $marker['sources'] === [] ? __('Before payday') : __('Payday :date', ['date' => $marker['startsOn']->format('D j M')]) }}@if($marker['sources'] !== []) · {{ implode(', ', $marker['sources']) }}@endif</span>
+                                <span class="tabular-nums" data-testid="pay-marker-obligation">{{ __('Bills :amount', ['amount' => MoneyCast::format($marker['obligation'])]) }}</span>
+                            </div>
+                            @foreach($marker['rows'] as $row)
+                                @include('livewire.partials.bill-row', ['row' => $row, 'stateColor' => $stateColor])
+                            @endforeach
+                        @endforeach
+                    @else
+                        @foreach($rows as $row)
+                            @include('livewire.partials.bill-row', ['row' => $row, 'stateColor' => $stateColor])
+                        @endforeach
+                    @endif
                 </div>
             @endif
         @endforeach
