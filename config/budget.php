@@ -34,6 +34,18 @@ return [
 
     'recurring_maintenance' => (bool) env('BUDGET_RECURRING_MAINTENANCE', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Bills Page
+    |--------------------------------------------------------------------------
+    |
+    | Shows the Bills workspace (overview, all bills, KPIs) and its navigation
+    | link. Stands in for a preview gate. Off by default.
+    |
+    */
+
+    'bills_page' => (bool) env('BUDGET_BILLS_PAGE', false),
+
     'jev_categorisation' => env('BUDGET_JEV_CATEGORISATION', false),
 
     /*
