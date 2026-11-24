@@ -305,3 +305,10 @@ it('keeps the planned payment matches out of the analysis suggestions list', fun
 
     Livewire\Livewire::actingAs($this->user)->test(App\Livewire\AnalysisSuggestions::class)->assertDontSee('Analysis Suggestions');
 });
+
+it('considers a transaction posted on the last day of the lookahead', function () {
+    $tx = matchPayer($this, 10000, '2026-03-20');
+    $occurrence = matchPlan($this, 10000, '2026-03-20', $tx->merchant_key, ['frequency' => App\Enums\RecurrenceFrequency::EveryMonth]);
+
+    expect(matchRun($this)['linked'])->toBe(1)->and($occurrence->fresh()->status)->toBe(OccurrenceStatus::Paid);
+});
