@@ -84,6 +84,47 @@ final readonly class PaycheckPlanner
     }
 
     /**
+     * Where each pay period of the current month starts, or nothing unless income splits the month into more than one
+     * period: monthly pay on the 1st leaves one period, pay on the 15th or every fortnight leaves several. Paychecks
+     * already received this month count, so the markers do not change as the month goes on.
+     *
+     * @return list<array{startsOn: CarbonImmutable, sources: list<string>}>
+     */
+    public function monthMarkers(User $user, ?CarbonImmutable $today = null): array
+    {
+        $today ??= $user->today();
+        $start = $today->startOfMonth();
+        $plans = $this->incomePlans($user)->filter(fn (PlannedTransaction $plan): bool => $this->isPayday($plan));
+
+        if ($plans->isEmpty()) {
+            return [];
+        }
+
+        $byDate = [];
+
+        foreach ($this->schedule->between($plans, $start, $today->endOfMonth()->startOfDay(), includeSettled: true) as $planId => $occurrences) {
+            foreach ($occurrences as $occurrence) {
+                $byDate[$occurrence->date->format('Y-m-d')]['date'] = $occurrence->date;
+                $byDate[$occurrence->date->format('Y-m-d')]['sources'][] = $plans[$planId]->description;
+            }
+        }
+
+        if ($byDate === []) {
+            return [];
+        }
+
+        ksort($byDate);
+
+        $markers = array_map(static fn (array $event): array => ['startsOn' => $event['date'], 'sources' => array_values(array_unique($event['sources']))], array_values($byDate));
+
+        if ($markers[0]['startsOn']->greaterThan($start)) {
+            array_unshift($markers, ['startsOn' => $start, 'sources' => []]);
+        }
+
+        return count($markers) > 1 ? $markers : [];
+    }
+
+    /**
      * @param  list<array{date: CarbonImmutable, amount: int, sources: list<string>}>  $planned
      * @param  array<int, list<array{date: CarbonImmutable, name: string, amount: int}>>  $buckets
      * @return list<PayPeriod>
