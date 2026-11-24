@@ -93,6 +93,21 @@ final class PaymentSettlementDeferral
         $this->note($transaction, restored: false, linkChanged: $linkChanged);
     }
 
+    /**
+     * A transaction was just linked to a plan by the matchers: outside a batch it pays the nearest open
+     * occurrence now, inside one it only notes the claim for after the commit, so the batch locks no occurrence.
+     */
+    public function transactionLinked(Transaction $transaction): void
+    {
+        if ($this->depth === 0) {
+            $this->claimLinked($transaction);
+
+            return;
+        }
+
+        $this->note($transaction, restored: true, linkChanged: true);
+    }
+
     public function transactionRestored(Transaction $transaction): void
     {
         if ($this->depth === 0) {

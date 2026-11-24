@@ -10,6 +10,7 @@ enum SuggestionType: string
     case PayCycle = 'pay-cycle';
     case RecurringTransaction = 'recurring-transaction';
     case UserRule = 'user-rule';
+    case PlannedPaymentMatch = 'planned-payment-match';
 
     public function label(): string
     {
@@ -18,6 +19,7 @@ enum SuggestionType: string
             self::PayCycle => 'Pay Cycle',
             self::RecurringTransaction => 'Recurring Transaction',
             self::UserRule => 'User Rule',
+            self::PlannedPaymentMatch => 'Planned Payment Match',
         };
     }
 }

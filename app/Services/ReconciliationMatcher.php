@@ -7,6 +7,7 @@ namespace App\Services;
 use App\DTOs\PlanOccurrence;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
+use App\Services\Recurring\PlannedPaymentMatcher;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
@@ -140,7 +141,7 @@ final readonly class ReconciliationMatcher
 
     public function link(Transaction $transaction, PlannedTransaction $planned): void
     {
-        $transaction->update(['planned_transaction_id' => $planned->id]);
+        app(PlannedPaymentMatcher::class)->linkToPlan($transaction, $planned);
     }
 
     public function unlink(Transaction $transaction): void
