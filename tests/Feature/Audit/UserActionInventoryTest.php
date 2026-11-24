@@ -114,10 +114,14 @@ test('every callable Livewire method, in class and view-based components, is aud
     }
 
     expect($unaudited)->toEqualCanonicalizing([
+        'App\\Livewire\\CalendarView::refreshAfterPayment',
         'App\\Livewire\\ImportBank::pollStatus',
         'App\\Livewire\\InsightFeed::pollRefresh',
+        'App\\Livewire\\OccurrencePaymentPanel::close',
+        'App\\Livewire\\OccurrencePaymentPanel::open',
         'pages::settings.exports::pollStatus',
         'App\\Livewire\\PdfImportReview::pollStatus',
+        'App\\Livewire\\PlannedTransactionManager::refreshAfterPayment',
         'App\\Livewire\\TransactionList::pollMerchantBrands',
         'App\\Livewire\\UserRuleManager::confirmApplyAll',
         'App\\Livewire\\UserRuleManager::confirmApplyRule',
