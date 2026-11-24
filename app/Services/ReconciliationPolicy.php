@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\DTOs\MatchScore;
-use App\Enums\RecurrenceFrequency;
 use App\Models\PlannedOccurrence;
 use App\Models\Transaction;
 use Carbon\CarbonImmutable;
@@ -137,7 +136,7 @@ final class ReconciliationPolicy
         $plan = $occurrence->plannedTransaction;
         $due = CarbonImmutable::instance($occurrence->snoozed_until ?? $occurrence->due_date)->startOfDay();
         $post = CarbonImmutable::instance($transaction->post_date)->startOfDay();
-        $cap = max(1, intdiv(self::cycleDays($plan->frequency, $plan->recurrence_interval), 2));
+        $cap = max(1, intdiv($plan->frequency->cycleDays($plan->recurrence_interval), 2));
         $early = min($plan->match_early_days, $cap);
         $late = min($plan->match_late_days, $cap);
 
@@ -154,15 +153,5 @@ final class ReconciliationPolicy
         $reach = ($offset < 0 ? $early : $late) + 1;
 
         return round(0.20 * (1 - abs($offset) / $reach), 4);
-    }
-
-    private static function cycleDays(RecurrenceFrequency $frequency, int $interval): int
-    {
-        return match ($frequency) {
-            RecurrenceFrequency::Semimonthly => 15,
-            RecurrenceFrequency::EveryWorkday => 1,
-            RecurrenceFrequency::EveryWeekend => 7,
-            default => $frequency->dayStep($interval) ?? ($frequency->monthStep($interval) ?? 1) * 30,
-        };
     }
 }

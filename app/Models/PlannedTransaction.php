@@ -164,6 +164,12 @@ final class PlannedTransaction extends Model
         'status' => 'active',
     ];
 
+    /** @return HasMany<PlannedTransactionPriceChange, $this> */
+    public function priceChanges(): HasMany
+    {
+        return $this->hasMany(PlannedTransactionPriceChange::class);
+    }
+
     /** @return BelongsTo<User, $this> */
     public function user(): BelongsTo
     {

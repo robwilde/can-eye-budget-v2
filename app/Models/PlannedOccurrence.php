@@ -26,6 +26,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property CarbonImmutable|null $closed_at
  * @property bool $closed_manually
  * @property int|string|null $payments_sum_amount
+ * @property string|null $payments_max_paid_on
+ * @property int $payments_count
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
  */
