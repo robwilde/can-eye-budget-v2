@@ -133,7 +133,7 @@ test('skips matching active planned transactions with audit reason', function ()
     expectWriterSkippedAudit($this->run, 'existing_planned_transaction', 'NETFLIX', $this->account);
 });
 
-test('skips recent rejections with audit reason', function () {
+test('skips rejections with audit reason', function () {
     $existingRun = PipelineRun::factory()->completed()->for($this->user)->create();
     AnalysisSuggestion::factory()->recurringTransaction()->rejected()->create([
         'pipeline_run_id' => $existingRun->id,
@@ -149,7 +149,7 @@ test('skips recent rejections with audit reason', function () {
 
     expect($ids)->toBeEmpty()
         ->and(AnalysisSuggestion::query()->where('pipeline_run_id', $this->run->id)->count())->toBe(0);
-    expectWriterSkippedAudit($this->run, 'recently_rejected', 'NETFLIX', $this->account);
+    expectWriterSkippedAudit($this->run, 'rejected', 'NETFLIX', $this->account);
 });
 
 test('continues persisting later candidates after skipping an earlier one', function () {
@@ -181,7 +181,7 @@ test('names the reason a candidate is skipped without writing anything', functio
 
     expect($this->writer->skipReason($this->user, writerCandidate($this->account, 'ROUND UP TO NETFLIX')))->toBe('noise')
         ->and($this->writer->skipReason($this->user, writerCandidate($this->account, 'SPOTIFY', 1199)))->toBe('existing_planned_transaction')
-        ->and($this->writer->skipReason($this->user, writerCandidate($this->account, 'GYM', 4000)))->toBe('recently_rejected')
+        ->and($this->writer->skipReason($this->user, writerCandidate($this->account, 'GYM', 4000)))->toBe('rejected')
         ->and($this->writer->skipReason($this->user, writerCandidate($this->account)))->toBeNull()
         ->and(PipelineAuditEntry::query()->count())->toBe(0);
 });

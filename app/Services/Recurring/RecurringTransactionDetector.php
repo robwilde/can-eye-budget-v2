@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Recurring;
 
 use App\DTOs\RecurringCandidate;
+use App\Enums\AccountClass;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionSource;
 use App\Models\Transaction;
@@ -122,6 +123,8 @@ final readonly class RecurringTransactionDetector
             )
             ->whereIn('source', TransactionSource::forAnalysis())
             ->whereNull('planned_transaction_id')
+            ->excludingTransfers()
+            ->whereDoesntHave('account', static fn (Builder $account): Builder => $account->where('type', AccountClass::Investment->value))
             ->current();
     }
 

@@ -116,13 +116,13 @@ final class PlannedOccurrenceGenerator
      * price change can pin what was already due. They are history, not debt: calendars only show
      * open occurrences from the current cycle on.
      */
-    public function backfillHistory(PlannedTransaction $plan, CarbonImmutable $today): int
+    public function backfillHistory(PlannedTransaction $plan, CarbonImmutable $today, int $months = self::HISTORY_MONTHS): int
     {
         if (! $plan->isActive()) {
             return 0;
         }
 
-        return $this->generate($plan, $today->subMonths(self::HISTORY_MONTHS)->startOfDay(), $today);
+        return $this->generate($plan, $today->subMonths($months)->startOfDay(), $today);
     }
 
     /**

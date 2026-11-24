@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\AccountClass;
 use App\Enums\CategorySource;
 use App\Enums\PayFrequency;
 use App\Enums\PlannedTransactionStatus;
-use App\Enums\PlannedTransactionType;
 use App\Enums\PlanOrigin;
 use App\Enums\SuggestionStatus;
 use App\Enums\TransactionDirection;
@@ -18,6 +18,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Payees\PayeeConfirmer;
 use App\Services\Recurring\OccurrencePaymentRecorder;
+use App\Services\Recurring\PlanTypeClassifier;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -89,15 +90,19 @@ final readonly class SuggestionApplier
     ): PlannedTransaction {
         return DB::transaction(function () use ($suggestion, $user, $categoryId): PlannedTransaction {
             $payload = $suggestion->payload;
+            $type = app(PlanTypeClassifier::class)->classify(
+                (string) $payload['clean_description'],
+                TransactionDirection::from($payload['direction']),
+                $this->isFlatCardCharge($payload['matched_transaction_ids'] ?? [], $user),
+            );
 
             $planned = PlannedTransaction::create([
                 'user_id' => $user->id,
                 'account_id' => $payload['account_id'],
                 'amount' => $payload['amount'],
                 'direction' => $payload['direction'],
-                'type' => $payload['direction'] === TransactionDirection::Credit->value
-                    ? PlannedTransactionType::Income
-                    : PlannedTransactionType::Bill,
+                'type' => $type,
+                'autopay' => app(PlanTypeClassifier::class)->defaultAutopay($type),
                 'origin' => PlanOrigin::Detected,
                 'description' => $payload['clean_description'],
                 'start_date' => $payload['start_date'],
@@ -177,6 +182,19 @@ final readonly class SuggestionApplier
             Transaction::query()->where('user_id', $user->id)->current()->whereKey($matchedIds)->get(),
             $planned,
         );
+    }
+
+    /**
+     * @param  list<int>  $matchedIds
+     */
+    private function isFlatCardCharge(array $matchedIds, User $user): bool
+    {
+        $rows = Transaction::query()->where('user_id', $user->id)->whereKey($matchedIds)->with('account:id,type')->get(['id', 'account_id', 'amount']);
+
+        return $rows->isNotEmpty()
+            && $rows->every(static fn (Transaction $row): bool => $row->account?->type === AccountClass::CreditCard)
+            && $rows->pluck('amount')->unique()->count() === 1
+            && abs((int) $rows->first()->amount) <= PlanTypeClassifier::FLAT_CARD_CHARGE_LIMIT_CENTS;
     }
 
     private function markAccepted(AnalysisSuggestion $suggestion): void
