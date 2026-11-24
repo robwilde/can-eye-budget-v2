@@ -5,19 +5,16 @@ declare(strict_types=1);
 namespace App\Services\Bills;
 
 use App\DTOs\CashFlowForecast;
-use App\Enums\AccountClass;
 use App\Enums\OccurrenceStatus;
 use App\Enums\TransactionDirection;
-use App\Models\Account;
 use App\Models\PlannedOccurrence;
 use App\Models\PlannedTransaction;
 use App\Models\Transaction;
 use App\Models\User;
-use App\Services\CurrencyConverter;
+use App\Services\Projection\SpendableCash;
 use App\Services\Recurring\PlanAmountResolver;
 use App\Services\Recurring\PlannedOccurrenceGenerator;
 use Carbon\CarbonImmutable;
-use Illuminate\Database\Eloquent\Collection;
 
 /**
  * A deliberately cautious thirty day look at cash: what is in the user's tracked everyday and savings accounts,
@@ -31,21 +28,21 @@ final readonly class CashFlowForecaster
 
     public const int SPEND_WINDOW_DAYS = 90;
 
-    public function __construct(private PlanAmountResolver $amounts, private PlannedOccurrenceGenerator $generator) {}
+    public function __construct(private PlanAmountResolver $amounts, private PlannedOccurrenceGenerator $generator, private SpendableCash $cashOnHand) {}
 
     public function forecast(User $user, ?CarbonImmutable $today = null): ?CashFlowForecast
     {
         $today ??= $user->today();
 
-        $accounts = Account::query()->where('user_id', $user->id)->active()->tracked()->whereIn('type', [AccountClass::Transaction->value, AccountClass::Savings->value])->get(['id', 'balance', 'currency']);
+        $cashOnHand = $this->cashOnHand->for($user, $today);
 
-        if ($accounts->isEmpty()) {
+        if ($cashOnHand === null) {
             return null;
         }
 
-        $cash = $this->cash($user, $accounts, $today);
+        $cash = $cashOnHand['total'];
         $dueByDay = $this->billsByDay($user, $today);
-        $dailySpend = $this->dailySpend($user, $accounts->pluck('id')->all(), $today);
+        $dailySpend = $this->dailySpend($user, $cashOnHand['accountIds'], $today);
         $running = $cash;
         $low = $cash;
         $lowOn = $today;
@@ -60,18 +57,6 @@ final readonly class CashFlowForecaster
         }
 
         return new CashFlowForecast($cash, (int) array_sum($dueByDay), $dailySpend, $low, $lowOn);
-    }
-
-    /** @param  Collection<int, Account>  $accounts */
-    private function cash(User $user, Collection $accounts, CarbonImmutable $today): int
-    {
-        if (! CurrencyConverter::enabled()) {
-            return (int) $accounts->sum('balance');
-        }
-
-        $converter = app(CurrencyConverter::class);
-
-        return (int) $accounts->sum(fn (Account $account): int => $converter->convert($account->balance, $account->currency, $user->base_currency, $today));
     }
 
     /** @return array<int, int> */
