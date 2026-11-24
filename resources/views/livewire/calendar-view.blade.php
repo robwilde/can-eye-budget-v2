@@ -122,6 +122,7 @@
                             <button type="button" class="cib-link" wire:click="skipOccurrence({{ $pip->occurrenceId }})" data-testid="occurrence-skip">{{ __('Skip') }}</button>
                             <input type="date" class="rounded border border-neutral-300 px-1 py-0.5" wire:model="snoozeDates.{{ $pip->occurrenceId }}" aria-label="{{ __('Snooze until') }}" data-testid="occurrence-snooze-date">
                             <button type="button" class="cib-link" wire:click="snoozeOccurrence({{ $pip->occurrenceId }})" data-testid="occurrence-snooze">{{ __('Snooze') }}</button>
+                            <button type="button" class="cib-link" wire:click="$dispatch('open-occurrence-payment-panel', { occurrenceId: {{ $pip->occurrenceId }} })" data-testid="occurrence-payments">{{ __('Payments') }}</button>
                         </div>
                     @endif
                 @empty
@@ -136,4 +137,5 @@
             </div>
         </div>
     @endif
+    <livewire:occurrence-payment-panel />
 </div>

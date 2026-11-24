@@ -147,6 +147,7 @@
                                                 <span class="w-28 tabular-nums">{{ $occurrence->effectiveDueDate()->format('Y-m-d') }}</span>
                                                 <flux:badge size="sm" :color="match($state->value) { 'overdue' => 'red', 'due' => 'amber', 'skipped', 'missed' => 'zinc', 'dormant' => 'yellow', default => 'green' }" data-testid="occurrence-state">{{ $state->label() }}</flux:badge>
                                                 <span class="w-24 tabular-nums">{{ MoneyCast::format(abs($occurrence->effectiveExpectedAmount())) }}</span>
+                                                <flux:button size="sm" variant="ghost" wire:click="$dispatch('open-occurrence-payment-panel', { occurrenceId: {{ $occurrence->id }} })" data-testid="occurrence-payments">{{ __('Payments') }}</flux:button>
                                                 @if($occurrence->status === \App\Enums\OccurrenceStatus::Scheduled)
                                                     <flux:button size="sm" variant="ghost" wire:click="skipOccurrence({{ $occurrence->id }})" data-testid="occurrence-skip">{{ __('Skip') }}</flux:button>
                                                     <flux:button size="sm" variant="ghost" wire:click="markOccurrenceMissed({{ $occurrence->id }})" data-testid="occurrence-missed">{{ __('Mark missed') }}</flux:button>
@@ -265,6 +266,8 @@
             </div>
         </div>
     </flux:modal>
+
+    <livewire:occurrence-payment-panel />
 
     <flux:modal wire:model="showDeleteModal" class="max-w-sm">
         <div class="space-y-4">
