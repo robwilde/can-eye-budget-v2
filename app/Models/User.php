@@ -9,6 +9,7 @@ use App\Casts\UserPreferencesCast;
 use App\DTOs\UserPreferences;
 use App\Enums\PayFrequency;
 use App\Enums\RedbarkTransport;
+use App\Enums\TransactionPeriod;
 use App\Services\CurrencyConverter;
 use App\Services\Recurring\OccurrenceSchedule;
 use App\Support\Currencies;
@@ -232,6 +233,22 @@ final class User extends Authenticatable
         return $this->pay_amount !== null
             && $this->pay_frequency !== null
             && $this->next_pay_date !== null;
+    }
+
+    /**
+     * The period value the transactions list and the reports open on: the saved default period,
+     * or this month when it is not one the pages offer or needs a pay cycle the user no longer has.
+     */
+    public function defaultListPeriod(): string
+    {
+        $period = $this->preferences->defaultPeriod;
+
+        if (! in_array($period, TransactionPeriod::defaultOptions(), true)
+            || ($period === TransactionPeriod::PayCycle && ! $this->hasPayCycleConfigured())) {
+            return TransactionPeriod::ThisMonth->value;
+        }
+
+        return $period->value;
     }
 
     /**
