@@ -21,6 +21,19 @@ return [
 
     'recurring_detection' => env('BUDGET_RECURRING_DETECTION', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Recurring Maintenance
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, the nightly app:recurring-maintenance command queues one job per
+    | user that records price changes from consistent payments and retires stale
+    | plans. Off by default.
+    |
+    */
+
+    'recurring_maintenance' => (bool) env('BUDGET_RECURRING_MAINTENANCE', false),
+
     'jev_categorisation' => env('BUDGET_JEV_CATEGORISATION', false),
 
     /*

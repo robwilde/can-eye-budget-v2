@@ -32,6 +32,12 @@ Schedule::command('app:settle-pending-payments')
     ->withoutOverlapping()
     ->onOneServer();
 
+Schedule::command('app:recurring-maintenance')
+    ->dailyAt('02:30')
+    ->name('recurring:maintenance')
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('app:scan-bnpl-emails')
     ->dailyAt('04:00')
     ->name('bnpl:scan-emails')
