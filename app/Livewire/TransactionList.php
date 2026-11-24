@@ -404,6 +404,10 @@ final class TransactionList extends Component
      */
     public function mount(): void
     {
+        if ($this->period === TransactionPeriod::ThisMonth->value && request()->query('period') === null) {
+            $this->period = auth()->user()->defaultListPeriod();
+        }
+
         $this->restoreRememberedPeriod();
 
         if (! in_array($this->direction, self::VALID_DIRECTIONS, true)) {

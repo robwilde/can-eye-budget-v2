@@ -122,6 +122,10 @@ final class CategoryReport extends Component
     {
         $this->print = $print;
 
+        if ($this->period === TransactionPeriod::ThisMonth->value && request()->query('period') === null) {
+            $this->period = $this->user()->defaultListPeriod();
+        }
+
         if (! TransactionPeriod::tryFrom($this->period)) {
             $this->period = 'this-month';
         }
