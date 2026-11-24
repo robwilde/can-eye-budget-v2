@@ -239,6 +239,7 @@
                         </optgroup>
                     @endif
                 </flux:select>
+                <flux:error name="transfer_to_account_id" data-testid="transfer-recurring-off-error" />
 
                 @if($bankFeedUnlinkedTransfer)
                     @php($candidates = $this->transferCandidates())

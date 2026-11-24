@@ -17,6 +17,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('settings/pay-cycle', 'pages::settings.pay-cycle')->name('pay-cycle.edit');
     Route::livewire('settings/currency', 'pages::settings.currency')->name('currency.edit');
     Route::livewire('settings/preferences', 'pages::settings.preferences')->name('preferences.edit');
+    Route::livewire('settings/recurring', 'pages::settings.recurring')->name('recurring.edit');
     Route::livewire('settings/providers', 'pages::settings.providers')->name('providers.edit');
     Route::livewire('settings/exports', 'pages::settings.exports')->name('exports.edit');
     Route::get('settings/exports/{export}/download', DataExportDownloadController::class)->where('export', '[0-9]{1,18}')->name('exports.download');
