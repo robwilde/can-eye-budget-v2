@@ -623,6 +623,24 @@
                 </div>
             @endif
 
+            @if($editingTransactionId && $mode === 'enter' && $paidPlans->isNotEmpty())
+                <hr class="panel-rule">
+
+                <div class="space-y-2" data-testid="transaction-paid-plans">
+                    <span class="cib-label">{{ __('Bills paid') }}</span>
+                    @foreach($paidPlans as $paid)
+                        <div class="flex items-center justify-between gap-2 text-sm" wire:key="paid-plan-{{ $paid['plan']->id }}">
+                            @if(config('budget.bills_page') && \App\Services\Recurring\RecurringGate::enabled(auth()->user()))
+                                <a href="{{ route('bills', ['plan' => $paid['plan']->id]) }}" class="cib-link" data-testid="paid-plan-link">{{ $paid['plan']->description }}</a>
+                            @else
+                                <span>{{ $paid['plan']->description }}</span>
+                            @endif
+                            <span class="tabular-nums">{{ $formatMoney($paid['amount']) }}</span>
+                        </div>
+                    @endforeach
+                </div>
+            @endif
+
             @if($editingTransactionId && $mode === 'enter')
                 <hr class="panel-rule">
 

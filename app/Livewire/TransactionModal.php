@@ -32,6 +32,7 @@ use App\Livewire\Concerns\PicksCadence;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Merchant;
+use App\Models\PlannedPayment;
 use App\Models\PlannedTransaction;
 use App\Models\Tag;
 use App\Models\Transaction;
@@ -1044,6 +1045,7 @@ final class TransactionModal extends Component
             'parsedAmount' => $parsed->amount ?? 0,
             'parsedDescription' => $parsed->description ?? '',
             'attachments' => $this->currentAttachments(),
+            'paidPlans' => $this->paidPlans(),
             'lockedFields' => $this->lockedFieldLabels($editing),
             'canSplit' => $this->showModal
                 && $editing instanceof Transaction
@@ -1405,6 +1407,28 @@ final class TransactionModal extends Component
         return $pending instanceof Transaction && $pending->status === TransactionStatus::Pending
             ? app(PendingMergeService::class)->candidatesFor($pending, min(max($this->mergeCandidateLimit, PendingMergeService::PAGE_SIZE), 200))
             : new Collection;
+    }
+
+    /**
+     * The bills the edited transaction paid, with what it gave each, so a payment is traceable from the
+     * transaction. Only the user's own bills, through the payments the transaction made.
+     *
+     * @return \Illuminate\Support\Collection<int, array{plan: PlannedTransaction, amount: int}>
+     */
+    private function paidPlans(): \Illuminate\Support\Collection
+    {
+        if ($this->editingTransactionId === null) {
+            return new \Illuminate\Support\Collection;
+        }
+
+        return PlannedPayment::query()
+            ->where('transaction_id', $this->editingTransactionId)
+            ->whereHas('occurrence', fn ($occurrences) => $occurrences->whereIn('planned_transaction_id', PlannedTransaction::query()->where('user_id', auth()->id())->billShaped()->select('id')))
+            ->with('occurrence.plannedTransaction')
+            ->get()
+            ->groupBy(fn (PlannedPayment $payment): int => $payment->occurrence->planned_transaction_id)
+            ->map(fn ($payments): array => ['plan' => $payments->first()->occurrence->plannedTransaction, 'amount' => (int) $payments->sum('amount')])
+            ->values();
     }
 
     /** @return Collection<int, TransactionAttachment> */

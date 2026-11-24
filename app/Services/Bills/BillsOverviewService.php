@@ -128,6 +128,15 @@ final class BillsOverviewService
     }
 
     /**
+     * One plan's current bill: its earliest open occurrence from the start of the month on, else its latest settled
+     * one. Null when it has neither.
+     */
+    public function currentFor(PlannedTransaction $plan, ?CarbonImmutable $today = null): ?BillRow
+    {
+        return $this->nextOpenByPlan(collect([$plan]), $today ?? $plan->user->today())[$plan->id] ?? null;
+    }
+
+    /**
      * Active subscriptions normalised to a month and a year from their cadence, and the ten most recent price
      * changes of the last twelve months across the user's subscriptions.
      */
