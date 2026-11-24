@@ -21,7 +21,7 @@ final class OccurrenceStateResolver
      * after. An open occurrence of a paused plan is dormant and never due or overdue. $paidCents is
      * what has been paid against it, read from the occurrence when not given.
      */
-    public function resolve(PlannedOccurrence $occurrence, CarbonImmutable $today, ?int $paidCents = null): OccurrenceState
+    public function resolve(PlannedOccurrence $occurrence, CarbonImmutable $today, ?int $paidCents = null, ?int $expectedCents = null): OccurrenceState
     {
         if ($occurrence->status === OccurrenceStatus::Paid) {
             return OccurrenceState::Paid;
@@ -41,7 +41,7 @@ final class OccurrenceStateResolver
             return OccurrenceState::Dormant;
         }
 
-        $expected = abs($occurrence->effectiveExpectedAmount());
+        $expected = $expectedCents ?? abs($occurrence->effectiveExpectedAmount());
         $paidCents ??= $occurrence->paidCents();
 
         if ($paidCents >= $expected && $expected > 0) {
