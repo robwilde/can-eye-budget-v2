@@ -4,6 +4,7 @@
         <livewire:recurring-transaction-review />
         <livewire:payee-review :onboarding="false" />
         <livewire:planned-transaction-manager />
+        <livewire:bill-audit-panel />
         <livewire:user-rule-manager />
         <livewire:transfer-rule-list />
     </div>
