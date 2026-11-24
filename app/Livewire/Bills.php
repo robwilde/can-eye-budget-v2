@@ -19,9 +19,11 @@ use App\Models\User;
 use App\Services\Bills\BillNoticeBuilder;
 use App\Services\Bills\BillsCalendarService;
 use App\Services\Bills\BillsOverviewService;
+use App\Services\Projection\PaycheckPlanner;
 use App\Services\Recurring\PlannedPaymentReview;
 use App\Services\Recurring\RecurringGate;
 use App\Services\Recurring\RecurringScanner;
+use Carbon\CarbonImmutable;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Collection;
@@ -38,6 +40,7 @@ use Livewire\Component;
  * @property-read BillsOverview $overview
  * @property-read BillsMonth $calendar
  * @property-read list<BillNotice> $notices
+ * @property-read list<array{startsOn: CarbonImmutable, sources: list<string>, rows: list<BillRow>, obligation: int}> $payMarkers
  * @property-read Collection<int, BillRow> $allBills
  * @property-read array<int, int> $reviewOccurrences
  * @property-read bool $hasBills
@@ -150,6 +153,30 @@ final class Bills extends Component
     public function calendar(): BillsMonth
     {
         return $this->calendarService()->month($this->user(), $this->month);
+    }
+
+    /**
+     * The pay periods of the current month with the bills due in each, only when income splits the month.
+     *
+     * @return list<array{startsOn: CarbonImmutable, sources: list<string>, rows: list<BillRow>, obligation: int}>
+     */
+    #[Computed]
+    public function payMarkers(): array
+    {
+        $markers = app(PaycheckPlanner::class)->monthMarkers($this->user());
+
+        if ($markers === []) {
+            return [];
+        }
+
+        $rows = $this->overview->thisMonth;
+
+        return array_map(static function (array $marker, int $index) use ($markers, $rows): array {
+            $next = $markers[$index + 1]['startsOn'] ?? null;
+            $inPeriod = array_values(array_filter($rows, static fn (BillRow $row): bool => $row->dueOn->greaterThanOrEqualTo($marker['startsOn']) && ($next === null || $row->dueOn->lessThan($next))));
+
+            return [...$marker, 'rows' => $inPeriod, 'obligation' => (int) array_sum(array_map(static fn (BillRow $row): int => $row->expected, $inPeriod))];
+        }, $markers, array_keys($markers));
     }
 
     /** @return list<BillNotice> */

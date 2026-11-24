@@ -75,6 +75,7 @@ final class Dashboard extends Component
      * Needed, buffer, Available, Owed, planned — stay current without a page reload.
      */
     #[On('transaction-saved')]
+    #[On('plan-declared')]
     public function refreshFigures(): void
     {
         unset($this->buffer, $this->daysUntilPay, $this->totalOwed, $this->totalAvailable, $this->totalNeeded, $this->numbers, $this->budgetsThisCycle, $this->nextThreePlanned, $this->spendLast7Days, $this->needsBankConnection, $this->statementsDue); // @phpstan-ignore property.notFound
