@@ -6,6 +6,7 @@ namespace App\Jobs;
 
 use App\Models\User;
 use App\Services\Recurring\PlannedOccurrenceGenerator;
+use App\Services\Recurring\RecurringGate;
 use App\Support\Audit\AttributeJobToUser;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -13,7 +14,7 @@ use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 
 /**
- * Fills one user's stored plan occurrences. Queued when a plan is created or its schedule edited,
+ * Fills one user's stored plan occurrences (nothing while the user has recurring switched off). Queued when a plan is created or its schedule edited,
  * after a transaction analysis and every night, so it is upkeep and not audited as a user action.
  * A rebuild also removes the user's open occurrences from before the current cycle first.
  * Queued runs for the same user and rebuild flag collapse into one until it starts.
@@ -55,6 +56,10 @@ final class GeneratePlannedOccurrencesJob implements ShouldBeUniqueUntilProcessi
 
     public function handle(PlannedOccurrenceGenerator $generator): void
     {
+        if (! RecurringGate::enabled($this->user)) {
+            return;
+        }
+
         if ($this->rebuildHistory) {
             $generator->rebuildHistory($this->user);
         }
