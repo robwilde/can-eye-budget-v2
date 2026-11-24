@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\HealthCheckController;
 use App\Http\Middleware\AttributeRequestToUser;
+use App\Http\Middleware\EnsurePreviewFeatures;
 use App\Http\Middleware\SetLocale;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
@@ -26,6 +27,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->trustProxies(at: '*');
 
         $middleware->preventRequestsDuringMaintenance(except: ['up']);
+
+        $middleware->alias(['preview' => EnsurePreviewFeatures::class]);
 
         $middleware->web(append: [SetLocale::class, AttributeRequestToUser::class]);
 
