@@ -50,6 +50,24 @@
     </div>
 
     @if($tab === 'overview')
+        @if($this->notices !== [])
+            <flux:card class="space-y-1" data-testid="bill-notices">
+                @foreach($this->notices as $notice)
+                    <div class="flex flex-wrap items-center gap-2 text-sm" wire:key="notice-{{ $notice->kind }}-{{ $notice->planId }}-{{ $notice->date->format('Y-m-d') }}" data-testid="bill-notice" data-kind="{{ $notice->kind }}" data-urgent="{{ $notice->urgent ? 'true' : 'false' }}">
+                        @if($notice->urgent)<flux:badge size="sm" color="red" data-testid="notice-urgent">{{ __('Urgent') }}</flux:badge>@endif
+                        @if($notice->material)<flux:badge size="sm" color="amber" data-testid="notice-material">{{ __('Material') }}</flux:badge>@endif
+                        <span class="font-medium">{{ $notice->name }}</span>
+                        <span>
+                            @if($notice->kind === 'trial'){{ __('Trial ends :date', ['date' => $notice->date->format('Y-m-d')]) }}
+                            @elseif($notice->kind === 'renewal'){{ __('Renews :date', ['date' => $notice->date->format('Y-m-d')]) }}
+                            @else{{ __('Price changed :date: :from to :to', ['date' => $notice->date->format('Y-m-d'), 'from' => MoneyCast::format($notice->previousAmount), 'to' => MoneyCast::format($notice->newAmount)]) }}
+                            @endif
+                        </span>
+                    </div>
+                @endforeach
+            </flux:card>
+        @endif
+
         <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5" data-testid="bills-kpis">
             <flux:card><flux:text size="sm">{{ __('Left this month') }}</flux:text><div class="text-xl font-semibold" data-testid="kpi-remaining">{{ MoneyCast::format($kpis->remainingThisMonth) }}</div></flux:card>
             <flux:card><flux:text size="sm">{{ __('Paid this month') }}</flux:text><div class="text-xl font-semibold" data-testid="kpi-paid">{{ MoneyCast::format($kpis->paidThisMonth) }}</div></flux:card>

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Livewire;
 
+use App\DTOs\BillNotice;
 use App\DTOs\BillRow;
 use App\DTOs\BillsMonth;
 use App\DTOs\BillsOverview;
@@ -15,6 +16,7 @@ use App\Models\AnalysisSuggestion;
 use App\Models\PlannedPayment;
 use App\Models\PlannedTransaction;
 use App\Models\User;
+use App\Services\Bills\BillNoticeBuilder;
 use App\Services\Bills\BillsCalendarService;
 use App\Services\Bills\BillsOverviewService;
 use App\Services\Recurring\PlannedPaymentReview;
@@ -35,6 +37,7 @@ use Livewire\Component;
  *
  * @property-read BillsOverview $overview
  * @property-read BillsMonth $calendar
+ * @property-read list<BillNotice> $notices
  * @property-read Collection<int, BillRow> $allBills
  * @property-read array<int, int> $reviewOccurrences
  * @property-read bool $hasBills
@@ -147,6 +150,13 @@ final class Bills extends Component
     public function calendar(): BillsMonth
     {
         return $this->calendarService()->month($this->user(), $this->month);
+    }
+
+    /** @return list<BillNotice> */
+    #[Computed]
+    public function notices(): array
+    {
+        return app(BillNoticeBuilder::class)->build($this->user());
     }
 
     #[Computed]
