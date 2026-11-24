@@ -356,3 +356,21 @@ test('totalNeededUntilPayday excludes planned transfers categorised at the paren
 
     expect($user->totalNeededUntilPayday())->toBe(25000);
 });
+
+test('it leaves paid bills out of total needed until payday', function () {
+    Illuminate\Support\Facades\Bus::fake();
+    $user = User::factory()->withPayCycle()->create(['next_pay_date' => now()->addDays(10)->startOfDay()]);
+    $account = Account::factory()->for($user)->create();
+    $date = now()->addDays(2)->startOfDay();
+
+    $paid = PlannedTransaction::factory()->for($user)->for($account)->create(['direction' => TransactionDirection::Debit, 'amount' => 7000, 'start_date' => $date, 'frequency' => RecurrenceFrequency::DontRepeat]);
+    App\Models\PlannedOccurrence::factory()->for($paid, 'plannedTransaction')->create(['original_date' => $date->toDateString(), 'due_date' => $date->toDateString(), 'status' => App\Enums\OccurrenceStatus::Paid, 'closed_at' => now()]);
+
+    $partly = PlannedTransaction::factory()->for($user)->for($account)->create(['direction' => TransactionDirection::Debit, 'amount' => 5000, 'start_date' => $date, 'frequency' => RecurrenceFrequency::DontRepeat]);
+    $occurrence = App\Models\PlannedOccurrence::factory()->for($partly, 'plannedTransaction')->create(['original_date' => $date->toDateString(), 'due_date' => $date->toDateString()]);
+    App\Models\PlannedPayment::factory()->create(['planned_occurrence_id' => $occurrence->id, 'transaction_id' => null, 'amount' => 2000, 'paid_on' => now()->toDateString()]);
+
+    PlannedTransaction::factory()->for($user)->for($account)->create(['direction' => TransactionDirection::Debit, 'amount' => 1000, 'start_date' => $date, 'frequency' => RecurrenceFrequency::DontRepeat]);
+
+    expect($user->totalNeededUntilPayday())->toBe(3000 + 1000);
+});
