@@ -12,6 +12,7 @@ use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Exceptions\TypeSafe\TypeSafeException;
 use App\Livewire\Concerns\EditsPlanSeries;
+use App\Livewire\Concerns\PicksCadence;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Merchant;
@@ -41,6 +42,7 @@ use Livewire\WithPagination;
 final class PlanDeclarationForm extends Component
 {
     use EditsPlanSeries;
+    use PicksCadence;
     use WithPagination;
 
     public const string KIND_BILL = 'bill';
@@ -79,6 +81,7 @@ final class PlanDeclarationForm extends Component
 
         $this->resetValidation();
         $this->resetSeriesFields();
+        $this->resetCadence();
         $this->kind = $kind === self::KIND_INCOME ? self::KIND_INCOME : self::KIND_BILL;
         $this->planType = $this->defaultPlanType();
         $this->description = '';
@@ -260,6 +263,8 @@ final class PlanDeclarationForm extends Component
                 'description' => $description,
                 'start_date' => $validated['startDate'],
                 'frequency' => RecurrenceFrequency::from($validated['frequency']),
+                'schedule_pinned' => true,
+                ...$this->cadenceAttributes(RecurrenceFrequency::from($validated['frequency'])),
                 'origin' => PlanOrigin::Declared,
                 'is_active' => true,
                 ...$this->seriesAttributes($direction, false, $merchantId, $this->notes, 'always', null),
@@ -292,7 +297,7 @@ final class PlanDeclarationForm extends Component
             'accounts' => Account::query()->where('user_id', $user->id)->active()->tracked()->orderBy('name')->get(['id', 'name']),
             'categories' => Category::visibleSortedByFullPath($user->id),
             'merchants' => Merchant::query()->where('user_id', $user->id)->orderBy('name')->get(['id', 'name']),
-            'frequencies' => RecurrenceFrequency::selectable(),
+            'frequencies' => RecurrenceFrequency::pickable(),
             'smartFillAvailable' => PlanSmartFiller::available(),
             'typeOptions' => $this->typeChoices($this->declaredDirection(), false)['options'],
             'patterns' => $this->showModal ? $this->patterns : collect(), // @phpstan-ignore property.notFound
@@ -307,7 +312,8 @@ final class PlanDeclarationForm extends Component
             'description' => ['required', 'string', 'max:255'],
             'amount' => ['required', 'numeric', 'decimal:0,2', 'min:0.01', 'max:9999999999.99'],
             'startDate' => ['required', 'date_format:Y-m-d'],
-            'frequency' => ['required', 'string', Rule::in(array_map(static fn (RecurrenceFrequency $frequency): string => $frequency->value, RecurrenceFrequency::selectable()))],
+            'frequency' => ['required', 'string', Rule::in(array_map(static fn (RecurrenceFrequency $frequency): string => $frequency->value, RecurrenceFrequency::pickable()))],
+            ...$this->cadenceRules(),
             'accountId' => ['required', Rule::exists('accounts', 'id')->where('user_id', auth()->id())->where('is_tracked', true)],
             'categoryId' => ['nullable', Rule::exists('categories', 'id')->where('user_id', auth()->id())->where('is_hidden', 0)],
             'merchantId' => ['nullable', Rule::exists('merchants', 'id')->where('user_id', auth()->id())],
@@ -351,7 +357,7 @@ final class PlanDeclarationForm extends Component
         $this->accountId = Account::query()->where('user_id', $user->id)->active()->tracked()->whereKey($accountId)->exists() ? $accountId : $this->defaultAccountId($user);
         $this->categoryId = $categoryId !== null && Category::query()->where('user_id', $user->id)->visible()->whereKey($categoryId)->exists() ? $categoryId : null;
         $this->merchantId = $merchantId !== null && Merchant::query()->where('user_id', $user->id)->whereKey($merchantId)->exists() ? $merchantId : null;
-        $this->frequency = in_array($frequency, RecurrenceFrequency::selectable(), true)
+        $this->frequency = $frequency->isPickable()
             ? $frequency->value
             : ($kind === self::KIND_INCOME ? RecurrenceFrequency::Every2Weeks->value : RecurrenceFrequency::EveryMonth->value);
         $this->startDate = $startDate->toDateString();
@@ -378,7 +384,7 @@ final class PlanDeclarationForm extends Component
 
         $frequency = $suggestion->frequency === null ? null : RecurrenceFrequency::tryFrom($suggestion->frequency);
 
-        if ($frequency !== null && in_array($frequency, RecurrenceFrequency::selectable(), true)) {
+        if ($frequency !== null && $frequency->isPickable()) {
             $this->frequency = $frequency->value;
         }
 

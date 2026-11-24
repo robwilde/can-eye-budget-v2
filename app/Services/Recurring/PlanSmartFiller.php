@@ -218,8 +218,8 @@ final readonly class PlanSmartFiller
     {
         $options = [];
 
-        foreach (RecurrenceFrequency::selectable() as $frequency) {
-            if ($frequency !== RecurrenceFrequency::DontRepeat) {
+        foreach (RecurrenceFrequency::pickable() as $frequency) {
+            if ($frequency !== RecurrenceFrequency::DontRepeat && ! $frequency->usesInterval()) {
                 $options[$frequency->value] = $frequency->label();
             }
         }

@@ -754,39 +754,37 @@ it('shows the interval label of a plan on a new cadence', function () {
         ->assertSee('Every 5 months');
 });
 
-it('offers only the fixed cadences in the edit form', function () {
+it('offers every cadence the picker can express in the edit form', function () {
     $plan = managerPlan($this);
 
     managerEditing($this, $plan)
         ->assertSeeHtml('value="every-month"')
-        ->assertDontSeeHtml('value="semimonthly"')
-        ->assertDontSeeHtml('value="every-n-months"');
+        ->assertSeeHtml('value="semimonthly"')
+        ->assertSeeHtml('value="every-n-months"')
+        ->assertDontSeeHtml('value="two-on-two-off"');
 });
 
-it('shows a plan on a custom cadence as kept as is and keeps its schedule when saved', function () {
-    $plan = managerPlan($this, ['frequency' => RecurrenceFrequency::Semimonthly, 'days_of_month' => [15, 'last']]);
+it('shows an unsupported frequency as custom and keeps it on save', function () {
+    $plan = managerPlan($this, ['frequency' => RecurrenceFrequency::TwoOnTwoOff]);
 
     managerEditing($this, $plan)
-        ->assertSeeHtml('value="semimonthly"')
-        ->assertSee('Custom schedule (kept as is)')
+        ->assertSeeHtml('value="two-on-two-off"')
+        ->assertSee('Custom')
         ->set('autopay', true)
         ->call('save')
         ->assertHasNoErrors();
 
-    $fresh = $plan->fresh();
-
-    expect($fresh->frequency)->toBe(RecurrenceFrequency::Semimonthly)
-        ->and($fresh->days_of_month)->toBe([15, 'last']);
+    expect($plan->fresh()->frequency)->toBe(RecurrenceFrequency::TwoOnTwoOff);
 });
 
-it('clears the interval and days when a custom cadence is changed to a fixed one', function () {
+it('keeps the interval and days when a cadence that uses them is picked and clears them for one that does not', function () {
     $plan = managerPlan($this, ['frequency' => RecurrenceFrequency::EveryNMonths, 'recurrence_interval' => 5, 'days_of_month' => [10]]);
 
-    managerEditing($this, $plan)->set('frequency', 'every-month')->call('save')->assertHasNoErrors();
+    managerEditing($this, $plan)->assertSet('recurrenceInterval', '5')->assertSet('daysOfMonth', '10')->set('frequency', 'every-month')->call('save')->assertHasNoErrors();
 
-    $fresh = $plan->fresh();
+    expect($plan->fresh()->days_of_month)->toBe([10])->and($plan->fresh()->recurrence_interval)->toBe(1);
 
-    expect($fresh->frequency)->toBe(RecurrenceFrequency::EveryMonth)
-        ->and($fresh->recurrence_interval)->toBe(1)
-        ->and($fresh->days_of_month)->toBeNull();
+    managerEditing($this, $plan->fresh())->set('frequency', 'every-week')->call('save')->assertHasNoErrors();
+
+    expect($plan->fresh()->days_of_month)->toBeNull()->and($plan->fresh()->recurrence_interval)->toBe(1);
 });

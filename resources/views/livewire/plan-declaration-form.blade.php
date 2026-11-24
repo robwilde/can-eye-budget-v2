@@ -94,13 +94,15 @@
 
                 <flux:field>
                     <flux:label>{{ __('Repeats') }}</flux:label>
-                    <flux:select wire:model="frequency" data-testid="declare-frequency">
+                    <flux:select wire:model.live="frequency" data-testid="declare-frequency">
                         @foreach($frequencies as $recurrenceFrequency)
-                            <flux:select.option value="{{ $recurrenceFrequency->value }}">{{ $recurrenceFrequency->label() }}</flux:select.option>
+                            <flux:select.option value="{{ $recurrenceFrequency->value }}">{{ $recurrenceFrequency->pickerLabel() }}</flux:select.option>
                         @endforeach
                     </flux:select>
                     <flux:error name="frequency" />
                 </flux:field>
+
+                <x-cadence-fields :frequency="$frequency" scope="declare" />
 
                 <flux:field>
                     <flux:label>{{ __('Type') }}</flux:label>

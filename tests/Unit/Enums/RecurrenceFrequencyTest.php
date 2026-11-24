@@ -9,7 +9,7 @@ use Carbon\CarbonImmutable;
 
 test('all recurrence frequency cases exist', function () {
     expect(RecurrenceFrequency::cases())->toHaveCount(22)
-        ->and(RecurrenceFrequency::selectable())->toHaveCount(18);
+        ->and(RecurrenceFrequency::pickable())->toHaveCount(21);
 });
 
 test('recurrence frequency has correct backing values', function () {
@@ -161,8 +161,8 @@ test('all repeating frequencies return carbon immutable', function (RecurrenceFr
     expect($frequency->nextOccurrence($from))->toBeInstanceOf(CarbonImmutable::class);
 })->with(
     array_filter(
-        RecurrenceFrequency::selectable(),
-        fn (RecurrenceFrequency $f) => $f !== RecurrenceFrequency::DontRepeat,
+        RecurrenceFrequency::cases(),
+        fn (RecurrenceFrequency $f) => ! in_array($f, [RecurrenceFrequency::DontRepeat, RecurrenceFrequency::Semimonthly, RecurrenceFrequency::EveryNWeeks, RecurrenceFrequency::EveryNMonths, RecurrenceFrequency::EveryNYears], true),
     ),
 );
 
@@ -173,8 +173,8 @@ test('all repeating frequencies return a date after the input', function (Recurr
     expect($result->greaterThan($from))->toBeTrue();
 })->with(
     array_filter(
-        RecurrenceFrequency::selectable(),
-        fn (RecurrenceFrequency $f) => $f !== RecurrenceFrequency::DontRepeat,
+        RecurrenceFrequency::cases(),
+        fn (RecurrenceFrequency $f) => ! in_array($f, [RecurrenceFrequency::DontRepeat, RecurrenceFrequency::Semimonthly, RecurrenceFrequency::EveryNWeeks, RecurrenceFrequency::EveryNMonths, RecurrenceFrequency::EveryNYears], true),
     ),
 );
 

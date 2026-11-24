@@ -33,17 +33,35 @@ enum RecurrenceFrequency: string
     case EveryNYears = 'every-n-years';
 
     /**
-     * The cadences the plan editors offer today. The interval and day-of-month cadences need the
-     * cadence picker before they can be chosen.
+     * The cadences the cadence picker can express: every one but "2 on 2 off", which no preset, interval or
+     * day list describes. A plan on another cadence reads back as Custom and keeps it until the user picks one.
      *
      * @return list<self>
      */
-    public static function selectable(): array
+    public static function pickable(): array
     {
-        return array_values(array_filter(
-            self::cases(),
-            static fn (self $frequency): bool => ! $frequency->usesInterval() && $frequency !== self::Semimonthly,
-        ));
+        return array_values(array_filter(self::cases(), static fn (self $frequency): bool => $frequency->isPickable()));
+    }
+
+    public function isPickable(): bool
+    {
+        return $this !== self::TwoOnTwoOff;
+    }
+
+    /** Whether the picker lets the user choose the days of the month this cadence falls on. */
+    public function supportsDaysOfMonth(): bool
+    {
+        return in_array($this, [self::EveryMonth, self::Every3Months, self::Every6Months, self::EveryNMonths, self::Semimonthly], true);
+    }
+
+    /** The largest interval the picker accepts for an interval cadence. */
+    public function maxInterval(): int
+    {
+        return match ($this) {
+            self::EveryNWeeks, self::EveryNMonths => 99,
+            self::EveryNYears => 20,
+            default => 1,
+        };
     }
 
     public function usesInterval(): bool
@@ -85,6 +103,17 @@ enum RecurrenceFrequency: string
             self::EveryNMonths => $interval,
             self::EveryNYears => 12 * $interval,
             default => null,
+        };
+    }
+
+    /** The name the picker shows: an interval cadence reads "Every N weeks" so it is not mistaken for a preset. */
+    public function pickerLabel(): string
+    {
+        return match ($this) {
+            self::EveryNWeeks => __('Every N weeks'),
+            self::EveryNMonths => __('Every N months'),
+            self::EveryNYears => __('Every N years'),
+            default => $this->label(),
         };
     }
 

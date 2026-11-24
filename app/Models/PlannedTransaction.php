@@ -89,6 +89,17 @@ final class PlannedTransaction extends Model
         'is_active',
     ];
 
+    /** The schedule columns a cadence or end-condition edit changes; pausing a plan is not one. */
+    public const array CADENCE_COLUMNS = [
+        'start_date',
+        'frequency',
+        'recurrence_interval',
+        'days_of_month',
+        'weekend_adjustment',
+        'until_date',
+        'end_after_count',
+    ];
+
     public const int WEEKEND_ADJUSTMENT_REACH_DAYS = 3;
 
     /**

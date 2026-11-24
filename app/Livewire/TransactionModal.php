@@ -27,6 +27,7 @@ use App\Exceptions\TransactionSplitRefusedException;
 use App\Exceptions\TransferAlreadyLinkedException;
 use App\Exceptions\TransferLinkRefusedException;
 use App\Livewire\Concerns\EditsPlanSeries;
+use App\Livewire\Concerns\PicksCadence;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Merchant;
@@ -76,6 +77,7 @@ use Throwable;
 final class TransactionModal extends Component
 {
     use EditsPlanSeries;
+    use PicksCadence;
     use WithFileUploads;
 
     private const int RATE_LOOKUP_TTL_SECONDS = 300;
@@ -427,6 +429,7 @@ final class TransactionModal extends Component
         $this->categoryPicked = false;
         $this->date = $occurrenceDate ?? $planned->start_date->format('Y-m-d');
         $this->frequency = $planned->frequency->value;
+        $this->fillCadenceFrom($planned);
 
         if ($planned->end_after_count !== null) {
             $this->untilType = 'after-count';
@@ -614,6 +617,16 @@ final class TransactionModal extends Component
 
         $this->date = $this->nextPlanStartDate($transaction->post_date->toImmutable());
         $this->refreshCategoriseContradictions();
+    }
+
+    public function updatedRecurrenceInterval(): void
+    {
+        $this->updatedFrequency();
+    }
+
+    public function updatedDaysOfMonth(): void
+    {
+        $this->updatedFrequency();
     }
 
     public function updatedFrequency(): void
@@ -1876,6 +1889,13 @@ final class TransactionModal extends Component
         });
     }
 
+    private function editedPlannedTransaction(): ?PlannedTransaction
+    {
+        return $this->editingPlannedTransactionId === null
+            ? null
+            : PlannedTransaction::query()->where('user_id', auth()->id())->find($this->editingPlannedTransactionId);
+    }
+
     private function updatePlannedTransaction(): bool
     {
         $resolved = $this->resolvePlannedTransactionWithParsedAmount();
@@ -1889,9 +1909,12 @@ final class TransactionModal extends Component
         $data = $this->buildPlannedTransactionData($parsed);
         unset($data['user_id'], $data['is_active']);
 
-        if ($data['frequency'] !== $planned->frequency) {
-            $data['recurrence_interval'] = 1;
-            $data['days_of_month'] = null;
+        if (! $this->cadenceChanged($planned, $data['frequency'])) {
+            unset($data['schedule_pinned']);
+        }
+
+        if ($this->occurrenceDate !== null && $this->date === $this->occurrenceDate) {
+            unset($data['start_date']);
         }
 
         DB::transaction(function () use ($planned, $data): void {
@@ -2665,6 +2688,8 @@ final class TransactionModal extends Component
             'start_date' => $this->date,
             'frequency' => RecurrenceFrequency::from($this->frequency),
             'is_active' => true,
+            'schedule_pinned' => true,
+            ...$this->cadenceAttributes(RecurrenceFrequency::from($this->frequency), $this->editedPlannedTransaction()),
             ...$this->seriesAttributes(
                 $direction,
                 $this->transactionType === 'transfer',
@@ -2734,10 +2759,7 @@ final class TransactionModal extends Component
      */
     private function frequencyOptions(): array
     {
-        $options = RecurrenceFrequency::selectable();
-        $current = RecurrenceFrequency::tryFrom($this->frequency);
-
-        return $current !== null && ! in_array($current, $options, true) ? [...$options, $current] : $options;
+        return $this->cadenceOptions(RecurrenceFrequency::tryFrom($this->frequency));
     }
 
     /**
@@ -2756,7 +2778,9 @@ final class TransactionModal extends Component
 
         $date = $from->startOfDay();
 
-        foreach (ScheduleGenerator::dates($frequency, $date) as $scheduled) {
+        $days = $frequency->supportsDaysOfMonth() ? $this->daysOfMonthList() : null;
+
+        foreach (ScheduleGenerator::dates($frequency, $date, $frequency->usesInterval() ? max(1, (int) $this->recurrenceInterval) : 1, $days) as $scheduled) {
             if ($scheduled->greaterThan($today)) {
                 return $scheduled->format('Y-m-d');
             }
@@ -3039,6 +3063,7 @@ final class TransactionModal extends Component
         $this->isSplitChild = false;
         $this->mode = 'enter';
         $this->frequency = 'every-month';
+        $this->resetCadence();
         $this->untilType = 'always';
         $this->untilDate = null;
         $this->resetSeriesFields();
@@ -3136,6 +3161,7 @@ final class TransactionModal extends Component
 
         if ($this->mode === 'plan') {
             $rules['frequency'] = ['required', Rule::in(array_column(RecurrenceFrequency::cases(), 'value'))];
+            $rules = [...$rules, ...$this->cadenceRules()];
             $rules['untilType'] = ['required', Rule::in(['always', 'until-date', 'after-count'])];
             $rules['untilDate'] = $this->untilType === 'until-date'
                 ? ['required', 'date_format:Y-m-d', 'after_or_equal:date']
