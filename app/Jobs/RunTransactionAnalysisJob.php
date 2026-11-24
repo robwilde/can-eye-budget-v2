@@ -32,6 +32,12 @@ final class RunTransactionAnalysisJob implements ShouldBeUnique, ShouldQueue
         public readonly PipelineTrigger $trigger = PipelineTrigger::Sync,
     ) {}
 
+    /** The lock this job holds while it runs; the rules-page scan takes the same one so the two never overlap. */
+    public static function lockKey(int $userId): string
+    {
+        return 'laravel-queue-overlap:'.self::class.":analysis-user-{$userId}";
+    }
+
     public function uniqueId(): int
     {
         return $this->user->id;

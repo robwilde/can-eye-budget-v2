@@ -12,6 +12,7 @@ use App\Models\AnalysisSuggestion;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Recurring\PlanHistoryBackfiller;
 use App\Services\RuleActionExecutor;
 use App\Services\SuggestionApplier;
 use Flux\Flux;
@@ -108,7 +109,8 @@ final class AnalysisSuggestions extends Component
         /** @var User $user */
         $user = auth()->user();
 
-        $applier->applyRecurringTransaction($suggestion, $user, $categoryId);
+        $plan = $applier->applyRecurringTransaction($suggestion, $user, $categoryId);
+        app(PlanHistoryBackfiller::class)->run($plan, $user);
         $this->recordHandPicked($user, $suggestionId, $categoryId);
 
         Flux::toast(text: $categoryId !== null ? 'Recurring transaction created and all matching transactions categorised' : 'Recurring transaction created', variant: 'success');
