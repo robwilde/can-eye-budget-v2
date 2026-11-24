@@ -145,7 +145,8 @@ final readonly class PlannedPaymentMatcher
     {
         return PlannedOccurrence::query()
             ->where('status', OccurrenceStatus::Scheduled->value)
-            ->whereBetween('due_date', [$today->subDays(self::LOOKBACK_DAYS + self::LOOKAHEAD_DAYS)->toDateString(), $today->addDays(self::LOOKAHEAD_DAYS)->toDateString()])
+            ->whereDate('due_date', '>=', $today->subDays(self::LOOKBACK_DAYS + self::LOOKAHEAD_DAYS)->toDateString())
+            ->whereDate('due_date', '<=', $today->addDays(self::LOOKAHEAD_DAYS)->toDateString())
             ->whereHas('plannedTransaction', static fn (Builder $plans): Builder => $plans->where('user_id', $user->id)->where('is_active', true))
             ->with('plannedTransaction')
             ->orderBy('id')
@@ -162,7 +163,8 @@ final readonly class PlannedPaymentMatcher
             ->whereNull('planned_transaction_id')
             ->whereNull('split_parent_id')
             ->whereNotExists(static fn ($payments) => $payments->selectRaw('1')->from('planned_payments')->whereColumn('planned_payments.transaction_id', 'transactions.id'))
-            ->whereBetween('post_date', [$today->subDays(self::LOOKBACK_DAYS)->toDateString(), $today->addDays(3)->toDateString()])
+            ->whereDate('post_date', '>=', $today->subDays(self::LOOKBACK_DAYS)->toDateString())
+            ->whereDate('post_date', '<=', $today->addDays(3)->toDateString())
             ->with('transferPair:id,account_id')
             ->orderBy('id')
             ->get();
