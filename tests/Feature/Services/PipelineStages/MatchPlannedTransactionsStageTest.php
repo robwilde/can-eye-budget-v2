@@ -30,7 +30,7 @@ test('exposes its contract metadata', function () {
         ->and($this->stage->shouldRun($this->context))->toBeTrue();
 });
 
-test('tags a matching transaction and returns a successful result', function () {
+test('tags a matching transaction with the same merchant and returns a successful result', function () {
     $plan = PlannedTransaction::factory()->for($this->user)->create([
         'account_id' => $this->account->id,
         'amount' => 50000,
@@ -43,9 +43,11 @@ test('tags a matching transaction and returns a successful result', function () 
     $tx = Transaction::factory()->for($this->user)->debit()->create([
         'account_id' => $this->account->id,
         'amount' => -50000,
+        'description' => 'ACME RENT',
         'post_date' => '2026-06-10',
         'planned_transaction_id' => null,
     ]);
+    $plan->update(['merchant_key' => $tx->merchant_key]);
 
     $result = $this->stage->execute($this->context);
 
