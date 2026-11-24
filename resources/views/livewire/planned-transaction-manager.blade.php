@@ -192,14 +192,16 @@
 
                 <flux:field>
                     <flux:label>Frequency</flux:label>
-                    <flux:select wire:model="frequency">
+                    <flux:select wire:model.live="frequency" data-testid="plan-frequency">
                         <flux:select.option value="">Select frequency</flux:select.option>
                         @foreach($frequencies as $recurrenceFrequency)
-                            <flux:select.option value="{{ $recurrenceFrequency->value }}">{{ in_array($recurrenceFrequency, RecurrenceFrequency::selectable(), true) ? $recurrenceFrequency->label() : 'Custom schedule (kept as is)' }}</flux:select.option>
+                            <flux:select.option value="{{ $recurrenceFrequency->value }}">{{ $recurrenceFrequency->isPickable() ? $recurrenceFrequency->pickerLabel() : 'Custom' }}</flux:select.option>
                         @endforeach
                     </flux:select>
                     <flux:error name="frequency" />
                 </flux:field>
+
+                <x-cadence-fields :frequency="$frequency" scope="plan" />
 
                 <flux:field>
                     <flux:label>Direction</flux:label>

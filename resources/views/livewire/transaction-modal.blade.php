@@ -441,11 +441,13 @@
                     <flux:select wire:model.live="frequency" :label="__('Frequency')" required>
                         @foreach($frequencyOptions as $freq)
                             <flux:select.option value="{{ $freq->value }}">
-                                {{ in_array($freq, RecurrenceFrequency::selectable(), true) ? $freq->label() : __('Custom schedule (kept as is)') }}
+                                {{ $freq->isPickable() ? $freq->pickerLabel() : __('Custom') }}
                             </flux:select.option>
                         @endforeach
                     </flux:select>
                 </div>
+
+                <x-cadence-fields :frequency="$frequency" scope="modal" />
 
                 <div class="space-y-3">
                     <div class="type-toggle" role="group" aria-label="{{ __('Repeat until') }}">

@@ -12,6 +12,7 @@ use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Exceptions\TypeSafe\TypeSafeException;
 use App\Livewire\Concerns\EditsPlanSeries;
+use App\Livewire\Concerns\PicksCadence;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Merchant;
@@ -43,6 +44,7 @@ use Livewire\Component;
 final class PlannedTransactionManager extends Component
 {
     use EditsPlanSeries;
+    use PicksCadence;
 
     public ?int $accountId = null;
 
@@ -181,6 +183,7 @@ final class PlannedTransactionManager extends Component
         $this->merchantId = $this->merchantIdForKey($plan->user_id, $plan->merchant_key);
         $this->notes = $plan->notes ?? '';
         $this->fillSeriesFrom($plan);
+        $this->fillCadenceFrom($plan);
         $this->showEditModal = true;
     }
 
@@ -207,7 +210,8 @@ final class PlannedTransactionManager extends Component
             $plan->update([
                 'amount' => (int) round((float) $this->amount * 100),
                 'frequency' => $this->frequency,
-                ...($this->frequency !== $plan->frequency->value ? ['recurrence_interval' => 1, 'days_of_month' => null] : []),
+                ...$this->cadenceAttributes(RecurrenceFrequency::from($this->frequency), $plan),
+                ...($this->cadenceChanged($plan, RecurrenceFrequency::from($this->frequency)) ? ['schedule_pinned' => true] : []),
                 'category_id' => $categoryId,
                 'direction' => $direction,
                 'is_active' => $this->isActive,
@@ -544,6 +548,7 @@ final class PlannedTransactionManager extends Component
         return [
             'amount' => ['required', 'numeric', 'decimal:0,2', 'min:0.01'],
             'frequency' => ['required', 'string', Rule::in($this->frequencyValues())],
+            ...$this->cadenceRules(),
             'direction' => ['required', 'string', Rule::in($this->directionValues())],
             'untilDate' => ['nullable', 'date', $this->singleEndRule()],
             'merchantId' => ['nullable', Rule::exists('merchants', 'id')->where('user_id', auth()->id())],
@@ -553,17 +558,13 @@ final class PlannedTransactionManager extends Component
     }
 
     /**
-     * The cadences to offer, plus the edited plan's own when it is one the editor cannot choose yet.
+     * The cadences to offer, plus the edited plan's own as Custom when the picker cannot express it.
      *
      * @return list<RecurrenceFrequency>
      */
     private function frequencyOptions(?PlannedTransaction $editing): array
     {
-        $options = RecurrenceFrequency::selectable();
-
-        return $editing !== null && ! in_array($editing->frequency, $options, true)
-            ? [...$options, $editing->frequency]
-            : $options;
+        return $this->cadenceOptions($editing?->frequency);
     }
 
     private function editedType(): PlannedTransactionType
@@ -649,6 +650,7 @@ final class PlannedTransactionManager extends Component
         $this->merchantId = null;
         $this->notes = '';
         $this->resetSeriesFields();
+        $this->resetCadence();
     }
 
     private function resetDeleteForm(): void
