@@ -101,6 +101,7 @@ return [
     'ignore_transactions' => [
         // Ignore Laravel's default health URL
         '/up',
+        '/bills/feed/{token}.ics',
     ],
 
     // Breadcrumb specific configuration

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\BillsFeedController;
 use App\Http\Controllers\StatementDownloadController;
 use App\Http\Controllers\TransactionAttachmentController;
 use App\Http\Middleware\EnsureBillsPageEnabled;
@@ -11,11 +12,14 @@ use App\Http\Middleware\EnsureRecurringEnabled;
 use App\Livewire\AccountShow;
 use App\Livewire\PdfImportReview;
 use App\Livewire\ReconcileStatement;
+use App\Services\Bills\CalendarFeedTokens;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome')->name('home');
 // Public: linked from onboarding step 1 and from tester invites; holds no user data.
 Route::view('setup-guide', 'setup-guide')->name('setup-guide');
+
+Route::get('bills/feed/{token}.ics', BillsFeedController::class)->where('token', CalendarFeedTokens::PATTERN)->middleware('throttle:30,1')->name('bills.feed');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');

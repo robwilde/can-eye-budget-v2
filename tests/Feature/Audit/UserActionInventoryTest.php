@@ -149,6 +149,7 @@ test('the setup journey actions are recorded under their expected audit names', 
         'pages::settings.providers' => ['save', 'syncNow', 'disconnect'],
         'pages::settings.pay-cycle' => ['save'],
         'pages::settings.currency' => ['save'],
+        'pages::settings.recurring' => ['resetCalendarFeed'],
     ];
 
     foreach ($expected as $name => $methods) {

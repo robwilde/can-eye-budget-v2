@@ -48,6 +48,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Private bills calendar feed
+    |--------------------------------------------------------------------------
+    |
+    | Lets a user subscribe an external calendar to a private feed of their open
+    | bills (name and amount only). Off by default; the feed answers not-found
+    | while off.
+    |
+    */
+
+    'calendar_feed' => (bool) env('BUDGET_CALENDAR_FEED', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Material price change (basis points)
     |--------------------------------------------------------------------------
     |

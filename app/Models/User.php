@@ -86,6 +86,7 @@ final class User extends Authenticatable
         'two_factor_recovery_codes',
         'remember_token',
         'vector_store_id',
+        'calendar_feed_token_hash',
     ];
 
     /**

@@ -4,6 +4,7 @@ use App\Enums\PlannedTransactionStatus;
 use App\Jobs\GeneratePlannedOccurrencesJob;
 use App\Models\PlannedTransaction;
 use App\Models\User;
+use App\Services\Bills\CalendarFeedTokens;
 use App\Services\Recurring\RecurringGate;
 use App\Services\Recurring\RecurringScanner;
 use App\Services\Recurring\StalePlanSweeper;
@@ -14,6 +15,8 @@ use Livewire\Component;
 
 new #[Title('Recurring settings')] class extends Component {
     public string $notice = '';
+
+    public string $feedUrl = '';
 
     public function toggleRecurring(): void
     {
@@ -62,6 +65,15 @@ new #[Title('Recurring settings')] class extends Component {
         $this->notice = __(':retired plan(s) paused, :discarded removed.', ['retired' => $result['retired'], 'discarded' => $result['discarded']]);
     }
 
+    public function resetCalendarFeed(CalendarFeedTokens $tokens): void
+    {
+        $user = $this->user();
+
+        abort_unless(config('budget.calendar_feed') && RecurringGate::enabled($user), 404);
+
+        $this->feedUrl = $tokens->url($tokens->issue($user));
+    }
+
     public function togglePlan(int $planId): void
     {
         $plan = $this->plan($planId);
@@ -100,6 +112,8 @@ new #[Title('Recurring settings')] class extends Component {
 
         return [
             'enabled' => RecurringGate::enabled($user),
+            'feedAvailable' => config('budget.calendar_feed') && RecurringGate::enabled($user),
+            'feedExists' => app(CalendarFeedTokens::class)->exists($user),
             'plans' => PlannedTransaction::query()->where('user_id', $user->id)->visible()->orderBy('status')->orderBy('description')->get(),
         ];
     }
@@ -127,6 +141,19 @@ new #[Title('Recurring settings')] class extends Component {
 
             @if($notice !== '')
                 <flux:text data-testid="recurring-notice" role="status">{{ $notice }}</flux:text>
+            @endif
+
+            @if($feedAvailable)
+                <div class="space-y-2" data-testid="calendar-feed">
+                    <flux:heading size="sm">{{ __('Calendar feed') }}</flux:heading>
+                    <flux:text size="sm">{{ __('Subscribe your calendar app to your open bills for the next 90 days (name and amount only). The link is private: anyone with it can read the feed. Resetting it stops the old link working at once.') }}</flux:text>
+                    @if($feedUrl !== '')
+                        <flux:input readonly copyable :value="$feedUrl" :label="__('Your feed link (shown once)')" data-testid="calendar-feed-url" />
+                    @elseif($feedExists)
+                        <flux:text size="sm" data-testid="calendar-feed-active">{{ __('A feed link exists. For safety only a fingerprint is stored, so it cannot be shown again; reset it to get a new link.') }}</flux:text>
+                    @endif
+                    <flux:button wire:click="resetCalendarFeed" wire:confirm="{{ $feedExists ? __('Reset the link? The old link stops working.') : __('Create a feed link?') }}" data-testid="calendar-feed-reset">{{ $feedExists ? __('Reset feed link') : __('Create feed link') }}</flux:button>
+                </div>
             @endif
 
             <div data-testid="recurring-plans">
