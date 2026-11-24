@@ -18,6 +18,7 @@ use Closure;
 use Database\Factories\UserFactory;
 use DateInvalidTimeZoneException;
 use DateTimeZone;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -233,6 +234,23 @@ final class User extends Authenticatable
         return $this->pay_amount !== null
             && $this->pay_frequency !== null
             && $this->next_pay_date !== null;
+    }
+
+    /** Only an explicit opt-in counts; a missing preference means off. */
+    public function hasPreviewFeatures(): bool
+    {
+        return $this->preferences->previewFeatures === true;
+    }
+
+    /**
+     * Users who opted in to preview features, for background jobs that select them.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeWithPreviewFeatures(Builder $query): Builder
+    {
+        return $query->where('preferences->previewFeatures', true);
     }
 
     /**

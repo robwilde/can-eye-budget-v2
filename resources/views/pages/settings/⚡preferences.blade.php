@@ -26,6 +26,8 @@ new #[Title('Preferences')] class extends Component {
 
     public string $defaultPeriod = 'this-month';
 
+    public bool $previewFeatures = false;
+
     public bool $rulePromptEnabled = true;
 
     #[Locked]
@@ -46,6 +48,7 @@ new #[Title('Preferences')] class extends Component {
         $this->timezone = $user->timezone ?? '';
         $this->monthStartDay = $user->month_start_day;
         $this->defaultPeriod = $user->defaultListPeriod();
+        $this->previewFeatures = $preferences->previewFeatures;
         $this->rulePromptEnabled = $this->storedRulePromptEnabled = $preferences->rulePromptEnabled;
         $this->pausedUntil = $until?->greaterThan(CarbonImmutable::now()) === true
             ? $until->timezone($user->resolvedTimezone())->format('j M Y, g:ia')
@@ -79,6 +82,7 @@ new #[Title('Preferences')] class extends Component {
             'timezone' => ['nullable', 'string', Rule::in(DateTimeZone::listIdentifiers())],
             'monthStartDay' => ['nullable', 'integer', 'between:1,28'],
             'defaultPeriod' => ['required', Rule::in(array_map(static fn (TransactionPeriod $period): string => $period->value, $this->periodOptions))],
+            'previewFeatures' => ['boolean'],
             'rulePromptEnabled' => ['boolean'],
         ]);
 
@@ -88,6 +92,7 @@ new #[Title('Preferences')] class extends Component {
             'theme' => $validated['theme'],
             'locale' => $validated['locale'],
             'defaultPeriod' => $validated['defaultPeriod'],
+            'previewFeatures' => $validated['previewFeatures'],
         ];
 
         if ($allowed !== [] && ! in_array($validated['baseCurrency'], $allowed, true)) {
@@ -171,6 +176,13 @@ new #[Title('Preferences')] class extends Component {
                     <flux:select.option value="{{ $option->value }}">{{ __($option->label()) }}</flux:select.option>
                 @endforeach
             </flux:select>
+
+            <flux:switch
+                wire:model="previewFeatures"
+                :label="__('Preview features')"
+                :description="__('Try features that are still being built. They may change or be removed.')"
+                data-test="preview-features-enabled"
+            />
 
             <flux:switch
                 wire:model="rulePromptEnabled"

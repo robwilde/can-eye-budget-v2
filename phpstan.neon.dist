@@ -31,6 +31,7 @@ parameters:
         - '#Call to an undefined method Illuminate\\Support\\Collection::#'
         - '#Call to an undefined method Illuminate\\Contracts\\Pagination\\LengthAwarePaginator::#'
         - '#Call to an undefined method Mockery\\ExpectationInterface::#'
+        - '#Trait App\\Livewire\\Concerns\\RequiresPreviewFeatures is used zero times#'
         -
             message: '#Call to an undefined method PHPUnit\\Framework\\TestCase::#'
             paths:
