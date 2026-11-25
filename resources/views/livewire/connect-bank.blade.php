@@ -7,15 +7,9 @@
                 {{ __('Step :step of :total', ['step' => $step, 'total' => \App\Livewire\ConnectBank::TOTAL_STEPS]) }}
             @endif
         </flux:text>
-        @if ($step === \App\Livewire\ConnectBank::STEP_GMAIL)
-            <flux:link :href="route('dashboard')" wire:click.prevent="finish" data-test="connect-bank-skip">
-                {{ __('Skip for now') }}
-            </flux:link>
-        @else
-            <flux:link :href="route('dashboard')" wire:navigate data-test="connect-bank-skip">
-                {{ __('Skip for now') }}
-            </flux:link>
-        @endif
+        <flux:link :href="route('dashboard')" wire:click.prevent="skipOnboarding" data-test="connect-bank-skip">
+            {{ __('Skip for now') }}
+        </flux:link>
     </div>
 
     @if ($step === \App\Livewire\ConnectBank::STEP_CONNECT)
@@ -75,6 +69,8 @@
         <livewire:redbark-account-setup :in-onboarding="true" />
     @elseif ($step === \App\Livewire\ConnectBank::STEP_PAY_CYCLE)
         <livewire:confirm-pay-cycle-step />
+    @elseif ($step === \App\Livewire\ConnectBank::STEP_PREFERENCES)
+        <livewire:onboarding-preferences-step />
     @elseif ($step === \App\Livewire\ConnectBank::STEP_TAGS)
         <livewire:confirm-budget-tags />
     @elseif ($step === \App\Livewire\ConnectBank::STEP_PAYEES)
