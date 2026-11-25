@@ -8,6 +8,7 @@ use App\Http\Controllers\TransactionAttachmentController;
 use App\Http\Middleware\EnsureBillsPageEnabled;
 use App\Http\Middleware\EnsureGoalsEnabled;
 use App\Http\Middleware\EnsureInsightsEnabled;
+use App\Http\Middleware\EnsureOnboarded;
 use App\Http\Middleware\EnsureRecurringEnabled;
 use App\Livewire\AccountShow;
 use App\Livewire\PdfImportReview;
@@ -21,11 +22,11 @@ Route::view('setup-guide', 'setup-guide')->name('setup-guide');
 
 Route::get('bills/feed/{token}.ics', BillsFeedController::class)->where('token', CalendarFeedTokens::PATTERN)->middleware('throttle:30,1')->name('bills.feed');
 
-Route::middleware(['auth', 'verified'])->group(function () {
+Route::middleware(['auth', 'verified', EnsureOnboarded::class])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');
     Route::view('smoke-test', 'smoke-test')->name('smoke-test');
     // Post-registration onboarding; transient, so deliberately not in the sidebar.
-    Route::view('connect-bank', 'connect-bank')->name('connect-bank');
+    Route::view('connect-bank', 'connect-bank')->withoutMiddleware(EnsureOnboarded::class)->name('connect-bank');
     Route::view('import-bank', 'import-bank')->name('import-bank');
     Route::view('transactions', 'transactions')->name('transactions');
     Route::get('transactions/attachments/{attachment}', TransactionAttachmentController::class)->where('attachment', '[0-9]{1,18}')->name('transactions.attachments.download');
@@ -45,7 +46,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('merchants', 'merchants')->name('merchants');
     Route::view('insights', 'insights')->middleware(EnsureInsightsEnabled::class)->name('insights');
     // Transient page reached from the providers panel, so deliberately not in the sidebar.
-    Route::view('redbark/setup', 'redbark-setup')->name('redbark.setup');
+    Route::view('redbark/setup', 'redbark-setup')->withoutMiddleware(EnsureOnboarded::class)->name('redbark.setup');
     Route::get('imports/pdf/{pdfImport}', PdfImportReview::class)->whereNumber('pdfImport')->name('imports.pdf.review');
     Route::get('accounts/{account}/reconcile', ReconcileStatement::class)->name('accounts.reconcile');
     Route::get('accounts/{account}', AccountShow::class)->whereNumber('account')->name('accounts.show');
