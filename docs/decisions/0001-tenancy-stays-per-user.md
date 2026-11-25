@@ -17,7 +17,7 @@ Can-I-Budget has none of this. Each user is a separate tenant:
 - `CategoryAttribution::atoms()` and `CategoryAttribution::query()` take a user id, not a set of accounts.
 - `audit_events` has a single `user_id` column (nullable, `nullOnDelete`). It records who acted, and nothing separate for whose data was touched.
 - No per-user timezone, month-start day or base currency exists. Dates resolve through `config('app.timezone')`. The settings on User today are `pay_amount`, `pay_frequency`, `next_pay_date` and `primary_account_id`.
-- `viewHorizon` is gated on the `HORIZON_AUTHORIZED_EMAILS` allowlist, and F48 plans to replace it with an `is_admin` flag on User.
+- `viewHorizon` was gated on an email allowlist; #738 replaced it with the `is_admin` flag on User.
 - Registration is gated by `FORTIFY_REGISTRATION_ENABLED`. The app is self-run.
 
 About 100 sub-issues in #641 add new user-owned models. Each one needs a single scoping rule to build on.
