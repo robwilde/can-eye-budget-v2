@@ -14,6 +14,7 @@ use App\Contracts\StatementPdfExtractor;
 use App\Contracts\TypeSafeServiceContract;
 use App\Contracts\VectorStoreContract;
 use App\Models\Transaction;
+use App\Models\User;
 use App\Observers\TransactionObserver;
 use App\Services\Bnpl\GmailScheduleSource;
 use App\Services\CategoryRuleGenerator;
@@ -50,6 +51,7 @@ use App\View\Composers\LayoutShellComposer;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
@@ -201,6 +203,8 @@ final class AppServiceProvider extends ServiceProvider
         $this->configureDefaults();
 
         Transaction::observe(TransactionObserver::class);
+
+        Gate::define('admin', static fn (?User $user): bool => $user?->is_admin === true);
 
         View::composer(
             ['*app.sidebar', '*app.partials.topbar'],
