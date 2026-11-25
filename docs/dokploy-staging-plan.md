@@ -23,8 +23,8 @@ for every non-SQLite driver, so PostgreSQL would break monthly report aggregatio
 under "Staging-verified behaviour"; #375 is closed. What follows stays written as a runbook, because it is also the rebuild and rollback procedure.
 
 **Step 0 has been implemented and merged to `develop`.** The five blocking code changes are now present: a root production image
-(`Dockerfile`, `.dockerignore`, `docker/`), a trusted-proxy call in `bootstrap/app.php`, an allow-listed Horizon gate
-(`app/Providers/HorizonServiceProvider.php` + `config/horizon.php` `authorized_emails`), `app/Listeners/VerifyHealthDependencies.php` so `/up` asserts
+(`Dockerfile`, `.dockerignore`, `docker/`), a trusted-proxy call in `bootstrap/app.php`, an admin-gated Horizon gate
+(`app/Providers/HorizonServiceProvider.php`, `users.is_admin` since #738), `app/Listeners/VerifyHealthDependencies.php` so `/up` asserts
 MariaDB and Redis, and the `FORTIFY_REGISTRATION_ENABLED` gate in `config/fortify.php` that lets staging close public sign-up.
 Bank-import storage is settled as a shared volume — a Dokploy provisioning step, not a code change. The "Deployment sequence" is ready to proceed,
 with the code prerequisites confirmed on `develop`.
@@ -44,7 +44,7 @@ no error to say so. That gate is now on `develop` (`config/fortify.php:149`), so
 |---|---|-------------------------------------------------------------------------|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 1 | #369 | Add production `Dockerfile`, `.dockerignore`, and container entrypoint   | Merged to `develop` (c0ade4a) | Multi-stage Node asset build plus PHP 8.4 runtime; installs the extension set listed under "PHP extension requirements"; entrypoint runs migrations and caches config **before** the HTTP server binds; runs `storage:link` in the image, not by hand. Delivered as root `Dockerfile`, `.dockerignore`, `docker/entrypoint.sh`, `docker/nginx/default.conf`, `docker/supervisord.conf`, `docker/php.ini` |
 | 2 | — | Provision the shared import volume                                      | Provisioning only | Mount one volume at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon`. Settled — see "Storage decision (settled): shared volume". No repository change; `FILESYSTEM_DISK` stays `local`                                          |
-| 3 | #370 | Restrict Horizon dashboard access outside `local`                       | Merged to `develop` (f39fcdd) | Gate is now an explicit allow-list: `config('horizon.authorized_emails')` from `HORIZON_AUTHORIZED_EMAILS`, with `local` short-circuited. Fails closed when unset. Registration is env-gated as of #383 — see "Security exposure decision"                              |
+| 3 | #370 | Restrict Horizon dashboard access outside `local`                       | Merged to `develop` (f39fcdd) | Gate allows only users with `users.is_admin` (#738 replaced the former email allow-list), with `local` short-circuited. Fails closed. Registration is env-gated as of #383 — see "Security exposure decision"                              |
 | 4 | #371 | Configure trusted proxies                                               | Merged to `develop` (94303c5) | `bootstrap/app.php` now calls `$middleware->trustProxies(at: '*')` with the framework's default header set; correct because the container is only reachable through Traefik on the Dokploy network                                                            |
 | 5 | #372 | Add a `DiagnosingHealth` listener that asserts database and Redis       | Merged to `develop` (74ed230) | `app/Listeners/VerifyHealthDependencies.php` runs `select 1` and a Redis `ping`; auto-discovered from `app/Listeners`. `/up` now returns 500 when either dependency is unreachable — a dependency probe, not a readiness signal; see "`/up` is a dependency probe" |
 | 6 | #383 | Env-gate registration and guard the landing page                        | Merged to `develop` (PR #395, c10c5b4) | `config/fortify.php` gates `Features::registration()` on `FORTIFY_REGISTRATION_ENABLED`, default `true` so local and production are unchanged; set `false` on staging. The three `route('register')` call sites in `resources/views/welcome.blade.php` are guarded with `Route::has('register')` so the landing page still renders once the routes are gone. Registration/password-reset throttling was split out to #394 — see row 9 |
@@ -248,9 +248,8 @@ This is a provisioning task, not a code change. Never point staging at a product
 The Horizon dashboard is served by the web container and is therefore publicly reachable on the staging domain. Confirming that the Horizon *container* has no
 port or domain does not address that.
 
-Resolved in #370: `app/Providers/HorizonServiceProvider::gate()` now allows `local` unconditionally, denies guests, and otherwise requires the user's email to
-appear in `config('horizon.authorized_emails')` — populated from the comma-separated `HORIZON_AUTHORIZED_EMAILS` variable. With that variable unset the
-allow-list is empty and nobody outside `local` can open the dashboard, so the control fails closed. Covered by `tests/Feature/HorizonAccessTest.php`.
+Resolved in #370: `app/Providers/HorizonServiceProvider::gate()` now allows `local` unconditionally, denies guests, and otherwise requires `users.is_admin`
+(#738 replaced the former email allow-list). With no admin user nobody outside `local` can open the dashboard, so the control fails closed; `php artisan app:make-admin <email>` grants the flag. Covered by `tests/Feature/HorizonAccessTest.php`.
 
 Also resolved, in #383: `config/fortify.php` now gates `Features::registration()` on `FORTIFY_REGISTRATION_ENABLED`, defaulting to `true` so local and
 production are unchanged. Set it to `false` on staging and seed accounts instead. The three `route('register')` call sites in
@@ -436,7 +435,6 @@ Set the common application environment on all three Application services. Values
 | `HORIZON_PREFIX`                                                         | Unique staging prefix, for example `can_eye_staging_horizon:`                                                                             |
 | `HORIZON_NAME`                                                           | `can-eye-staging-horizon` on the Horizon service                                                                                         |
 | `HORIZON_PATH`                                                           | Optional defence in depth now the gate is an allow-list; the default is `horizon`                                                          |
-| `HORIZON_AUTHORIZED_EMAILS`                                              | Comma-separated allow-list of emails permitted to open the dashboard outside `local`. Empty means nobody can — fails closed                |
 | `FORTIFY_REGISTRATION_ENABLED`                                           | `false` on staging — closes public sign-up on a bank-feed application. Default is `true`, so local and production are unchanged            |
 | `CONTAINER_ROLE`                                                         | `web` on `can-eye-web`, `horizon` on `can-eye-horizon`, `scheduler` on `can-eye-scheduler`. Defaults to `web`. This is the **only** setting that differentiates the three services: since #430 the entrypoint resolves its own process from it, so the Dokploy `command` and `args` fields stay empty on all three. Only the `web` role migrates; the `web` role is health-checked over HTTP (`/up`), while `horizon` and `scheduler` roles are health-checked via process-specific liveness probes (#396) |
 | `FILESYSTEM_DISK`                                                        | `local`, paired with the shared volume at `storage/app/private` — see "Storage decision (settled): shared volume". Never set `s3`        |
@@ -481,7 +479,7 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
    any Application yet. Mount the shared volume on `can-eye-web` and `can-eye-horizon`.
 8. Set the common environment variables. Leave the `command` **and** `args` fields empty on all three services and differentiate them with `CONTAINER_ROLE`
    alone (`web`, `horizon`, `scheduler`) — see "Dokploy `command` replaces the entrypoint". Set `APP_DEBUG=false`, `DB_CONNECTION=mariadb`,
-   `HORIZON_AUTHORIZED_EMAILS`, `FORTIFY_REGISTRATION_ENABLED=false` and a distinct `HORIZON_NAME` before the first deployment. Two variables are **first-boot
+   `FORTIFY_REGISTRATION_ENABLED=false` and a distinct `HORIZON_NAME` before the first deployment. Two variables are **first-boot
    preconditions** rather than preferences, and getting either wrong costs a deploy: `CACHE_STORE`, because `migrate --force --isolated` takes its mutex
    through the default cache store and the unset default is `database` — on a virgin schema the `cache_locks` table does not exist yet, so the entrypoint exits
    1 under `set -e` before port 80 binds (set `redis`, or `file` to migrate before Redis exists); and `APP_KEY`, because without it the container still reports
@@ -551,7 +549,7 @@ Steps 1 and 2 were the code gate; both are satisfied. Everything from step 3 onw
 - A CSV bank import uploaded through the web container is read successfully by the Horizon container — this is the specific flow that fails without shared
   storage, so upload alone is not sufficient evidence.
 - Storage is verified by reading the file back, not by a successful write: every disk sets `'throw' => false`, so failures are silent.
-- The Horizon dashboard is not reachable by a seeded account absent from `HORIZON_AUTHORIZED_EMAILS`. With registration disabled on staging there is no way
+- The Horizon dashboard is not reachable by a seeded account who is not an admin (`users.is_admin`). With registration disabled on staging there is no way
   to self-register a fresh account for this check, so seed one.
 - `/register` returns 404 and `/` renders with no sign-up link, confirming `FORTIFY_REGISTRATION_ENABLED=false` reached the running container.
 - No production Redbark, Gmail, GitHub, mail, or storage credentials are present unless explicitly approved for staging. The Context.dev key is the approved exception: it is shared between local and staging.
@@ -638,9 +636,10 @@ Prerequisites 1 through 5 are satisfied by the deployment recorded above. 6 onwa
 2. Satisfied: the shared volume `can-eye-staging-import` is mounted at `/var/www/html/storage/app/private` on both `can-eye-web` and `can-eye-horizon` with
    `FILESYSTEM_DISK=local`. Never adopt `FILESYSTEM_DISK=s3`: `league/flysystem-aws-s3-v3` is absent from `composer.lock` and the import path calls
    `Storage::disk('local')->path()` directly.
-3. Satisfied: `FORTIFY_REGISTRATION_ENABLED=false` and `SESSION_SECURE_COOKIE=true` are set on all three services, and `HORIZON_AUTHORIZED_EMAILS` carries a
+3. Satisfied: `FORTIFY_REGISTRATION_ENABLED=false` and `SESSION_SECURE_COOKIE=true` are set on all three services, and an admin user exists (create a user, then run
+   `php artisan app:make-admin <email>` in `can-eye-web` once step 9 has migrated; registration is closed, so the first-user rule does not apply) for a
    single address. The controls here are not symmetrical, so treat them differently when changing them: the Horizon gate
-   (#370) **fails closed** — leave `HORIZON_AUTHORIZED_EMAILS` unset and nobody outside `local` gets in, so populating it grants access. The registration
+   (#370) **fails closed** — with no admin user nobody outside `local` gets in, so granting `is_admin` grants access. The registration
    toggle (#383) **fails open**: it defaults to `true`, so omitting the variable leaves public sign-up enabled on the domain. `SESSION_SECURE_COOKIE` sits in
    that same fail-open class — `config/session.php` carries no default of its own — so both of those must be set explicitly to be safe. `CACHE_STORE` and
    `APP_KEY` are a separate category again: first-boot preconditions, covered in step 8 of the deployment sequence.

@@ -2919,7 +2919,7 @@ The remaining features have no ordering constraint beyond the conventions above.
 #### Maps to Can-I-Budget
 - **Status:** Partial
 - **Existing:**
-  - The Horizon dashboard, gated by `viewHorizon`: open to anyone in the local environment, otherwise only to emails listed in `horizon.authorized_emails`.
+  - The Horizon dashboard, gated by `viewHorizon`: open to anyone in the local environment, otherwise only to users with `users.is_admin` (#738; the `HORIZON` email allowlist is gone). The first user to register on an empty instance is made an admin, and `php artisan app:make-admin {email}` (`--revoke` to undo) grants or removes the flag; the `admin` gate is defined for the admin console. The migration backfilled the flag from the old allowlist.
   - Health and liveness: HealthCheckController, `horizon:liveness` and `scheduler:heartbeat`.
   - The AuditEvent trail, pruned after `audit.retention_days`.
   - Sentry error reporting.
@@ -2927,5 +2927,5 @@ The remaining features have no ordering constraint beyond the conventions above.
   - `services.redbark.include_pending` is the switch for including pending transactions, and `app:sync-redbark-feeds` runs every six hours in place of an admin-set auto-sync.
 - **Gap:** There is no admin role, user management, impersonation, invite codes or settings screen. The audit trail has no viewer.
 - **Build it like:**
-  - An admin flag on User is the single instance-admin definition. It replaces the `horizon.authorized_emails` allowlist, and `viewHorizon` checks it. Household roles from F43 stay separate and gate household actions only.
+  - An admin flag on User is the single instance-admin definition. It replaced the Horizon email allowlist, and `viewHorizon` checks it. Household roles from F43 stay separate and gate household actions only.
   - The admin area is made of audited Livewire components (C3, C5). Livewire actions need no test change; any new write route or job goes into UserActionInventoryTest (C4).
