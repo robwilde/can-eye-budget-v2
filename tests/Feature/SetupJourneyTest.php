@@ -131,6 +131,8 @@ test('a new user goes from sign-up to a categorised, pay-cycle-aware view with e
     $this->travel(15)->seconds();
 
     $onboarding->dispatch('pay-cycle-confirmed')
+        ->assertSet('step', ConnectBank::STEP_PREFERENCES)
+        ->dispatch('onboarding-preferences-done')
         ->assertSet('step', ConnectBank::STEP_TAGS)
         ->dispatch('budget-tags-confirmed')
         ->assertSet('step', ConnectBank::STEP_PAYEES)
@@ -150,6 +152,7 @@ test('a new user goes from sign-up to a categorised, pay-cycle-aware view with e
             'livewire.redbark-account-setup.save',
             'livewire.connect-bank.advanceToPayCycle',
             'livewire.confirm-pay-cycle-step.confirm',
+            'livewire.connect-bank.advanceToPreferences',
             'livewire.connect-bank.advanceToTags',
             'livewire.connect-bank.advanceToPayees',
             'livewire.connect-bank.advanceToGmail',
@@ -165,6 +168,7 @@ test('a new user goes from sign-up to a categorised, pay-cycle-aware view with e
         ['livewire.redbark-account-setup.save', 'success', '2026-10-15 10:01:30'],
         ['livewire.connect-bank.advanceToPayCycle', 'success', '2026-10-15 10:01:30'],
         ['livewire.confirm-pay-cycle-step.confirm', 'success', '2026-10-15 10:02:15'],
+        ['livewire.connect-bank.advanceToPreferences', 'success', '2026-10-15 10:02:30'],
         ['livewire.connect-bank.advanceToTags', 'success', '2026-10-15 10:02:30'],
         ['livewire.connect-bank.advanceToPayees', 'success', '2026-10-15 10:02:30'],
         ['livewire.connect-bank.advanceToGmail', 'success', '2026-10-15 10:02:30'],

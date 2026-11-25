@@ -38,13 +38,15 @@ final class ConnectBank extends Component
 
     public const int STEP_PAY_CYCLE = 3;
 
-    public const int STEP_TAGS = 4;
+    public const int STEP_PREFERENCES = 4;
 
-    public const int STEP_PAYEES = 5;
+    public const int STEP_TAGS = 5;
 
-    public const int STEP_GMAIL = 6;
+    public const int STEP_PAYEES = 6;
 
-    public const int TOTAL_STEPS = 5;
+    public const int STEP_GMAIL = 7;
+
+    public const int TOTAL_STEPS = 6;
 
     public int $step = self::STEP_CONNECT;
 
@@ -69,6 +71,12 @@ final class ConnectBank extends Component
         if ($feeds->every(fn (RedbarkFeed $feed): bool => ! $feed->pending_account_setup && $feed->last_synced_at !== null)) {
             if ($this->needsPayCycleConfirmation()) {
                 $this->step = self::STEP_PAY_CYCLE;
+
+                return;
+            }
+
+            if (Auth::user()?->onboarded_at === null) {
+                $this->step = self::STEP_PREFERENCES;
 
                 return;
             }
@@ -160,6 +168,12 @@ final class ConnectBank extends Component
     }
 
     #[On('pay-cycle-confirmed')]
+    public function advanceToPreferences(): void
+    {
+        $this->step = self::STEP_PREFERENCES;
+    }
+
+    #[On('onboarding-preferences-done')]
     public function advanceToTags(): void
     {
         $this->step = self::STEP_TAGS;
@@ -186,7 +200,22 @@ final class ConnectBank extends Component
     #[On('gmail-saved')]
     public function finish(): void
     {
+        $this->markOnboarded();
+
         session()->flash('status', __('Primary account and pay cycle saved.'));
+
+        $this->redirect(route('dashboard'), navigate: true);
+    }
+
+    public function skipOnboarding(): void
+    {
+        if ($this->step === self::STEP_GMAIL) {
+            $this->finish();
+
+            return;
+        }
+
+        $this->markOnboarded();
 
         $this->redirect(route('dashboard'), navigate: true);
     }
@@ -194,6 +223,16 @@ final class ConnectBank extends Component
     public function render(): View
     {
         return view('livewire.connect-bank');
+    }
+
+    private function markOnboarded(): void
+    {
+        /** @var User $user */
+        $user = Auth::user();
+
+        if ($user->onboarded_at === null) {
+            $user->forceFill(['onboarded_at' => now()])->save();
+        }
     }
 
     private function needsPayCycleConfirmation(): bool
