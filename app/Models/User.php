@@ -45,6 +45,7 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * @property UserPreferences $preferences
  * @property string|null $avatar_path
  * @property CarbonImmutable|null $onboarded_at
+ * @property bool $is_admin
  */
 final class User extends Authenticatable
 {
@@ -60,6 +61,7 @@ final class User extends Authenticatable
      */
     protected $attributes = [
         'base_currency' => 'AUD',
+        'is_admin' => false,
     ];
 
     /**
@@ -511,6 +513,7 @@ final class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'onboarded_at' => 'immutable_datetime',
+            'is_admin' => 'boolean',
             'password' => 'hashed',
             'pay_amount' => MoneyCast::class,
             'pay_frequency' => PayFrequency::class,
