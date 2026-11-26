@@ -2600,8 +2600,8 @@ The remaining features have no ordering constraint beyond the conventions above.
 
 #### Maps to Can-I-Budget
 - **Status:** Missing
-- **Existing:** none
-- **Gap:** There is no conversational assistant, chat history, AI consent or LLM cost tracking. The only AI integration is the Jev categoriser (TypeSafeService, behind `budget.jev_categorisation`), which suggests payee categories and does not chat.
+- **Existing (#733):** the `chats`, `chat_messages` and `llm_usages` tables and models (user-scoped, cascade deleted with the user; a chat's messages go with the chat and usage rows keep a null message link; cost is integer cents), the `budget.ai_assistant` flag (env `BUDGET_AI_ASSISTANT`, default off) and per-user AI consent, which is stored as `aiConsentedAt` in the typed `UserPreferences` (`User::hasAiConsent()`, `grantAiConsent()`, `revokeAiConsent()`) rather than a separate users column. A data reset clears chats and keeps the usage ledger. Usage rows hold counts and cost only, never prompts or replies.
+- **Gap:** There is no conversational assistant, chat page or reply generation. The only AI integration is the Jev categoriser (TypeSafeService, behind `budget.jev_categorisation`), which suggests payee categories and does not chat.
 - **Build it like:**
   - Data and page: new user-owned Chat and ChatMessage models (C2, C5), and a chat page in the auth+verified group with every public action audited (C3).
   - Background work: replies produced by a queued job that carries AttributeJobToUser and is added to the UserActionInventoryTest job list with its audited flag (C4).

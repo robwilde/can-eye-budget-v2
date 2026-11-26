@@ -123,6 +123,33 @@ final class User extends Authenticatable
             ->implode('');
     }
 
+    /** @return HasMany<Chat, $this> */
+    public function chats(): HasMany
+    {
+        return $this->hasMany(Chat::class);
+    }
+
+    /** @return HasMany<LlmUsage, $this> */
+    public function llmUsages(): HasMany
+    {
+        return $this->hasMany(LlmUsage::class);
+    }
+
+    public function hasAiConsent(): bool
+    {
+        return $this->preferences->aiConsentedAt !== null;
+    }
+
+    public function grantAiConsent(): void
+    {
+        $this->updatePreferences(['aiConsentedAt' => CarbonImmutable::now()->toIso8601String()]);
+    }
+
+    public function revokeAiConsent(): void
+    {
+        $this->updatePreferences(['aiConsentedAt' => null]);
+    }
+
     /** @return HasMany<ApiKey, $this> */
     public function apiKeys(): HasMany
     {
