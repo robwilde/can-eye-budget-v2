@@ -56,11 +56,12 @@ final readonly class UserDataResetter
         'category_groups',
         'data_exports',
         'documents',
+        'chats',
     ];
 
     /**
      * User-owned tables a reset leaves alone: the audit trail that records it, the login sessions,
-     * the personal API keys and the connected mailbox, which is a provider setting rather than financial data.
+     * the personal API keys, the LLM usage ledger and the connected mailbox, which is a provider setting rather than financial data.
      *
      * @var list<string>
      */
@@ -68,6 +69,7 @@ final readonly class UserDataResetter
         'audit_events',
         'sessions',
         'api_keys',
+        'llm_usages',
         'gmail_credentials',
     ];
 
