@@ -7,11 +7,11 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Resources\Api\TagResource;
 use App\Models\Tag;
 use App\Services\Tags\TagDeleter;
+use App\Services\Tags\TagInput;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Throwable;
 
@@ -32,11 +32,11 @@ final class TagController extends OwnedReadController
     /**
      * Creates a tag; the name is trimmed and unique per user, the colour is a #RRGGBB hex picked from the palette when omitted.
      */
-    public function store(Request $request): JsonResponse
+    public function store(Request $request, TagInput $input): JsonResponse
     {
         $userId = $this->owner($request)->id;
 
-        $validated = $this->validated($request, $userId, null, true);
+        $validated = $input->validate($request->only(['name', 'colour']), $userId, null, true);
 
         $tag = Tag::query()->create(['user_id' => $userId, ...$validated]);
 
@@ -46,13 +46,13 @@ final class TagController extends OwnedReadController
     /**
      * Renames or recolours one of the user's tags (PUT and PATCH both accept a partial body).
      */
-    public function update(Request $request, int $id): TagResource
+    public function update(Request $request, int $id, TagInput $input): TagResource
     {
         $userId = $this->owner($request)->id;
 
         $tag = Tag::query()->where('user_id', $userId)->findOrFail($id);
 
-        $tag->update($this->validated($request, $userId, $tag->id, false));
+        $tag->update($input->validate($request->only(['name', 'colour']), $userId, $tag->id, false));
 
         return new TagResource($tag);
     }
@@ -82,33 +82,5 @@ final class TagController extends OwnedReadController
         $deleter->delete($userId, $tag->id, $replacementId === null ? null : (int) $replacementId);
 
         return response()->noContent();
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    private function validated(Request $request, int $userId, ?int $ignoreId, bool $creating): array
-    {
-        $input = $request->only(['name', 'colour']);
-
-        if (is_string($input['name'] ?? null)) {
-            $input['name'] = mb_trim($input['name']);
-        }
-
-        $presence = $creating ? 'required' : 'sometimes';
-
-        /** @var array<string, string> $validated */
-        $validated = Validator::make($input, [
-            'name' => [
-                $presence,
-                'string',
-                'max:50',
-                Rule::notIn([Tag::RESERVED_NAME]),
-                Rule::unique(Tag::class, 'name')->where('user_id', $userId)->ignore($ignoreId),
-            ],
-            'colour' => ['sometimes', 'required', 'string', 'regex:/^#[0-9A-Fa-f]{6}\z/'],
-        ])->validate();
-
-        return $validated;
     }
 }

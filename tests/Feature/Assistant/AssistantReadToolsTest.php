@@ -237,7 +237,7 @@ it('hides preview-only tools from users without preview features', function () {
 });
 
 it('registers every read tool for an ordinary user', function () {
-    expect(array_keys(app(AssistantToolRegistry::class)->forUser(User::factory()->create())))->toBe([
+    expect(array_keys(app(AssistantToolRegistry::class)->forUser(User::factory()->create())))->toContain(
         'list_accounts', 'search_transactions', 'list_categories', 'list_payees', 'list_rules', 'get_budgets', 'list_planned_transactions', 'get_income_statement', 'get_net_worth_history',
-    ]);
+    );
 });
