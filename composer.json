@@ -15,6 +15,7 @@
     "laravel/fortify": "^1.36.2",
     "laravel/framework": "^12.56.0",
     "laravel/horizon": "^5.45.5",
+    "laravel/sanctum": "^4.5",
     "laravel/tinker": "^2.11.1",
     "league/csv": "^9.28",
     "livewire/blaze": "1.0.7",
