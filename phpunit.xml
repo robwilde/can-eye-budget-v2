@@ -63,6 +63,8 @@
              (#433), so a developer's real SENTRY_DSN would send deliberately thrown test
              failures to the production project (#439). An empty DSN disables the SDK outright
              instead of erroring at boot. -->
+        <env name="BUDGET_REGISTRATION_MODE" value="" force="true"/>
+        <server name="BUDGET_REGISTRATION_MODE" value=""/>
         <env name="SENTRY_DSN" value="" force="true"/>
         <server name="SENTRY_DSN" value=""/>
         <!-- Every Context.dev call costs credits, so the suite must never reach the live API

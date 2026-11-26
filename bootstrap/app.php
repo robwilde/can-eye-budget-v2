@@ -63,6 +63,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('app:sync-redbark-feeds')->everySixHours()->withoutOverlapping();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->dontFlash(['invite_code']);
+
         // Route every exception Laravel decides to report through to Sentry. Registering
         // via Integration::handles() (rather than a bespoke reportable callback) keeps
         // Laravel's own shouldntReport list authoritative, so validation, authentication
