@@ -407,11 +407,16 @@ it('runs a tool call loop for the user and records one usage row per call', func
                 return ['type' => 'object', 'properties' => new stdClass];
             }
 
-            public function execute(array $arguments): string
+            public function requiresPreview(): bool
             {
-                $this->seen[] = $this->user->id;
+                return false;
+            }
 
-                return 'You have 7 accounts.';
+            public function handle(User $user, array $arguments): array
+            {
+                $this->seen[] = $user->id;
+
+                return ['message' => 'You have 7 accounts.'];
             }
         };
     });
@@ -425,10 +430,10 @@ it('runs a tool call loop for the user and records one usage row per call', func
     expect($seen)->toBe([$user->id])
         ->and($reply->fresh()->content)->toBe('You have 7 accounts.')
         ->and(LlmUsage::query()->count())->toBe(2);
-    Http::assertSent(fn (Request $request): bool => collect($request->data()['messages'] ?? [])->contains(fn (array $m): bool => ($m['role'] ?? '') === 'tool' && $m['content'] === 'You have 7 accounts.'));
+    Http::assertSent(fn (Request $request): bool => collect($request->data()['messages'] ?? [])->contains(fn (array $m): bool => ($m['role'] ?? '') === 'tool' && $m['content'] === '{"message":"You have 7 accounts."}'));
 });
 
-it('answers an unknown tool call with a refusal instead of running anything', function () {
+it('answers an unknown tool call without running anything', function () {
     $user = consentedUser();
     [, $reply] = pendingReply($user);
     Http::fake(['api.openai.com/*' => Http::sequence()
@@ -535,9 +540,14 @@ it('keeps tool definitions on the last round and tells the provider not to call 
             return ['type' => 'object', 'properties' => new stdClass];
         }
 
-        public function execute(array $arguments): string
+        public function requiresPreview(): bool
         {
-            return 'ok';
+            return false;
+        }
+
+        public function handle(User $user, array $arguments): array
+        {
+            return ['ok' => true];
         }
     });
 

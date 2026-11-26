@@ -9,8 +9,8 @@ use App\Models\User;
 use Closure;
 
 /**
- * The tools the assistant may call, built per user so a tool can only see that user's data.
- * Nothing is registered here; later slices add factories.
+ * The tools the assistant may call. Tools are registered once and filtered per user: a tool that requires
+ * preview features is not offered (and cannot be called) for a user without them.
  */
 final class AssistantToolRegistry
 {
@@ -30,14 +30,19 @@ final class AssistantToolRegistry
      */
     public function forUser(User $user): array
     {
-        $tools = [];
+        $available = [];
 
         foreach ($this->factories as $factory) {
             $tool = $factory($user);
-            $tools[$tool->name()] = $tool;
+
+            if ($tool->requiresPreview() && ! $user->hasPreviewFeatures()) {
+                continue;
+            }
+
+            $available[$tool->name()] = $tool;
         }
 
-        return $tools;
+        return $available;
     }
 
     /**
