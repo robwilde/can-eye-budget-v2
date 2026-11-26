@@ -6,6 +6,7 @@ use App\Exceptions\TransactionWriteRefusedException;
 use App\Http\Controllers\HealthCheckController;
 use App\Http\Middleware\AttributeRequestToUser;
 use App\Http\Middleware\EnsureApiEnabled;
+use App\Http\Middleware\EnsureMcpEnabled;
 use App\Http\Middleware\EnsurePreviewFeatures;
 use App\Http\Middleware\SetLocale;
 use App\Http\Middleware\ThrottleApiByAddress;
@@ -48,6 +49,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->prependToPriorityList(before: AuthenticatesRequests::class, prepend: ThrottleApiByAddress::class);
         $middleware->prependToPriorityList(before: ThrottleApiByAddress::class, prepend: EnsureApiEnabled::class);
+        $middleware->prependToPriorityList(before: EnsureApiEnabled::class, prepend: EnsureMcpEnabled::class);
 
         $middleware->appendToPriorityList(
             after: StartSession::class,
@@ -88,7 +90,7 @@ return Application::configure(basePath: dirname(__DIR__))
             ? response()->json(['message' => $exception->getMessage()], 422)
             : null);
 
-        $exceptions->shouldRenderJsonWhen(static fn (Request $request): bool => $request->is('api/*') || $request->expectsJson());
+        $exceptions->shouldRenderJsonWhen(static fn (Request $request): bool => $request->is('api/*', 'mcp') || $request->expectsJson());
 
         // Route every exception Laravel decides to report through to Sentry. Registering
         // via Integration::handles() (rather than a bespoke reportable callback) keeps

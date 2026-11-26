@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
-use App\Enums\ApiKeyScope;
 use App\Models\ApiKey;
 use Closure;
 use Illuminate\Http\JsonResponse;
@@ -25,7 +24,7 @@ final readonly class EnsureApiKeyScope
 
         $key = $request->user()?->currentAccessToken();
 
-        if (! $key instanceof ApiKey || $key->scope !== ApiKeyScope::ReadWrite || ! $key->can(ApiKeyScope::ABILITY_WRITE)) {
+        if (! $key instanceof ApiKey || ! $key->allowsWrites()) {
             return new JsonResponse(['message' => 'insufficient scope'], 403);
         }
 

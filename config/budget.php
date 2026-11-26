@@ -203,6 +203,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | MCP server
+    |--------------------------------------------------------------------------
+    |
+    | Serves the assistant's tools to external MCP clients at /mcp, authenticated with the same personal API keys
+    | as the REST API and rate limited the same way. It needs BUDGET_API as well; while either is off the endpoint
+    | answers not-found.
+    |
+    */
+
+    'mcp' => (bool) env('BUDGET_MCP', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | AI assistant
     |--------------------------------------------------------------------------
     |
