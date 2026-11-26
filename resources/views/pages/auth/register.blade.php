@@ -7,6 +7,18 @@
 
         <form method="POST" action="{{ route('register.store') }}" class="flex flex-col gap-6">
             @csrf
+            @if (App\Enums\RegistrationMode::current()->requiresInvite())
+                <flux:input
+                    name="invite_code"
+                    :label="__('Invite code')"
+                    type="text"
+                    required
+                    autocomplete="off"
+                    :placeholder="__('Paste your invite code')"
+                    data-test="invite-code-input"
+                />
+            @endif
+
             <!-- Name -->
             <flux:input
                 name="name"
