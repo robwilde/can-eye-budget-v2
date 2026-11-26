@@ -16,7 +16,7 @@
                 <flux:navlist.item :href="route('api-keys.edit')" wire:navigate>{{ __('API keys') }}</flux:navlist.item>
             @endif
             @can('admin')
-                <flux:navlist.item :href="route('admin.invite-codes')" wire:navigate>{{ __('Invite codes') }}</flux:navlist.item>
+                <flux:navlist.item :href="route('admin.users')" wire:navigate>{{ __('Admin') }}</flux:navlist.item>
             @endcan
         </flux:navlist>
     </div>
