@@ -122,6 +122,16 @@ new #[Title('API keys')] class extends Component {
             </flux:callout>
         @endif
 
+        @if (config('budget.mcp') === true)
+            <flux:callout icon="command-line" class="mb-6" data-test="mcp-section">
+                <flux:callout.heading>{{ __('MCP server') }}</flux:callout.heading>
+                <flux:callout.text>
+                    {{ __('Connect an MCP client to this address and send one of the keys below as a bearer token. A read-only key only sees the tools that read your data. Revoking a key ends its connections.') }}
+                    <code class="mt-2 block break-all font-mono" data-test="mcp-address">{{ url('/mcp') }}</code>
+                </flux:callout.text>
+            </flux:callout>
+        @endif
+
         <div class="space-y-2">
             @forelse ($this->keys as $key)
                 <div class="flex items-center justify-between gap-4 rounded-lg border-2 border-cib-black bg-white px-4 py-2" wire:key="api-key-{{ $key->id }}" data-test="api-key-row">
