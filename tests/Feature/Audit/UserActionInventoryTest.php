@@ -134,6 +134,7 @@ test('every callable Livewire method, in class and view-based components, is aud
     }
 
     expect($unaudited)->toEqualCanonicalizing([
+        'App\\Livewire\\AssistantChat::pollReply',
         'App\\Livewire\\BillDrawer::close',
         'App\\Livewire\\BillDrawer::open',
         'App\\Livewire\\CalendarView::refreshAfterPayment',
