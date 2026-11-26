@@ -21,10 +21,21 @@ trait ReadsUserData
      */
     private function validated(array $arguments, array $rules): array|string
     {
-        $arguments = array_filter($arguments, static fn (mixed $value): bool => $value !== null && ! (is_string($value) && mb_trim($value) === ''));
+        $arguments = $this->withoutBlanks($arguments);
         $validator = Validator::make($arguments, $rules);
 
         return $validator->fails() ? 'Invalid arguments: '.implode(' ', $validator->errors()->all()) : $validator->validated();
+    }
+
+    /**
+     * The model often fills unused optional arguments with null or an empty string; those mean "not given".
+     *
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function withoutBlanks(array $arguments): array
+    {
+        return array_filter($arguments, static fn (mixed $value): bool => $value !== null && ! (is_string($value) && mb_trim($value) === ''));
     }
 
     /**
