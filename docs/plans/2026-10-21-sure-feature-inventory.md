@@ -2803,7 +2803,8 @@ The remaining features have no ordering constraint beyond the conventions above.
   - BnplPendingBadge shows a count in the sidebar.
   - The Dashboard shows a "Connect your bank" card and statements that are due.
   - Fortify sends password-reset mail through the Notifiable User. A verification mail goes out only if the user opens the verify page and asks for a resend, because User does not implement MustVerifyEmail.
-- **Gap:** There is no push, no worker-health banner (Horizon status is visible only on its own dashboard), no calendar feed, and no other email.
+- **Built (#739):** `WorkerHealth` reports a problem when Horizon has no running master (none, paused or unreadable) or the scheduler heartbeat is older than 180 seconds, cached for 30 seconds. `scheduler:heartbeat` now also writes the timestamp to the cache, because the web container cannot see the scheduler container's heartbeat file. The app layout shows a warning banner only to users passing the `admin` gate; for everyone else the check is never run.
+- **Gap:** There is no push, no calendar feed, and no other email.
 - **Build it like:** Laravel notifications on the Notifiable User, sent from queued jobs carrying AttributeJobToUser, each added to the UserActionInventoryTest job list with its audited flag (C4), behind a `budget.*` flag (C6). Where a feature needs dedupe, such as the F25 rule email, it keeps a delivery record but still sends through a notification.
 
 ### F46. Onboarding
