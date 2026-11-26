@@ -12,6 +12,9 @@
             <flux:navlist.item :href="route('recurring.edit')" wire:navigate>{{ __('Recurring') }}</flux:navlist.item>
             <flux:navlist.item :href="route('providers.edit')" wire:navigate>{{ __('Providers') }}</flux:navlist.item>
             <flux:navlist.item :href="route('exports.edit')" wire:navigate>{{ __('Exports') }}</flux:navlist.item>
+            @if (config('budget.api'))
+                <flux:navlist.item :href="route('api-keys.edit')" wire:navigate>{{ __('API keys') }}</flux:navlist.item>
+            @endif
             @can('admin')
                 <flux:navlist.item :href="route('admin.invite-codes')" wire:navigate>{{ __('Invite codes') }}</flux:navlist.item>
             @endcan
