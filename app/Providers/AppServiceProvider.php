@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Contracts\AssistantTool;
 use App\Contracts\ContextDevServiceContract;
 use App\Contracts\ExchangeRateProviderContract;
 use App\Contracts\GitHubServiceContract;
@@ -14,6 +15,15 @@ use App\Contracts\SecurityPriceProviderContract;
 use App\Contracts\StatementPdfExtractor;
 use App\Contracts\TypeSafeServiceContract;
 use App\Contracts\VectorStoreContract;
+use App\Http\Assistant\Tools\GetBudgets;
+use App\Http\Assistant\Tools\GetIncomeStatement;
+use App\Http\Assistant\Tools\GetNetWorthHistory;
+use App\Http\Assistant\Tools\ListAccounts;
+use App\Http\Assistant\Tools\ListCategories;
+use App\Http\Assistant\Tools\ListPayees;
+use App\Http\Assistant\Tools\ListPlannedTransactions;
+use App\Http\Assistant\Tools\ListRules;
+use App\Http\Assistant\Tools\SearchTransactions;
 use App\Models\ApiKey;
 use App\Models\Transaction;
 use App\Models\User;
@@ -56,6 +66,7 @@ use App\Support\Email\Schedules\PayPalReceiptStrategy;
 use App\View\Composers\LayoutShellComposer;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -206,7 +217,25 @@ final class AppServiceProvider extends ServiceProvider
 
         $this->app->scoped(LayoutShellComposer::class);
 
-        $this->app->singleton(AssistantToolRegistry::class);
+        $this->app->singleton(AssistantToolRegistry::class, function (Application $app): AssistantToolRegistry {
+            $registry = new AssistantToolRegistry;
+
+            foreach ([
+                ListAccounts::class,
+                SearchTransactions::class,
+                ListCategories::class,
+                ListPayees::class,
+                ListRules::class,
+                GetBudgets::class,
+                ListPlannedTransactions::class,
+                GetIncomeStatement::class,
+                GetNetWorthHistory::class,
+            ] as $tool) {
+                $registry->register(static fn (): AssistantTool => $app->make($tool));
+            }
+
+            return $registry;
+        });
 
         $this->app->bind(LlmClientContract::class, function (): LlmClientContract {
             $ai = (array) config('services.ai');
