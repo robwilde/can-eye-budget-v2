@@ -7,10 +7,13 @@ namespace App\Services\Assistant;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\User;
+use App\Services\InstanceSettings;
 
 final readonly class AssistantPromptBuilder
 {
     public const int SMALL_CONTEXT_WINDOW = 16_000;
+
+    public function __construct(private InstanceSettings $settings) {}
 
     /**
      * The system prompt: today's date in the user's timezone, their currency, and their accounts and
@@ -25,14 +28,33 @@ final readonly class AssistantPromptBuilder
         $categories = Category::query()->where('user_id', $user->id)->where('is_hidden', false)->orderBy('name')->pluck('name')->all();
 
         return implode("\n", [
-            'You are a careful budgeting assistant inside a personal finance app. Answer only from the user\'s own data and say so when you do not know.',
-            'Never mention, name or describe the tools or functions you can call; just use them and answer in plain language.',
+            ...$this->instructions(),
             'Money is stored in integer cents; show amounts to the user in dollars and cents in their currency.',
             'Today is '.$user->today()->format('l j F Y').' ('.$user->resolvedTimezone().').',
             'The user\'s base currency is '.$user->base_currency.'.',
             $this->section('accounts', $accounts, $limit, $collapse),
             $this->section('categories', $categories, $limit, $collapse),
         ]);
+    }
+
+    /**
+     * The standing instructions: an admin's override when one is saved, otherwise the built-in ones. The lines about the
+     * user's own context always follow.
+     *
+     * @return list<string>
+     */
+    private function instructions(): array
+    {
+        $override = $this->settings->systemPrompt();
+
+        if ($override !== null) {
+            return [$override];
+        }
+
+        return [
+            'You are a careful budgeting assistant inside a personal finance app. Answer only from the user\'s own data and say so when you do not know.',
+            'Never mention, name or describe the tools or functions you can call; just use them and answer in plain language.',
+        ];
     }
 
     /**

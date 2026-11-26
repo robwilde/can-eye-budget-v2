@@ -21,6 +21,7 @@ final readonly class OpenAiClient implements LlmClientContract
         private string $baseUrl = 'https://api.openai.com/v1',
         private int $timeoutSeconds = 60,
         private int $connectTimeoutSeconds = 10,
+        private ?int $maxTokens = null,
     ) {}
 
     public function provider(): string
@@ -35,6 +36,10 @@ final readonly class OpenAiClient implements LlmClientContract
         }
 
         $payload = ['model' => $this->model, 'messages' => [['role' => 'system', 'content' => $system], ...$this->messages($conversation)]];
+
+        if ($this->maxTokens !== null) {
+            $payload['max_completion_tokens'] = $this->maxTokens;
+        }
 
         if ($tools !== []) {
             $payload['tools'] = array_map(static fn (array $tool): array => ['type' => 'function', 'function' => [
