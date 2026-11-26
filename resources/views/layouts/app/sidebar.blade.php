@@ -45,6 +45,11 @@
                     {{ __('Goals') }}
                 </flux:sidebar.item>
             @endif
+            @if (config('budget.ai_assistant'))
+                <flux:sidebar.item icon="sparkles" :href="route('assistant')" :current="request()->routeIs('assistant')" wire:navigate :class="$navItem">
+                    {{ __('Assistant') }}
+                </flux:sidebar.item>
+            @endif
             <flux:sidebar.item icon="arrow-up-tray" :href="route('import-bank')" :current="request()->routeIs('import-bank')" wire:navigate
                                :class="$navItem">
                 {{ __('Import Bank') }}

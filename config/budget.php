@@ -213,7 +213,9 @@ return [
 
     'ai_assistant' => (bool) env('BUDGET_AI_ASSISTANT', false),
 
-    'ai_reply_min_age_seconds' => (int) env('BUDGET_AI_REPLY_MIN_AGE_SECONDS', 120),
+    'ai_reply_min_age_seconds' => (int) env('BUDGET_AI_REPLY_MIN_AGE_SECONDS', 60),
+
+    'ai_reply_timeout_seconds' => (int) env('BUDGET_AI_REPLY_TIMEOUT_SECONDS', 90),
 
     'api_ip_rate_limit' => (int) env('BUDGET_API_IP_RATE_LIMIT', 120),
 
