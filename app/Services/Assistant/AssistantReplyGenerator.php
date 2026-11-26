@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Assistant;
 
+use App\Contracts\AssistantWriteTool;
 use App\Contracts\LlmClientContract;
 use App\DTOs\Llm\LlmResponse;
 use App\Enums\AssistantErrorKind;
@@ -64,8 +65,20 @@ final readonly class AssistantReplyGenerator
         $system = $this->prompts->build($user);
         $rounds = max(1, config()->integer('services.ai.max_tool_rounds', 5));
 
+        $wrote = [];
+
         for ($round = 1; ; $round++) {
-            $response = $this->client->complete($system, $conversation, $definitions, $round < $rounds);
+            try {
+                $response = $this->client->complete($system, $conversation, $definitions, $round < $rounds);
+            } catch (LlmException $exception) {
+                if ($wrote === []) {
+                    throw $exception;
+                }
+
+                $this->completeAfterWrites($reply, $wrote);
+
+                return;
+            }
 
             $this->record($user, $reply, $response);
 
@@ -76,7 +89,7 @@ final readonly class AssistantReplyGenerator
             $conversation[] = ['role' => 'assistant', 'content' => $response->content, 'tool_calls' => $response->toolCalls];
 
             foreach ($response->toolCalls as $call) {
-                $conversation[] = ['role' => 'tool', 'tool_call_id' => $call->id, 'name' => $call->name, 'content' => $this->run($user, $tools, $call->name, $call->arguments)];
+                $conversation[] = ['role' => 'tool', 'tool_call_id' => $call->id, 'name' => $call->name, 'content' => $this->run($user, $tools, $call->name, $call->arguments, $wrote)];
             }
         }
 
@@ -102,6 +115,26 @@ final readonly class AssistantReplyGenerator
             ->whereKey($reply->id)
             ->where('status', ChatMessageStatus::Pending)
             ->update(['status' => ChatMessageStatus::Failed->value, 'error_kind' => $kind->value, 'updated_at' => now()]);
+    }
+
+    /**
+     * The provider failed after write tools had already changed data. Retrying from the start would repeat those
+     * writes, so the reply is finished with a plain note of what ran and the user decides what to ask next.
+     *
+     * @param  list<string>  $wrote
+     */
+    private function completeAfterWrites(ChatMessage $reply, array $wrote): void
+    {
+        $content = 'I made some changes ('.implode(', ', array_unique($wrote)).') and then lost contact with the assistant service, so I stopped before finishing. Please check your data before asking me again.';
+
+        $completed = ChatMessage::query()
+            ->whereKey($reply->id)
+            ->where('status', ChatMessageStatus::Pending)
+            ->update(['content' => $content, 'status' => ChatMessageStatus::Complete->value, 'error_kind' => null, 'updated_at' => now()]);
+
+        if ($completed === 1) {
+            $reply->chat->update(['last_message_at' => now()]);
+        }
     }
 
     /**
@@ -152,8 +185,9 @@ final readonly class AssistantReplyGenerator
     /**
      * @param  array<string, \App\Contracts\AssistantTool>  $tools
      * @param  array<string, mixed>  $arguments
+     * @param  list<string>  $wrote  the write tools that have succeeded in this run
      */
-    private function run(User $user, array $tools, string $name, array $arguments): string
+    private function run(User $user, array $tools, string $name, array $arguments, array &$wrote): string
     {
         $tool = $tools[$name] ?? null;
 
@@ -162,7 +196,13 @@ final readonly class AssistantReplyGenerator
         }
 
         try {
-            return json_encode($tool->handle($user, $arguments), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+            $result = $tool->handle($user, $arguments);
+
+            if ($tool instanceof AssistantWriteTool && ! array_key_exists('error', $result) && ($result['applied'] ?? true) !== false) {
+                $wrote[] = $name;
+            }
+
+            return json_encode($result, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
         } catch (Throwable) {
             return 'That could not be done.';
         }
