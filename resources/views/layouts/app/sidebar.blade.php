@@ -45,7 +45,7 @@
                     {{ __('Goals') }}
                 </flux:sidebar.item>
             @endif
-            @if (config('budget.ai_assistant'))
+            @if (app(\App\Services\Assistant\AssistantAvailability::class)->chatEnabled())
                 <flux:sidebar.item icon="sparkles" :href="route('assistant')" :current="request()->routeIs('assistant')" wire:navigate :class="$navItem">
                     {{ __('Assistant') }}
                 </flux:sidebar.item>

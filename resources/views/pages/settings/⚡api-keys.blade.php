@@ -122,7 +122,7 @@ new #[Title('API keys')] class extends Component {
             </flux:callout>
         @endif
 
-        @if (config('budget.mcp') === true)
+        @if (config('budget.mcp') === true && app(\App\Services\InstanceSettings::class)->toolsEnabled())
             <flux:callout icon="command-line" class="mb-6" data-test="mcp-section">
                 <flux:callout.heading>{{ __('MCP server') }}</flux:callout.heading>
                 <flux:callout.text>

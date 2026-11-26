@@ -159,7 +159,7 @@
             <a href="{{ route('login') }}" class="focus-ring hidden sm:inline font-medium hover:text-teal-deep">
                 Log in
             </a>
-            @if (Route::has('register'))
+            @if (Route::has('register') && App\Enums\RegistrationMode::current()->allowsRegistration())
                 <a
                         href="{{ route('register') }}"
                         class="focus-ring inline-flex items-center px-4 py-2 rounded-full border-2 font-medium hover:bg-teal-soft"
@@ -206,7 +206,7 @@
             </p>
 
             <div class="mt-10 flex flex-wrap items-center gap-5">
-                @if (Route::has('register'))
+                @if (Route::has('register') && App\Enums\RegistrationMode::current()->allowsRegistration())
                     <a
                             href="{{ route('register') }}"
                             class="btn-primary focus-ring display-wonk inline-flex items-center gap-2 px-7 py-4 rounded-full font-semibold text-lg"
@@ -354,7 +354,7 @@
         Pick one.
     </h2>
 
-    @if (Route::has('register'))
+    @if (Route::has('register') && App\Enums\RegistrationMode::current()->allowsRegistration())
         <div class="mt-12">
             <a
                     href="{{ route('register') }}"
