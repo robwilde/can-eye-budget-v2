@@ -32,18 +32,37 @@ final readonly class AttributeRequestToUser
         try {
             $response = $next($request);
         } catch (Throwable $exception) {
-            $this->audit($request, $actorId, AuditOutcome::Failure);
+            $this->audit($request, $actorId ?? $this->tokenActorId($request), AuditOutcome::Failure);
 
             throw $exception;
         }
 
         $this->audit(
             $request,
-            $actorId,
+            $actorId ?? $this->tokenActorId($request),
             $this->succeeded($request, $response) ? AuditOutcome::Success : AuditOutcome::Failure,
         );
 
         return $response;
+    }
+
+    /**
+     * On the API group the actor is only known once the token guard has run inside the pipeline, so it is
+     * read from the request after the response; a request that never authenticated has none and is not audited.
+     */
+    private function tokenActorId(Request $request): ?int
+    {
+        if (! $request->is('api/*')) {
+            return null;
+        }
+
+        $id = $request->user()?->getAuthIdentifier();
+
+        if ($id !== null) {
+            $this->sentryActor->bind((int) $id);
+        }
+
+        return $id === null ? null : (int) $id;
     }
 
     private function succeeded(Request $request, Response $response): bool
