@@ -60,13 +60,14 @@ final readonly class UserDataResetter
 
     /**
      * User-owned tables a reset leaves alone: the audit trail that records it, the login sessions,
-     * and the connected mailbox, which is a provider setting rather than financial data.
+     * the personal API keys and the connected mailbox, which is a provider setting rather than financial data.
      *
      * @var list<string>
      */
     public const array KEPT_TABLES = [
         'audit_events',
         'sessions',
+        'api_keys',
         'gmail_credentials',
     ];
 

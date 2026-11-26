@@ -13,6 +13,7 @@ use App\Contracts\SecurityPriceProviderContract;
 use App\Contracts\StatementPdfExtractor;
 use App\Contracts\TypeSafeServiceContract;
 use App\Contracts\VectorStoreContract;
+use App\Models\ApiKey;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Observers\TransactionObserver;
@@ -55,6 +56,7 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
+use Laravel\Sanctum\Sanctum;
 use RuntimeException;
 
 final class AppServiceProvider extends ServiceProvider
@@ -203,6 +205,8 @@ final class AppServiceProvider extends ServiceProvider
         $this->configureDefaults();
 
         Transaction::observe(TransactionObserver::class);
+
+        Sanctum::usePersonalAccessTokenModel(ApiKey::class);
 
         Gate::define('admin', static fn (?User $user): bool => $user?->is_admin === true);
 
