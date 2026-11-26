@@ -190,6 +190,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Personal API
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, users can create personal API keys under Settings > API keys
+    | and the token-guarded REST API answers requests. Off by default; while off
+    | the settings page and the API answer not-found.
+    |
+    */
+
+    'api' => (bool) env('BUDGET_API', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Investments
     |--------------------------------------------------------------------------
     |
