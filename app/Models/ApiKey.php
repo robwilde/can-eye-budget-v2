@@ -109,6 +109,14 @@ final class ApiKey extends PersonalAccessToken
         return $query->where('user_id', $user instanceof User ? $user->id : $user);
     }
 
+    /**
+     * Whether this key may change data: the read_write scope and the write ability, never one without the other.
+     */
+    public function allowsWrites(): bool
+    {
+        return $this->scope === ApiKeyScope::ReadWrite && $this->can(ApiKeyScope::ABILITY_WRITE);
+    }
+
     public function status(): string
     {
         return match (true) {

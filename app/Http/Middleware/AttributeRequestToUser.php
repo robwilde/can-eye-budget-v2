@@ -52,7 +52,7 @@ final readonly class AttributeRequestToUser
      */
     private function tokenActorId(Request $request): ?int
     {
-        if (! $request->is('api/*')) {
+        if (! $request->is('api/*', 'mcp')) {
             return null;
         }
 
