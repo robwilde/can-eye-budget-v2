@@ -201,6 +201,18 @@ return [
 
     'api' => (bool) env('BUDGET_API', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | AI assistant
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, users who have consented can chat with the assistant about
+    | their own data. Off by default; consent is stored per user.
+    |
+    */
+
+    'ai_assistant' => (bool) env('BUDGET_AI_ASSISTANT', false),
+
     'api_ip_rate_limit' => (int) env('BUDGET_API_IP_RATE_LIMIT', 120),
 
     'api_key_rate_limit' => (int) env('BUDGET_API_KEY_RATE_LIMIT', 120),
