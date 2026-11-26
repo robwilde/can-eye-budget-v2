@@ -20,6 +20,7 @@ const RESET_GLOBAL_TABLES = [
     'securities',
     'security_prices',
     'security_splits',
+    'invite_codes',
 ];
 
 /**
