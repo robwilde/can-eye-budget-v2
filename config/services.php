@@ -59,6 +59,33 @@ return [
         ],
     ],
 
+    'openai' => [
+        'key' => env('OPENAI_API_KEY'),
+    ],
+
+    'anthropic' => [
+        'key' => env('ANTHROPIC_API_KEY'),
+    ],
+
+    'ai' => [
+        // Chat assistant: provider (openai or anthropic), model, per-model prices in cents per million tokens,
+        // and prompt sizing. Timeouts apply to one call; a call is never retried inside the client. The reply job must finish within
+        // 85 s (below the queue's 90 s retry_after), so keep max_tool_rounds x timeout under that.
+        'provider' => env('AI_PROVIDER', 'openai'),
+        'model' => env('AI_MODEL', 'gpt-4o-mini'),
+        'base_url' => env('AI_BASE_URL'),
+        'timeout' => (int) env('AI_TIMEOUT', 25),
+        'connect_timeout' => (int) env('AI_CONNECT_TIMEOUT', 10),
+        'max_tokens' => (int) env('AI_MAX_TOKENS', 2048),
+        'context_window' => (int) env('AI_CONTEXT_WINDOW', 128000),
+        'max_listed' => (int) env('AI_MAX_LISTED', 40),
+        'max_tool_rounds' => (int) env('AI_MAX_TOOL_ROUNDS', 3),
+        'prices' => [
+            'gpt-4o-mini' => ['prompt' => 15, 'completion' => 60],
+            'claude-sonnet-4-5' => ['prompt' => 300, 'completion' => 1500],
+        ],
+    ],
+
     'typesafe' => [
         // Server-side secret for TypeSafe System One (Jev). Only the offline
         // categories:jev-eval command (#505) calls it; nothing in the request path does.

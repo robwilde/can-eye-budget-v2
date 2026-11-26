@@ -8,6 +8,7 @@ use App\Contracts\ContextDevServiceContract;
 use App\Contracts\ExchangeRateProviderContract;
 use App\Contracts\GitHubServiceContract;
 use App\Contracts\GmailServiceContract;
+use App\Contracts\LlmClientContract;
 use App\Contracts\ScheduleSource;
 use App\Contracts\SecurityPriceProviderContract;
 use App\Contracts\StatementPdfExtractor;
@@ -17,6 +18,9 @@ use App\Models\ApiKey;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Observers\TransactionObserver;
+use App\Services\Assistant\AnthropicClient;
+use App\Services\Assistant\AssistantToolRegistry;
+use App\Services\Assistant\OpenAiClient;
 use App\Services\Bnpl\GmailScheduleSource;
 use App\Services\CategoryRuleGenerator;
 use App\Services\ContextDevService;
@@ -201,6 +205,18 @@ final class AppServiceProvider extends ServiceProvider
         ));
 
         $this->app->scoped(LayoutShellComposer::class);
+
+        $this->app->singleton(AssistantToolRegistry::class);
+
+        $this->app->bind(LlmClientContract::class, function (): LlmClientContract {
+            $ai = (array) config('services.ai');
+            $model = (string) ($ai['model'] ?? '');
+
+            return match ($ai['provider'] ?? 'openai') {
+                'anthropic' => new AnthropicClient(config('services.anthropic.key'), $model, $ai['base_url'] ?: 'https://api.anthropic.com/v1', (int) $ai['timeout'], (int) $ai['connect_timeout'], (int) $ai['max_tokens']),
+                default => new OpenAiClient(config('services.openai.key'), $model, $ai['base_url'] ?: 'https://api.openai.com/v1', (int) $ai['timeout'], (int) $ai['connect_timeout']),
+            };
+        });
     }
 
     /**
