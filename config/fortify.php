@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\RegistrationMode;
 use Laravel\Fortify\Features;
 
 return [
@@ -146,7 +147,7 @@ return [
     */
 
     'features' => array_values(array_filter([
-        env('FORTIFY_REGISTRATION_ENABLED', true) ? Features::registration() : null,
+        RegistrationMode::fromEnvironment()->allowsRegistration() ? Features::registration() : null,
         Features::resetPasswords(),
         Features::emailVerification(),
         Features::twoFactorAuthentication([
