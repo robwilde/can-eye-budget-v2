@@ -41,6 +41,7 @@ Route::middleware(['auth', 'verified', EnsureOnboarded::class])->group(function 
     Route::view('goals/{goal}', 'goal-show')->whereNumber('goal')->middleware(EnsureGoalsEnabled::class)->name('goals.show');
     Route::view('accounts', 'accounts')->name('accounts');
     Route::view('bills', 'bills')->middleware([EnsureBillsPageEnabled::class, EnsureRecurringEnabled::class])->name('bills');
+    Route::view('admin/invite-codes', 'admin.invite-codes')->middleware('can:admin')->name('admin.invite-codes');
     Route::view('rules', 'rules')->name('rules');
     Route::view('tags', 'tags')->name('tags');
     Route::view('merchants', 'merchants')->name('merchants');

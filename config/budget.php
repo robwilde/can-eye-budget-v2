@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Enums\RegistrationMode;
+
 return [
 
     /*
@@ -261,5 +263,23 @@ return [
             'openai' => ['txt', 'md', 'json', 'html', 'doc', 'docx', 'pptx'],
         ],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Registration mode
+    |--------------------------------------------------------------------------
+    |
+    | open, closed or invite_only. BUDGET_REGISTRATION_MODE wins when set; without
+    | it FORTIFY_REGISTRATION_ENABLED=false means closed and anything else open.
+    | An unrecognised value closes registration. An invite_only instance needs an
+    | admin before the mode is switched on: register the first user while open (the
+    | first user becomes admin) or run app:make-admin. In invite_only mode a sign-up
+    | needs a single-use code that an instance admin generates. Fortify only
+    | registers the register routes unless the mode is closed, so changing the
+    | mode needs a config reload.
+    |
+    */
+
+    'registration_mode' => RegistrationMode::fromEnvironment()->value,
 
 ];
