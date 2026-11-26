@@ -15,6 +15,11 @@ use App\Contracts\SecurityPriceProviderContract;
 use App\Contracts\StatementPdfExtractor;
 use App\Contracts\TypeSafeServiceContract;
 use App\Contracts\VectorStoreContract;
+use App\Http\Assistant\Tools\ApplyRule;
+use App\Http\Assistant\Tools\CreateRule;
+use App\Http\Assistant\Tools\CreateTag;
+use App\Http\Assistant\Tools\CreateTransaction;
+use App\Http\Assistant\Tools\DeleteTransaction;
 use App\Http\Assistant\Tools\GetBudgets;
 use App\Http\Assistant\Tools\GetIncomeStatement;
 use App\Http\Assistant\Tools\GetNetWorthHistory;
@@ -23,7 +28,15 @@ use App\Http\Assistant\Tools\ListCategories;
 use App\Http\Assistant\Tools\ListPayees;
 use App\Http\Assistant\Tools\ListPlannedTransactions;
 use App\Http\Assistant\Tools\ListRules;
+use App\Http\Assistant\Tools\ListTags;
+use App\Http\Assistant\Tools\PreviewRule;
 use App\Http\Assistant\Tools\SearchTransactions;
+use App\Http\Assistant\Tools\UnmatchTransfer;
+use App\Http\Assistant\Tools\UpdateBudget;
+use App\Http\Assistant\Tools\UpdateRule;
+use App\Http\Assistant\Tools\UpdateTag;
+use App\Http\Assistant\Tools\UpdateTransaction;
+use App\Http\Assistant\Tools\UpdateTransfer;
 use App\Models\ApiKey;
 use App\Models\Transaction;
 use App\Models\User;
@@ -230,6 +243,19 @@ final class AppServiceProvider extends ServiceProvider
                 ListPlannedTransactions::class,
                 GetIncomeStatement::class,
                 GetNetWorthHistory::class,
+                CreateTransaction::class,
+                UpdateTransaction::class,
+                DeleteTransaction::class,
+                ListTags::class,
+                CreateTag::class,
+                UpdateTag::class,
+                UpdateTransfer::class,
+                UnmatchTransfer::class,
+                UpdateBudget::class,
+                CreateRule::class,
+                UpdateRule::class,
+                PreviewRule::class,
+                ApplyRule::class,
             ] as $tool) {
                 $registry->register(static fn (): AssistantTool => $app->make($tool));
             }
