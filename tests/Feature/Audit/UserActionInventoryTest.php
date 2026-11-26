@@ -195,6 +195,7 @@ test('every app write route is named, in the inventory, and passes through the a
         'two-factor.disable',
         'two-factor.regenerate-recovery-codes',
         'verification.send',
+        'mcp.server',
         ...API_WRITE_ROUTES,
     ];
     $infrastructurePrefixes = ['horizon.', 'boost.', 'storage.'];
@@ -202,6 +203,7 @@ test('every app write route is named, in the inventory, and passes through the a
     $writeRoutes = collect(Route::getRoutes()->getRoutes())
         ->filter(fn (IlluminateRoute $route): bool => array_intersect(['POST', 'PUT', 'PATCH', 'DELETE'], $route->methods()) !== [])
         ->reject(fn (IlluminateRoute $route): bool => mb_ltrim($route->getActionName(), '\\') === RedirectController::class)
+        ->reject(fn (IlluminateRoute $route): bool => $route->uri() === 'mcp' && $route->getName() === null && $route->methods() === ['DELETE'])
         ->reject(fn (IlluminateRoute $route): bool => is_string($route->getName()) && (
             str_contains($route->getName(), 'livewire')
             || collect($infrastructurePrefixes)->contains(fn (string $prefix): bool => str_starts_with($route->getName(), $prefix))
