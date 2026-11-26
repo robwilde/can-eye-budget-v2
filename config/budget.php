@@ -201,6 +201,10 @@ return [
 
     'api' => (bool) env('BUDGET_API', false),
 
+    'api_ip_rate_limit' => (int) env('BUDGET_API_IP_RATE_LIMIT', 120),
+
+    'api_key_rate_limit' => (int) env('BUDGET_API_KEY_RATE_LIMIT', 120),
+
     /*
     |--------------------------------------------------------------------------
     | Investments
