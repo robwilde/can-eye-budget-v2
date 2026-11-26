@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Exceptions\TransactionWriteRefusedException;
 use App\Http\Controllers\HealthCheckController;
 use App\Http\Middleware\AttributeRequestToUser;
 use App\Http\Middleware\EnsureApiEnabled;
@@ -43,6 +44,7 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->web(append: [SetLocale::class, AttributeRequestToUser::class]);
+        $middleware->api(append: [AttributeRequestToUser::class]);
 
         $middleware->prependToPriorityList(before: AuthenticatesRequests::class, prepend: ThrottleApiByAddress::class);
         $middleware->prependToPriorityList(before: ThrottleApiByAddress::class, prepend: EnsureApiEnabled::class);
@@ -79,6 +81,12 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->dontFlash(['invite_code']);
+
+        $exceptions->dontReport([TransactionWriteRefusedException::class]);
+
+        $exceptions->render(static fn (TransactionWriteRefusedException $exception, Request $request) => $request->is('api/*')
+            ? response()->json(['message' => $exception->getMessage()], 422)
+            : null);
 
         $exceptions->shouldRenderJsonWhen(static fn (Request $request): bool => $request->is('api/*') || $request->expectsJson());
 
