@@ -76,7 +76,7 @@ final readonly class AssistantReplyGenerator
             $conversation[] = ['role' => 'assistant', 'content' => $response->content, 'tool_calls' => $response->toolCalls];
 
             foreach ($response->toolCalls as $call) {
-                $conversation[] = ['role' => 'tool', 'tool_call_id' => $call->id, 'name' => $call->name, 'content' => $this->run($tools, $call->name, $call->arguments)];
+                $conversation[] = ['role' => 'tool', 'tool_call_id' => $call->id, 'name' => $call->name, 'content' => $this->run($user, $tools, $call->name, $call->arguments)];
             }
         }
 
@@ -153,7 +153,7 @@ final readonly class AssistantReplyGenerator
      * @param  array<string, \App\Contracts\AssistantTool>  $tools
      * @param  array<string, mixed>  $arguments
      */
-    private function run(array $tools, string $name, array $arguments): string
+    private function run(User $user, array $tools, string $name, array $arguments): string
     {
         $tool = $tools[$name] ?? null;
 
@@ -162,7 +162,7 @@ final readonly class AssistantReplyGenerator
         }
 
         try {
-            return $tool->execute($arguments);
+            return json_encode($tool->handle($user, $arguments), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
         } catch (Throwable) {
             return 'That could not be done.';
         }
