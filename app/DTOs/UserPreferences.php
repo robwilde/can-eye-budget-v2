@@ -44,6 +44,7 @@ final class UserPreferences extends Dto
         public readonly CashFlowGrouping $cashFlowGrouping = CashFlowGrouping::Group,
         public readonly array $reportSectionOrder = [],
         public readonly bool $recurringEnabled = true,
+        public readonly ?CarbonImmutable $aiConsentedAt = null,
     ) {}
 
     /**
@@ -73,6 +74,7 @@ final class UserPreferences extends Dto
             dashboardLayout: self::layout($stored['dashboardLayout'] ?? null) ?? $defaults->dashboardLayout,
             reportSectionOrder: is_array($stored['reportSectionOrder'] ?? null) ? array_values(array_filter($stored['reportSectionOrder'], is_string(...))) : $defaults->reportSectionOrder,
             recurringEnabled: is_bool($stored['recurringEnabled'] ?? null) ? $stored['recurringEnabled'] : $defaults->recurringEnabled,
+            aiConsentedAt: self::moment($stored['aiConsentedAt'] ?? null),
             cashFlowGrouping: is_string($stored['cashFlowGrouping'] ?? null) ? CashFlowGrouping::tryFrom($stored['cashFlowGrouping']) ?? $defaults->cashFlowGrouping : $defaults->cashFlowGrouping,
         );
     }
