@@ -625,3 +625,24 @@ it('serialises jobs per message and stops the queue retrying a failed message', 
         ->and($job->timeout)->toBeLessThan((int) config('queue.connections.redis.retry_after'))
         ->and(collect($job->middleware())->contains(fn (object $m): bool => $m instanceof Illuminate\Queue\Middleware\WithoutOverlapping))->toBeTrue();
 });
+
+it('does not repeat a write when the provider fails after the tool already ran', function () {
+    $user = consentedUser();
+    $account = Account::factory()->for($user)->create(['is_tracked' => true]);
+    [, $reply] = pendingReply($user);
+    $arguments = json_encode(['account_id' => $account->id, 'amount' => 500, 'direction' => 'debit', 'post_date' => '2026-07-01', 'description' => 'Coffee']);
+
+    Http::fake(['api.openai.com/*' => Http::sequence()
+        ->push(['model' => 'gpt-4o-mini', 'choices' => [['message' => ['content' => '', 'tool_calls' => [['id' => 'c1', 'type' => 'function', 'function' => ['name' => 'create_transaction', 'arguments' => $arguments]]]]]], 'usage' => ['prompt_tokens' => 10, 'completion_tokens' => 2]])
+        ->push(['error' => 'rate limited'], 429)]);
+
+    GenerateAssistantReplyJob::dispatchSync($user, $reply->id);
+
+    $fresh = $reply->fresh();
+
+    expect(App\Models\Transaction::query()->where('user_id', $user->id)->count())->toBe(1)
+        ->and($fresh->status)->toBe(ChatMessageStatus::Complete)
+        ->and($fresh->content)->toContain('create_transaction')
+        ->and(AuditEvent::query()->where('action', 'assistant.create_transaction')->count())->toBe(1);
+    Http::assertSentCount(2);
+});
