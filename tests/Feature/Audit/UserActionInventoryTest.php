@@ -40,6 +40,23 @@ use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\Drawer\Utils;
 
+const API_WRITE_ROUTES = [
+    'api.v1.transactions.store',
+    'api.v1.transactions.update',
+    'api.v1.transactions.destroy',
+    'api.v1.transactions.splits.update',
+    'api.v1.transactions.splits.destroy',
+    'api.v1.tags.store',
+    'api.v1.tags.update',
+    'api.v1.tags.destroy',
+    'api.v1.payees.store',
+    'api.v1.planned-transactions.store',
+    'api.v1.planned-transactions.update',
+    'api.v1.planned-transactions.destroy',
+    'api.v1.imports.store',
+    'api.v1.feeds.sync',
+];
+
 /**
  * @return array<int, string>
  */
@@ -176,6 +193,7 @@ test('every app write route is named, in the inventory, and passes through the a
         'two-factor.disable',
         'two-factor.regenerate-recovery-codes',
         'verification.send',
+        ...API_WRITE_ROUTES,
     ];
     $infrastructurePrefixes = ['horizon.', 'boost.', 'storage.'];
 
@@ -328,4 +346,20 @@ it('pins ApplyUserRulesJob in the user action inventory', function () {
     $attribution->handle($job, fn () => null);
 
     expect(AuditEvent::query()->where('action', 'job.ApplyUserRulesJob')->where('user_id', $user->id)->exists())->toBeTrue();
+});
+
+it('lists every API write route in the user action inventory', function () {
+    $apiWrites = collect(Route::getRoutes()->getRoutes())
+        ->filter(fn (IlluminateRoute $route): bool => str_starts_with($route->uri(), 'api/v1/') && array_intersect(['POST', 'PUT', 'PATCH', 'DELETE'], $route->methods()) !== [])
+        ->values();
+
+    expect($apiWrites->map(fn (IlluminateRoute $route): ?string => $route->getName())->all())->toEqualCanonicalizing(API_WRITE_ROUTES);
+
+    foreach ($apiWrites as $route) {
+        $middleware = app('router')->gatherRouteMiddleware($route);
+
+        expect($middleware)->toContain(AttributeRequestToUser::class)
+            ->and($middleware)->toContain(App\Http\Middleware\EnsureApiKeyScope::class)
+            ->and($middleware)->toContain(App\Http\Middleware\EnsureApiEnabled::class);
+    }
 });
