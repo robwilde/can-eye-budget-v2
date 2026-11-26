@@ -25,6 +25,7 @@ use App\Models\RedbarkFeed;
 use App\Models\RedbarkSyncLog;
 use App\Models\Transaction;
 use App\Services\FeedCategoryMatcher;
+use App\Services\InstanceSettings;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\Recurring\PaymentSettlementDeferral;
 use App\Services\RedbarkClientFactory;
@@ -484,7 +485,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
      */
     private function syncTransactions(RedbarkServiceContract $client, array $connections, RedbarkSyncLog $log): void
     {
-        $includePending = (bool) config('services.redbark.include_pending');
+        $includePending = app(InstanceSettings::class)->includePending();
         $end = CarbonImmutable::now();
 
         $accounts = $this->feed->accounts()

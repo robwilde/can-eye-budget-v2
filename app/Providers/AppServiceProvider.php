@@ -51,6 +51,7 @@ use App\Services\Documents\OpenAiVectorStore;
 use App\Services\ExchangeRateClient;
 use App\Services\GitHubService;
 use App\Services\GmailService;
+use App\Services\InstanceSettings;
 use App\Services\Investments\SecurityPriceProviders;
 use App\Services\Investments\TwelveDataClient;
 use App\Services\MerchantBrands\ContextDevCreditBalance;
@@ -108,8 +109,8 @@ final class AppServiceProvider extends ServiceProvider
             allowedHost: (string) parse_url((string) config('services.redbark.base_url'), PHP_URL_HOST),
         ));
 
-        $this->app->singleton(ContextDevServiceContract::class, function (): ContextDevService {
-            $apiKey = (string) config('services.context_dev.api_key');
+        $this->app->scoped(ContextDevServiceContract::class, function (Application $app): ContextDevService {
+            $apiKey = (string) $app->make(InstanceSettings::class)->contextDevApiKey();
 
             throw_if(blank($apiKey), RuntimeException::class, 'CONTEXT_DEV_API_KEY is not configured.');
 
@@ -263,13 +264,17 @@ final class AppServiceProvider extends ServiceProvider
             return $registry;
         });
 
-        $this->app->bind(LlmClientContract::class, function (): LlmClientContract {
-            $ai = (array) config('services.ai');
-            $model = (string) ($ai['model'] ?? '');
+        $this->app->scoped(InstanceSettings::class);
 
-            return match ($ai['provider'] ?? 'openai') {
-                'anthropic' => new AnthropicClient(config('services.anthropic.key'), $model, $ai['base_url'] ?: 'https://api.anthropic.com/v1', (int) $ai['timeout'], (int) $ai['connect_timeout'], (int) $ai['max_tokens']),
-                default => new OpenAiClient(config('services.openai.key'), $model, $ai['base_url'] ?: 'https://api.openai.com/v1', (int) $ai['timeout'], (int) $ai['connect_timeout']),
+        $this->app->bind(LlmClientContract::class, function (Application $app): LlmClientContract {
+            $ai = (array) config('services.ai');
+            $settings = $app->make(InstanceSettings::class);
+            $model = $settings->llmModel();
+            $endpoint = $settings->llmEndpoint();
+
+            return match ($settings->llmProvider()) {
+                'anthropic' => new AnthropicClient($settings->anthropicApiKey(), $model, $endpoint ?? 'https://api.anthropic.com/v1', (int) $ai['timeout'], (int) $ai['connect_timeout'], $settings->llmTokenBudget()),
+                default => new OpenAiClient($settings->openaiApiKey(), $model, $endpoint ?? 'https://api.openai.com/v1', (int) $ai['timeout'], (int) $ai['connect_timeout'], $settings->savedTokenBudget()),
             };
         });
     }

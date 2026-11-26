@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Console\FeedSyncSchedule;
 use App\Exceptions\TransactionWriteRefusedException;
 use App\Http\Controllers\HealthCheckController;
 use App\Http\Middleware\AttributeRequestToUser;
@@ -10,6 +11,7 @@ use App\Http\Middleware\EnsureMcpEnabled;
 use App\Http\Middleware\EnsurePreviewFeatures;
 use App\Http\Middleware\SetLocale;
 use App\Http\Middleware\ThrottleApiByAddress;
+use App\Services\InstanceSettings;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
@@ -79,7 +81,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('scheduler:heartbeat')
             ->everyMinute()
             ->runInBackground();
-        $schedule->command('app:sync-redbark-feeds')->everySixHours()->withoutOverlapping();
+        FeedSyncSchedule::register($schedule, app(InstanceSettings::class));
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->dontFlash(['invite_code']);

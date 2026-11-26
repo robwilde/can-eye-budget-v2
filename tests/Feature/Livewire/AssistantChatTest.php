@@ -47,7 +47,7 @@ function chatUser(bool $consented = true): User
     return $user->fresh();
 }
 
-it('shows the assistant page and the sidebar link only when the flag is on', function () {
+it('shows the assistant page and the sidebar link only while the chat is enabled', function () {
     $user = chatUser();
 
     $this->actingAs($user)->get(route('assistant'))->assertOk()->assertSeeLivewire(AssistantChat::class);
@@ -56,7 +56,7 @@ it('shows the assistant page and the sidebar link only when the flag is on', fun
     config(['budget.ai_assistant' => false]);
 
     $this->actingAs($user)->get(route('dashboard'))->assertDontSee(route('assistant'), false);
-    $this->get(route('assistant'))->assertOk();
+    $this->get(route('assistant'))->assertNotFound();
 });
 
 it('sends guests to login', function () {

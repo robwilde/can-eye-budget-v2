@@ -4,6 +4,7 @@
         'admin.audit' => __('Audit trail'),
         'admin.llm-usage' => __('LLM usage'),
         'admin.invite-codes' => __('Invite codes'),
+        'admin.settings' => __('Self-hosting'),
     ];
 @endphp
 

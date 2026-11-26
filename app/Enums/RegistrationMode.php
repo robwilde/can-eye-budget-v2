@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Enums;
 
+use App\Services\InstanceSettings;
 use Illuminate\Support\Env;
 
 enum RegistrationMode: string
@@ -33,9 +34,7 @@ enum RegistrationMode: string
 
     public static function current(): self
     {
-        $mode = config('budget.registration_mode');
-
-        return is_string($mode) ? (self::tryFrom($mode) ?? self::Closed) : self::Closed;
+        return app(InstanceSettings::class)->registrationMode();
     }
 
     public function allowsRegistration(): bool

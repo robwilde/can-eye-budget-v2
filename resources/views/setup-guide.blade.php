@@ -105,7 +105,7 @@
             <flux:text size="sm" class="text-zinc-500">
                 {{ __('Last checked 9 October 2026 against redbark.com and myaccount.google.com. If a step no longer matches what you see, tell us with the Report feedback button once you are signed in.') }}
             </flux:text>
-            @if (Route::has('register'))
+            @if (Route::has('register') && App\Enums\RegistrationMode::current()->allowsRegistration())
                 <flux:link :href="route('register')">{{ __('Create your Can I Budget account') }}</flux:link>
             @endif
         </section>

@@ -35,6 +35,7 @@ use App\Models\TransactionSplit;
 use App\Models\User;
 use App\Services\CategoryRuleGenerator;
 use App\Services\GmailService;
+use App\Services\InstanceSettings;
 use App\Services\MerchantBrands\BrandNameWriter;
 use App\Services\MerchantBrands\ContextDevCreditBalance;
 use App\Services\MerchantBrands\ContextDevCreditBudget;
@@ -2101,7 +2102,7 @@ final class TransactionList extends Component
 
         $balance = app(ContextDevCreditBalance::class);
 
-        if (filled(config('services.context_dev.api_key')) && $balance->claimRefresh()) {
+        if (filled(app(InstanceSettings::class)->contextDevApiKey()) && $balance->claimRefresh()) {
             try {
                 app(ContextDevServiceContract::class)->creditsRemaining();
             } catch (ContextDevException $e) {
