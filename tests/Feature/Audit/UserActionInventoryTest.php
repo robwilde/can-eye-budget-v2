@@ -9,6 +9,7 @@ use App\Jobs\ApplyUserRulesJob;
 use App\Jobs\CategoriseRuleMatchesJob;
 use App\Jobs\EnrichMerchantBrandsJob;
 use App\Jobs\ExtractStatementPdfJob;
+use App\Jobs\GenerateAssistantReplyJob;
 use App\Jobs\GenerateDataExportJob;
 use App\Jobs\GenerateInsightsJob;
 use App\Jobs\GeneratePlannedOccurrencesJob;
@@ -227,6 +228,7 @@ test('every queued job is in the inventory and carries the audit middleware as d
 
     $jobs = [
         EnrichMerchantBrandsJob::class => [new EnrichMerchantBrandsJob($user), false],
+        GenerateAssistantReplyJob::class => [new GenerateAssistantReplyJob($user, 1), true],
         GenerateInsightsJob::class => [new GenerateInsightsJob($user), true],
         ResolveMerchantBrandJob::class => [new ResolveMerchantBrandJob($user, 'merchant'), false],
         ImportCsvTransactionsJob::class => [new ImportCsvTransactionsJob(BankImport::factory()->create()), true],
