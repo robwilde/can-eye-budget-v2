@@ -6,13 +6,13 @@ namespace App\Http\Assistant\Tools;
 
 use App\Contracts\AssistantWriteTool;
 use App\Models\User;
-use App\Services\Transactions\ApiTransactionWriter;
+use App\Services\Transactions\TransactionWriter;
 
 final class DeleteTransaction implements AssistantWriteTool
 {
     use WritesUserData;
 
-    public function __construct(private readonly ApiTransactionWriter $writer) {}
+    public function __construct(private readonly TransactionWriter $writer) {}
 
     public function name(): string
     {

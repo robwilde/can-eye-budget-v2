@@ -16,6 +16,7 @@ use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
 use App\Enums\PlanRefusal;
 use App\Enums\RecurrenceFrequency;
+use App\Enums\StaleVersion;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionKind;
 use App\Enums\TransactionSource;
@@ -54,9 +55,9 @@ use App\Services\Recurring\PlanWriter;
 use App\Services\Recurring\RecurringGate;
 use App\Services\RulePromptGate;
 use App\Services\Tags\TransactionTagger;
-use App\Services\TransactionIdempotency;
-use App\Services\Transactions\TransactionDeleter;
 use App\Services\Transactions\TransactionSplitter;
+use App\Services\Transactions\TransactionWriteOptions;
+use App\Services\Transactions\TransactionWriter;
 use App\Services\Transfers\TransferExchange;
 use App\Services\Transfers\TransferKinds;
 use App\Services\Transfers\TransferLinker;
@@ -68,6 +69,7 @@ use Carbon\CarbonImmutable;
 use Carbon\Exceptions\InvalidFormatException;
 use Closure;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -707,23 +709,23 @@ final class TransactionModal extends Component
      */
     public function deleteTransaction(): void
     {
-        $target = Transaction::query()
-            ->where('user_id', auth()->id())
-            ->find($this->openedTransactionId ?? $this->editingTransactionId);
+        $id = $this->openedTransactionId ?? $this->editingTransactionId;
 
-        if ($target instanceof Transaction && $target->isSplitChild()) {
-            $this->addError('splitLines', __('A split line is deleted with its parent. Undo the split or delete the parent.'));
-
+        if ($id === null) {
             return;
         }
 
-        $deleted = app(TransactionDeleter::class)->delete(
-            Transaction::query()
-                ->where('user_id', auth()->id())
-                ->whereKey($this->openedTransactionId ?? $this->editingTransactionId),
-        );
+        try {
+            app(TransactionWriter::class)->delete($this->authenticatedUser(), $id);
+        } catch (TransactionWriteRefusedException $refused) {
+            $isSplitLine = Transaction::query()->where('user_id', auth()->id())->whereKey($id)->whereNotNull('split_parent_id')->exists();
 
-        if ($deleted === 0) {
+            $this->addError($isSplitLine ? 'splitLines' : 'descriptionInput', $refused->getMessage());
+
+            return;
+        } catch (ModelNotFoundException) {
+            $this->addError('descriptionInput', TransactionWriter::STALE_VERSION);
+
             return;
         }
 
@@ -1391,15 +1393,6 @@ final class TransactionModal extends Component
     }
 
     /**
-     * @param  array<string, mixed>  $overrides
-     * @return array<string, mixed>
-     */
-    private function withLockedFields(Transaction $transaction, array $overrides): array
-    {
-        return $overrides + ['locked_fields' => $transaction->lockedFieldsAfter($overrides) ?: null];
-    }
-
-    /**
      * What the user locked, in words; the amount lock a folded fee put there is the system's.
      *
      * @return list<string>
@@ -1598,8 +1591,7 @@ final class TransactionModal extends Component
         return match (true) {
             $moved && $row->isSplitChild() => __('A split line keeps its amount, date, account and type. Edit the split on its parent to change the amount.'),
             $moved => __('A split transaction keeps its amount, date, account and type. Undo the split to change them.'),
-            $row->isSplitParent() && ! $this->excluded => __('A split transaction stays excluded until the split is undone.'),
-            default => null,
+            default => TransactionWriter::exclusionRefusal($row, $this->excluded),
         };
     }
 
@@ -1671,7 +1663,7 @@ final class TransactionModal extends Component
             }, TransferKinds::TRANSACTION_ATTEMPTS);
         }
 
-        if (! $isLinked && $wantsTransfer && $this->bankFeedFieldsChanged($row) && ($refusal = $this->transferLegExclusionRefusal($row, linking: true)) !== null) {
+        if (! $isLinked && $wantsTransfer && $this->bankFeedFieldsChanged($row) && ($refusal = $this->linkExclusionRefusal($row)) !== null) {
             $this->addError('descriptionInput', $refusal);
 
             return false;
@@ -1877,17 +1869,25 @@ final class TransactionModal extends Component
             return false;
         }
 
-        DB::transaction(function () use ($parsed): void {
-            app(AccountBalanceHistoryBuilder::class)->lockAccounts($this->accountId);
-
-            $created = app(TransactionIdempotency::class)->ingestOnce(
-                new Transaction($this->manualSingleAttributes($parsed, null)),
-                $this->submissionToken,
-            );
-
-            $targets = $created->trashed() ? $created->children()->current()->get() : collect([$created]);
-            $targets->each(fn (Transaction $row) => $this->syncChosenTags($row));
-        }, TransferKinds::TRANSACTION_ATTEMPTS);
+        app(TransactionWriter::class)->create($this->authenticatedUser(), [
+            'account_id' => (int) $this->accountId,
+            'category_id' => $this->categoryId,
+            'merchant_id' => $this->merchantId,
+            'amount' => $parsed->amount,
+            'direction' => $this->transactionType === 'expense' ? TransactionDirection::Debit->value : TransactionDirection::Credit->value,
+            'description' => $parsed->description,
+            'post_date' => $this->date,
+            'notes' => $this->notes !== '' ? $this->notes : null,
+            'excluded' => $this->excluded,
+            ...$this->currencyAttributes(),
+        ], new TransactionWriteOptions(
+            idempotencyKey: $this->submissionToken,
+            attempts: TransferKinds::TRANSACTION_ATTEMPTS,
+            within: function (Transaction $created): void {
+                $targets = $created->trashed() ? $created->children()->current()->get() : collect([$created]);
+                $targets->each(fn (Transaction $row) => $this->syncChosenTags($row));
+            },
+        ));
 
         return true;
     }
@@ -2048,49 +2048,12 @@ final class TransactionModal extends Component
     }
 
     /**
-     * Re-reads the row under the edit's locks: a row that was trashed or versioned since the form
-     * loaded it, or a split that committed after the form's first check, must refuse the edit
-     * instead of inserting a live version of a stale copy.
-     *
-     * @throws TransactionSplitRefusedException
-     * @throws TransactionWriteRefusedException
+     * Why the form must not exclude a row it is linking as a transfer leg, or null: a leg is counted as a
+     * pair, so excluding one counts the pair twice. A row that is already excluded may still be linked.
      */
-    private function assertSplitRowUnchanged(Transaction $transaction): void
+    private function linkExclusionRefusal(Transaction $row): ?string
     {
-        $locked = Transaction::withTrashed()
-            ->where('user_id', auth()->id())
-            ->whereKey($transaction->id)
-            ->lockForUpdate()
-            ->first();
-
-        if (! $locked instanceof Transaction || $locked->trashed() || $locked->children()->exists()) {
-            throw new TransactionSplitRefusedException(__('This transaction changed while you were editing it. Reopen it and try again.'));
-        }
-
-        $legRefusal = $this->transferLegExclusionRefusal($locked);
-
-        if ($legRefusal !== null) {
-            throw new TransactionWriteRefusedException($legRefusal);
-        }
-
-        $refusal = $this->splitRowRefusal();
-
-        if ($refusal !== null) {
-            throw new TransactionSplitRefusedException($refusal);
-        }
-    }
-
-    /**
-     * Why the form must not exclude this row, or null. A transfer leg is counted as a pair, so
-     * excluding one leg counts the pair twice; a leg that is already excluded may still be saved.
-     */
-    private function transferLegExclusionRefusal(Transaction $row, bool $linking = false): ?string
-    {
-        if (! $this->excluded || $row->excluded || ($row->transfer_pair_id === null && ! $linking)) {
-            return null;
-        }
-
-        return __('A transfer leg cannot be excluded.');
+        return $this->excluded && ! $row->excluded ? TransactionWriter::TRANSFER_LEG_NOT_EXCLUDABLE : null;
     }
 
     /**
@@ -2106,62 +2069,59 @@ final class TransactionModal extends Component
 
         [$transaction, $parsed] = $resolved;
 
-        if ($transaction->source->isBankFeed()) {
-            $child = DB::transaction(function () use ($transaction): Transaction {
-                app(AccountBalanceHistoryBuilder::class)->lockAccounts($transaction->account_id);
-                $this->assertSplitRowUnchanged($transaction);
-                $this->reloadCleanNamesUnderLock($transaction);
-
-                $child = $transaction->createChild($this->withLockedFields($transaction, [
+        $child = app(TransactionWriter::class)->update(
+            $this->authenticatedUser(),
+            $transaction->id,
+            $transaction->source->isBankFeed()
+                ? [
                     'category_id' => $this->categoryId,
                     'merchant_id' => $this->merchantId,
                     'notes' => $this->notes !== '' ? $this->notes : null,
                     'excluded' => $this->excluded,
-                    ...$this->exclusionSourceFor($transaction),
                     ...$this->editedDescriptors($transaction),
                     ...$this->kindOverride(),
-                ]));
-
-                // The partner follows the new version, but only for links that still hold under lock.
-                app(TransferLinker::class)->followVersion($transaction, $child);
-                $this->syncChosenTags($child);
-
-                return $child;
-            }, TransferKinds::TRANSACTION_ATTEMPTS);
-        } else {
-            $child = DB::transaction(function () use ($transaction, $parsed): Transaction {
-                app(AccountBalanceHistoryBuilder::class)->lockAccounts($transaction->account_id, $this->accountId);
-                $this->assertSplitRowUnchanged($transaction);
-                $this->reloadCleanNamesUnderLock($transaction);
-
-                $child = $transaction->createChild($this->withLockedFields($transaction, [
-                    'account_id' => $this->accountId,
+                ]
+                : [
+                    'account_id' => (int) $this->accountId,
                     'category_id' => $this->categoryId,
                     'merchant_id' => $this->merchantId,
                     'amount' => $this->amountAfterEdit($transaction, $parsed),
-                    'direction' => $this->transactionType === 'expense'
-                        ? TransactionDirection::Debit
-                        : TransactionDirection::Credit,
-                    ...$this->editedDescriptors($transaction),
+                    'direction' => $this->transactionType === 'expense' ? TransactionDirection::Debit : TransactionDirection::Credit,
+                    ...($parsed->description !== $this->openedDescription ? ['description' => $parsed->description] : []),
                     'post_date' => $this->date,
                     'notes' => $this->notes !== '' ? $this->notes : null,
                     'excluded' => $this->excluded,
-                    ...$this->exclusionSourceFor($transaction),
                     ...$this->currencyAttributes($transaction),
                     ...$this->kindOverride(),
-                ]));
-
-                app(AccountBalanceHistoryBuilder::class)->rebuildForEdit($transaction, $child);
-                app(TransferLinker::class)->followEditedVersion($transaction, $child);
-                $this->syncChosenTags($child);
-
-                return $child;
-            }, TransferKinds::TRANSACTION_ATTEMPTS);
-        }
+                ],
+            $this->formWriteOptions(),
+        );
 
         $this->applyCategoriseMatching($child);
 
         return true;
+    }
+
+    /**
+     * How the form's edits are written: imported CSV and PDF rows may change their figures, a stale copy is
+     * refused instead of followed, the split and category line checks that compare the form with the row run
+     * on the locked row, and the chosen tags commit with the new version.
+     */
+    private function formWriteOptions(): TransactionWriteOptions
+    {
+        return new TransactionWriteOptions(
+            allowImportedCoreEdits: true,
+            stale: StaleVersion::Refuse,
+            attempts: TransferKinds::TRANSACTION_ATTEMPTS,
+            guard: function (): void {
+                $refusal = $this->splitRowRefusal();
+
+                if ($refusal !== null) {
+                    throw new TransactionSplitRefusedException($refusal);
+                }
+            },
+            within: fn (Transaction $child) => $this->syncChosenTags($child),
+        );
     }
 
     private function reloadCleanNamesUnderLock(Transaction ...$transactions): void
@@ -2912,12 +2872,6 @@ final class TransactionModal extends Component
     private function kindChanged(): bool
     {
         return $this->kind !== $this->openedKind;
-    }
-
-    /** @return array{excluded_source?: ExclusionSource} */
-    private function exclusionSourceFor(Transaction $transaction): array
-    {
-        return $this->excluded === $transaction->excluded ? [] : ['excluded_source' => ExclusionSource::Manual];
     }
 
     /** @return array{kind?: TransactionKind} */
