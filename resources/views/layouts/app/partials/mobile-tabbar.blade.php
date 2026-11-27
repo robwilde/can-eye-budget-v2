@@ -20,15 +20,17 @@
         </a>
     @endforeach
 
-    <button
-        type="button"
-        wire:click="$dispatch('open-transaction-modal', { date: '{{ now()->toDateString() }}' })"
-        data-testid="mobile-tabbar-fab"
-        aria-label="Log a transaction"
-        class="-translate-y-3.5 inline-flex flex-col items-center gap-1 rounded-[20px] border-2 border-cib-black bg-cib-teal-400 px-3 py-2.5 text-white shadow-pop-sm"
-    >
-        <flux:icon name="plus" class="size-5" />
-    </button>
+    @if (auth()->user()?->hasVerifiedEmail())
+        <button
+            type="button"
+            wire:click="$dispatch('open-transaction-modal', { date: '{{ now()->toDateString() }}' })"
+            data-testid="mobile-tabbar-fab"
+            aria-label="Log a transaction"
+            class="-translate-y-3.5 inline-flex flex-col items-center gap-1 rounded-[20px] border-2 border-cib-black bg-cib-teal-400 px-3 py-2.5 text-white shadow-pop-sm"
+        >
+            <flux:icon name="plus" class="size-5" />
+        </button>
+    @endif
 
     <a
         href="{{ route('transactions') }}"

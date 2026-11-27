@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Models\UserRule;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\URL;
 use Livewire\Livewire;
 
 /** @return list<array<string, mixed>> */
@@ -65,7 +66,10 @@ test('a new user goes from sign-up to a categorised, pay-cycle-aware view with e
     ])->assertRedirect(route('connect-bank'));
 
     $user = User::query()->where('email', 'setup@example.com')->sole();
-    $this->actingAs($user)->get(route('connect-bank'))->assertOk();
+    $this->actingAs($user)->get(route('connect-bank'))->assertRedirect(route('verification.notice'));
+
+    $this->actingAs($user)->get(URL::temporarySignedRoute('verification.verify', now()->addMinutes(60), ['id' => $user->id, 'hash' => sha1($user->email)]))->assertRedirect();
+    $this->actingAs($user->fresh())->get(route('connect-bank'))->assertOk();
 
     $this->travel(40)->seconds();
     Http::swap(new Illuminate\Http\Client\Factory);

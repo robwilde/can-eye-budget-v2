@@ -79,6 +79,7 @@ use App\Support\Email\Schedules\AfterpayOrderStrategy;
 use App\Support\Email\Schedules\PayPalReceiptStrategy;
 use App\View\Composers\LayoutShellComposer;
 use Carbon\CarbonImmutable;
+use Illuminate\Auth\Middleware\EnsureEmailIsVerified;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Request;
@@ -92,6 +93,7 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 use Laravel\Sanctum\Events\TokenAuthenticated;
 use Laravel\Sanctum\Sanctum;
+use Livewire\Livewire;
 use RuntimeException;
 
 final class AppServiceProvider extends ServiceProvider
@@ -289,6 +291,8 @@ final class AppServiceProvider extends ServiceProvider
         Transaction::observe(TransactionObserver::class);
 
         Sanctum::usePersonalAccessTokenModel(ApiKey::class);
+
+        Livewire::addPersistentMiddleware([EnsureEmailIsVerified::class]);
 
         Event::listen(TokenAuthenticated::class, static function (TokenAuthenticated $event): void {
             if ($event->token instanceof ApiKey) {
