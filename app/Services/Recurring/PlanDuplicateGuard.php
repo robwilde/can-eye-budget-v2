@@ -17,10 +17,10 @@ use App\Models\User;
  */
 final class PlanDuplicateGuard
 {
-    public function exists(User $user, int $accountId, int $amount, TransactionDirection $direction, ?int $merchantId, string $description): bool
+    public function exists(User $user, int $accountId, int $amount, TransactionDirection $direction, ?int $merchantId, string $description, ?int $exceptPlanId = null, ?string $merchantKey = null): bool
     {
         $description = mb_strtolower(mb_trim($description));
-        $merchantKeys = $this->merchantKeys($user, $merchantId);
+        $merchantKeys = $this->merchantKeys($user, $merchantId, $merchantKey);
 
         if ($description === '' && $merchantKeys === []) {
             return false;
@@ -30,6 +30,7 @@ final class PlanDuplicateGuard
             ->where('user_id', $user->id)
             ->visible()
             ->where('account_id', $accountId)
+            ->when($exceptPlanId !== null, fn ($query) => $query->whereKeyNot($exceptPlanId))
             ->whereNull('transfer_to_account_id')
             ->where('direction', $direction->value)
             ->where('amount', abs($amount))
@@ -40,12 +41,23 @@ final class PlanDuplicateGuard
     }
 
     /**
-     * The merchant's own key and the keys of merchants merged into it, which plans may still carry.
+     * The merchant's own key and the keys of merchants merged into it, which plans may still carry. A plan
+     * that stores only a key (no merchant id at hand) resolves to its merchant the same way, so an old merged
+     * key and the surviving merchant's key count as one.
      *
      * @return list<string>
      */
-    private function merchantKeys(User $user, ?int $merchantId): array
+    public function merchantKeys(User $user, ?int $merchantId, ?string $merchantKey = null): array
     {
+        if ($merchantId === null && $merchantKey !== null) {
+            $merchantId = Merchant::query()->where('user_id', $user->id)->where('merchant_key', $merchantKey)->value('id')
+                ?? MerchantAlias::query()->where('user_id', $user->id)->where('merchant_key', $merchantKey)->value('merchant_id');
+
+            if ($merchantId === null) {
+                return [$merchantKey];
+            }
+        }
+
         if ($merchantId === null) {
             return [];
         }

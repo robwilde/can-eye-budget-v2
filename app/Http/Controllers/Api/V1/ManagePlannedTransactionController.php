@@ -6,22 +6,22 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
+use App\Enums\PlanRefusal;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Exceptions\PlanWriteRefusedException;
 use App\Http\Resources\Api\PlannedTransactionResource;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\PlannedTransaction;
 use App\Models\User;
-use App\Services\Recurring\PlanDuplicateGuard;
-use App\Services\Recurring\RecurringGate;
+use App\Services\Recurring\PlanWriter;
 use Closure;
-use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 final class ManagePlannedTransactionController extends OwnedReadController
@@ -34,23 +34,13 @@ final class ManagePlannedTransactionController extends OwnedReadController
      *
      * @throws Throwable
      */
-    public function store(Request $request, PlanDuplicateGuard $guard): JsonResponse
+    public function store(Request $request, PlanWriter $writer): JsonResponse
     {
-        $user = $this->recurringOwner($request);
+        $user = $this->recurringOwner($request, $writer);
 
         $attributes = $this->attributes($request, $user, null);
 
-        $plan = DB::transaction(function () use ($user, $guard, $attributes): PlannedTransaction {
-            User::query()->whereKey($user->id)->lockForUpdate()->first();
-
-            abort_if(
-                $guard->exists($user, $attributes['account_id'], $attributes['amount'], $attributes['direction'], null, $attributes['description']),
-                Response::HTTP_CONFLICT,
-                'A plan like this already exists.',
-            );
-
-            return PlannedTransaction::query()->create(['user_id' => $user->id, ...$attributes]);
-        });
+        $plan = $this->written(static fn (): PlannedTransaction => $writer->create($user, $attributes));
 
         return new PlannedTransactionResource($plan->refresh())->response()->setStatusCode(Response::HTTP_CREATED);
     }
@@ -60,49 +50,93 @@ final class ManagePlannedTransactionController extends OwnedReadController
      *
      * @throws Throwable
      */
-    public function update(Request $request, int $id): PlannedTransactionResource
+    public function update(Request $request, int $id, PlanWriter $writer): PlannedTransactionResource
     {
-        $user = $this->recurringOwner($request);
+        $user = $this->recurringOwner($request, $writer);
 
-        $plan = $this->ownedPlan($user, $id);
+        $plan = $this->ownedPlan($user, $id, $writer);
 
         $attributes = $this->attributes($request, $user, $plan);
 
-        DB::transaction(fn (): bool => $plan->update($attributes));
+        $updated = $this->written(static fn (): PlannedTransaction => $writer->update($user, $plan, $attributes));
 
-        return new PlannedTransactionResource($plan->refresh());
+        return new PlannedTransactionResource($updated->refresh());
     }
 
     /**
      * @throws Throwable
      */
-    public function destroy(Request $request, int $id): Response
+    public function destroy(Request $request, int $id, PlanWriter $writer): Response
     {
-        $user = $this->recurringOwner($request);
+        $user = $this->recurringOwner($request, $writer);
 
-        $plan = $this->ownedPlan($user, $id);
+        $plan = $this->ownedPlan($user, $id, $writer);
 
-        DB::transaction(fn () => $plan->discard());
+        $this->written(static fn () => $writer->discard($user, $plan));
 
         return response()->noContent();
     }
 
-    private function recurringOwner(Request $request): User
+    private function recurringOwner(Request $request, PlanWriter $writer): User
     {
         $user = $this->owner($request);
 
-        abort_unless(RecurringGate::enabled($user), Response::HTTP_NOT_FOUND);
+        $refusal = $writer->refusalFor($user);
+
+        if ($refusal instanceof PlanRefusal) {
+            $this->refused($refusal);
+        }
 
         return $user;
     }
 
-    private function ownedPlan(User $user, int $id): PlannedTransaction
+    private function ownedPlan(User $user, int $id, PlanWriter $writer): PlannedTransaction
     {
         $plan = PlannedTransaction::query()->where('user_id', $user->id)->visible()->findOrFail($id);
 
-        abort_if($plan->is_pay_cycle_income === true, Response::HTTP_FORBIDDEN, 'Pay cycle income is managed elsewhere.');
+        $refusal = $writer->refusalFor($user, $plan);
+
+        if ($refusal instanceof PlanRefusal) {
+            $this->refused($refusal);
+        }
 
         return $plan;
+    }
+
+    /**
+     * @template T
+     *
+     * @param  Closure(): T  $write
+     * @return T
+     */
+    private function written(Closure $write): mixed
+    {
+        try {
+            return $write();
+        } catch (PlanWriteRefusedException $exception) {
+            $this->refused($exception->reason);
+        }
+    }
+
+    /** The response a refusal becomes: a validation error on the field it concerns, or its own status. */
+    private function refused(PlanRefusal $refusal): never
+    {
+        $field = match ($refusal) {
+            PlanRefusal::UntrackedAccount => 'account_id',
+            PlanRefusal::HiddenCategory => 'category_id',
+            PlanRefusal::StartNotAfterToday => 'start_date',
+            default => null,
+        };
+
+        if ($field !== null) {
+            throw ValidationException::withMessages([$field => $refusal->message()]);
+        }
+
+        abort($refusal->status(), match ($refusal) {
+            PlanRefusal::PayCycleIncome => 'Pay cycle income is managed elsewhere.',
+            PlanRefusal::Duplicate => $refusal->message(),
+            default => '',
+        });
     }
 
     /**
@@ -119,8 +153,8 @@ final class ManagePlannedTransactionController extends OwnedReadController
         $isTransfer = $plan?->transfer_to_account_id !== null;
 
         $validated = $request->validate([
-            'account_id' => [$presence, 'integer', Rule::exists(Account::class, 'id')->where(fn (Builder $query): Builder => $query->where('user_id', $user->id)->where('is_tracked', true))],
-            'category_id' => ['nullable', 'integer', Rule::exists(Category::class, 'id')->where(fn (Builder $query): Builder => $query->where('user_id', $user->id)->where('is_hidden', false))],
+            'account_id' => [$presence, 'integer', Rule::exists(Account::class, 'id')->where('user_id', $user->id)],
+            'category_id' => ['nullable', 'integer', Rule::exists(Category::class, 'id')->where('user_id', $user->id)],
             'amount' => [$presence, 'integer', 'min:1', 'max:'.self::MAX_AMOUNT_CENTS],
             'direction' => [$presence, Rule::enum(TransactionDirection::class)],
             'type' => ['sometimes', 'string', $this->typeRule($direction, $isTransfer)],
@@ -179,9 +213,6 @@ final class ManagePlannedTransactionController extends OwnedReadController
         if ($frequency !== null && ($plan === null || array_key_exists('frequency', $validated) || array_key_exists('recurrence_interval', $validated))) {
             $attributes['frequency'] = $frequency;
 
-            if ($plan !== null && $frequency !== $plan->frequency) {
-                $attributes['days_of_month'] = null;
-            }
             $attributes['recurrence_interval'] = $frequency->usesInterval()
                 ? (int) ($validated['recurrence_interval'] ?? ($plan?->frequency === $frequency ? $plan->recurrence_interval : 1))
                 : 1;
