@@ -135,14 +135,6 @@ final readonly class ApiTransactionWriter
 
             $child = $current->createChild($overrides + ['locked_fields' => $current->lockedFieldsAfter($overrides) ?: null]);
 
-            foreach ($current->splits as $split) {
-                $split->replicate()->fill(['transaction_id' => $child->id])->save();
-            }
-
-            foreach ($current->emails as $email) {
-                $email->replicate()->fill(['transaction_id' => $child->id])->save();
-            }
-
             if ($wantsAmountChange) {
                 $this->history->rebuildForEdit($current, $child);
             }

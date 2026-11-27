@@ -652,6 +652,8 @@ final class Transaction extends Model
             self::query()->where('split_parent_id', $this->id)->update(['split_parent_id' => $child->id]);
             self::query()->where('transfer_fee_for_id', $this->id)->update(['transfer_fee_for_id' => $child->id]);
 
+            $this->carryCategoryLinesAndEmails($child, $overrides);
+
             app(OccurrencePaymentRecorder::class)->revalidate($child, $child->planned_transaction_id !== $this->planned_transaction_id);
 
             return $child;
@@ -871,6 +873,25 @@ final class Transaction extends Model
             'locked_fields' => 'array',
             'exchange_rate' => 'float',
         ];
+    }
+
+    /**
+     * Category lines add up to the amount, so they follow the row only while the new version keeps
+     * that amount; the linked emails follow every version.
+     *
+     * @param  array<string, mixed>  $overrides
+     */
+    private function carryCategoryLinesAndEmails(self $child, array $overrides): void
+    {
+        if (! array_key_exists('amount', $overrides) || (int) $overrides['amount'] === (int) $this->amount) {
+            foreach ($this->splits()->get() as $split) {
+                $split->replicate()->fill(['transaction_id' => $child->id])->save();
+            }
+        }
+
+        foreach ($this->emails()->get() as $email) {
+            $email->replicate()->fill(['transaction_id' => $child->id])->save();
+        }
     }
 
     private function comparable(string $field, mixed $value): string
