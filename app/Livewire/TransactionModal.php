@@ -16,6 +16,7 @@ use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
 use App\Enums\PlanRefusal;
 use App\Enums\RecurrenceFrequency;
+use App\Enums\StaleVersion;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionKind;
 use App\Enums\TransactionSource;
@@ -1599,8 +1600,7 @@ final class TransactionModal extends Component
         return match (true) {
             $moved && $row->isSplitChild() => __('A split line keeps its amount, date, account and type. Edit the split on its parent to change the amount.'),
             $moved => __('A split transaction keeps its amount, date, account and type. Undo the split to change them.'),
-            $row->isSplitParent() && ! $this->excluded => __('A split transaction stays excluded until the split is undone.'),
-            default => null,
+            default => TransactionWriter::exclusionRefusal($row, $this->excluded),
         };
     }
 
@@ -2138,39 +2138,46 @@ final class TransactionModal extends Component
                 return $child;
             }, TransferKinds::TRANSACTION_ATTEMPTS);
         } else {
-            $child = DB::transaction(function () use ($transaction, $parsed): Transaction {
-                app(AccountBalanceHistoryBuilder::class)->lockAccounts($transaction->account_id, $this->accountId);
-                $this->assertSplitRowUnchanged($transaction);
-                $this->reloadCleanNamesUnderLock($transaction);
-
-                $child = $transaction->createChild($this->withLockedFields($transaction, [
-                    'account_id' => $this->accountId,
-                    'category_id' => $this->categoryId,
-                    'merchant_id' => $this->merchantId,
-                    'amount' => $this->amountAfterEdit($transaction, $parsed),
-                    'direction' => $this->transactionType === 'expense'
-                        ? TransactionDirection::Debit
-                        : TransactionDirection::Credit,
-                    ...$this->editedDescriptors($transaction),
-                    'post_date' => $this->date,
-                    'notes' => $this->notes !== '' ? $this->notes : null,
-                    'excluded' => $this->excluded,
-                    ...$this->exclusionSourceFor($transaction),
-                    ...$this->currencyAttributes($transaction),
-                    ...$this->kindOverride(),
-                ]));
-
-                app(AccountBalanceHistoryBuilder::class)->rebuildForEdit($transaction, $child);
-                app(TransferLinker::class)->followEditedVersion($transaction, $child);
-                $this->syncChosenTags($child);
-
-                return $child;
-            }, TransferKinds::TRANSACTION_ATTEMPTS);
+            $child = app(TransactionWriter::class)->update($this->authenticatedUser(), $transaction->id, [
+                'account_id' => (int) $this->accountId,
+                'category_id' => $this->categoryId,
+                'merchant_id' => $this->merchantId,
+                'amount' => $this->amountAfterEdit($transaction, $parsed),
+                'direction' => $this->transactionType === 'expense' ? TransactionDirection::Debit : TransactionDirection::Credit,
+                ...($parsed->description !== $this->openedDescription ? ['description' => $parsed->description] : []),
+                'post_date' => $this->date,
+                'notes' => $this->notes !== '' ? $this->notes : null,
+                'excluded' => $this->excluded,
+                ...$this->currencyAttributes($transaction),
+                ...$this->kindOverride(),
+            ], $this->formWriteOptions());
         }
 
         $this->applyCategoriseMatching($child);
 
         return true;
+    }
+
+    /**
+     * How the form's edits are written: imported CSV and PDF rows may change their figures, a stale copy is
+     * refused instead of followed, the split and category line checks that compare the form with the row run
+     * on the locked row, and the chosen tags commit with the new version.
+     */
+    private function formWriteOptions(): TransactionWriteOptions
+    {
+        return new TransactionWriteOptions(
+            allowImportedCoreEdits: true,
+            stale: StaleVersion::Refuse,
+            attempts: TransferKinds::TRANSACTION_ATTEMPTS,
+            guard: function (): void {
+                $refusal = $this->splitRowRefusal();
+
+                if ($refusal !== null) {
+                    throw new TransactionSplitRefusedException($refusal);
+                }
+            },
+            within: fn (Transaction $child) => $this->syncChosenTags($child),
+        );
     }
 
     private function reloadCleanNamesUnderLock(Transaction ...$transactions): void
