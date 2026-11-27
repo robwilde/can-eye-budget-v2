@@ -1548,8 +1548,12 @@ final class TransactionModal extends Component
     {
         $row = $this->editingOwnedTransaction();
 
-        if (! $row instanceof Transaction || ! ($row->isSplitParent() || $row->isSplitChild())) {
+        if (! $row instanceof Transaction) {
             return null;
+        }
+
+        if (! ($row->isSplitParent() || $row->isSplitChild())) {
+            return $this->categoryLinesRefusal($row);
         }
 
         $isFeed = in_array($row->source, TransactionSource::bankFeed(), true);
@@ -1569,6 +1573,37 @@ final class TransactionModal extends Component
             $row->isSplitParent() && ! $this->excluded => __('A split transaction stays excluded until the split is undone.'),
             default => null,
         };
+    }
+
+    /**
+     * Category lines add up to the amount, so a row that has them keeps its amount, type and date
+     * until the lines are removed, as the API does.
+     */
+    private function categoryLinesRefusal(Transaction $row): ?string
+    {
+        if ($this->mode === 'plan' || ! $row->isSplit()) {
+            return null;
+        }
+
+        $isFeed = in_array($row->source, TransactionSource::bankFeed(), true);
+        $type = $row->direction === TransactionDirection::Debit ? 'expense' : 'income';
+
+        $moved = $this->transactionType !== $type
+            || (! $isFeed && AmountParser::parse($this->descriptionInput)->amount !== abs($row->amount))
+            || $this->date !== $row->post_date->format('Y-m-d');
+
+        return $moved ? __('Remove the split before changing the amount.') : null;
+    }
+
+    /**
+     * The amount a non-feed edit stores: the row's own value, with its sign, while the typed amount
+     * and the type are unchanged, so lines signed to that amount keep adding up.
+     */
+    private function amountAfterEdit(Transaction $transaction, AmountParseResult $parsed): int
+    {
+        $sameType = ($this->transactionType === 'expense') === ($transaction->direction === TransactionDirection::Debit);
+
+        return $sameType && $parsed->amount === abs($transaction->amount) ? $transaction->amount : $parsed->amount;
     }
 
     /**
@@ -2084,7 +2119,7 @@ final class TransactionModal extends Component
                     'account_id' => $this->accountId,
                     'category_id' => $this->categoryId,
                     'merchant_id' => $this->merchantId,
-                    'amount' => $parsed->amount,
+                    'amount' => $this->amountAfterEdit($transaction, $parsed),
                     'direction' => $this->transactionType === 'expense'
                         ? TransactionDirection::Debit
                         : TransactionDirection::Credit,
