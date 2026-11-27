@@ -25,6 +25,7 @@ use App\Exceptions\ExchangeRateUnavailableException;
 use App\Exceptions\IdempotencyKeyReusedException;
 use App\Exceptions\PendingMergeRefusedException;
 use App\Exceptions\TransactionSplitRefusedException;
+use App\Exceptions\TransactionWriteRefusedException;
 use App\Exceptions\TransferAlreadyLinkedException;
 use App\Exceptions\TransferLinkRefusedException;
 use App\Livewire\Concerns\EditsPlanSeries;
@@ -1607,6 +1608,12 @@ final class TransactionModal extends Component
             }, TransferKinds::TRANSACTION_ATTEMPTS);
         }
 
+        if (! $isLinked && $wantsTransfer && $this->bankFeedFieldsChanged($row) && ($refusal = $this->transferLegExclusionRefusal($row, linking: true)) !== null) {
+            $this->addError('descriptionInput', $refusal);
+
+            return false;
+        }
+
         if (! $isLinked && $wantsTransfer) {
             return DB::transaction(function () use ($row): bool {
                 if (! $this->linkBankFeedRow($row)) {
@@ -1979,7 +1986,7 @@ final class TransactionModal extends Component
     {
         try {
             return $this->persistTransactionUpdate();
-        } catch (TransactionSplitRefusedException $refused) {
+        } catch (TransactionSplitRefusedException|TransactionWriteRefusedException $refused) {
             $this->addError('descriptionInput', $refused->getMessage());
 
             return false;
@@ -1992,6 +1999,7 @@ final class TransactionModal extends Component
      * instead of inserting a live version of a stale copy.
      *
      * @throws TransactionSplitRefusedException
+     * @throws TransactionWriteRefusedException
      */
     private function assertSplitRowUnchanged(Transaction $transaction): void
     {
@@ -2005,11 +2013,30 @@ final class TransactionModal extends Component
             throw new TransactionSplitRefusedException(__('This transaction changed while you were editing it. Reopen it and try again.'));
         }
 
+        $legRefusal = $this->transferLegExclusionRefusal($locked);
+
+        if ($legRefusal !== null) {
+            throw new TransactionWriteRefusedException($legRefusal);
+        }
+
         $refusal = $this->splitRowRefusal();
 
         if ($refusal !== null) {
             throw new TransactionSplitRefusedException($refusal);
         }
+    }
+
+    /**
+     * Why the form must not exclude this row, or null. A transfer leg is counted as a pair, so
+     * excluding one leg counts the pair twice; a leg that is already excluded may still be saved.
+     */
+    private function transferLegExclusionRefusal(Transaction $row, bool $linking = false): ?string
+    {
+        if (! $this->excluded || $row->excluded || ($row->transfer_pair_id === null && ! $linking)) {
+            return null;
+        }
+
+        return __('A transfer leg cannot be excluded.');
     }
 
     /**
