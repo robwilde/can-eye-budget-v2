@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Console\FeedSyncSchedule;
+use App\Exceptions\PlanWriteRefusedException;
 use App\Exceptions\TransactionWriteRefusedException;
 use App\Http\Controllers\HealthCheckController;
 use App\Http\Middleware\AttributeRequestToUser;
@@ -86,7 +87,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->dontFlash(['invite_code']);
 
-        $exceptions->dontReport([TransactionWriteRefusedException::class]);
+        $exceptions->dontReport([TransactionWriteRefusedException::class, PlanWriteRefusedException::class]);
 
         $exceptions->render(static fn (TransactionWriteRefusedException $exception, Request $request) => $request->is('api/*')
             ? response()->json(['message' => $exception->getMessage()], 422)

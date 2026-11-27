@@ -16,6 +16,9 @@ use App\Models\User;
 
 uses(Tests\Concerns\CallsApi::class);
 
+// New plans must start after today, so the fixed dates below need a fixed clock.
+beforeEach(fn () => $this->travelTo('2026-10-15'));
+
 /**
  * @param  array<string, mixed>  $overrides
  * @return array<string, mixed>

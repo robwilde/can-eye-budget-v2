@@ -14,9 +14,15 @@
             </div>
 
             <div class="flex flex-wrap items-end gap-2">
-                <flux:button size="sm" variant="primary" wire:click="$dispatch('declare-plan', { kind: 'bill' })" data-testid="add-bill">Add bill</flux:button>
-                <flux:button size="sm" wire:click="$dispatch('declare-plan', { kind: 'income' })" data-testid="add-income">Add income</flux:button>
+                <flux:button size="sm" variant="primary" wire:click="$dispatch('declare-plan', { kind: 'bill' })" data-testid="add-bill" :disabled="! $recurringOn">Add bill</flux:button>
+                <flux:button size="sm" wire:click="$dispatch('declare-plan', { kind: 'income' })" data-testid="add-income" :disabled="! $recurringOn">Add income</flux:button>
             </div>
+
+            @unless($recurringOn)
+                <flux:callout variant="warning" icon="exclamation-triangle" class="w-full" data-testid="recurring-off-notice">
+                    <flux:callout.text>{{ __('Recurring is switched off. Switch it on in Settings → Recurring.') }}</flux:callout.text>
+                </flux:callout>
+            @endunless
 
             <flux:field class="min-w-56">
                 <flux:label>Account</flux:label>
@@ -94,7 +100,7 @@
                                         @if($plan->is_pay_cycle_income)
                                             <flux:text size="sm" class="text-zinc-500">Managed from pay cycle</flux:text>
                                         @else
-                                            <flux:button variant="ghost" size="sm" wire:click="openEdit({{ $plan->id }})">
+                                            <flux:button variant="ghost" size="sm" wire:click="openEdit({{ $plan->id }})" :disabled="! $recurringOn">
                                                 <flux:icon.pencil class="size-4" />
                                             </flux:button>
                                             <flux:button variant="ghost" size="sm" wire:click="$set('occurrencesPlanId', {{ $occurrencesPlanId === $plan->id ? 'null' : $plan->id }})" data-testid="plan-occurrences-toggle-{{ $plan->id }}">
@@ -105,10 +111,10 @@
                                                     {{ __('Smart configure') }}
                                                 </flux:button>
                                             @endif
-                                            <flux:button variant="ghost" size="sm" wire:click="toggleActive({{ $plan->id }})" data-testid="plan-toggle-{{ $plan->id }}">
+                                            <flux:button variant="ghost" size="sm" wire:click="toggleActive({{ $plan->id }})" data-testid="plan-toggle-{{ $plan->id }}" :disabled="! $recurringOn">
                                                 {{ $plan->isActive() ? 'Deactivate' : 'Activate' }}
                                             </flux:button>
-                                            <flux:button variant="ghost" size="sm" wire:click="confirmDelete({{ $plan->id }})" data-testid="plan-delete-{{ $plan->id }}">
+                                            <flux:button variant="ghost" size="sm" wire:click="confirmDelete({{ $plan->id }})" data-testid="plan-delete-{{ $plan->id }}" :disabled="! $recurringOn">
                                                 <flux:icon.trash class="size-4" />
                                             </flux:button>
                                         @endif

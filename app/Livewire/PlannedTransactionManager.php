@@ -9,13 +9,15 @@ use App\DTOs\PlanSmartFillSuggestion;
 use App\Enums\PlanAmountStrategy;
 use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
+use App\Enums\PlanRefusal;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
+use App\Exceptions\PlanWriteRefusedException;
 use App\Exceptions\TypeSafe\TypeSafeException;
 use App\Livewire\Attributes\NotAudited;
 use App\Livewire\Concerns\EditsPlanSeries;
+use App\Livewire\Concerns\GuardsPlanWrites;
 use App\Livewire\Concerns\PicksCadence;
-use App\Livewire\Concerns\RefusesPayCycleIncomePlans;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Merchant;
@@ -29,6 +31,8 @@ use App\Services\Recurring\OccurrenceSchedule;
 use App\Services\Recurring\OccurrenceStateResolver;
 use App\Services\Recurring\PlannedOccurrenceGenerator;
 use App\Services\Recurring\PlanSmartFiller;
+use App\Services\Recurring\PlanWriter;
+use App\Services\Recurring\RecurringGate;
 use Carbon\CarbonImmutable;
 use Closure;
 use Flux\Flux;
@@ -47,8 +51,8 @@ use Livewire\Component;
 final class PlannedTransactionManager extends Component
 {
     use EditsPlanSeries;
+    use GuardsPlanWrites;
     use PicksCadence;
-    use RefusesPayCycleIncomePlans;
 
     public ?int $accountId = null;
 
@@ -210,27 +214,33 @@ final class PlannedTransactionManager extends Component
         $direction = TransactionDirection::from($this->direction);
         $merchantId = $this->resolvedMerchantId();
 
-        DB::transaction(function () use ($plan, $categoryId, $direction, $merchantId): void {
-            $plan->update([
-                'amount' => (int) round((float) $this->amount * 100),
-                'frequency' => $this->frequency,
-                ...$this->cadenceAttributes(RecurrenceFrequency::from($this->frequency), $plan),
-                ...($this->cadenceChanged($plan, RecurrenceFrequency::from($this->frequency)) ? ['schedule_pinned' => true] : []),
-                'category_id' => $categoryId,
-                'direction' => $direction,
-                'status' => $this->isActive ? PlannedTransactionStatus::Active : PlannedTransactionStatus::Inactive,
-                ...$this->seriesAttributes(
-                    $direction,
-                    $plan->transfer_to_account_id !== null,
-                    $merchantId,
-                    $this->notes,
-                    $this->effectiveUntilType(),
-                    $this->untilDate,
-                ),
-            ]);
+        try {
+            DB::transaction(function () use ($plan, $categoryId, $direction, $merchantId): void {
+                $updated = app(PlanWriter::class)->update($this->authenticatedUser(), $plan, [
+                    'amount' => (int) round((float) $this->amount * 100),
+                    'frequency' => $this->frequency,
+                    ...$this->cadenceAttributes(RecurrenceFrequency::from($this->frequency), $plan),
+                    ...($this->cadenceChanged($plan, RecurrenceFrequency::from($this->frequency)) ? ['schedule_pinned' => true] : []),
+                    'category_id' => $categoryId,
+                    'direction' => $direction,
+                    'status' => $this->isActive ? PlannedTransactionStatus::Active : PlannedTransactionStatus::Inactive,
+                    ...$this->seriesAttributes(
+                        $direction,
+                        $plan->transfer_to_account_id !== null,
+                        $merchantId,
+                        $this->notes,
+                        $this->effectiveUntilType(),
+                        $this->untilDate,
+                    ),
+                ], $merchantId);
 
-            $this->copyPaymentUrlToMatching($plan);
-        });
+                $this->copyPaymentUrlToMatching($updated);
+            });
+        } catch (PlanWriteRefusedException $refused) {
+            $this->showPlanRefusal($refused->reason);
+
+            return;
+        }
 
         if ($this->categoryPicked && $categoryId !== null) {
             app(RecentCategoryPicks::class)->record($this->authenticatedUser(), $categoryId);
@@ -301,7 +311,11 @@ final class PlannedTransactionManager extends Component
             return;
         }
 
-        DB::transaction(fn (): bool => $plan->update(['status' => $plan->status->toggled()]));
+        try {
+            app(PlanWriter::class)->update($this->authenticatedUser(), $plan, ['status' => $plan->status->toggled()]);
+        } catch (PlanWriteRefusedException $refused) {
+            $this->showPlanRefusal($refused->reason);
+        }
     }
 
     public function confirmDelete(int $id): void
@@ -329,7 +343,13 @@ final class PlannedTransactionManager extends Component
             return;
         }
 
-        DB::transaction(fn () => $plan->discard());
+        try {
+            app(PlanWriter::class)->discard($this->authenticatedUser(), $plan);
+        } catch (PlanWriteRefusedException $refused) {
+            $this->showPlanRefusal($refused->reason);
+
+            return;
+        }
 
         Flux::toast(text: 'Planned transaction deleted', variant: 'success');
 
@@ -344,6 +364,7 @@ final class PlannedTransactionManager extends Component
         $editing = $this->editingId === null ? null : $this->findUserPlan($this->editingId);
 
         return view('livewire.planned-transaction-manager', [
+            'recurringOn' => RecurringGate::enabled($user),
             'typeChoices' => $this->typeChoices($direction, $editing?->transfer_to_account_id !== null),
             'amountStrategies' => PlanAmountStrategy::cases(),
             'smartFillAvailable' => PlanSmartFiller::available(),
@@ -363,6 +384,14 @@ final class PlannedTransactionManager extends Component
     protected function dismissGuardedPlan(): void
     {
         $this->resetModals();
+    }
+
+    protected function planRefusalField(PlanRefusal $refusal): ?string
+    {
+        return match ($refusal) {
+            PlanRefusal::Duplicate => 'amount',
+            default => null,
+        };
     }
 
     /**
@@ -607,19 +636,7 @@ final class PlannedTransactionManager extends Component
 
     private function resolvedCategoryId(): ?int
     {
-        if ($this->categoryId === null || $this->categoryId === '') {
-            return null;
-        }
-
-        $categoryId = (int) $this->categoryId;
-
-        return Category::query()
-            ->where('user_id', $this->authenticatedUser()->id)
-            ->visible()
-            ->whereKey($categoryId)
-            ->exists()
-                ? $categoryId
-                : null;
+        return $this->categoryId === null || $this->categoryId === '' ? null : (int) $this->categoryId;
     }
 
     /** @return list<string> */

@@ -223,3 +223,11 @@ it('refuses a description of only non-breaking spaces', function () {
 
     expect(PlannedTransaction::query()->count())->toBe(0);
 });
+
+it('refuses to declare a plan while recurring is switched off', function () {
+    $this->user->updatePreferences(['recurringEnabled' => false]);
+
+    declareFill(declareForm($this), 'Gym', '20')->call('save')->assertSet('showModal', false);
+
+    expect(PlannedTransaction::query()->count())->toBe(0);
+});
