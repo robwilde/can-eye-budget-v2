@@ -20,6 +20,7 @@ use App\Enums\TransactionDirection;
 use App\Enums\TransactionPeriod;
 use App\Enums\TransactionStatus;
 use App\Exceptions\GmailSearchException;
+use App\Exceptions\TransactionWriteRefusedException;
 use App\Jobs\ResolveMerchantBrandJob;
 use App\Livewire\Attributes\NotAudited;
 use App\Models\Account;
@@ -49,6 +50,7 @@ use App\Services\Reports\CategoryGroupMap;
 use App\Services\Tags\TransactionTagger;
 use App\Services\TransactionEmailLinker;
 use App\Services\Transactions\TransactionBulkEditor;
+use App\Services\Transactions\TransactionCategoryLines;
 use App\Services\Transactions\TransactionDeleter;
 use App\Services\Transfers\TransferKinds;
 use App\Services\Transfers\TransferLinker;
@@ -1468,101 +1470,29 @@ final class TransactionList extends Component
             ->current()
             ->findOrFail($this->splitPanelTxnId);
 
-        if ($transaction->isSplitChild() || $transaction->isSplitParent()) {
-            $this->splitError = 'A transaction split into transactions cannot also have category lines.';
-
-            return;
-        }
-
-        if ($transaction->transfer_pair_id !== null) {
-            $this->splitError = 'Transfers cannot be split.';
-
-            return;
-        }
-
-        $sign = (int) $transaction->amount < 0 ? -1 : 1;
+        $knownCategoryIds = array_filter([$transaction->category_id, ...$transaction->splits()->pluck('category_id')->all()]);
 
         $lines = [];
 
         foreach ($this->splitLines as $line) {
             $categoryId = $line['category_id'] ?? null;
-            $cents = AmountParser::parse((string) ($line['amount'] ?? ''))->amount;
-
-            if ($categoryId === '' || ! is_numeric($categoryId)) {
-                $this->splitError = 'Every split line needs a category.';
-
-                return;
-            }
-
-            if ($cents <= 0) {
-                $this->splitError = 'Every split line needs an amount greater than zero.';
-
-                return;
-            }
-
-            $notes = is_string($line['notes'] ?? null) ? mb_trim($line['notes']) : '';
-
-            if (mb_strlen($notes) > 255) {
-                $this->splitError = 'Split notes must be 255 characters or fewer.';
-
-                return;
-            }
 
             $lines[] = [
-                'category_id' => (int) $categoryId,
-                'amount' => $sign * $cents,
-                'notes' => $notes === '' ? null : $notes,
+                'category_id' => is_numeric($categoryId) ? (int) $categoryId : null,
+                'amount' => AmountParser::parse((string) ($line['amount'] ?? ''))->amount,
+                'notes' => is_string($line['notes'] ?? null) ? $line['notes'] : null,
             ];
         }
 
-        if (count($lines) < 2) {
-            $this->splitError = 'A split needs at least two lines.';
+        try {
+            $saved = app(TransactionCategoryLines::class)->save($this->authenticatedUser(), $transaction->id, $lines);
+        } catch (TransactionWriteRefusedException $refused) {
+            $this->splitError = $refused->getMessage();
 
             return;
         }
 
-        if (array_sum(array_column($lines, 'amount')) !== (int) $transaction->amount) {
-            $this->splitError = 'Split lines must add up to the transaction total.';
-
-            return;
-        }
-
-        $categoryIds = array_column($lines, 'category_id');
-
-        if (Category::query()->where('user_id', auth()->id())->whereIn('id', $categoryIds)->count() !== count(array_unique($categoryIds))) {
-            $this->splitError = 'One or more categories are invalid.';
-
-            return;
-        }
-
-        $knownCategoryIds = array_filter([$transaction->category_id, ...$transaction->splits()->pluck('category_id')->all()]);
-
-        $saved = DB::transaction(static function () use ($transaction, $lines): bool {
-            $locked = Transaction::query()->where('user_id', $transaction->user_id)->whereKey($transaction->id)->lockForUpdate()->first();
-
-            if (! $locked instanceof Transaction || $locked->isSplitChild() || $locked->isSplitParent()) {
-                return false;
-            }
-
-            $transaction->splits()->delete();
-
-            foreach ($lines as $position => $line) {
-                $transaction->splits()->create([
-                    'category_id' => $line['category_id'],
-                    'amount' => $line['amount'],
-                    'notes' => $line['notes'],
-                    'position' => $position,
-                ]);
-            }
-
-            return true;
-        });
-
-        if (! $saved) {
-            $this->splitError = 'A transaction split into transactions cannot also have category lines.';
-
-            return;
-        }
+        $categoryIds = $saved->splits->pluck('category_id')->all();
 
         $recent = app(RecentCategoryPicks::class);
 
@@ -1576,12 +1506,7 @@ final class TransactionList extends Component
 
     public function unsplit(int $transactionId): void
     {
-        $transaction = Transaction::query()
-            ->where('user_id', auth()->id())
-            ->current()
-            ->findOrFail($transactionId);
-
-        $transaction->splits()->delete();
+        app(TransactionCategoryLines::class)->clear($this->authenticatedUser(), $transactionId);
 
         if ($this->splitPanelTxnId === $transactionId) {
             $this->closeSplitPanel();
