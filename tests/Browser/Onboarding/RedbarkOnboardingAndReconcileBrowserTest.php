@@ -13,6 +13,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use Livewire\Features\SupportFileUploads\FileUploadConfiguration;
 use Livewire\Features\SupportFileUploads\FileUploadController;
 
@@ -59,13 +60,21 @@ test('a new user signs up, connects Redbark and reconciles last month', function
         ],
     );
 
-    // Step 1-3: register, connect, set up the account.
+    // Step 0: register, then verify the email address; the app is closed to unverified users.
     $page = visit('/register')
         ->fill('name', 'Onboarding Tester')
         ->fill('email', 'onboarding@example.com')
         ->fill('password', 'password-12345')
         ->fill('password_confirmation', 'password-12345')
         ->click('[data-test="register-user-button"]')
+        ->assertPathIs('/email/verify')
+        ->assertSee('Resend verification email')
+        ->screenshot(filename: 'register-verification-notice');
+
+    $user = User::query()->where('email', 'onboarding@example.com')->sole();
+
+    // Step 1-3: connect, set up the account.
+    $page->navigate(URL::temporarySignedRoute('verification.verify', now()->addMinutes(60), ['id' => $user->id, 'hash' => sha1($user->email)]))
         ->assertPathIs('/connect-bank')
         ->assertSee('Step 1 of 6')
         ->fill('[data-test="connect-bank-api-key"]', 'rbk_test_0123456789abcdef')
@@ -73,7 +82,6 @@ test('a new user signs up, connects Redbark and reconciles last month', function
         ->assertSee('Step 2 of 6')
         ->assertSee('Everyday Card');
 
-    $user = User::query()->where('email', 'onboarding@example.com')->sole();
     $redbarkAccountId = RedbarkFeed::query()->where('user_id', $user->id)->sole()->accounts()->sole()->id;
 
     $page->select("[data-test=\"redbark-choice-{$redbarkAccountId}\"]", 'new:'.AccountClass::CreditCard->value)

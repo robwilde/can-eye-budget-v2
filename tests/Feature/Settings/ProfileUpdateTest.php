@@ -5,6 +5,8 @@
 declare(strict_types=1);
 
 use App\Models\User;
+use Illuminate\Auth\Notifications\VerifyEmail;
+use Illuminate\Support\Facades\Notification;
 use Livewire\Livewire;
 
 test('profile page is displayed', function () {
@@ -78,4 +80,53 @@ test('correct password must be provided to delete account', function () {
     $response->assertHasErrors(['password']);
 
     expect($user->fresh())->not->toBeNull();
+});
+
+test('changing the email sends a verification email to the new address', function () {
+    Notification::fake();
+    $user = User::factory()->create();
+
+    $this->actingAs($user);
+
+    Livewire::test('pages::settings.profile')
+        ->set('name', $user->name)
+        ->set('email', 'changed@example.com')
+        ->call('updateProfileInformation')
+        ->assertHasNoErrors();
+
+    Notification::assertSentTo($user->refresh(), VerifyEmail::class);
+    expect($user->email)->toBe('changed@example.com');
+    $this->get(route('dashboard'))->assertRedirect(route('verification.notice'));
+});
+
+test('saving the profile without changing the email sends no verification email', function () {
+    Notification::fake();
+    $user = User::factory()->create();
+
+    $this->actingAs($user);
+
+    Livewire::test('pages::settings.profile')
+        ->set('name', 'Renamed')
+        ->set('email', $user->email)
+        ->call('updateProfileInformation')
+        ->assertHasNoErrors();
+
+    Notification::assertNothingSent();
+});
+
+test('the resend link on the profile page is throttled', function () {
+    Notification::fake();
+    $user = User::factory()->unverified()->create();
+
+    $this->actingAs($user);
+
+    $component = Livewire::test('pages::settings.profile');
+
+    foreach (range(1, 6) as $ignored) {
+        $component->call('resendVerificationNotification')->assertHasNoErrors();
+    }
+
+    $component->call('resendVerificationNotification')->assertHasErrors('email');
+
+    Notification::assertSentToTimes($user, VerifyEmail::class, 6);
 });

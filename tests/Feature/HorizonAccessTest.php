@@ -147,3 +147,13 @@ it('fails app:make-admin for an unknown email', function () {
 it('no longer reads the Horizon email allowlist', function () {
     expect(config('horizon.authorized_emails'))->toBeNull();
 });
+
+it('keeps Horizon closed to an admin whose email is not verified', function () {
+    asEnvironment('production');
+    $admin = User::factory()->unverified()->create();
+    $admin->forceFill(['is_admin' => true])->save();
+
+    expect(Gate::forUser($admin)->allows('viewHorizon'))->toBeFalse();
+
+    $this->actingAs($admin)->get('/horizon')->assertForbidden();
+});
