@@ -328,3 +328,19 @@ it('renames the display name when a manual transaction description changes', fun
         expect($child->clean_description)->toBe('New name');
     }
 });
+
+it('keeps a rule exclusion source and creates no version when excluded is unchanged', function () {
+    $user = User::factory()->create();
+    $token = $this->apiTokenFor($user);
+    $row = Transaction::factory()->for($user)->debit()->create(['source' => TransactionSource::Redbark, 'excluded' => true, 'excluded_source' => App\Enums\ExclusionSource::Rule]);
+
+    $id = $this->apiCall('PATCH', 'transactions/'.$row->id, $token, ['excluded' => true])->assertOk()->json('data.id');
+
+    expect($id)->toBe($row->id)
+        ->and(Transaction::query()->where('user_id', $user->id)->count())->toBe(1)
+        ->and($row->fresh()->excluded_source)->toBe(App\Enums\ExclusionSource::Rule);
+
+    $edited = $this->apiCall('PATCH', 'transactions/'.$row->id, $token, ['excluded' => true, 'notes' => 'n'])->assertOk()->json('data.id');
+
+    expect(Transaction::query()->findOrFail($edited)->excluded_source)->toBe(App\Enums\ExclusionSource::Rule);
+});
