@@ -29,6 +29,7 @@ use App\Exceptions\TransferAlreadyLinkedException;
 use App\Exceptions\TransferLinkRefusedException;
 use App\Livewire\Concerns\EditsPlanSeries;
 use App\Livewire\Concerns\PicksCadence;
+use App\Livewire\Concerns\RefusesPayCycleIncomePlans;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Merchant;
@@ -80,6 +81,7 @@ final class TransactionModal extends Component
 {
     use EditsPlanSeries;
     use PicksCadence;
+    use RefusesPayCycleIncomePlans;
     use WithFileUploads;
 
     private const int RATE_LOOKUP_TTL_SECONDS = 300;
@@ -401,7 +403,7 @@ final class TransactionModal extends Component
             ->where('user_id', auth()->id())
             ->find($id);
 
-        if (! $planned) {
+        if (! $planned || (! $this->isPastOccurrence($occurrenceDate) && ! $this->guardEditablePlan($planned))) {
             return;
         }
 
@@ -1179,7 +1181,7 @@ final class TransactionModal extends Component
             ->where('user_id', auth()->id())
             ->find($this->editingPlannedTransactionId);
 
-        if (! $planned) {
+        if (! $planned || ! $this->guardEditablePlan($planned)) {
             return;
         }
 
@@ -1197,20 +1199,9 @@ final class TransactionModal extends Component
      */
     public function isRealizableOccurrence(): bool
     {
-        if ($this->editingPlannedTransactionId === null
-            || $this->mode !== 'plan'
-            || $this->occurrenceDate === null) {
-            return false;
-        }
-
-        try {
-            $occurrence = CarbonImmutable::createFromFormat('!Y-m-d', $this->occurrenceDate);
-        } catch (Throwable) {
-            return false;
-        }
-
-        return $occurrence instanceof CarbonImmutable
-            && $occurrence->lessThanOrEqualTo(auth()->user()->today());
+        return $this->editingPlannedTransactionId !== null
+            && $this->mode === 'plan'
+            && $this->isPastOccurrence($this->occurrenceDate);
     }
 
     public function updatedCategoriseMatching(): void
@@ -1284,10 +1275,32 @@ final class TransactionModal extends Component
         $this->dispatch('transaction-saved');
     }
 
+    protected function dismissGuardedPlan(): void
+    {
+        $this->showModal = false;
+        $this->resetForm();
+    }
+
     /** @return array<string, mixed> */
     private static function blankSplitLine(): array
     {
         return ['name' => '', 'amount' => '', 'category_id' => null, 'notes' => '', 'excluded' => false];
+    }
+
+    private function isPastOccurrence(?string $date): bool
+    {
+        if ($date === null) {
+            return false;
+        }
+
+        try {
+            $occurrence = CarbonImmutable::createFromFormat('!Y-m-d', $date);
+        } catch (Throwable) {
+            return false;
+        }
+
+        return $occurrence instanceof CarbonImmutable
+            && $occurrence->lessThanOrEqualTo(auth()->user()->today());
     }
 
     private function authenticatedUser(): User
@@ -1744,6 +1757,14 @@ final class TransactionModal extends Component
             return $this->isBankFeedTransaction
                 ? $this->planFromBankFeedRow()
                 : $this->convertEnteredToPlanned();
+        }
+
+        if ($this->editingPlannedTransactionId !== null && ! $this->isRealizableOccurrence()) {
+            $plan = $this->editedPlannedTransaction();
+
+            if ($plan instanceof PlannedTransaction && ! $this->guardEditablePlan($plan)) {
+                return false;
+            }
         }
 
         if ($this->editingPlannedTransactionId && $this->mode === 'enter') {

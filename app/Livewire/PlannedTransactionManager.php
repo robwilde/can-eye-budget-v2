@@ -15,6 +15,7 @@ use App\Exceptions\TypeSafe\TypeSafeException;
 use App\Livewire\Attributes\NotAudited;
 use App\Livewire\Concerns\EditsPlanSeries;
 use App\Livewire\Concerns\PicksCadence;
+use App\Livewire\Concerns\RefusesPayCycleIncomePlans;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Merchant;
@@ -47,6 +48,7 @@ final class PlannedTransactionManager extends Component
 {
     use EditsPlanSeries;
     use PicksCadence;
+    use RefusesPayCycleIncomePlans;
 
     public ?int $accountId = null;
 
@@ -358,6 +360,11 @@ final class PlannedTransactionManager extends Component
         ]);
     }
 
+    protected function dismissGuardedPlan(): void
+    {
+        $this->resetModals();
+    }
+
     /**
      * @return list<array{field: string, current: string, suggested: string}>
      */
@@ -479,18 +486,6 @@ final class PlannedTransactionManager extends Component
             ->find($id);
 
         return $plan instanceof PlannedTransaction ? $plan : null;
-    }
-
-    private function guardEditablePlan(PlannedTransaction $plan): bool
-    {
-        if (! $plan->is_pay_cycle_income) {
-            return true;
-        }
-
-        $this->resetModals();
-        Flux::toast(text: 'Pay cycle income is managed elsewhere', variant: 'warning');
-
-        return false;
     }
 
     /** @return Collection<int, Account> */
