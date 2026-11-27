@@ -17,7 +17,7 @@ final class TransactionSplitController extends OwnedReadController
         $user = $this->owner($request);
 
         $data = $request->validate([
-            'lines' => ['required', 'array', 'min:2', 'max:50'],
+            'lines' => ['required', 'array', 'min:2', 'max:'.TransactionCategoryLines::MAX_LINES],
             'lines.*.category_id' => ['required', 'integer', Rule::exists(Category::class, 'id')->where('user_id', $user->id)],
             'lines.*.amount' => ['required', 'integer', 'min:1', 'max:99999999999'],
             'lines.*.notes' => ['sometimes', 'nullable', 'string', 'max:'.TransactionCategoryLines::MAX_NOTES_LENGTH],

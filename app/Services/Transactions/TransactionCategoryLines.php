@@ -15,14 +15,17 @@ use Throwable;
 /**
  * Category lines on one transaction (the amount spread over two or more categories), the same rules the
  * transactions list enforces: at least two lines, each above zero, adding up to the transaction total,
- * every category the user's own, and never on a transfer or a transaction split into transactions.
+ * every category the user's own, and never on a transfer or a transaction split into transactions. The transactions
+ * list and the REST API both save through it.
  */
 final readonly class TransactionCategoryLines
 {
     public const int MAX_NOTES_LENGTH = 255;
 
+    public const int MAX_LINES = 50;
+
     /**
-     * @param  list<array{category_id: int, amount: int, notes?: string|null}>  $lines  amounts are positive cents
+     * @param  list<array{category_id: int|null, amount: int, notes?: string|null}>  $lines  amounts are positive cents; a line with no category is refused
      *
      * @throws TransactionWriteRefusedException
      * @throws ModelNotFoundException
@@ -38,12 +41,20 @@ final readonly class TransactionCategoryLines
             throw new TransactionWriteRefusedException('A split needs at least two lines.');
         }
 
+        if (count($lines) > self::MAX_LINES) {
+            throw new TransactionWriteRefusedException('A split can have at most '.self::MAX_LINES.' lines.');
+        }
+
         $sign = $transaction->amount < 0 ? -1 : 1;
         $prepared = [];
 
         foreach ($lines as $line) {
             $cents = (int) $line['amount'];
             $notes = isset($line['notes']) ? mb_trim((string) $line['notes']) : '';
+
+            if (($line['category_id'] ?? null) === null) {
+                throw new TransactionWriteRefusedException('Every split line needs a category.');
+            }
 
             if ($cents <= 0) {
                 throw new TransactionWriteRefusedException('Every split line needs an amount greater than zero.');
