@@ -1393,15 +1393,6 @@ final class TransactionModal extends Component
     }
 
     /**
-     * @param  array<string, mixed>  $overrides
-     * @return array<string, mixed>
-     */
-    private function withLockedFields(Transaction $transaction, array $overrides): array
-    {
-        return $overrides + ['locked_fields' => $transaction->lockedFieldsAfter($overrides) ?: null];
-    }
-
-    /**
      * What the user locked, in words; the amount lock a folded fee put there is the system's.
      *
      * @return list<string>
@@ -1672,7 +1663,7 @@ final class TransactionModal extends Component
             }, TransferKinds::TRANSACTION_ATTEMPTS);
         }
 
-        if (! $isLinked && $wantsTransfer && $this->bankFeedFieldsChanged($row) && ($refusal = $this->transferLegExclusionRefusal($row, linking: true)) !== null) {
+        if (! $isLinked && $wantsTransfer && $this->bankFeedFieldsChanged($row) && ($refusal = $this->linkExclusionRefusal($row)) !== null) {
             $this->addError('descriptionInput', $refusal);
 
             return false;
@@ -2057,49 +2048,12 @@ final class TransactionModal extends Component
     }
 
     /**
-     * Re-reads the row under the edit's locks: a row that was trashed or versioned since the form
-     * loaded it, or a split that committed after the form's first check, must refuse the edit
-     * instead of inserting a live version of a stale copy.
-     *
-     * @throws TransactionSplitRefusedException
-     * @throws TransactionWriteRefusedException
+     * Why the form must not exclude a row it is linking as a transfer leg, or null: a leg is counted as a
+     * pair, so excluding one counts the pair twice. A row that is already excluded may still be linked.
      */
-    private function assertSplitRowUnchanged(Transaction $transaction): void
+    private function linkExclusionRefusal(Transaction $row): ?string
     {
-        $locked = Transaction::withTrashed()
-            ->where('user_id', auth()->id())
-            ->whereKey($transaction->id)
-            ->lockForUpdate()
-            ->first();
-
-        if (! $locked instanceof Transaction || $locked->trashed() || $locked->children()->exists()) {
-            throw new TransactionSplitRefusedException(__('This transaction changed while you were editing it. Reopen it and try again.'));
-        }
-
-        $legRefusal = $this->transferLegExclusionRefusal($locked);
-
-        if ($legRefusal !== null) {
-            throw new TransactionWriteRefusedException($legRefusal);
-        }
-
-        $refusal = $this->splitRowRefusal();
-
-        if ($refusal !== null) {
-            throw new TransactionSplitRefusedException($refusal);
-        }
-    }
-
-    /**
-     * Why the form must not exclude this row, or null. A transfer leg is counted as a pair, so
-     * excluding one leg counts the pair twice; a leg that is already excluded may still be saved.
-     */
-    private function transferLegExclusionRefusal(Transaction $row, bool $linking = false): ?string
-    {
-        if (! $this->excluded || $row->excluded || ($row->transfer_pair_id === null && ! $linking)) {
-            return null;
-        }
-
-        return __('A transfer leg cannot be excluded.');
+        return $this->excluded && ! $row->excluded ? TransactionWriter::TRANSFER_LEG_NOT_EXCLUDABLE : null;
     }
 
     /**
@@ -2115,43 +2069,33 @@ final class TransactionModal extends Component
 
         [$transaction, $parsed] = $resolved;
 
-        if ($transaction->source->isBankFeed()) {
-            $child = DB::transaction(function () use ($transaction): Transaction {
-                app(AccountBalanceHistoryBuilder::class)->lockAccounts($transaction->account_id);
-                $this->assertSplitRowUnchanged($transaction);
-                $this->reloadCleanNamesUnderLock($transaction);
-
-                $child = $transaction->createChild($this->withLockedFields($transaction, [
+        $child = app(TransactionWriter::class)->update(
+            $this->authenticatedUser(),
+            $transaction->id,
+            $transaction->source->isBankFeed()
+                ? [
                     'category_id' => $this->categoryId,
                     'merchant_id' => $this->merchantId,
                     'notes' => $this->notes !== '' ? $this->notes : null,
                     'excluded' => $this->excluded,
-                    ...$this->exclusionSourceFor($transaction),
                     ...$this->editedDescriptors($transaction),
                     ...$this->kindOverride(),
-                ]));
-
-                // The partner follows the new version, but only for links that still hold under lock.
-                app(TransferLinker::class)->followVersion($transaction, $child);
-                $this->syncChosenTags($child);
-
-                return $child;
-            }, TransferKinds::TRANSACTION_ATTEMPTS);
-        } else {
-            $child = app(TransactionWriter::class)->update($this->authenticatedUser(), $transaction->id, [
-                'account_id' => (int) $this->accountId,
-                'category_id' => $this->categoryId,
-                'merchant_id' => $this->merchantId,
-                'amount' => $this->amountAfterEdit($transaction, $parsed),
-                'direction' => $this->transactionType === 'expense' ? TransactionDirection::Debit : TransactionDirection::Credit,
-                ...($parsed->description !== $this->openedDescription ? ['description' => $parsed->description] : []),
-                'post_date' => $this->date,
-                'notes' => $this->notes !== '' ? $this->notes : null,
-                'excluded' => $this->excluded,
-                ...$this->currencyAttributes($transaction),
-                ...$this->kindOverride(),
-            ], $this->formWriteOptions());
-        }
+                ]
+                : [
+                    'account_id' => (int) $this->accountId,
+                    'category_id' => $this->categoryId,
+                    'merchant_id' => $this->merchantId,
+                    'amount' => $this->amountAfterEdit($transaction, $parsed),
+                    'direction' => $this->transactionType === 'expense' ? TransactionDirection::Debit : TransactionDirection::Credit,
+                    ...($parsed->description !== $this->openedDescription ? ['description' => $parsed->description] : []),
+                    'post_date' => $this->date,
+                    'notes' => $this->notes !== '' ? $this->notes : null,
+                    'excluded' => $this->excluded,
+                    ...$this->currencyAttributes($transaction),
+                    ...$this->kindOverride(),
+                ],
+            $this->formWriteOptions(),
+        );
 
         $this->applyCategoriseMatching($child);
 
@@ -2928,12 +2872,6 @@ final class TransactionModal extends Component
     private function kindChanged(): bool
     {
         return $this->kind !== $this->openedKind;
-    }
-
-    /** @return array{excluded_source?: ExclusionSource} */
-    private function exclusionSourceFor(Transaction $transaction): array
-    {
-        return $this->excluded === $transaction->excluded ? [] : ['excluded_source' => ExclusionSource::Manual];
     }
 
     /** @return array{kind?: TransactionKind} */
