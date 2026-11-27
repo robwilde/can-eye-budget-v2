@@ -8,14 +8,14 @@ use App\Contracts\AssistantWriteTool;
 use App\Http\Resources\Api\TransactionResource;
 use App\Models\Category;
 use App\Models\User;
-use App\Services\Transactions\ApiTransactionWriter;
+use App\Services\Transactions\TransactionWriter;
 use Illuminate\Validation\Rule;
 
 final class UpdateTransaction implements AssistantWriteTool
 {
     use WritesUserData;
 
-    public function __construct(private readonly ApiTransactionWriter $writer) {}
+    public function __construct(private readonly TransactionWriter $writer) {}
 
     public function name(): string
     {

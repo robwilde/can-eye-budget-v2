@@ -9,7 +9,7 @@ use App\Http\Resources\Api\TransactionResource;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Transaction;
-use App\Services\Transactions\ApiTransactionWriter;
+use App\Services\Transactions\TransactionWriter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -47,7 +47,7 @@ final class TransactionController extends OwnedReadController
         return TransactionResource::collection($query->paginate($this->perPage($request))->withQueryString());
     }
 
-    public function store(Request $request, ApiTransactionWriter $writer): JsonResponse
+    public function store(Request $request, TransactionWriter $writer): JsonResponse
     {
         $user = $this->owner($request);
 
@@ -67,7 +67,7 @@ final class TransactionController extends OwnedReadController
         return (new TransactionResource($transaction->load('splits')))->response()->setStatusCode(201);
     }
 
-    public function update(Request $request, int $id, ApiTransactionWriter $writer): JsonResponse
+    public function update(Request $request, int $id, TransactionWriter $writer): JsonResponse
     {
         $user = $this->owner($request);
 
@@ -84,7 +84,7 @@ final class TransactionController extends OwnedReadController
         return (new TransactionResource($writer->update($user, $id, $changes)->load('splits')))->response()->setStatusCode(200);
     }
 
-    public function destroy(Request $request, int $id, ApiTransactionWriter $writer): Response
+    public function destroy(Request $request, int $id, TransactionWriter $writer): Response
     {
         $writer->delete($this->owner($request), $id);
 

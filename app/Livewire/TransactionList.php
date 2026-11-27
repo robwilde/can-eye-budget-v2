@@ -13,7 +13,6 @@ use App\DTOs\EmailSearchResult;
 use App\Enums\AccountStatus;
 use App\Enums\BudgetTag;
 use App\Enums\CategorySource;
-use App\Enums\ExclusionSource;
 use App\Enums\MerchantBrandStatus;
 use App\Enums\PayeeStatus;
 use App\Enums\TransactionDirection;
@@ -52,8 +51,9 @@ use App\Services\TransactionEmailLinker;
 use App\Services\Transactions\TransactionBulkEditor;
 use App\Services\Transactions\TransactionCategoryLines;
 use App\Services\Transactions\TransactionDeleter;
+use App\Services\Transactions\TransactionWriteOptions;
+use App\Services\Transactions\TransactionWriter;
 use App\Services\Transfers\TransferKinds;
-use App\Services\Transfers\TransferLinker;
 use App\Services\Transfers\TransferReviewQueue;
 use App\Support\AmountParser;
 use App\Support\Budget\BudgetTagResolver;
@@ -1214,23 +1214,16 @@ final class TransactionList extends Component
      */
     public function toggleExcluded(int $transactionId, bool $excluded): void
     {
-        $toggled = Transaction::query()->getConnection()->transaction(function () use ($transactionId, $excluded): bool {
-            $current = Transaction::lockCurrentVersion($transactionId, (int) auth()->id());
+        $user = $this->authenticatedUser();
+        $current = Transaction::findCurrentVersion($transactionId, $user->id) ?? throw new ModelNotFoundException;
 
-            if ($current->excluded === $excluded
-                || ($excluded && $current->transfer_pair_id !== null)
-                || (! $excluded && $current->isSplitParent())) {
-                return false;
-            }
+        try {
+            $written = app(TransactionWriter::class)->update($user, $current->id, ['excluded' => $excluded], new TransactionWriteOptions(attempts: TransferKinds::TRANSACTION_ATTEMPTS));
+        } catch (TransactionWriteRefusedException) {
+            return;
+        }
 
-            $child = $current->createChild(['excluded' => $excluded, 'excluded_source' => ExclusionSource::Manual]);
-
-            app(TransferLinker::class)->followVersion($current, $child);
-
-            return true;
-        }, 3);
-
-        if ($toggled) {
+        if ($written->id !== $current->id) {
             $this->dispatch('transaction-saved');
         }
     }

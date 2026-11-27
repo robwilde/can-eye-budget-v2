@@ -10,7 +10,7 @@ use App\Http\Resources\Api\TransactionResource;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\User;
-use App\Services\Transactions\ApiTransactionWriter;
+use App\Services\Transactions\TransactionWriter;
 use Illuminate\Validation\Rule;
 
 final class CreateTransaction implements AssistantWriteTool
@@ -19,7 +19,7 @@ final class CreateTransaction implements AssistantWriteTool
 
     private const int MAX_CENTS = 99_999_999_999;
 
-    public function __construct(private readonly ApiTransactionWriter $writer) {}
+    public function __construct(private readonly TransactionWriter $writer) {}
 
     public function name(): string
     {

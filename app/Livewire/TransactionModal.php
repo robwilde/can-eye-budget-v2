@@ -54,9 +54,9 @@ use App\Services\Recurring\PlanWriter;
 use App\Services\Recurring\RecurringGate;
 use App\Services\RulePromptGate;
 use App\Services\Tags\TransactionTagger;
-use App\Services\TransactionIdempotency;
-use App\Services\Transactions\TransactionDeleter;
 use App\Services\Transactions\TransactionSplitter;
+use App\Services\Transactions\TransactionWriteOptions;
+use App\Services\Transactions\TransactionWriter;
 use App\Services\Transfers\TransferExchange;
 use App\Services\Transfers\TransferKinds;
 use App\Services\Transfers\TransferLinker;
@@ -68,6 +68,7 @@ use Carbon\CarbonImmutable;
 use Carbon\Exceptions\InvalidFormatException;
 use Closure;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -707,23 +708,23 @@ final class TransactionModal extends Component
      */
     public function deleteTransaction(): void
     {
-        $target = Transaction::query()
-            ->where('user_id', auth()->id())
-            ->find($this->openedTransactionId ?? $this->editingTransactionId);
+        $id = $this->openedTransactionId ?? $this->editingTransactionId;
 
-        if ($target instanceof Transaction && $target->isSplitChild()) {
-            $this->addError('splitLines', __('A split line is deleted with its parent. Undo the split or delete the parent.'));
-
+        if ($id === null) {
             return;
         }
 
-        $deleted = app(TransactionDeleter::class)->delete(
-            Transaction::query()
-                ->where('user_id', auth()->id())
-                ->whereKey($this->openedTransactionId ?? $this->editingTransactionId),
-        );
+        try {
+            app(TransactionWriter::class)->delete($this->authenticatedUser(), $id);
+        } catch (TransactionWriteRefusedException $refused) {
+            $isSplitLine = Transaction::query()->where('user_id', auth()->id())->whereKey($id)->whereNotNull('split_parent_id')->exists();
 
-        if ($deleted === 0) {
+            $this->addError($isSplitLine ? 'splitLines' : 'descriptionInput', $refused->getMessage());
+
+            return;
+        } catch (ModelNotFoundException) {
+            $this->addError('descriptionInput', TransactionWriter::STALE_VERSION);
+
             return;
         }
 
@@ -1877,17 +1878,25 @@ final class TransactionModal extends Component
             return false;
         }
 
-        DB::transaction(function () use ($parsed): void {
-            app(AccountBalanceHistoryBuilder::class)->lockAccounts($this->accountId);
-
-            $created = app(TransactionIdempotency::class)->ingestOnce(
-                new Transaction($this->manualSingleAttributes($parsed, null)),
-                $this->submissionToken,
-            );
-
-            $targets = $created->trashed() ? $created->children()->current()->get() : collect([$created]);
-            $targets->each(fn (Transaction $row) => $this->syncChosenTags($row));
-        }, TransferKinds::TRANSACTION_ATTEMPTS);
+        app(TransactionWriter::class)->create($this->authenticatedUser(), [
+            'account_id' => (int) $this->accountId,
+            'category_id' => $this->categoryId,
+            'merchant_id' => $this->merchantId,
+            'amount' => $parsed->amount,
+            'direction' => $this->transactionType === 'expense' ? TransactionDirection::Debit->value : TransactionDirection::Credit->value,
+            'description' => $parsed->description,
+            'post_date' => $this->date,
+            'notes' => $this->notes !== '' ? $this->notes : null,
+            'excluded' => $this->excluded,
+            ...$this->currencyAttributes(),
+        ], new TransactionWriteOptions(
+            idempotencyKey: $this->submissionToken,
+            attempts: TransferKinds::TRANSACTION_ATTEMPTS,
+            within: function (Transaction $created): void {
+                $targets = $created->trashed() ? $created->children()->current()->get() : collect([$created]);
+                $targets->each(fn (Transaction $row) => $this->syncChosenTags($row));
+            },
+        ));
 
         return true;
     }
