@@ -344,3 +344,13 @@ it('keeps a rule exclusion source and creates no version when excluded is unchan
 
     expect(Transaction::query()->findOrFail($edited)->excluded_source)->toBe(App\Enums\ExclusionSource::Rule);
 });
+
+it('carries linked emails onto the new version of an edited transaction', function () {
+    $user = User::factory()->create();
+    $row = Transaction::factory()->for($user)->debit()->create(['amount' => 1000]);
+    App\Models\TransactionEmail::factory()->create(['user_id' => $user->id, 'transaction_id' => $row->id, 'gmail_message_id' => 'api-receipt@mail']);
+
+    $newId = $this->apiCall('PATCH', 'transactions/'.$row->id, $this->apiTokenFor($user), ['notes' => 'later'])->assertOk()->json('data.id');
+
+    expect(Transaction::query()->findOrFail($newId)->emails()->pluck('gmail_message_id')->all())->toBe(['api-receipt@mail']);
+});

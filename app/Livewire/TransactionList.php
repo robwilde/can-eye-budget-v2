@@ -1223,14 +1223,6 @@ final class TransactionList extends Component
 
             $child = $current->createChild(['excluded' => $excluded, 'excluded_source' => ExclusionSource::Manual]);
 
-            foreach ($current->splits as $split) {
-                $split->replicate()->fill(['transaction_id' => $child->id])->save();
-            }
-
-            foreach ($current->emails as $email) {
-                $email->replicate()->fill(['transaction_id' => $child->id])->save();
-            }
-
             app(TransferLinker::class)->followVersion($current, $child);
 
             return true;
