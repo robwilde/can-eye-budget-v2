@@ -93,6 +93,14 @@ final readonly class ApiTransactionWriter
                 $this->assertCoreEditable($current);
             }
 
+            if (array_key_exists('excluded', $changes) && (bool) $changes['excluded'] === $current->excluded) {
+                unset($changes['excluded']);
+
+                if ($changes === []) {
+                    return $current;
+                }
+            }
+
             $overrides = [];
 
             foreach (['category_id', 'notes', 'amount', 'description', 'post_date'] as $field) {
