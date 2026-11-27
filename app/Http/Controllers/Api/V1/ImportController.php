@@ -8,7 +8,7 @@ use App\Enums\ImportPreset;
 use App\Http\Resources\Api\BankImportResource;
 use App\Models\Account;
 use App\Models\BankImport;
-use App\Services\CsvImport\ApiCsvImporter;
+use App\Services\CsvImport\CsvImporter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -17,7 +17,7 @@ final class ImportController extends OwnedReadController
 {
     public const int MAX_KILOBYTES = 10240;
 
-    public function store(Request $request, ApiCsvImporter $importer): JsonResponse
+    public function store(Request $request, CsvImporter $importer): JsonResponse
     {
         $user = $this->owner($request);
 
