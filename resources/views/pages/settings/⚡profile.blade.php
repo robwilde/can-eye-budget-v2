@@ -143,13 +143,6 @@ new #[Title('Profile settings')] class extends Component {
     {
         return Auth::user() instanceof MustVerifyEmail && ! Auth::user()->hasVerifiedEmail();
     }
-
-    #[Computed]
-    public function showDeleteUser(): bool
-    {
-        return ! Auth::user() instanceof MustVerifyEmail
-            || (Auth::user() instanceof MustVerifyEmail && Auth::user()->hasVerifiedEmail());
-    }
 }; ?>
 
 <section class="w-full">
@@ -218,8 +211,6 @@ new #[Title('Profile settings')] class extends Component {
 
         <livewire:pages::settings.reset-data />
 
-        @if ($this->showDeleteUser)
-            <livewire:pages::settings.delete-user-form />
-        @endif
+        <livewire:pages::settings.delete-user-form />
     </x-pages::settings.layout>
 </section>

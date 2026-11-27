@@ -130,3 +130,29 @@ test('the resend link on the profile page is throttled', function () {
 
     Notification::assertSentToTimes($user, VerifyEmail::class, 6);
 });
+
+it('lets an unverified user delete their own account from the profile page', function () {
+    $user = User::factory()->unverified()->create();
+    $other = User::factory()->create();
+
+    $this->actingAs($user)->get(route('profile.edit'))
+        ->assertOk()
+        ->assertSeeLivewire('pages::settings.delete-user-form');
+
+    Livewire::test('pages::settings.delete-user-modal')
+        ->set('password', 'wrong-password')
+        ->call('deleteUser')
+        ->assertHasErrors(['password']);
+
+    expect($user->fresh())->not->toBeNull();
+
+    Livewire::test('pages::settings.delete-user-modal')
+        ->set('password', 'password')
+        ->call('deleteUser')
+        ->assertHasNoErrors()
+        ->assertRedirect('/');
+
+    expect($user->fresh())->toBeNull()
+        ->and($other->fresh())->not->toBeNull();
+    $this->assertGuest();
+});
