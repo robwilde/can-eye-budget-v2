@@ -94,8 +94,10 @@
     {{ $slot }}
 </main>
 
-<livewire:feedback-widget/>
-<livewire:transaction-modal/>
+@if (auth()->user()?->hasVerifiedEmail())
+    <livewire:feedback-widget/>
+    <livewire:transaction-modal/>
+@endif
 <flux:toast/>
 
 @fluxScripts

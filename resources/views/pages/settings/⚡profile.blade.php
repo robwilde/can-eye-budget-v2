@@ -5,6 +5,7 @@ use App\Models\User;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\Computed;
@@ -45,6 +46,10 @@ new #[Title('Profile settings')] class extends Component {
         }
 
         $user->save();
+
+        if ($user->wasChanged('email')) {
+            $this->sendVerificationNotification($user);
+        }
 
         $this->dispatch('profile-updated', name: $user->name);
     }
@@ -113,9 +118,24 @@ new #[Title('Profile settings')] class extends Component {
             return;
         }
 
-        $user->sendEmailVerificationNotification();
+        if (! $this->sendVerificationNotification($user)) {
+            $this->addError('email', __('Too many verification emails requested. Try again in a minute.'));
+
+            return;
+        }
 
         Session::flash('status', 'verification-link-sent');
+    }
+
+    /**
+     * Sends the verification email unless this user already asked for six in the last minute,
+     * the same budget Fortify gives the verification.send route.
+     */
+    private function sendVerificationNotification(User $user): bool
+    {
+        $sent = RateLimiter::attempt('verification-resend:'.$user->id, 6, static fn () => $user->sendEmailVerificationNotification(), 60);
+
+        return $sent !== false;
     }
 
     #[Computed]

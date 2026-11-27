@@ -68,14 +68,16 @@
             <flux:icon name="arrow-path" class="size-4"/>
         </a>
 
-        <button
-                type="button"
-                wire:click="$dispatch('open-transaction-modal', { date: '{{ now()->toDateString() }}' })"
-                data-testid="topbar-log-spend"
-                class="inline-flex items-center gap-2 rounded-md border-2 border-cib-black bg-cib-yellow-400 px-4 py-2 text-sm font-bold text-cib-black shadow-pop transition-transform hover:-translate-y-px"
-        >
-            <flux:icon name="plus" class="size-4"/>
-            Log spend
-        </button>
+        @if (auth()->user()?->hasVerifiedEmail())
+            <button
+                    type="button"
+                    wire:click="$dispatch('open-transaction-modal', { date: '{{ now()->toDateString() }}' })"
+                    data-testid="topbar-log-spend"
+                    class="inline-flex items-center gap-2 rounded-md border-2 border-cib-black bg-cib-yellow-400 px-4 py-2 text-sm font-bold text-cib-black shadow-pop transition-transform hover:-translate-y-px"
+            >
+                <flux:icon name="plus" class="size-4"/>
+                Log spend
+            </button>
+        @endif
     </div>
 </header>
