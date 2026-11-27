@@ -98,14 +98,14 @@ it('refuses a recurring transfer while recurring is off', function () {
     expect($existing->fresh()->description)->toBe('Still editable')->and(PlannedTransaction::query()->whereNotNull('transfer_to_account_id')->count())->toBe(1);
 });
 
-it('refuses a recurring transfer from the plan editors with a message', function () {
+it('refuses a recurring transfer from the plan editors while recurring is off', function () {
     $savings = Account::factory()->for($this->user)->create();
     switchOff($this->user);
 
     Livewire::actingAs($this->user)->test(App\Livewire\TransactionModal::class)
         ->dispatch('open-transaction-modal', date: '2026-04-01')
         ->set('mode', 'plan')->set('transactionType', 'transfer')->set('descriptionInput', '50 Sweep')->set('accountId', $this->account->id)->set('transferToAccountId', $savings->id)
-        ->call('save')->assertHasErrors('transfer_to_account_id')->assertSeeHtml('data-testid="transfer-recurring-off-error"')->assertSee('Recurring transfers are off');
+        ->call('save')->assertHasErrors('mode')->assertSee('Recurring is switched off');
 
     expect(PlannedTransaction::query()->count())->toBe(0);
 });

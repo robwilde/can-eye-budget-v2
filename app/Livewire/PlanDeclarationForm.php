@@ -25,6 +25,7 @@ use App\Services\Recurring\PlanDuplicateGuard;
 use App\Services\Recurring\PlanPatternPicker;
 use App\Services\Recurring\PlanSmartFiller;
 use App\Services\Recurring\PlanTransactionSearch;
+use App\Services\Recurring\PlanWriter;
 use App\Support\Recurrence\NextDueDate;
 use Carbon\CarbonImmutable;
 use Flux\Flux;
@@ -240,6 +241,15 @@ final class PlanDeclarationForm extends Component
         $this->description = mb_trim($this->description);
 
         $validated = $this->validate($this->rules(), $this->messages());
+
+        $refusal = app(PlanWriter::class)->refusalFor($user);
+
+        if ($refusal !== null) {
+            Flux::toast(text: $refusal->message(), variant: 'warning');
+            $this->showModal = false;
+
+            return;
+        }
 
         $direction = $this->declaredDirection();
         $cents = (int) round((float) $validated['amount'] * 100);

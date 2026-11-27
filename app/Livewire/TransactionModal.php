@@ -14,6 +14,7 @@ use App\Enums\ExclusionSource;
 use App\Enums\PlanAmountStrategy;
 use App\Enums\PlannedTransactionStatus;
 use App\Enums\PlannedTransactionType;
+use App\Enums\PlanRefusal;
 use App\Enums\RecurrenceFrequency;
 use App\Enums\TransactionDirection;
 use App\Enums\TransactionKind;
@@ -24,13 +25,14 @@ use App\Exceptions\CategoriesLockedException;
 use App\Exceptions\ExchangeRateUnavailableException;
 use App\Exceptions\IdempotencyKeyReusedException;
 use App\Exceptions\PendingMergeRefusedException;
+use App\Exceptions\PlanWriteRefusedException;
 use App\Exceptions\TransactionSplitRefusedException;
 use App\Exceptions\TransactionWriteRefusedException;
 use App\Exceptions\TransferAlreadyLinkedException;
 use App\Exceptions\TransferLinkRefusedException;
 use App\Livewire\Concerns\EditsPlanSeries;
+use App\Livewire\Concerns\GuardsPlanWrites;
 use App\Livewire\Concerns\PicksCadence;
-use App\Livewire\Concerns\RefusesPayCycleIncomePlans;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Merchant;
@@ -48,6 +50,8 @@ use App\Services\Projection\AccountBalanceHistoryBuilder;
 use App\Services\RecentCategoryPicks;
 use App\Services\Recurring\OccurrencePaymentRecorder;
 use App\Services\Recurring\PlanDuplicateGuard;
+use App\Services\Recurring\PlanWriter;
+use App\Services\Recurring\RecurringGate;
 use App\Services\RulePromptGate;
 use App\Services\Tags\TransactionTagger;
 use App\Services\TransactionIdempotency;
@@ -81,8 +85,8 @@ use Throwable;
 final class TransactionModal extends Component
 {
     use EditsPlanSeries;
+    use GuardsPlanWrites;
     use PicksCadence;
-    use RefusesPayCycleIncomePlans;
     use WithFileUploads;
 
     private const int RATE_LOOKUP_TTL_SECONDS = 300;
@@ -268,7 +272,7 @@ final class TransactionModal extends Component
         $this->resetForm();
         $this->date = $date;
         $this->accountId = $this->prefillAccountId();
-        $this->mode = CarbonImmutable::parse($date)->isFuture() ? 'plan' : 'enter';
+        $this->mode = CarbonImmutable::parse($date)->isFuture() && RecurringGate::enabled($this->authenticatedUser()) ? 'plan' : 'enter';
         $this->showModal = true;
     }
 
@@ -404,13 +408,14 @@ final class TransactionModal extends Component
             ->where('user_id', auth()->id())
             ->find($id);
 
-        if (! $planned || (! $this->isPastOccurrence($occurrenceDate) && ! $this->guardEditablePlan($planned))) {
+        if (! $planned || ! $this->guardEditablePlan($planned, $this->isPastOccurrence($occurrenceDate))) {
             return;
         }
 
         $this->resetForm();
 
         $this->editingPlannedTransactionId = $planned->id;
+        $this->openedCategoryId = $planned->category_id;
         $this->occurrenceDate = $occurrenceDate;
         $this->mode = 'plan';
         $this->originalWasTransfer = $planned->transfer_to_account_id !== null;
@@ -503,6 +508,11 @@ final class TransactionModal extends Component
         } catch (ExchangeRateUnavailableException $e) {
             $this->categoryId = $categoryBeforeCleanup;
             $this->addError('exchangeRate', $e->getMessage());
+
+            return;
+        } catch (PlanWriteRefusedException $e) {
+            $this->categoryId = $categoryBeforeCleanup;
+            $this->showPlanRefusal($e->reason);
 
             return;
         }
@@ -1045,6 +1055,7 @@ final class TransactionModal extends Component
             'frequencyOptions' => $this->frequencyOptions(),
             'formatMoney' => MoneyCast::format(...),
             'planExists' => $this->planAlreadyExists(),
+            'recurringOn' => RecurringGate::enabled($this->authenticatedUser()),
             'parsedAmount' => $parsed->amount ?? 0,
             'parsedDescription' => $parsed->description ?? '',
             'attachments' => $this->currentAttachments(),
@@ -1186,7 +1197,13 @@ final class TransactionModal extends Component
             return;
         }
 
-        DB::transaction(fn () => $planned->discard());
+        try {
+            app(PlanWriter::class)->discard($this->authenticatedUser(), $planned);
+        } catch (PlanWriteRefusedException $refused) {
+            $this->showPlanRefusal($refused->reason);
+
+            return;
+        }
 
         $this->showModal = false;
         $this->resetForm();
@@ -1280,6 +1297,17 @@ final class TransactionModal extends Component
     {
         $this->showModal = false;
         $this->resetForm();
+    }
+
+    protected function planRefusalField(PlanRefusal $refusal): ?string
+    {
+        return match ($refusal) {
+            PlanRefusal::Duplicate, PlanRefusal::RecurringOff => 'mode',
+            PlanRefusal::UntrackedAccount => 'accountId',
+            PlanRefusal::HiddenCategory => 'categoryId',
+            PlanRefusal::StartNotAfterToday => 'date',
+            PlanRefusal::PayCycleIncome => null,
+        };
     }
 
     /** @return array<string, mixed> */
@@ -1789,12 +1817,6 @@ final class TransactionModal extends Component
             return false;
         }
 
-        if ($this->mode === 'plan' && $this->planAlreadyExists()) {
-            $this->addError('mode', __('A plan like this already exists.'));
-
-            return false;
-        }
-
         if ($this->editingTransactionId && $this->mode === 'plan') {
             return $this->isBankFeedTransaction
                 ? $this->planFromBankFeedRow()
@@ -1894,7 +1916,8 @@ final class TransactionModal extends Component
 
     /**
      * Whether the user already has a plan for what the form describes: same account, direction and
-     * amount, and the same merchant or description. Transfers and plan edits never count.
+     * amount, and the same merchant or description. Only drives the Plan toggle; PlanWriter refuses
+     * the duplicate itself when the plan is saved.
      */
     private function planAlreadyExists(): bool
     {
@@ -1936,30 +1959,26 @@ final class TransactionModal extends Component
     }
 
     /**
-     * Run a plan-creating write under a lock on the user row, re-checking for a matching plan inside the
-     * lock so two saves at once cannot both create it. False, with the error added, when the plan exists.
+     * Creates the plan through PlanWriter inside one transaction with whatever else the save writes.
      *
-     * @param  Closure(): void  $create
+     * @param  array<string, mixed>  $attributes
+     * @param  Closure(PlannedTransaction): void|null  $alongside
+     *
+     * @throws PlanWriteRefusedException
      */
-    private function createUnlessPlanExists(Closure $create): bool
+    private function createPlan(array $attributes, ?Closure $alongside = null): PlannedTransaction
     {
-        $exists = DB::transaction(function () use ($create): bool {
-            User::query()->whereKey(auth()->id())->lockForUpdate()->first();
+        return DB::transaction(function () use ($attributes, $alongside): PlannedTransaction {
+            $planned = app(PlanWriter::class)->create($this->authenticatedUser(), $attributes, $this->merchantId);
 
-            if ($this->planAlreadyExists()) {
-                return true;
+            $this->copyPaymentUrlToMatching($planned);
+
+            if ($alongside !== null) {
+                $alongside($planned);
             }
 
-            $create();
-
-            return false;
+            return $planned;
         });
-
-        if ($exists) {
-            $this->addError('mode', __('A plan like this already exists.'));
-        }
-
-        return ! $exists;
     }
 
     private function createPlannedTransaction(): bool
@@ -1972,9 +1991,9 @@ final class TransactionModal extends Component
             return false;
         }
 
-        return $this->createUnlessPlanExists(function () use ($parsed): void {
-            $this->copyPaymentUrlToMatching(PlannedTransaction::query()->create($this->buildPlannedTransactionData($parsed)));
-        });
+        $this->createPlan($this->buildPlannedTransactionData($parsed));
+
+        return true;
     }
 
     private function editedPlannedTransaction(): ?PlannedTransaction
@@ -2006,9 +2025,9 @@ final class TransactionModal extends Component
         }
 
         DB::transaction(function () use ($planned, $data): void {
-            $planned->update($data);
+            $updated = app(PlanWriter::class)->update($this->authenticatedUser(), $planned, $data, $this->merchantId);
 
-            $this->copyPaymentUrlToMatching($planned);
+            $this->copyPaymentUrlToMatching($updated);
         });
 
         return true;
@@ -2416,19 +2435,11 @@ final class TransactionModal extends Component
         // double-counted on the calendar; its own fields are left untouched.
         $isPlainSource = $this->transactionType !== 'transfer' && $transaction->transfer_pair_id === null;
 
-        $created = $this->createUnlessPlanExists(function () use ($transaction, $parsed, $isPlainSource): void {
-            $planned = PlannedTransaction::query()->create($this->buildPlannedTransactionData($parsed));
-
-            $this->copyPaymentUrlToMatching($planned);
-
+        $this->createPlan($this->buildPlannedTransactionData($parsed), function (PlannedTransaction $planned) use ($transaction, $isPlainSource): void {
             if ($isPlainSource) {
                 $transaction->update(['planned_transaction_id' => $planned->id]);
             }
         });
-
-        if (! $created) {
-            return false;
-        }
 
         $this->applyCategoriseMatching($transaction);
 
@@ -2599,7 +2610,7 @@ final class TransactionModal extends Component
                 $this->createSingleTransaction($parsed);
             }
 
-            $planned->discard();
+            app(PlanWriter::class)->discard($this->authenticatedUser(), $planned);
         });
 
         return true;
@@ -2825,23 +2836,15 @@ final class TransactionModal extends Component
 
         [$transaction, $parsed] = $resolved;
 
-        $created = $this->createUnlessPlanExists(function () use ($parsed, $transaction): void {
-            $planned = PlannedTransaction::query()->create([
-                ...$this->buildPlannedTransactionData($parsed),
-                'type' => PlannedTransactionType::resolve(PlannedTransactionType::tryFrom($this->planType), $transaction->direction, false),
-                'transfer_to_account_id' => null,
-                'amount' => abs($transaction->amount),
-                'direction' => $transaction->direction,
-                'account_id' => $transaction->account_id,
-                'description' => filled($transaction->clean_description) ? $transaction->clean_description : $transaction->description,
-            ]);
-
-            $this->copyPaymentUrlToMatching($planned);
-        });
-
-        if (! $created) {
-            return false;
-        }
+        $this->createPlan([
+            ...$this->buildPlannedTransactionData($parsed),
+            'type' => PlannedTransactionType::resolve(PlannedTransactionType::tryFrom($this->planType), $transaction->direction, false),
+            'transfer_to_account_id' => null,
+            'amount' => abs($transaction->amount),
+            'direction' => $transaction->direction,
+            'account_id' => $transaction->account_id,
+            'description' => filled($transaction->clean_description) ? $transaction->clean_description : $transaction->description,
+        ]);
 
         $this->applyCategoriseMatching($transaction);
 
@@ -3235,11 +3238,16 @@ final class TransactionModal extends Component
             ],
             'categoryId' => [
                 'nullable',
-                Rule::exists('categories', 'id')->where('user_id', auth()->id())->where('is_hidden', 0),
+                Rule::exists('categories', 'id')
+                    ->where('user_id', auth()->id())
+                    ->when(
+                        ! ($this->editingPlannedTransactionId !== null && $this->mode === 'plan' && ! $this->isRealizableOccurrence() && $this->categoryId === $this->openedCategoryId),
+                        static fn ($rule) => $rule->where('is_hidden', 0),
+                    ),
             ],
             'merchantId' => ['nullable', Rule::exists('merchants', 'id')->where('user_id', auth()->id())],
             'date' => $this->mode === 'plan' && $this->editingPlannedTransactionId === null
-                ? ['required', 'date_format:Y-m-d', 'after:'.auth()->user()->today()->toDateString()]
+                ? ['required', 'date_format:Y-m-d', 'after:'.app(PlanWriter::class)->earliestStartDate(auth()->user())->subDay()->toDateString()]
                 : ['required', 'date_format:Y-m-d'],
             'notes' => ['nullable', 'string', 'max:1000'],
             'tagIds' => ['array', 'max:50'],

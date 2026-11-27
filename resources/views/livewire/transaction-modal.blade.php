@@ -99,6 +99,7 @@
                         <flux:select.option value="transfer">{{ __('Transfer between accounts') }}</flux:select.option>
                     </flux:select>
                 </div>
+                @if($recurringOn)
                 <div>
                     <span class="cib-label">{{ __('Mode') }}</span>
                     <div class="type-toggle" role="group" aria-label="{{ __('Enter vs Plan') }}">
@@ -121,10 +122,9 @@
                     @if($planExists && $mode !== 'plan')
                         <p id="plan-already-exists-hint" class="mt-1 text-xs text-zinc-500" data-testid="plan-already-exists">{{ __('A plan like this already exists.') }}</p>
                     @endif
-                    @if($planExists)
-                        <flux:error name="mode" />
-                    @endif
                 </div>
+                @endif
+                <flux:error name="mode" />
             </div>
 
             {{-- Clean description first: it is the field a bank-feed row lets you edit --}}
