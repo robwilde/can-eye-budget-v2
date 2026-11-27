@@ -1473,6 +1473,7 @@ final class TransactionList extends Component
 
         $transaction = Transaction::query()
             ->where('user_id', auth()->id())
+            ->current()
             ->findOrFail($this->splitPanelTxnId);
 
         if ($transaction->isSplitChild() || $transaction->isSplitParent()) {
@@ -1585,6 +1586,7 @@ final class TransactionList extends Component
     {
         $transaction = Transaction::query()
             ->where('user_id', auth()->id())
+            ->current()
             ->findOrFail($transactionId);
 
         $transaction->splits()->delete();
