@@ -31,7 +31,9 @@ use App\Services\Recurring\PaymentSettlementDeferral;
 use App\Services\RedbarkClientFactory;
 use App\Services\RedbarkTransactionMatcher;
 use App\Services\TransactionIngestor;
+use App\Services\Transactions\TransactionSplitter;
 use App\Support\Audit\AttributeJobToUser;
+use App\Support\Audit\AuditRecorder;
 use App\Support\CleanDescriptionDeriver;
 use App\Support\Redbark\InitialSyncWindow;
 use App\Support\RedbarkCurrency;
@@ -67,6 +69,10 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
     public const int PENDING_CLAIM_WINDOW_DAYS = 8;
 
     private const int INCREMENTAL_LOOKBACK_DAYS = 7;
+
+    private const int MAX_NOTES_LENGTH = 1000;
+
+    private const array SPLIT_BREAKING_FIELDS = ['amount', 'direction', 'post_date'];
 
     public int $tries = 5;
 
@@ -1004,6 +1010,7 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
 
             $this->applyValues($current, $values);
             $this->fillFeedCategory($current, $feedCategoryId);
+            $this->undoSplitChangedByBank($current);
             $current->save();
             $this->persistNames($existing, $names);
 
@@ -1071,6 +1078,30 @@ final class SyncRedbarkFeedJob implements ShouldBeUnique, ShouldQueue
         $ingestor->ingest($created, rebuildHistory: false);
 
         return 'created';
+    }
+
+    /**
+     * A bank that changes the amount, direction or date of a split parent leaves its lines
+     * adding up to the old figures, and spend counts the lines. The split is undone instead,
+     * in the same account lock and transaction as the update: the lines go, the parent counts
+     * again with the bank's figures, and a note and an audit event say why.
+     */
+    private function undoSplitChangedByBank(Transaction $current): void
+    {
+        if (! $current->isDirty(self::SPLIT_BREAKING_FIELDS) || ! $current->isSplitParent()) {
+            return;
+        }
+
+        $notice = __('Split removed: the bank changed the amount, direction or date of this transaction.');
+        $notes = $current->notes === null || $current->notes === '' ? $notice : $current->notes."\n".$notice;
+
+        if (mb_strlen($notes) <= self::MAX_NOTES_LENGTH) {
+            $current->notes = $notes;
+        }
+
+        app(TransactionSplitter::class)->dissolve($current, enforceReceiptLimit: false);
+
+        app(AuditRecorder::class)->recordSafely('sync.split_removed', 'transaction', $current->id, actorId: $current->user_id);
     }
 
     private function feedCategoryId(FeedCategoryMatcher $categoryMatcher, RedbarkAccount $redbarkAccount, mixed $category): ?int
