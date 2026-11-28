@@ -806,3 +806,112 @@ it('carries the earlier surplus into a month when it is initialised', function (
 
     expect(budgetMgrLineOf($february, $groceries)->rolled_over_amount)->toBe(10000);
 });
+
+it('keeps the allocated total when a category moves under a parent', function () {
+    $pets = budgetMgrCategory($this->user, 'Pets');
+    $groceries = budgetMgrCategory($this->user, 'Groceries');
+    $plan = budgetMgrPlan($this->user, '2026-03', total: 100000);
+    $petsLine = budgetMgrLine($plan, $pets, 0);
+    budgetMgrLine($plan, $groceries, 10000);
+
+    $this->manager->moveCategory($this->user, $groceries, $pets->id);
+
+    expect($groceries->fresh()->parent_id)->toBe($pets->id)
+        ->and($petsLine->fresh()->limit_amount)->toBe(10000)
+        ->and(app(BudgetPlanCalculator::class)->summarise($plan)->allocated)->toBe(10000);
+});
+
+it('takes a moved category out of its old parent and keeps the parent reserve', function () {
+    $food = budgetMgrCategory($this->user, 'Food');
+    $groceries = budgetMgrCategory($this->user, 'Groceries', $food);
+    $plan = budgetMgrPlan($this->user, '2026-03', total: 100000);
+    $foodLine = budgetMgrLine($plan, $food, 30000);
+    budgetMgrLine($plan, $groceries, 10000);
+
+    $this->manager->moveCategory($this->user, $groceries, null);
+
+    expect($foodLine->fresh()->limit_amount)->toBe(20000)
+        ->and(app(BudgetPlanCalculator::class)->summarise($plan)->allocated)->toBe(30000);
+});
+
+it('keeps the allocated total when money later leaves a moved category', function () {
+    $pets = budgetMgrCategory($this->user, 'Pets');
+    $groceries = budgetMgrCategory($this->user, 'Groceries');
+    $fuel = budgetMgrCategory($this->user, 'Fuel');
+    $plan = budgetMgrPlan($this->user, '2026-03', total: 100000);
+    budgetMgrLine($plan, $pets, 0);
+    $groceriesLine = budgetMgrLine($plan, $groceries, 10000);
+    $fuelLine = budgetMgrLine($plan, $fuel, 0);
+
+    $this->manager->moveCategory($this->user, $groceries, $pets->id);
+    $this->manager->moveMoney($this->user, $groceriesLine, $fuelLine, 4000);
+
+    expect(app(BudgetPlanCalculator::class)->summarise($plan)->allocated)->toBe(10000);
+});
+
+it('shifts a moved category between parents in every plan and leaves another user alone', function () {
+    $food = budgetMgrCategory($this->user, 'Food');
+    $pets = budgetMgrCategory($this->user, 'Pets');
+    $groceries = budgetMgrCategory($this->user, 'Groceries', $food);
+    $march = budgetMgrPlan($this->user, '2026-03');
+    $april = budgetMgrPlan($this->user, '2026-04', initialised: false);
+    $marchFood = budgetMgrLine($march, $food, 30000);
+    $marchPets = budgetMgrLine($march, $pets, 5000);
+    budgetMgrLine($march, $groceries, 10000);
+    $aprilFood = budgetMgrLine($april, $food, 12000);
+    $aprilPets = budgetMgrLine($april, $pets, 0);
+    budgetMgrLine($april, $groceries, 2000);
+    $other = User::factory()->create();
+    $otherParent = budgetMgrCategory($other, 'Food');
+    $otherLine = budgetMgrLine(budgetMgrPlan($other, '2026-03'), $otherParent, 30000);
+
+    $this->manager->moveCategory($this->user, $groceries, $pets->id);
+
+    expect($marchFood->fresh()->limit_amount)->toBe(20000)
+        ->and($marchPets->fresh()->limit_amount)->toBe(15000)
+        ->and($aprilFood->fresh()->limit_amount)->toBe(10000)
+        ->and($aprilPets->fresh()->limit_amount)->toBe(2000)
+        ->and($otherLine->fresh()->limit_amount)->toBe(30000);
+});
+
+it('refuses to move a category of another user or under another user category', function () {
+    $mine = budgetMgrCategory($this->user, 'Groceries');
+    $other = User::factory()->create();
+    $theirs = budgetMgrCategory($other, 'Pets');
+
+    expect(fn () => $this->manager->moveCategory($this->user, $theirs, null))->toThrow(ModelNotFoundException::class)
+        ->and(fn () => $this->manager->moveCategory($this->user, $mine, $theirs->id))->toThrow(ModelNotFoundException::class)
+        ->and($mine->fresh()->parent_id)->toBeNull();
+});
+
+it('gives a Shared subcategory moved to the top level what is dedicated below it', function () {
+    $food = budgetMgrCategory($this->user, 'Food');
+    $groceries = budgetMgrCategory($this->user, 'Groceries', $food);
+    $fruit = budgetMgrCategory($this->user, 'Fruit', $groceries);
+    $plan = budgetMgrPlan($this->user, '2026-03', total: 100000);
+    $foodLine = budgetMgrLine($plan, $food, 30000);
+    $groceriesLine = budgetMgrLine($plan, $groceries, null);
+    budgetMgrLine($plan, $fruit, 4000);
+
+    $this->manager->moveCategory($this->user, $groceries, null);
+
+    expect($groceriesLine->fresh()->limit_amount)->toBe(4000)
+        ->and($foodLine->fresh()->limit_amount)->toBe(26000)
+        ->and(app(BudgetPlanCalculator::class)->summarise($plan)->allocated)->toBe(30000);
+});
+
+it('refreshes carried amounts after a category moves', function () {
+    $pets = budgetMgrCategory($this->user, 'Pets');
+    $groceries = budgetMgrCategory($this->user, 'Groceries');
+    $january = budgetMgrPlan($this->user, '2026-01');
+    $february = budgetMgrPlan($this->user, '2026-02');
+    budgetMgrLine($january, $pets, 0, rollover: true);
+    budgetMgrLine($january, $groceries, 10000);
+    $februaryPets = budgetMgrLine($february, $pets, 0, rollover: true);
+    budgetMgrLine($february, $groceries, 10000);
+    budgetMgrSpend($this->user, $groceries, 3000, '2026-01-10');
+
+    $this->manager->moveCategory($this->user, $groceries, $pets->id);
+
+    expect($februaryPets->fresh()->rolled_over_amount)->toBe(7000);
+});
