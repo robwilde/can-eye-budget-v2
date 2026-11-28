@@ -23,7 +23,8 @@ final readonly class TransactionFeeFolder
      * Soft-deletes the fee (hiding it everywhere), links it to a merged
      * version-chain child of the parent that carries the combined amount, and
      * returns that merged child. Returns null (no side effects) when the fee is
-     * not eligible or no unambiguous parent exists.
+     * not eligible, no unambiguous parent exists, or the purchase changed (for
+     * example was split) between the first read and the account lock.
      */
     public function fold(Transaction $fee): ?Transaction
     {
@@ -33,8 +34,24 @@ final readonly class TransactionFeeFolder
             return null;
         }
 
-        return DB::transaction(function () use ($fee, $parent): Transaction {
+        return DB::transaction(function () use ($fee, $parent): ?Transaction {
             $this->history->lockAccounts($parent->account_id);
+
+            $locked = Transaction::query()
+                ->withTrashed()
+                ->where('user_id', $fee->user_id)
+                ->whereIn('id', [$fee->id, $parent->id])
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            $lockedFee = $locked->get($fee->id);
+            $parent = $locked->get($parent->id);
+
+            if (! $lockedFee instanceof Transaction || ! $parent instanceof Transaction || $this->foldableParent($lockedFee)?->id !== $parent->id) {
+                return null;
+            }
 
             $note = sprintf('Includes intl transaction fee %s (folded)', MoneyCast::format($fee->amount));
 

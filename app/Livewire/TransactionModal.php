@@ -817,6 +817,12 @@ final class TransactionModal extends Component
             return;
         }
 
+        if (array_filter($this->splitLines, static fn (mixed $line): bool => ! self::splitLineIsWellFormed($line)) !== []) {
+            $this->addError('splitLines', __('The split lines are not valid. Nothing was split.'));
+
+            return;
+        }
+
         $lines = array_map(
             static fn (array $line): TransactionSplitLine => new TransactionSplitLine(
                 amount: AmountParser::parse((string) ($line['amount'] ?? ''))->amount,
@@ -1069,10 +1075,7 @@ final class TransactionModal extends Component
                 && ! $this->originalWasTransfer
                 && app(TransactionSplitter::class)->refusalFor($editing) === null,
             'splitParentCents' => $editing instanceof Transaction ? abs($editing->amount) : 0,
-            'splitSumCents' => array_sum(array_map(
-                static fn (array $line): int => AmountParser::parse((string) ($line['amount'] ?? ''))->amount,
-                $this->splitLines,
-            )),
+            'splitSumCents' => array_sum(array_map(self::splitLineCents(...), $this->splitLines)),
             'mergeSuggestion' => $this->mergeSuggestion(),
             'mergeCandidates' => $this->mergeCandidates(),
             'currencies' => $this->offeredCurrencies(),
@@ -1316,6 +1319,21 @@ final class TransactionModal extends Component
     private static function blankSplitLine(): array
     {
         return ['name' => '', 'amount' => '', 'category_id' => null, 'notes' => '', 'excluded' => false];
+    }
+
+    private static function splitLineIsWellFormed(mixed $line): bool
+    {
+        return is_array($line)
+            && (is_string($line['name'] ?? null) || ($line['name'] ?? null) === null)
+            && (is_string($line['notes'] ?? null) || ($line['notes'] ?? null) === null)
+            && (is_scalar($line['amount'] ?? null) || ($line['amount'] ?? null) === null)
+            && (is_scalar($line['category_id'] ?? null) || ($line['category_id'] ?? null) === null)
+            && (is_scalar($line['excluded'] ?? null) || ($line['excluded'] ?? null) === null);
+    }
+
+    private static function splitLineCents(mixed $line): int
+    {
+        return self::splitLineIsWellFormed($line) ? AmountParser::parse((string) ($line['amount'] ?? ''))->amount : 0;
     }
 
     private function isPastOccurrence(?string $date): bool

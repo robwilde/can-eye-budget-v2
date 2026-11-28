@@ -649,8 +649,8 @@ final class Transaction extends Model
             app(OccurrencePaymentRecorder::class)->carryPayments($this->id, $child->id);
             $this->attachments()->update(['transaction_id' => $child->id]);
 
-            self::query()->where('split_parent_id', $this->id)->update(['split_parent_id' => $child->id]);
-            self::query()->where('transfer_fee_for_id', $this->id)->update(['transfer_fee_for_id' => $child->id]);
+            self::query()->where('user_id', $this->user_id)->where('split_parent_id', $this->id)->update(['split_parent_id' => $child->id]);
+            self::query()->where('user_id', $this->user_id)->where('transfer_fee_for_id', $this->id)->update(['transfer_fee_for_id' => $child->id]);
 
             $this->carryCategoryLinesAndEmails($child, $overrides);
 
