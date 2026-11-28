@@ -11,6 +11,7 @@ use App\Models\Category;
 use App\Models\CategoryGroup;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Budgets\BudgetPlanManager;
 use App\Services\CategoryCreator;
 use App\Services\CategoryMerger;
 use App\Services\Reports\CategoryGroupMap;
@@ -106,7 +107,7 @@ final class CategoryEditor extends Component
         $this->showDeleteConfirm = false;
     }
 
-    public function saveRename(): void
+    public function saveRename(BudgetPlanManager $budgets): void
     {
         if (! $this->selectedCategoryId) {
             return;
@@ -154,7 +155,11 @@ final class CategoryEditor extends Component
         $parent = $this->editingParentId === null ? null : Category::query()->where('user_id', $userId)->find($this->editingParentId);
         $color = $parent !== null ? $parent->color : ($this->editingColor === '' ? null : $this->editingColor);
 
-        DB::transaction(function () use ($category, $userId, $color): void {
+        DB::transaction(function () use ($category, $userId, $color, $budgets): void {
+            if ($this->editingParentId !== $category->parent_id) {
+                $budgets->moveCategory($this->authenticatedUser(), $category, $this->editingParentId);
+            }
+
             $category->update([
                 'name' => $this->editingName,
                 'parent_id' => $this->editingParentId,

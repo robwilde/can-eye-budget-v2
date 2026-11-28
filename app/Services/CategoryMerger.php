@@ -12,6 +12,7 @@ use App\Enums\SuggestionStatus;
 use App\Exceptions\CategoryMergeRefusedException;
 use App\Models\Category;
 use App\Models\User;
+use App\Services\Budgets\BudgetPlanManager;
 use App\Support\Categories\ProtectedCategories;
 use App\Support\Rules\RuleTriggers;
 use Illuminate\Database\Query\Builder;
@@ -34,6 +35,8 @@ final class CategoryMerger
      * @var list<array{0: int, 1: int|null}>
      */
     private array $moves = [];
+
+    public function __construct(private readonly BudgetPlanManager $budgets) {}
 
     /**
      * Merge the sources into the target one at a time, deepest first. Each
@@ -71,7 +74,7 @@ final class CategoryMerger
                 $source = Category::query()->where('user_id', $user->id)->find($sourceId);
 
                 if ($source !== null) {
-                    $this->absorb($user->id, $source, $target);
+                    $this->absorb($user, $source, $target);
                 }
             }
 
@@ -102,7 +105,7 @@ final class CategoryMerger
             }
 
             $this->assertNoForeignReferences($user->id, $categoryId);
-            $this->moveChildren($user->id, $categoryId, null);
+            $this->moveChildren($user, $categoryId, null);
             $replacementId = $this->resolveMoved($replacementId);
             $this->repoint($user->id, $categoryId, $replacementId);
             $this->moves[] = [$categoryId, $replacementId];
@@ -155,13 +158,13 @@ final class CategoryMerger
         }
     }
 
-    private function absorb(int $userId, Category $source, Category $target): void
+    private function absorb(User $user, Category $source, Category $target): void
     {
-        $this->assertNoForeignReferences($userId, $source->id);
-        $this->moveChildren($userId, $source->id, $target->id);
-        $this->repoint($userId, $source->id, $target->id);
+        $this->assertNoForeignReferences($user->id, $source->id);
+        $this->moveChildren($user, $source->id, $target->id);
+        $this->repoint($user->id, $source->id, $target->id);
         $this->moves[] = [$source->id, $target->id];
-        Category::query()->where('user_id', $userId)->whereKey($source->id)->delete();
+        Category::query()->where('user_id', $user->id)->whereKey($source->id)->delete();
     }
 
     /**
@@ -193,26 +196,24 @@ final class CategoryMerger
         return $categoryId;
     }
 
-    private function moveChildren(int $userId, int $fromId, ?int $toId): void
+    private function moveChildren(User $user, int $fromId, ?int $toId): void
     {
-        $children = Category::query()->where('user_id', $userId)->where('parent_id', $fromId)->orderBy('id')->get();
+        $children = Category::query()->where('user_id', $user->id)->where('parent_id', $fromId)->orderBy('id')->get();
 
         foreach ($children as $child) {
             $sibling = Category::query()
-                ->where('user_id', $userId)
+                ->where('user_id', $user->id)
                 ->when($toId === null, fn ($query) => $query->whereNull('parent_id'), fn ($query) => $query->where('parent_id', $toId))
                 ->whereKeyNot([$child->id, $fromId])
                 ->orderBy('id')
                 ->get()
                 ->first(fn (Category $candidate): bool => $this->sameName($candidate->name, $child->name));
 
+            $this->budgets->moveCategory($user, $child, $toId);
+
             if ($sibling !== null) {
-                $this->absorb($userId, $child, $sibling);
-
-                continue;
+                $this->absorb($user, $child, $sibling);
             }
-
-            Category::query()->where('user_id', $userId)->whereKey($child->id)->update(['parent_id' => $toId]);
         }
     }
 

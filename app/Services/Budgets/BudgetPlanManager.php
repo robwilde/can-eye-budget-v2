@@ -243,6 +243,39 @@ final readonly class BudgetPlanManager
     }
 
     /**
+     * Moves a category under another parent, or to the top level, and keeps every budget plan of
+     * the user in step: the old ancestors give up what the category holds, the new ones take it
+     * on, and a Shared line left with nothing to draw on becomes a numeric one. The rollover
+     * chains are recomputed because actuals roll up the new tree.
+     */
+    public function moveCategory(User $actor, Category $category, ?int $parentId): Category
+    {
+        return $actor->getConnection()->transaction(function () use ($actor, $category, $parentId): Category {
+            $this->lockUser($actor);
+            $own = Category::query()->where('user_id', $actor->id)->lockForUpdate()->findOrFail($category->id);
+
+            if ($parentId !== null) {
+                Category::query()->where('user_id', $actor->id)->findOrFail($parentId);
+            }
+
+            if ($own->parent_id === $parentId) {
+                return $own;
+            }
+
+            $this->shiftAllocations($actor, $own, $parentId);
+            $own->update(['parent_id' => $parentId]);
+
+            $earliest = BudgetPlan::query()->where('user_id', $actor->id)->orderBy('period_start')->orderBy('id')->first();
+
+            if ($earliest !== null) {
+                $this->recomputer->recomputeFrom($earliest);
+            }
+
+            return $own;
+        });
+    }
+
+    /**
      * Raises each numeric line to at least what the lines below it hold, deepest first, so a
      * line that exists only in this plan does not hide the allocations beneath it.
      *
@@ -507,6 +540,47 @@ final readonly class BudgetPlanManager
         foreach ($tree->numericAncestors($line->category_id) as $ancestorId) {
             $ancestor = $lines->get($ancestorId);
             $ancestor->update(['limit_amount' => max(0, $ancestor->limit_amount + $change)]);
+        }
+    }
+
+    /**
+     * Moves what the category holds from its numeric ancestors in the old tree to those in the
+     * new one, in each of the user's plans in id order. An ancestor common to both nets to no
+     * change.
+     */
+    private function shiftAllocations(User $actor, Category $category, ?int $parentId): void
+    {
+        $oldParents = $this->parents($actor->id);
+        $newParents = [$category->id => $parentId] + $oldParents;
+        $plans = BudgetPlan::query()->where('user_id', $actor->id)->orderBy('id')->lockForUpdate()->get();
+
+        foreach ($plans as $plan) {
+            $lines = $this->categoryLines($plan);
+            $oldTree = AllocationTree::fromLines($oldParents, $lines);
+            $newTree = AllocationTree::fromLines($newParents, $lines);
+            $moved = $oldTree->inclusive($category->id);
+            $changes = [];
+
+            foreach ($oldTree->numericAncestors($category->id) as $ancestorId) {
+                $changes[$ancestorId] = ($changes[$ancestorId] ?? 0) - $moved;
+            }
+
+            foreach ($newTree->numericAncestors($category->id) as $ancestorId) {
+                $changes[$ancestorId] = ($changes[$ancestorId] ?? 0) + $moved;
+            }
+
+            foreach ($changes as $ancestorId => $change) {
+                if ($change !== 0) {
+                    $ancestor = $lines->get($ancestorId);
+                    $ancestor->update(['limit_amount' => max(0, $ancestor->limit_amount + $change)]);
+                }
+            }
+
+            $own = $lines->get($category->id);
+
+            if ($own !== null && $own->limit_amount === null && ! $newTree->isCovered($category->id)) {
+                $own->update(['limit_amount' => $moved]);
+            }
         }
     }
 }

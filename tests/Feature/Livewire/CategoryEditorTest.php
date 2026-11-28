@@ -8,10 +8,13 @@ use App\Enums\AuditOutcome;
 use App\Livewire\CategoryEditor;
 use App\Models\Account;
 use App\Models\AuditEvent;
+use App\Models\Budget;
+use App\Models\BudgetPlan;
 use App\Models\Category;
 use App\Models\CategoryGroup;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Budgets\BudgetPlanCalculator;
 use App\Services\UserCategoryProvisioner;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Livewire\Livewire;
@@ -920,4 +923,41 @@ it('inherits a parent\'s missing colour instead of keeping the old one', functio
         ->assertHasNoErrors();
 
     expect($coloured->fresh()->color)->toBeNull();
+});
+
+it('keeps the budget allocated total when a category is moved under a parent in the editor', function () {
+    $user = User::factory()->create();
+    $pets = Category::factory()->for($user)->create(['name' => 'Pets']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries']);
+    $plan = BudgetPlan::factory()->for($user)->create(['total_amount' => 100000]);
+    $petsLine = Budget::factory()->inPlan($plan)->withCategory($pets)->create(['limit_amount' => 0]);
+    Budget::factory()->inPlan($plan)->withCategory($groceries)->create(['limit_amount' => 10000]);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $groceries->id)
+        ->set('editingParentId', $pets->id)
+        ->call('saveRename')
+        ->assertHasNoErrors();
+
+    expect($groceries->fresh()->parent_id)->toBe($pets->id)
+        ->and($petsLine->fresh()->limit_amount)->toBe(10000)
+        ->and(app(BudgetPlanCalculator::class)->summarise($plan)->allocated)->toBe(10000);
+});
+
+it('leaves budget allocations alone when a category is only renamed', function () {
+    $user = User::factory()->create();
+    $food = Category::factory()->for($user)->create(['name' => 'Food']);
+    $groceries = Category::factory()->for($user)->create(['name' => 'Groceries', 'parent_id' => $food->id]);
+    $plan = BudgetPlan::factory()->for($user)->create(['total_amount' => 100000]);
+    $foodLine = Budget::factory()->inPlan($plan)->withCategory($food)->create(['limit_amount' => 30000]);
+    Budget::factory()->inPlan($plan)->withCategory($groceries)->create(['limit_amount' => 10000]);
+
+    Livewire::actingAs($user)
+        ->test(CategoryEditor::class)
+        ->call('selectCategory', $groceries->id)
+        ->set('editingName', 'Supermarket')
+        ->call('saveRename');
+
+    expect($foodLine->fresh()->limit_amount)->toBe(30000);
 });
