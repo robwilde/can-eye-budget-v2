@@ -342,3 +342,84 @@ test('planned transfers move the projection only across the tracked boundary and
     expect(array_map(fn ($point) => $point->eventAmountCents, $projection->points))->toBe([0, -30000, 10000])
         ->and($projection->points[2]->balanceCents)->toBe(80000);
 });
+
+test('a bill on another account does not lower the primary account projection', function () {
+    $user = User::factory()->create();
+    $primary = Account::factory()->for($user)->create(['balance' => 80000]);
+    $funded = Account::factory()->for($user)->create(['balance' => 1000000]);
+    $user->update(['primary_account_id' => $primary->id]);
+
+    PlannedTransaction::factory()->for($user)->for($funded)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 100000,
+        'start_date' => CarbonImmutable::today()->addDays(3),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'status' => PlannedTransactionStatus::Active,
+    ]);
+
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
+
+    expect($projection->points)->toHaveCount(1)
+        ->and($projection->firstNegativeDate)->toBeNull();
+});
+
+test('a bill on the primary account still lowers the projection beside one on another account', function () {
+    $user = User::factory()->create();
+    $primary = Account::factory()->for($user)->create(['balance' => 80000]);
+    $other = Account::factory()->for($user)->create(['balance' => 1000000]);
+    $user->update(['primary_account_id' => $primary->id]);
+
+    foreach ([[$primary, 30000], [$other, 100000]] as [$account, $amount]) {
+        PlannedTransaction::factory()->for($user)->for($account)->create([
+            'direction' => TransactionDirection::Debit,
+            'amount' => $amount,
+            'start_date' => CarbonImmutable::today()->addDays(3),
+            'frequency' => RecurrenceFrequency::DontRepeat,
+            'status' => PlannedTransactionStatus::Active,
+        ]);
+    }
+
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
+
+    expect(array_map(fn ($point) => $point->balanceCents, $projection->points))->toBe([80000, 50000]);
+});
+
+test('a foreign currency plan on another account is never added to the primary balance', function () {
+    $user = User::factory()->create();
+    $primary = Account::factory()->for($user)->create(['balance' => 80000, 'currency' => 'AUD']);
+    $euro = Account::factory()->for($user)->create(['balance' => 1000000, 'currency' => 'EUR']);
+    $user->update(['primary_account_id' => $primary->id]);
+
+    PlannedTransaction::factory()->for($user)->for($euro)->create([
+        'direction' => TransactionDirection::Debit,
+        'amount' => 100000,
+        'start_date' => CarbonImmutable::today()->addDays(3),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'status' => PlannedTransactionStatus::Active,
+    ]);
+
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
+
+    expect($projection->points)->toHaveCount(1);
+});
+
+test('a transfer into the primary account from an untracked account in another currency is left out', function () {
+    $user = User::factory()->create();
+    $primary = Account::factory()->for($user)->create(['balance' => 80000, 'currency' => 'AUD']);
+    $euroSavings = Account::factory()->for($user)->untracked()->create(['balance' => 1000000, 'currency' => 'EUR']);
+    $user->update(['primary_account_id' => $primary->id]);
+
+    PlannedTransaction::factory()->for($user)->create([
+        'account_id' => $euroSavings->id,
+        'transfer_to_account_id' => $primary->id,
+        'direction' => TransactionDirection::Debit,
+        'amount' => 100000,
+        'start_date' => CarbonImmutable::today()->addDays(3),
+        'frequency' => RecurrenceFrequency::DontRepeat,
+        'status' => PlannedTransactionStatus::Active,
+    ]);
+
+    $projection = app(MonthlyProjectionService::class)->forUser($user->fresh());
+
+    expect($projection->points)->toHaveCount(1);
+});
