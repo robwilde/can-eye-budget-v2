@@ -15,6 +15,7 @@ use App\Models\GoalAccount;
 use App\Models\GoalSpend;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Transfers\TransferKinds;
 use Illuminate\Support\Collection;
 use Throwable;
 
@@ -180,7 +181,9 @@ final class GoalManager
 
     /**
      * Records money spent from one of the goal's accounts. The account's earmark shrinks by
-     * the same amount and the spend still counts toward the goal's progress.
+     * the same amount and the spend still counts toward the goal's progress. The transaction is
+     * retried when InnoDB aborts it as a deadlock victim; every read sits inside the closure,
+     * so a retry sees the committed state, such as an account deleted meanwhile.
      *
      * @throws GoalRefusedException|Throwable
      */
@@ -222,7 +225,7 @@ final class GoalManager
                 'transaction_id' => $transaction?->id,
                 'amount' => $amount,
             ]);
-        });
+        }, TransferKinds::TRANSACTION_ATTEMPTS);
     }
 
     /**
