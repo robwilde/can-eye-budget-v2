@@ -14,6 +14,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * One user's budget for one period: the month's total and expected income.
+ * The plan keeps the currency it was created in: the owner's base currency at that moment.
+ * Its figures, actuals and rollover chain all stay in that currency.
+ *
  * Its per-category allocations are the Budget rows linked through budget_plan_id.
  *
  * @property int $id
@@ -22,6 +25,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property CarbonImmutable $period_end
  * @property int $total_amount
  * @property int $expected_income
+ * @property string $currency
  * @property CarbonImmutable|null $initialised_at
  * @property CarbonImmutable $created_at
  * @property CarbonImmutable $updated_at
@@ -41,6 +45,7 @@ final class BudgetPlan extends Model
         'total_amount',
         'expected_income',
         'initialised_at',
+        'currency',
     ];
 
     /** @return BelongsTo<User, $this> */
@@ -53,6 +58,15 @@ final class BudgetPlan extends Model
     public function lines(): HasMany
     {
         return $this->hasMany(Budget::class);
+    }
+
+    protected static function booted(): void
+    {
+        self::creating(static function (self $plan): void {
+            if (blank($plan->currency)) {
+                $plan->currency = (string) User::query()->whereKey($plan->user_id)->value('base_currency');
+            }
+        });
     }
 
     /**

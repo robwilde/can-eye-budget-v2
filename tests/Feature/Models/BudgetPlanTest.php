@@ -147,3 +147,14 @@ it('removes plan lines and restores the legacy budget shape when rolled back', f
             'start_date' => '2026-10-01',
         ]))->toThrow(QueryException::class);
 });
+
+it('records the owner base currency on a new plan and keeps it when the base currency changes', function () {
+    $user = User::factory()->create(['base_currency' => 'USD']);
+
+    $plan = BudgetPlan::factory()->for($user)->create();
+    $user->update(['base_currency' => 'EUR']);
+
+    expect($plan->currency)->toBe('USD')
+        ->and($plan->fresh()?->currency)->toBe('USD')
+        ->and(BudgetPlan::factory()->for($user)->create()->currency)->toBe('EUR');
+});
