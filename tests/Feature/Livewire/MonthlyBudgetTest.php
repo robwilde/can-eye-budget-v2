@@ -600,3 +600,33 @@ it('keeps unsaved header figures while a category write runs', function () {
 
     expect($line->fresh()->limit_amount)->toBe(2000);
 });
+
+it('shows the plan currency on the budget page instead of a dollar sign', function () {
+    $plan = monthlyBudgetPlan($this->user, '2026-03', total: 123456);
+    $plan->update(['currency' => 'EUR']);
+    $line = monthlyBudgetLine($plan, 'Groceries', 30000);
+    monthlyBudgetSpend($this->user, $line, 1000, '2026-03-05');
+
+    monthlyBudgetPage($this->user)
+        ->assertSee('EUR 1,234.56')
+        ->assertSee('EUR 300.00')
+        ->assertDontSee('$1,234.56')
+        ->assertDontSee('$300.00');
+});
+
+it('keeps the dollar sign for an AUD plan', function () {
+    $plan = monthlyBudgetPlan($this->user, '2026-03', total: 123456);
+    monthlyBudgetLine($plan, 'Groceries', 30000);
+
+    expect($plan->currency)->toBe('AUD');
+
+    monthlyBudgetPage($this->user)->assertSee('$1,234.56');
+});
+
+it('offers a copy only from an earlier plan in the same currency', function () {
+    $january = monthlyBudgetPlan($this->user, '2026-01');
+    $january->update(['currency' => 'USD']);
+    monthlyBudgetPlan($this->user, '2026-03', initialised: false)->update(['currency' => 'EUR']);
+
+    expect(monthlyBudgetPage($this->user)->instance()->copySource)->toBeNull();
+});
