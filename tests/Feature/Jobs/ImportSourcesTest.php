@@ -174,6 +174,44 @@ it('maps an actual budget export through its preset', function () {
     expect(Transaction::query()->where('account_id', $this->account->id)->orderBy('post_date')->pluck('amount')->all())->toBe([-1250, 200000]);
 });
 
+it('skips the split parents of an actual budget export and imports their parts', function () {
+    $csv = "Account,Date,Payee,Notes,Category_Group,Category,Amount,Split_Amount,Cleared\n"
+        ."Everyday,2024-03-25,Coles,(SPLIT INTO 2) ,,,0,-30.00,Cleared\n"
+        ."Everyday,2024-03-25,Coles,(SPLIT 1 OF 2) ,Food,Groceries,-20.00,0,Cleared\n"
+        ."Everyday,2024-03-25,Coles,(SPLIT 2 OF 2) ,Home,Household,-10.00,0,Cleared\n"
+        ."Everyday,2024-03-26,Employer,,Income,Salary,2000.00,0,Cleared\n";
+
+    Livewire::actingAs($this->user)->test(ImportBank::class)
+        ->set('importPreset', 'actual_budget')
+        ->set('accountId', $this->account->id)
+        ->set('file', UploadedFile::fake()->createWithContent('actual.csv', $csv))
+        ->call('uploadAndDetectHeaders')
+        ->call('confirmImport')
+        ->assertHasNoErrors();
+
+    sourcesRunImport(BankImport::query()->sole());
+
+    expect(Transaction::query()->where('account_id', $this->account->id)->orderBy('amount')->pluck('amount')->all())->toBe([-2000, -1000, 200000]);
+});
+
+it('imports a zero amount row of an actual budget export that is not a split', function () {
+    $csv = "Account,Date,Payee,Notes,Category_Group,Category,Amount,Split_Amount,Cleared\n"
+        ."Everyday,2024-03-25,Adjustment,,,,0,0,Cleared\n"
+        ."Everyday,2024-03-26,Employer,,Income,Salary,2000.00,0,Cleared\n";
+
+    Livewire::actingAs($this->user)->test(ImportBank::class)
+        ->set('importPreset', 'actual_budget')
+        ->set('accountId', $this->account->id)
+        ->set('file', UploadedFile::fake()->createWithContent('actual.csv', $csv))
+        ->call('uploadAndDetectHeaders')
+        ->call('confirmImport')
+        ->assertHasNoErrors();
+
+    sourcesRunImport(BankImport::query()->sole());
+
+    expect(Transaction::query()->where('account_id', $this->account->id)->orderBy('post_date')->pluck('amount')->all())->toBe([0, 200000]);
+});
+
 it('does not replace the account\'s saved bank mapping with a preset\'s', function () {
     $this->account->update(['column_mapping' => ['date' => 'Posted', 'amount' => 'Value', 'description' => 'Narrative', 'date_format' => 'd/m/Y']]);
     $csv = "Account,Date,Payee,Notes,Category,Amount,Cleared\nEveryday,2024-03-25,Coles,,Groceries,-12.50,true\n";
