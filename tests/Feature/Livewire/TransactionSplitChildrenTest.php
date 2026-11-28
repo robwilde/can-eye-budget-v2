@@ -6,6 +6,7 @@
 
 declare(strict_types=1);
 
+use App\DTOs\TransactionSplitLine;
 use App\Enums\AuditOutcome;
 use App\Enums\ImportSource;
 use App\Enums\TransactionDirection;
@@ -642,4 +643,62 @@ it('refuses a modal edit of a split line that an undo trashed after the form loa
         ->and(Transaction::withTrashed()->where('user_id', $this->user->id)->count())->toBe(3)
         ->and($line->fresh()->notes)->toBeNull()
         ->and(Transaction::query()->where('user_id', $this->user->id)->whereNotNull('parent_transaction_id')->exists())->toBeFalse();
+});
+
+it('does not fold a fee into a purchase split during the fold', function () {
+    $purchase = splitRow($this->user, $this->account, [
+        'description' => 'VISA -JetBrains Prague CZ FRGN AMT-9.570000 051280 #8357',
+        'amount' => 1394,
+    ]);
+    $fee = splitRow($this->user, $this->account, ['description' => 'Int Tran Fee - JetBrains CZ - 951280', 'amount' => 42]);
+    $armed = true;
+
+    DB::listen(function (QueryExecuted $query) use (&$armed, $purchase): void {
+        if ($armed && str_contains($query->sql, 'select "id" from "accounts"')) {
+            $armed = false;
+
+            app(TransactionSplitter::class)->save($this->user->id, $purchase->id, [new TransactionSplitLine(1000), new TransactionSplitLine(394)]);
+        }
+    });
+
+    $folded = app(App\Services\TransactionFeeFolder::class)->fold($fee);
+    $parent = splitCurrent($purchase);
+
+    expect($armed)->toBeFalse()
+        ->and($folded)->toBeNull()
+        ->and(Transaction::query()->find($fee->id))->not->toBeNull()
+        ->and($parent->amount)->toBe(1394)
+        ->and(splitChildrenOf($parent)->sum('amount'))->toBe(1394);
+});
+
+it('rejects a malformed split payload', function () {
+    $row = splitRow($this->user, $this->account);
+
+    foreach ([
+        ['not a line', splitLine('100')],
+        [splitLine('60'), ['name' => 'x', 'amount' => ['1'], 'category_id' => null, 'notes' => '', 'excluded' => false]],
+        [splitLine('60'), ['name' => ['x'], 'amount' => '40', 'category_id' => null, 'notes' => '', 'excluded' => false]],
+    ] as $lines) {
+        splitModal($this->user, $row)->set('splitLines', $lines)->call('saveSplit')->assertHasErrors('splitLines')->assertNotDispatched('transaction-saved');
+    }
+
+    expect(splitCurrent($row)->excluded)->toBeFalse()
+        ->and(splitChildrenOf(splitCurrent($row)))->toBeEmpty();
+});
+
+it('limits split line notes and line count', function () {
+    $row = splitRow($this->user, $this->account, ['amount' => 10200]);
+
+    $tooManyLines = array_fill(0, TransactionSplitter::MAX_LINES + 1, splitLine('2'));
+    $longNote = [splitLine('60', '', null, str_repeat('n', TransactionSplitter::MAX_NOTES_LENGTH + 1)), splitLine('42')];
+    $maxNote = [splitLine('60', '', null, str_repeat('n', TransactionSplitter::MAX_NOTES_LENGTH)), splitLine('42')];
+
+    splitModal($this->user, $row)->set('splitLines', $tooManyLines)->call('saveSplit')->assertHasErrors('splitLines');
+    splitModal($this->user, $row)->set('splitLines', $longNote)->call('saveSplit')->assertHasErrors('splitLines');
+
+    expect(splitChildrenOf(splitCurrent($row)))->toBeEmpty();
+
+    splitModal($this->user, $row)->set('splitLines', $maxNote)->call('saveSplit')->assertHasNoErrors();
+
+    expect(splitChildrenOf(splitCurrent($row)))->toHaveCount(2);
 });
