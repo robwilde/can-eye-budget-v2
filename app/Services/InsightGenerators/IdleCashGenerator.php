@@ -45,6 +45,7 @@ final readonly class IdleCashGenerator implements InsightGenerator
             ->where('currency', $user->base_currency)
             ->where('balance', '>=', self::MIN_BALANCE_CENTS)
             ->where('created_at', '<=', $since->startOfDay())
+            ->where(fn ($query) => $query->whereNull('balance_changed_at')->orWhere('balance_changed_at', '<', $since->startOfDay()))
             ->whereDoesntHave('transactions', fn ($query) => $query->whereDoesntHave('children', fn ($children) => $children->whereNull('deleted_at'))->where('post_date', '>=', $since->toDateString()))
             ->whereDoesntHave('valuations', fn ($query) => $query->where('valued_on', '>=', $since->toDateString())->where('difference', '!=', 0))
             ->orderByDesc('balance')

@@ -492,6 +492,27 @@ test('balances land on both the redbark account and the app account', function (
         ->and(RedbarkSyncLog::query()->latest('id')->firstOrFail()->balances_updated)->toBe(1);
 });
 
+test('a feed balance that moves an account records the change and an unchanged one does not', function () {
+    $this->travelTo('2026-11-15 12:00:00');
+    [$feed, , $account] = linkedRedbarkFeed();
+    $account->update(['balance' => 10000]);
+    fakeRedbark(
+        accounts: [redbarkUpstreamAccount()],
+        balances: [['accountId' => 'rb_acc_1', 'currentBalance' => '9000.00', 'currency' => 'AUD']],
+    );
+
+    runRedbarkSync($feed);
+
+    $changedAt = $account->fresh()->balance_changed_at;
+
+    $this->travelTo('2026-11-20 12:00:00');
+    runRedbarkSync($feed);
+
+    expect($changedAt?->toDateTimeString())->toBe('2026-11-15 12:00:00')
+        ->and($account->fresh()->balance_changed_at?->toDateTimeString())->toBe('2026-11-15 12:00:00')
+        ->and($account->fresh()->balance_updated_at?->toDateTimeString())->toBe('2026-11-20 12:00:00');
+});
+
 test('a failed balances call never overwrites the previous balance', function () {
     [$feed, $redbarkAccount, $account] = linkedRedbarkFeed();
 
