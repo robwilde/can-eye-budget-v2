@@ -1,7 +1,8 @@
-@use('App\Casts\MoneyCast')
+@use('App\Support\Insights\InsightMoney')
 @use('App\Enums\BudgetLineStatus')
 @php
     $summary = $this->summary;
+    $money = fn (int $cents): string => InsightMoney::format($cents, $this->currency);
     $statusColors = [
         BudgetLineStatus::OverBudget->value => 'red',
         BudgetLineStatus::NearLimit->value => 'amber',
@@ -33,7 +34,7 @@
     </div>
 
     @if (config('budget.multi_currency'))
-        <p class="text-sm text-gray-500" data-testid="budget-base-currency">{{ __('Spending is converted to :currency. Budgeted amounts are shown as you entered them.', ['currency' => auth()->user()->base_currency]) }}</p>
+        <p class="text-sm text-gray-500" data-testid="budget-base-currency">{{ __('Spending is converted to :currency. Budgeted amounts are shown as you entered them.', ['currency' => $this->currency]) }}</p>
     @endif
 
     @error('budget')
@@ -71,7 +72,7 @@
                             x-on:click="$wire.totalInput = '{{ number_format($this->suggestion['spending'] / 100, 2, '.', '') }}'; $wire.incomeInput = '{{ number_format($this->suggestion['income'] / 100, 2, '.', '') }}'"
                             data-testid="use-suggestion"
                         >
-                            {{ __('Suggest from my history (:spending spending, :income income)', ['spending' => MoneyCast::format($this->suggestion['spending']), 'income' => MoneyCast::format($this->suggestion['income'])]) }}
+                            {{ __('Suggest from my history (:spending spending, :income income)', ['spending' => $money($this->suggestion['spending']), 'income' => $money($this->suggestion['income'])]) }}
                         </flux:button>
                     </div>
                 </form>
@@ -84,7 +85,7 @@
                     <flux:callout variant="warning" icon="exclamation-triangle" data-testid="over-allocated-warning">
                         <flux:callout.heading>{{ __('Allocations are over budget') }}</flux:callout.heading>
                         <flux:callout.text>
-                            {{ __(':allocated is allocated against :total budgeted.', ['allocated' => MoneyCast::format($summary->allocated), 'total' => MoneyCast::format($summary->totalAmount)]) }}
+                            {{ __(':allocated is allocated against :total budgeted.', ['allocated' => $money($summary->allocated), 'total' => $money($summary->totalAmount)]) }}
                             <a href="#allocations" class="font-medium underline" data-testid="fix-allocations">{{ __('Fix allocations') }}</a>
                         </flux:callout.text>
                     </flux:callout>
@@ -98,8 +99,8 @@
                             <circle cx="18" cy="18" r="15.9155" fill="none" stroke-width="4" stroke-dasharray="{{ $percent }} {{ 100 - $percent }}" @class(['stroke-red-500' => $summary->spent > $summary->totalAmount, 'stroke-teal-500' => $summary->spent <= $summary->totalAmount])/>
                         </svg>
                         <div class="absolute inset-0 flex flex-col items-center justify-center text-center">
-                            <span class="text-lg font-semibold">{{ MoneyCast::format($summary->spent) }}</span>
-                            <span class="text-xs text-zinc-500">{{ __('of :total', ['total' => MoneyCast::format($summary->totalAmount)]) }}</span>
+                            <span class="text-lg font-semibold">{{ $money($summary->spent) }}</span>
+                            <span class="text-xs text-zinc-500">{{ __('of :total', ['total' => $money($summary->totalAmount)]) }}</span>
                         </div>
                     </div>
                 @endif
@@ -113,15 +114,15 @@
 
                 @if ($tab === \App\Livewire\MonthlyBudget::TAB_ACTUAL)
                     <dl class="space-y-2" data-testid="actual-figures">
-                        <div class="flex justify-between"><dt>{{ __('Income earned') }}</dt><dd>{{ MoneyCast::format($summary->actualIncome) }} <span class="text-zinc-500">({{ $summary->incomePercent }}%)</span></dd></div>
-                        <div class="flex justify-between"><dt>{{ __('Spent') }}</dt><dd>{{ MoneyCast::format($summary->spent) }}</dd></div>
+                        <div class="flex justify-between"><dt>{{ __('Income earned') }}</dt><dd>{{ $money($summary->actualIncome) }} <span class="text-zinc-500">({{ $summary->incomePercent }}%)</span></dd></div>
+                        <div class="flex justify-between"><dt>{{ __('Spent') }}</dt><dd>{{ $money($summary->spent) }}</dd></div>
                     </dl>
                 @else
                     <dl class="space-y-2" data-testid="budgeted-figures">
-                        <div class="flex justify-between"><dt>{{ __('Expected income') }}</dt><dd>{{ MoneyCast::format($summary->expectedIncome) }}</dd></div>
-                        <div class="flex justify-between"><dt>{{ __('Budgeted spending') }}</dt><dd>{{ MoneyCast::format($summary->totalAmount) }}</dd></div>
-                        <div class="flex justify-between"><dt>{{ __('Allocated') }}</dt><dd>{{ MoneyCast::format($summary->allocated) }}</dd></div>
-                        <div class="flex justify-between"><dt>{{ __('Available to allocate') }}</dt><dd data-testid="available-to-allocate">{{ MoneyCast::format($summary->availableToAllocate) }}</dd></div>
+                        <div class="flex justify-between"><dt>{{ __('Expected income') }}</dt><dd>{{ $money($summary->expectedIncome) }}</dd></div>
+                        <div class="flex justify-between"><dt>{{ __('Budgeted spending') }}</dt><dd>{{ $money($summary->totalAmount) }}</dd></div>
+                        <div class="flex justify-between"><dt>{{ __('Allocated') }}</dt><dd>{{ $money($summary->allocated) }}</dd></div>
+                        <div class="flex justify-between"><dt>{{ __('Available to allocate') }}</dt><dd data-testid="available-to-allocate">{{ $money($summary->availableToAllocate) }}</dd></div>
                     </dl>
                     <form wire:submit="initialise" class="grid gap-3 border-t border-neutral-200 pt-4 sm:grid-cols-3 dark:border-neutral-700">
                         <flux:input wire:model="totalInput" type="number" step="0.01" min="0" size="sm" label="{{ __('Budgeted spending') }}"/>
@@ -139,7 +140,7 @@
                     <flux:heading size="lg">{{ __('Cash on hand') }}</flux:heading>
                     <flux:text size="sm" class="text-zinc-500">{{ __('Cash-account balances less money earmarked for goals. A preview only: it is not part of the allocations.') }}</flux:text>
                 </div>
-                <span class="text-xl font-semibold" data-testid="cash-on-hand-amount">{{ MoneyCast::format($this->cashOnHand) }}</span>
+                <span class="text-xl font-semibold" data-testid="cash-on-hand-amount">{{ InsightMoney::format($this->cashOnHand, auth()->user()->base_currency) }}</span>
             </flux:card>
         @endif
 
@@ -151,17 +152,17 @@
                     <flux:button size="sm" variant="ghost" icon="x-mark" wire:click="$set('drilldownId', null)" aria-label="{{ __('Close') }}"/>
                 </div>
                 <dl class="grid gap-2 sm:grid-cols-2">
-                    <div class="flex justify-between"><dt>{{ __('Budgeted') }}</dt><dd>{{ $detail->allocation === null ? __('Shared') : MoneyCast::format($detail->allocation) }}</dd></div>
-                    <div class="flex justify-between"><dt>{{ __('Rolled over') }}</dt><dd>{{ MoneyCast::format($detail->rolledOver) }}</dd></div>
-                    <div class="flex justify-between"><dt>{{ __('Spent') }}</dt><dd>{{ MoneyCast::format($detail->actual) }}</dd></div>
+                    <div class="flex justify-between"><dt>{{ __('Budgeted') }}</dt><dd>{{ $detail->allocation === null ? __('Shared') : $money($detail->allocation) }}</dd></div>
+                    <div class="flex justify-between"><dt>{{ __('Rolled over') }}</dt><dd>{{ $money($detail->rolledOver) }}</dd></div>
+                    <div class="flex justify-between"><dt>{{ __('Spent') }}</dt><dd>{{ $money($detail->actual) }}</dd></div>
                     @if ($detail->available !== null)
-                        <div class="flex justify-between"><dt>{{ $detail->available < 0 ? __('Overspent') : __('Left') }}</dt><dd data-testid="drilldown-left">{{ MoneyCast::format(abs($detail->available)) }}</dd></div>
+                        <div class="flex justify-between"><dt>{{ $detail->available < 0 ? __('Overspent') : __('Left') }}</dt><dd data-testid="drilldown-left">{{ $money(abs($detail->available)) }}</dd></div>
                     @endif
-                    <div class="flex justify-between"><dt>{{ __('Monthly average') }}</dt><dd>{{ MoneyCast::format($detail->averageMonthlySpend ?? 0) }}</dd></div>
-                    <div class="flex justify-between"><dt>{{ __('Monthly median') }}</dt><dd>{{ MoneyCast::format($detail->medianMonthlySpend ?? 0) }}</dd></div>
-                    <div class="flex justify-between"><dt>{{ __('Bills reserved') }}</dt><dd>{{ MoneyCast::format($detail->billsReserved ?? 0) }}</dd></div>
+                    <div class="flex justify-between"><dt>{{ __('Monthly average') }}</dt><dd>{{ $money($detail->averageMonthlySpend ?? 0) }}</dd></div>
+                    <div class="flex justify-between"><dt>{{ __('Monthly median') }}</dt><dd>{{ $money($detail->medianMonthlySpend ?? 0) }}</dd></div>
+                    <div class="flex justify-between"><dt>{{ __('Bills reserved') }}</dt><dd>{{ $money($detail->billsReserved ?? 0) }}</dd></div>
                     @if ($detail->suggestedDailySpend !== null)
-                        <div class="flex justify-between"><dt>{{ __('Suggested daily spend') }}</dt><dd data-testid="suggested-daily">{{ MoneyCast::format($detail->suggestedDailySpend) }}</dd></div>
+                        <div class="flex justify-between"><dt>{{ __('Suggested daily spend') }}</dt><dd data-testid="suggested-daily">{{ $money($detail->suggestedDailySpend) }}</dd></div>
                     @endif
                 </dl>
                 <div>
@@ -169,7 +170,7 @@
                     @forelse ($detail->recentTransactions ?? [] as $transaction)
                         <div class="flex justify-between border-b border-neutral-100 py-2 text-sm last:border-0 dark:border-neutral-800" wire:key="drilldown-tx-{{ $transaction->id }}">
                             <span>{{ $transaction->post_date->format('j M') }} · {{ $transaction->description }}</span>
-                            <span>{{ $transaction->currency === auth()->user()->base_currency ? MoneyCast::format(abs($transaction->amount)) : $transaction->currency.' '.number_format(abs($transaction->amount) / 100, 2) }}</span>
+                            <span>{{ InsightMoney::format(abs($transaction->amount), $transaction->currency) }}</span>
                         </div>
                     @empty
                         <flux:text size="sm" class="text-zinc-500">{{ __('No transactions this month.') }}</flux:text>
@@ -221,8 +222,8 @@
                         aria-label="{{ __('Allocation for :name', ['name' => $line->name]) }}"
                         data-testid="allocation-input"
                     />
-                    <span class="text-right text-sm" data-testid="line-spent"><span class="sr-only">{{ __('Spent') }}: </span>{{ MoneyCast::format($line->actual) }}</span>
-                    <span class="text-right text-sm {{ $line->available !== null && $line->available < 0 ? 'text-red-600 dark:text-red-500' : '' }}" data-testid="line-available"><span class="sr-only">{{ __('Available') }}: </span>{{ $line->available === null ? '–' : MoneyCast::format($line->available) }}</span>
+                    <span class="text-right text-sm" data-testid="line-spent"><span class="sr-only">{{ __('Spent') }}: </span>{{ $money($line->actual) }}</span>
+                    <span class="text-right text-sm {{ $line->available !== null && $line->available < 0 ? 'text-red-600 dark:text-red-500' : '' }}" data-testid="line-available"><span class="sr-only">{{ __('Available') }}: </span>{{ $line->available === null ? '–' : $money($line->available) }}</span>
                     <div class="flex items-center justify-end gap-2">
                         <label class="flex items-center gap-1 text-xs text-zinc-500">
                             <input type="checkbox" @checked($line->rolloverEnabled) wire:change="setRollover({{ $line->budgetId }}, $event.target.checked)" aria-label="{{ __('Roll over :name', ['name' => $line->name]) }}" data-testid="rollover-toggle"/>
@@ -236,7 +237,7 @@
             @if ($summary->availableToAllocate > 0)
                 <div class="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-2 dark:bg-zinc-800" data-testid="uncategorized-remainder">
                     <span class="font-medium">{{ __('Uncategorized') }}</span>
-                    <span>{{ MoneyCast::format($summary->availableToAllocate) }}</span>
+                    <span>{{ $money($summary->availableToAllocate) }}</span>
                 </div>
             @endif
         </flux:card>

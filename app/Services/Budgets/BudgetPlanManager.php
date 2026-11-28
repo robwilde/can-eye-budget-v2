@@ -77,18 +77,19 @@ final readonly class BudgetPlanManager
     }
 
     /**
-     * Median monthly spend and income from the user's history, 0 when there is none.
+     * Median monthly spend and income from the user's history, 0 when there is none, in
+     * $currency (the user's base currency when omitted) when multi-currency is on.
      *
      * @return array{spending: int, income: int}
      */
-    public function suggestFromHistory(User $user): array
+    public function suggestFromHistory(User $user, ?string $currency = null): array
     {
-        return $this->calculator->historyMedians($user);
+        return $this->calculator->historyMedians($user, $currency);
     }
 
     /**
-     * Fills an uninitialised plan from the latest earlier initialised one: total, expected
-     * income, allocations and rollover flags. Rolled-over amounts are recomputed, never copied.
+     * Fills an uninitialised plan from the latest earlier initialised one in the same currency:
+     * total, expected income, allocations and rollover flags. Rolled-over amounts are recomputed, never copied.
      * Categories the target has no line for are skipped; new categories stay at 0.
      */
     public function copyFrom(User $actor, BudgetPlan $target): BudgetPlan
@@ -103,6 +104,7 @@ final readonly class BudgetPlanManager
 
             $source = BudgetPlan::query()
                 ->where('user_id', $actor->id)
+                ->where('currency', $plan->currency)
                 ->whereNotNull('initialised_at')
                 ->whereDate('period_start', '<', $plan->period_start)
                 ->orderByDesc('period_start')

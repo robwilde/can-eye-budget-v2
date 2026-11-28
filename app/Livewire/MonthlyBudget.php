@@ -37,6 +37,7 @@ use Livewire\Component;
  * @property-read BudgetPlanSummaryDto|null $summary
  * @property-read BudgetPlan|null $copySource
  * @property-read array{spending: int, income: int} $suggestion
+ * @property-read string $currency
  * @property-read bool $hasOverBudget
  * @property-read list<array{line: BudgetLineSummaryDto, depth: int}> $rows
  * @property-read BudgetLineSummaryDto|null $drilldown
@@ -119,7 +120,7 @@ final class MonthlyBudget extends Component
     #[On('transaction-saved')]
     public function refreshReadState(): void
     {
-        unset($this->plan, $this->summary, $this->rows, $this->hasOverBudget, $this->copySource, $this->drilldown, $this->bounds, $this->previousMonth, $this->nextMonth); // @phpstan-ignore property.notFound
+        unset($this->plan, $this->currency, $this->summary, $this->rows, $this->hasOverBudget, $this->copySource, $this->drilldown, $this->bounds, $this->previousMonth, $this->nextMonth); // @phpstan-ignore property.notFound
     }
 
     /**
@@ -293,6 +294,7 @@ final class MonthlyBudget extends Component
 
         return BudgetPlan::query()
             ->where('user_id', $this->authenticatedUser()->id)
+            ->where('currency', $this->currency)
             ->whereNotNull('initialised_at')
             ->whereDate('period_start', '<', $this->viewed)
             ->orderByDesc('period_start')
@@ -303,7 +305,14 @@ final class MonthlyBudget extends Component
     #[Computed]
     public function suggestion(): array
     {
-        return app(BudgetPlanManager::class)->suggestFromHistory($this->authenticatedUser());
+        return app(BudgetPlanManager::class)->suggestFromHistory($this->authenticatedUser(), $this->currency);
+    }
+
+    /** The viewed plan's currency; a month with no plan yet will be opened in the base currency. */
+    #[Computed]
+    public function currency(): string
+    {
+        return $this->plan->currency ?? $this->authenticatedUser()->base_currency;
     }
 
     #[Computed]
@@ -452,7 +461,7 @@ final class MonthlyBudget extends Component
 
     private function invalidateReadState(): void
     {
-        unset($this->plan, $this->summary, $this->rows, $this->hasOverBudget, $this->copySource, $this->drilldown, $this->cashOnHand); // @phpstan-ignore property.notFound
+        unset($this->plan, $this->currency, $this->summary, $this->rows, $this->hasOverBudget, $this->copySource, $this->drilldown, $this->cashOnHand); // @phpstan-ignore property.notFound
     }
 
     private function refreshFigures(): void

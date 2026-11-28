@@ -816,3 +816,109 @@ it('finishes and counts spend once when categories form a parent cycle', functio
         ->and(budgetCalcLineFor($plan, $groceriesLine)->actual)->toBe(5000)
         ->and(app(BudgetPlanCalculator::class)->drilldown($plan, $groceriesLine->id)->actual)->toBe(5000);
 });
+
+it('converts spend into the plan currency after the base currency changes', function () {
+    config(['budget.multi_currency' => true, 'services.exchange_rates.enabled' => false]);
+    $user = User::factory()->create(['base_currency' => 'USD']);
+    $euro = Account::factory()->for($user)->create(['currency' => 'EUR']);
+    $groceries = budgetCalcCategory($user);
+    $plan = budgetCalcPlan($user, '2026-03');
+    $line = budgetCalcLine($plan, $groceries, 40000);
+    ExchangeRate::factory()->create(['from_currency' => 'EUR', 'to_currency' => 'USD', 'rate_date' => '2026-03-10', 'rate' => 1.5]);
+    budgetCalcSpend($user, $euro, $groceries, 10000, '2026-03-10')->update(['currency' => 'EUR']);
+
+    $user->update(['base_currency' => 'EUR']);
+
+    $summary = budgetCalcLineFor($plan->fresh(), $line);
+
+    expect($plan->currency)->toBe('USD')
+        ->and($summary->actual)->toBe(15000)
+        ->and($summary->available)->toBe(25000)
+        ->and(app(BudgetPlanCalculator::class)->summarise($plan->fresh())->spent)->toBe(15000);
+});
+
+it('reserves bills in the plan currency after the base currency changes', function () {
+    config(['budget.multi_currency' => true, 'services.exchange_rates.enabled' => false]);
+    $user = User::factory()->create(['base_currency' => 'USD']);
+    $euro = Account::factory()->for($user)->create(['currency' => 'EUR']);
+    $groceries = budgetCalcCategory($user);
+    $plan = budgetCalcPlan($user, '2026-03');
+    $line = budgetCalcLine($plan, $groceries, 40000);
+    ExchangeRate::factory()->create(['from_currency' => 'EUR', 'to_currency' => 'USD', 'rate_date' => '2026-03-20', 'rate' => 1.5]);
+    PlannedTransaction::factory()->noRepeat()->for($user)->create([
+        'account_id' => $euro->id,
+        'category_id' => $groceries->id,
+        'amount' => 10000,
+        'start_date' => '2026-03-25',
+    ]);
+
+    $user->update(['base_currency' => 'EUR']);
+
+    $detail = app(BudgetPlanCalculator::class)->drilldown($plan->fresh(), $line->id);
+
+    expect($detail->billsReserved)->toBe(15000);
+});
+
+it('leaves spend unconverted when multi-currency is off whatever the plan currency', function () {
+    config(['budget.multi_currency' => false]);
+    $user = User::factory()->create(['base_currency' => 'USD']);
+    $euro = Account::factory()->for($user)->create(['currency' => 'EUR']);
+    $groceries = budgetCalcCategory($user);
+    $plan = budgetCalcPlan($user, '2026-03');
+    $line = budgetCalcLine($plan, $groceries, 40000);
+    ExchangeRate::factory()->create(['from_currency' => 'EUR', 'to_currency' => 'USD', 'rate_date' => '2026-03-10', 'rate' => 1.5]);
+    budgetCalcSpend($user, $euro, $groceries, 10000, '2026-03-10')->update(['currency' => 'EUR']);
+
+    expect(budgetCalcLineFor($plan, $line)->actual)->toBe(10000);
+});
+
+it('does not carry a surplus into a plan in another currency', function () {
+    $groceries = budgetCalcCategory($this->user);
+    $january = budgetCalcPlan($this->user, '2026-01');
+    $february = budgetCalcPlan($this->user, '2026-02');
+    $february->update(['currency' => 'EUR']);
+    budgetCalcLine($january, $groceries, 40000, rollover: true);
+    $februaryLine = budgetCalcLine($february, $groceries, 40000, rollover: true);
+
+    budgetCalcSpend($this->user, $this->account, $groceries, 30000, '2026-01-10');
+    budgetCalcRecompute($january);
+
+    $line = budgetCalcLineFor($february, $februaryLine);
+
+    expect($line->rolledOver)->toBe(0)
+        ->and($line->available)->toBe(40000);
+});
+
+it('starts a fresh chain in the new currency and carries again within it', function () {
+    $groceries = budgetCalcCategory($this->user);
+    $january = budgetCalcPlan($this->user, '2026-01');
+    $february = budgetCalcPlan($this->user, '2026-02');
+    $march = budgetCalcPlan($this->user, '2026-03');
+    $february->update(['currency' => 'EUR']);
+    $march->update(['currency' => 'EUR']);
+    budgetCalcLine($january, $groceries, 40000, rollover: true);
+    $februaryLine = budgetCalcLine($february, $groceries, 40000, rollover: true);
+    $marchLine = budgetCalcLine($march, $groceries, 40000, rollover: true);
+
+    budgetCalcSpend($this->user, $this->account, $groceries, 30000, '2026-01-10');
+    budgetCalcSpend($this->user, $this->account, $groceries, 30000, '2026-02-10');
+    budgetCalcRecompute($january);
+
+    expect($februaryLine->fresh()->rolled_over_amount)->toBe(0)
+        ->and($marchLine->fresh()->rolled_over_amount)->toBe(10000);
+});
+
+it('does not take the carry in from an earlier plan in another currency when recomputing from the later one', function () {
+    $groceries = budgetCalcCategory($this->user);
+    $january = budgetCalcPlan($this->user, '2026-01');
+    $february = budgetCalcPlan($this->user, '2026-02');
+    $february->update(['currency' => 'EUR']);
+    budgetCalcLine($january, $groceries, 40000, rollover: true);
+    $februaryLine = budgetCalcLine($february, $groceries, 40000, rollover: true);
+    $februaryLine->update(['rolled_over_amount' => 7000]);
+
+    budgetCalcSpend($this->user, $this->account, $groceries, 30000, '2026-01-10');
+    budgetCalcRecompute($february);
+
+    expect($februaryLine->fresh()->rolled_over_amount)->toBe(0);
+});

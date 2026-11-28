@@ -11,7 +11,8 @@ use Illuminate\Database\Eloquent\Collection;
 
 /**
  * Rewrites the rolled-over amount each line holds, walking the user's initialised plans in
- * period order. Uninitialised plans are skipped without breaking the chain.
+ * period order. Uninitialised plans are skipped without breaking the chain. A plan in a
+ * different currency from the one before it breaks the chain: nothing carries across.
  */
 final readonly class BudgetRolloverRecomputer
 {
@@ -27,7 +28,10 @@ final readonly class BudgetRolloverRecomputer
     {
         $plan->getConnection()->transaction(function () use ($plan): void {
             User::query()->whereKey($plan->user_id)->lockForUpdate()->value('id');
-            $carry = $this->carryBefore($plan);
+
+            $previous = $this->previousInitialised($plan);
+            $carry = $previous === null ? [] : $this->carryOutOf($previous);
+            $carryCurrency = $previous?->currency;
 
             $chain = BudgetPlan::query()
                 ->where('user_id', $plan->user_id)
@@ -37,6 +41,10 @@ final readonly class BudgetRolloverRecomputer
                 ->get();
 
             foreach ($chain as $link) {
+                if ($link->currency !== $carryCurrency) {
+                    $carry = [];
+                }
+
                 $lines = $this->lines($link);
                 $actuals = $this->calculator->lineActuals($link, $lines);
                 $next = [];
@@ -52,26 +60,26 @@ final readonly class BudgetRolloverRecomputer
                 }
 
                 $carry = $next;
+                $carryCurrency = $link->currency;
             }
         });
     }
 
-    /**
-     * @return array<int, int>
-     */
-    private function carryBefore(BudgetPlan $plan): array
+    private function previousInitialised(BudgetPlan $plan): ?BudgetPlan
     {
-        $previous = BudgetPlan::query()
+        return BudgetPlan::query()
             ->where('user_id', $plan->user_id)
             ->whereNotNull('initialised_at')
             ->whereDate('period_start', '<', $plan->period_start)
             ->orderByDesc('period_start')
             ->first();
+    }
 
-        if ($previous === null) {
-            return [];
-        }
-
+    /**
+     * @return array<int, int>
+     */
+    private function carryOutOf(BudgetPlan $previous): array
+    {
         $lines = $this->lines($previous);
         $actuals = $this->calculator->lineActuals($previous, $lines);
         $carry = [];
