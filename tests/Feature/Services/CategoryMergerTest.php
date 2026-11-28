@@ -27,6 +27,7 @@ use App\Models\TransactionSplit;
 use App\Models\User;
 use App\Models\UserCategoryBudgetTag;
 use App\Models\UserRule;
+use App\Services\Budgets\BudgetPlanCalculator;
 use App\Services\CategoryCreator;
 use App\Services\CategoryMerger;
 use Illuminate\Support\Facades\DB;
@@ -471,4 +472,35 @@ it('replaces a deleted category with its replacement in the recent picks', funct
     $this->merger->deleteWithReplacement($this->user, $doomed->id, $replacement->id);
 
     expect($this->user->fresh()->preferences->recentCategoryIds)->toBe([$replacement->id]);
+});
+
+it('keeps the allocated total when a parent is deleted with a replacement', function () {
+    $food = mergerCategory($this->user, 'Food');
+    $groceries = mergerCategory($this->user, 'Groceries', $food);
+    $dining = mergerCategory($this->user, 'Dining');
+    $plan = BudgetPlan::factory()->for($this->user)->create(['total_amount' => 100000]);
+    Budget::factory()->inPlan($plan)->withCategory($food)->create(['limit_amount' => 30000]);
+    $groceriesLine = Budget::factory()->inPlan($plan)->withCategory($groceries)->create(['limit_amount' => 10000]);
+    $diningLine = Budget::factory()->inPlan($plan)->withCategory($dining)->create(['limit_amount' => 0]);
+
+    $this->merger->deleteWithReplacement($this->user, $food->id, $dining->id);
+
+    expect($groceriesLine->fresh()->limit_amount)->toBe(10000)
+        ->and($diningLine->fresh()->limit_amount)->toBe(20000)
+        ->and(app(BudgetPlanCalculator::class)->summarise($plan)->allocated)->toBe(30000);
+});
+
+it('moves a merged parent subcategory allocation into the target line', function () {
+    $food = mergerCategory($this->user, 'Food');
+    $groceries = mergerCategory($this->user, 'Groceries', $food);
+    $shopping = mergerCategory($this->user, 'Shopping');
+    $plan = BudgetPlan::factory()->for($this->user)->create(['total_amount' => 100000]);
+    Budget::factory()->inPlan($plan)->withCategory($food)->create(['limit_amount' => 30000]);
+    Budget::factory()->inPlan($plan)->withCategory($groceries)->create(['limit_amount' => 10000]);
+    $shoppingLine = Budget::factory()->inPlan($plan)->withCategory($shopping)->create(['limit_amount' => 5000]);
+
+    $this->merger->merge($this->user, [$food->id], $shopping->id);
+
+    expect($shoppingLine->fresh()->limit_amount)->toBe(35000)
+        ->and(app(BudgetPlanCalculator::class)->summarise($plan)->allocated)->toBe(35000);
 });
