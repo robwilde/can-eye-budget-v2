@@ -204,6 +204,67 @@ function lockOrderFinishSpend(array $spend): array
     return json_decode(mb_trim($output), true, 512, JSON_THROW_ON_ERROR);
 }
 
+function lockOrderWaitForQuery(string $pattern): void
+{
+    $statement = lockOrderAdmin()->prepare('SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE DB = ? AND INFO LIKE ? AND TIME_MS >= 500');
+    $deadline = microtime(true) + 30;
+
+    while (microtime(true) < $deadline) {
+        $statement->execute([lockOrderSettings()['database'], $pattern]);
+
+        if ((int) $statement->fetchColumn() > 0) {
+            return;
+        }
+
+        usleep(50000);
+    }
+
+    throw new RuntimeException("No query like {$pattern} ever waited.");
+}
+
+/**
+ * Races a real DELETE FROM accounts against a spend, with no lock held by the test on the
+ * accounts. A BEFORE DELETE trigger parks the delete on a named lock once it holds the account's
+ * primary-key row. The spend then takes the (user_id, id) index entry and waits for that row.
+ * Releasing the named lock lets the delete go on to the index entry the spend holds, which is
+ * the cycle InnoDB aborts with error 1213.
+ *
+ * @return array{spend: array{outcome: string, message?: string, class?: string}, deleted: bool}
+ */
+function lockOrderRaceDeleteAgainstSpend(User $user, Account $account, Goal $goal, int $amount): array
+{
+    $settings = lockOrderSettings();
+    $database = $settings['database'];
+    $admin = lockOrderAdmin();
+    $barrier = lockOrderAdmin();
+    $deleter = new mysqli($settings['host'], $settings['username'], $settings['password'], $database, (int) $settings['port']);
+
+    $admin->exec("CREATE TRIGGER `{$database}`.`lock_order_barrier` BEFORE DELETE ON `{$database}`.`accounts` FOR EACH ROW BEGIN DO GET_LOCK('lock_order_barrier', 30); DO RELEASE_LOCK('lock_order_barrier'); END");
+
+    try {
+        $barrier->query("SELECT GET_LOCK('lock_order_barrier', 0)")->fetchColumn();
+
+        $deleter->query("DELETE FROM accounts WHERE id = {$account->id}", MYSQLI_ASYNC);
+        lockOrderWaitForQuery('DO GET_LOCK(%lock_order_barrier%');
+
+        $spend = lockOrderStartSpend($user, $goal, $amount, $account);
+        lockOrderWaitUntilBlocked($spend);
+
+        $barrier->query("SELECT RELEASE_LOCK('lock_order_barrier')")->fetchColumn();
+
+        try {
+            $deleted = $deleter->reap_async_query() !== false;
+        } catch (mysqli_sql_exception) {
+            $deleted = false;
+        }
+
+        return ['spend' => lockOrderFinishSpend($spend), 'deleted' => $deleted];
+    } finally {
+        $deleter->close();
+        $admin->exec("DROP TRIGGER IF EXISTS `{$database}`.`lock_order_barrier`");
+    }
+}
+
 /**
  * Holds the user's account row locks, starts a spend that has to wait for it, lets $change run while
  * the spend waits, commits, and returns what the spend did.
@@ -296,4 +357,16 @@ test('an account delete and a spend that overlap both finish without a deadlock'
     expect($result['outcome'])->toBe('refused')
         ->and(Account::query()->whereKey($account->id)->exists())->toBeFalse()
         ->and(GoalAccount::query()->where('goal_id', $goal->id)->exists())->toBeFalse();
+});
+
+test('an account delete racing a spend commits and the spend is refused instead of failing', function () {
+    [$user, $account, $goal] = lockOrderGoal();
+
+    $result = lockOrderRaceDeleteAgainstSpend($user, $account, $goal, 8000);
+
+    expect($result['spend'])->toBe(['outcome' => 'refused', 'message' => 'That account does not fund this goal.'])
+        ->and($result['deleted'])->toBeTrue()
+        ->and(Account::query()->whereKey($account->id)->exists())->toBeFalse()
+        ->and(GoalAccount::query()->where('goal_id', $goal->id)->exists())->toBeFalse()
+        ->and(GoalSpend::query()->where('goal_id', $goal->id)->exists())->toBeFalse();
 });
