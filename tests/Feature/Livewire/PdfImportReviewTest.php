@@ -141,6 +141,24 @@ it('starts a pdf import from the import screen and opens its review', function (
     expect(PdfImport::query()->where('user_id', $this->user->id)->count())->toBe(2);
 });
 
+it('starts the pdf import without hinting that another user stored the same file', function () {
+    Storage::fake('local');
+    Queue::fake();
+    config(['budget.pdf_import.enabled' => true]);
+    $content = StatementPdfFactory::make(['Shared statement']);
+    $theirs = Statement::factory()->create(['content_hash' => hash('sha256', $content)]);
+
+    Livewire::actingAs($this->user)->test(ImportBank::class)
+        ->set('pdfFile', UploadedFile::fake()->createWithContent('joint.pdf', $content))
+        ->call('startPdfImport')
+        ->assertHasNoErrors()
+        ->assertSet('errorMessage', null)
+        ->assertRedirect(route('imports.pdf.review', PdfImport::query()->latest('id')->value('id')));
+
+    expect(PdfImport::query()->latest('id')->first()->statement->user_id)->toBe($this->user->id)
+        ->and($theirs->fresh()->user_id)->not->toBe($this->user->id);
+});
+
 it('rejects non-pdf files on the import screen and hides the option while the feature is off', function () {
     config(['budget.pdf_import.enabled' => true]);
 

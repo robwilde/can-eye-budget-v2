@@ -82,19 +82,24 @@ it('reuses a statement that is already in the vault', function () {
         ->and(Statement::query()->count())->toBe(1);
 });
 
-it('refuses to reuse another user\'s statement for a pdf import', function () {
+it('stores and imports the user\'s own copy of a pdf another user already stored', function () {
     $content = StatementPdfFactory::make(['Statement']);
     $theirs = Statement::factory()->create(['content_hash' => hash('sha256', $content)]);
+    $theirsBefore = $theirs->fresh()->getAttributes();
 
-    expect(fn () => $this->starter->start($this->user, UploadedFile::fake()->createWithContent('mine.pdf', $content)))
-        ->toThrow(PdfImportRefused::class, 'This PDF is already stored as a statement you cannot access');
+    $import = $this->starter->start($this->user, UploadedFile::fake()->createWithContent('mine.pdf', $content));
 
-    expect($theirs->fresh())->not->toBeNull()
-        ->and($theirs->fresh()->user_id)->not->toBe($this->user->id)
-        ->and(PdfImport::query()->count())->toBe(0)
-        ->and(Statement::query()->where('user_id', $this->user->id)->count())->toBe(0);
+    expect($import->status)->toBe(PdfImportStatus::Pending)
+        ->and($import->user_id)->toBe($this->user->id)
+        ->and($import->statement->user_id)->toBe($this->user->id)
+        ->and($import->statement->content_hash)->toBe($theirs->content_hash)
+        ->and($import->statement_id)->not->toBe($theirs->id)
+        ->and($theirs->fresh()->getAttributes())->toBe($theirsBefore)
+        ->and(Statement::query()->where('user_id', $this->user->id)->count())->toBe(1)
+        ->and(Statement::query()->count())->toBe(2)
+        ->and(PdfImport::query()->where('statement_id', $theirs->id)->count())->toBe(0);
 
-    Queue::assertNothingPushed();
+    Queue::assertPushed(ExtractStatementPdfJob::class, fn (ExtractStatementPdfJob $job): bool => $job->import->is($import));
 });
 
 it('refuses when the feature is off, the file is not a pdf or the account is not the user\'s', function () {

@@ -90,13 +90,7 @@ final class PdfImportStarter
             throw new PdfImportRefused(__('The file could not be read.'));
         }
 
-        $existing = Statement::query()->where('user_id', $user->id)->where('content_hash', $hash)->first();
-
-        if ($existing === null && Statement::query()->where('content_hash', $hash)->where('user_id', '!=', $user->id)->exists()) {
-            throw new PdfImportRefused(__('This PDF is already stored as a statement you cannot access'));
-        }
-
-        $statement = $existing;
+        $statement = Statement::query()->where('user_id', $user->id)->where('content_hash', $hash)->first();
 
         if ($statement === null) {
             $result = $this->uploads->upload($user, [$file], $account);
