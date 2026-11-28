@@ -126,7 +126,7 @@ new #[Title('Exports')] class extends Component {
     <x-pages::settings.layout :heading="__('Exports')" :subheading="__('Download a copy of your data')">
         <div @if($this->inProgress) wire:poll.3s="pollStatus" @endif class="my-6 w-full space-y-6">
             <flux:text size="sm">
-                {{ __('An export is a zip with a CSV for your accounts, transactions, categories, merchants, payees and rules, one file with those same records and a list of your attachments and documents. It does not contain the files themselves or any password or key.') }}
+                {{ __('An export is a zip with a CSV for your accounts, transactions, categories, merchants, merchant aliases, payees, rules, tags and the tags on your transactions, transfer rules, goals (with their accounts, pledges and spends), budgets and budget plans, planned transactions and their occurrences, BNPL orders and their events, and your statement records, one file with those same records and a list of your attachments and documents. It does not contain the files themselves, including statements, or any password, key or email text.') }}
             </flux:text>
 
             <div>
