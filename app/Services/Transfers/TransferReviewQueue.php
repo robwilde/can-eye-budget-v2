@@ -48,6 +48,7 @@ final class TransferReviewQueue
             ->current()
             ->whereIn('source', array_map(fn (TransactionSource $s): string => $s->value, TransactionSource::bankFeed()))
             ->whereNull('transfer_pair_id')
+            ->notSplit()
             ->whereNull('suggested_pair_id')
             ->where(fn (Builder $q): Builder => $q
                 ->whereNull('transfer_link_source')

@@ -240,6 +240,7 @@ final readonly class PendingMergeService
             ->where('account_id', $pending->account_id)
             ->where('status', TransactionStatus::Posted)
             ->whereNull('transfer_pair_id')
+            ->notSplit()
             ->whereKeyNot($pending->id);
     }
 

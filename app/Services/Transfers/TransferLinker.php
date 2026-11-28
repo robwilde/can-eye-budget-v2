@@ -16,6 +16,7 @@ use App\Exceptions\AccountNotUntrackedException;
 use App\Exceptions\ExchangeRateUnavailableException;
 use App\Exceptions\IdempotencyKeyReusedException;
 use App\Exceptions\RealOppositeRowExistsException;
+use App\Exceptions\SplitRowNotLinkableException;
 use App\Exceptions\TransferAlreadyLinkedException;
 use App\Exceptions\TransferLegsTooFarApartException;
 use App\Exceptions\TransferLinkRefusedException;
@@ -256,6 +257,10 @@ final class TransferLinker
                 throw new TransferAlreadyLinkedException('That row is already linked to another transaction.');
             }
 
+            if ($this->isSplitRow($locked)) {
+                throw new SplitRowNotLinkableException(__('A split transaction cannot be linked as a transfer.'));
+            }
+
             // Real rows win: a mirror next to an existing imported opposite leg is the duplicate
             // the whole feature exists to prevent.
             if ($this->candidatesFor($locked, includeRejected: true, crossCurrency: true, exchange: $exchange)->isNotEmpty()) {
@@ -304,6 +309,10 @@ final class TransferLinker
 
             if (! $locked instanceof Transaction || $locked->transfer_pair_id !== null) {
                 throw new TransferAlreadyLinkedException('That row is already linked to another transaction.');
+            }
+
+            if ($this->isSplitRow($locked)) {
+                throw new SplitRowNotLinkableException(__('A split transaction cannot be linked as a transfer.'));
             }
 
             $realMatch = $this->candidatesFor($locked, includeRejected: true, windowDays: self::MANUAL_WINDOW_DAYS, lockOnAccountId: $account->id, crossCurrency: true, exchange: $exchange)

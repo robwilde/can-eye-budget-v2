@@ -6,6 +6,7 @@
 
 declare(strict_types=1);
 
+use App\DTOs\TransactionSplitLine;
 use App\Enums\AuditOutcome;
 use App\Enums\ImportSource;
 use App\Enums\TransactionDirection;
@@ -565,6 +566,69 @@ it('never offers a split row as a manual transfer leg', function () {
         ->and($paired->pluck('account_id')->sort()->values()->all())->toBe(collect([$this->account->id, $accountB->id])->sort()->values()->all())
         ->and($paired->pluck('id')->all())->not->toContain($parent->id)
         ->not->toContain(...$children->modelKeys());
+});
+
+it('does not offer a split row as a pending merge', function () {
+    $posted = splitRow($this->user, $this->account, ['amount' => 6000, 'post_date' => '2026-10-12', 'description' => 'COLES SUPERMARKET 1234']);
+    $parent = splitInto($this->user, $posted, [splitLine('40'), splitLine('20')]);
+    $plain = splitRow($this->user, $this->account, ['amount' => 5500, 'post_date' => '2026-10-11', 'description' => 'COLES SUPERMARKET 1234']);
+    $pending = splitRow($this->user, $this->account, ['amount' => 5000, 'post_date' => '2026-10-10', 'description' => 'COLES SUPERMARKET 1234', 'status' => TransactionStatus::Pending]);
+    $merges = app(App\Services\PendingMergeService::class);
+
+    expect($merges->suggestionFor($pending)?->id)->toBe($plain->id)
+        ->and($merges->candidatesFor($pending)->modelKeys())->toBe([$plain->id])
+        ->not->toContain($parent->id)
+        ->not->toContain(...splitChildrenOf($parent)->modelKeys());
+});
+
+it('does not offer a split row for transfer review', function () {
+    $hidden = Account::factory()->for($this->user)->create(['is_tracked' => false]);
+    $tracked = Account::factory()->for($this->user)->create();
+    $bankRow = fn (string $description, int $amount): Transaction => splitRow($this->user, $this->account, [
+        'description' => $description,
+        'amount' => $amount,
+        'source' => TransactionSource::Redbark,
+        'redbark_id' => 'rb_'.fake()->unique()->numerify('######'),
+    ]);
+    $row = $bankRow('TRANSFER TO SAVINGS', 10000);
+    app(TransactionSplitter::class)->save($this->user->id, $row->id, [new TransactionSplitLine(6000), new TransactionSplitLine(4000)]);
+    $parent = splitCurrent($row);
+    $child = splitChildrenOf($parent)->first();
+    $lone = $bankRow('TRANSFER TO JOE', 2500);
+    $linker = app(TransferLinker::class);
+    $source = App\Enums\TransferLinkSource::Manual;
+
+    expect(app(App\Services\Transfers\TransferReviewQueue::class)->unmatched($this->user)->pluck('id')->all())->toBe([$lone->id]);
+
+    foreach ([$parent, $child] as $target) {
+        expect(fn () => $linker->linkToUntrackedAccount($target, $hidden, $source))
+            ->toThrow(App\Exceptions\TransferLinkRefusedException::class, 'A split transaction cannot be linked as a transfer.')
+            ->and(fn () => $linker->createMissingLeg($target, $tracked, $source))
+            ->toThrow(App\Exceptions\TransferLinkRefusedException::class, 'A split transaction cannot be linked as a transfer.');
+    }
+
+    expect(Transaction::query()->whereIn('account_id', [$hidden->id, $tracked->id])->exists())->toBeFalse()
+        ->and($parent->fresh()->transfer_pair_id)->toBeNull()
+        ->and($child->fresh()->transfer_pair_id)->toBeNull();
+});
+
+it('does not link split lines to a planned transaction by rule', function () {
+    $plan = App\Models\PlannedTransaction::factory()->for($this->user)->for($this->account)->noRepeat()->create([
+        'amount' => 10000,
+        'direction' => TransactionDirection::Debit,
+        'start_date' => '2026-10-10',
+    ]);
+    $parent = splitInto($this->user, splitRow($this->user, $this->account, ['description' => 'HARDWARE STORE 42']), [splitLine('60'), splitLine('40')]);
+    $rule = App\Models\UserRule::factory()->for($this->user)->create([
+        'user_rule_group_id' => App\Models\UserRuleGroup::factory()->for($this->user),
+        'triggers' => [['field' => 'description', 'operator' => 'contains', 'value' => 'HARDWARE STORE']],
+        'actions' => [['type' => App\Enums\RuleActionType::LinkToPlannedTransaction->value, 'value' => (string) $plan->id]],
+    ]);
+
+    app(App\Services\UserRuleApplier::class)->applyToHistory($rule);
+
+    expect($parent->fresh()->planned_transaction_id)->toBe($plan->id)
+        ->and(splitChildrenOf($parent)->pluck('planned_transaction_id')->unique()->all())->toBe([null]);
 });
 
 it('keeps the receipts of split lines when the split is edited or undone', function () {
