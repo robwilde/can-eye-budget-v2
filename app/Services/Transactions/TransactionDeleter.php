@@ -22,7 +22,9 @@ use Throwable;
  * partner is unlinked and survives; any other partner is dissolved by TransferLinker.
  *
  * A split child is never deleted on its own: it goes only with its parent, which takes every
- * child with it.
+ * child with it. Deleting a split parent that is an original bank-feed row clears its split
+ * and keeps the row, counted again. Deleting a version of a split parent hands current status
+ * back to the row before it, which counts again unless a person or a rule excluded it.
  */
 final readonly class TransactionDeleter
 {
@@ -47,7 +49,8 @@ final readonly class TransactionDeleter
                 ->orWhereNotIn('source', array_map(
                     static fn (TransactionSource $source): string => $source->value,
                     TransactionSource::bankFeed(),
-                )));
+                ))
+                ->orWhereHas('splitChildren'));
     }
 
     /**
@@ -77,9 +80,23 @@ final readonly class TransactionDeleter
                     continue;
                 }
 
+                if ($this->isProtectedOriginal($transaction)) {
+                    if ($this->deleteSplitChildren($transaction)) {
+                        $this->countAgain($transaction);
+                        $deleted[] = $transaction;
+                    }
+
+                    continue;
+                }
+
                 $this->releaseTransfer($transaction);
-                $this->deleteSplitChildren($transaction);
+                $hadSplit = $this->deleteSplitChildren($transaction);
                 $transaction->delete();
+
+                if ($hadSplit) {
+                    $this->restoreExclusion($transaction);
+                }
+
                 $deleted[] = $transaction;
             }
 
@@ -91,7 +108,17 @@ final readonly class TransactionDeleter
         });
     }
 
-    private function deleteSplitChildren(Transaction $parent): void
+    private function isProtectedOriginal(Transaction $transaction): bool
+    {
+        return $transaction->parent_transaction_id === null && $transaction->source->isBankFeed();
+    }
+
+    /**
+     * Soft deletes every live row split off the parent, in id order.
+     *
+     * @return bool whether the parent had any
+     */
+    private function deleteSplitChildren(Transaction $parent): bool
     {
         $children = Transaction::query()
             ->where('user_id', $parent->user_id)
@@ -102,6 +129,39 @@ final readonly class TransactionDeleter
 
         foreach ($children as $child) {
             $child->delete();
+        }
+
+        return $children->isNotEmpty();
+    }
+
+    /**
+     * Splitting flips the parent's excluded flag in place and every later edit copies it, so the
+     * version a delete hands current status back to can still carry it with no lines left. It
+     * counts again unless a person or a rule decided its exclusion.
+     */
+    private function restoreExclusion(Transaction $deleted): void
+    {
+        if ($deleted->parent_transaction_id === null || ! $deleted->excluded) {
+            return;
+        }
+
+        $predecessor = Transaction::query()
+            ->where('user_id', $deleted->user_id)
+            ->lockForUpdate()
+            ->find($deleted->parent_transaction_id);
+
+        if ($predecessor instanceof Transaction) {
+            $this->countAgain($predecessor);
+        }
+    }
+
+    /**
+     * Un-excludes a row the split excluded; an exclusion a person or a rule decided stays.
+     */
+    private function countAgain(Transaction $row): void
+    {
+        if ($row->excluded && $row->excluded_source === null) {
+            $row->update(['excluded' => false]);
         }
     }
 
