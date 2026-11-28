@@ -549,6 +549,10 @@ final readonly class RuleActionExecutor
 
     private function linkToPlannedTransaction(Transaction $transaction, string $value, ?RuleActionLookups $lookups = null): bool
     {
+        if ($transaction->isSplitChild()) {
+            return true;
+        }
+
         $plannedId = (int) $value;
 
         if ($lookups?->planIsOwnedBy($plannedId, $transaction->user_id) ?? PlannedTransaction::visible()->where('id', $plannedId)->where('user_id', $transaction->user_id)->exists()) {
