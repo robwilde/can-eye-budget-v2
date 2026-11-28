@@ -424,3 +424,21 @@ it('does nothing while insights are disabled', function () {
 
     expect(Insight::query()->count())->toBe(0);
 });
+
+it('does not warn about cash flow for a bill on a separate well-funded account', function () {
+    $user = User::factory()->create();
+    $primary = Account::factory()->for($user)->create(['balance' => 80000]);
+    $funded = Account::factory()->for($user)->create(['balance' => 1000000]);
+    $user->update(['primary_account_id' => $primary->id]);
+    PlannedTransaction::factory()->create([
+        'user_id' => $user->id,
+        'account_id' => $funded->id,
+        'amount' => 100000,
+        'start_date' => '2026-11-20',
+        'frequency' => RecurrenceFrequency::EveryMonth,
+    ]);
+
+    GenerateInsightsJob::dispatchSync($user->fresh());
+
+    expect(Insight::query()->where('user_id', $user->id)->where('type', InsightType::CashFlowWarning)->exists())->toBeFalse();
+});
