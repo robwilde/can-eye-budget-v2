@@ -806,3 +806,27 @@ it('carries the earlier surplus into a month when it is initialised', function (
 
     expect(budgetMgrLineOf($february, $groceries)->rolled_over_amount)->toBe(10000);
 });
+
+it('stamps a plan opened by the manager with the base currency of the moment', function () {
+    $user = User::factory()->create(['base_currency' => 'USD']);
+    $march = $this->manager->open($user, CarbonImmutable::parse('2026-03-01'));
+    $user->update(['base_currency' => 'EUR']);
+    $april = $this->manager->open($user->fresh(), CarbonImmutable::parse('2026-04-01'));
+
+    expect($march->currency)->toBe('USD')
+        ->and($april->currency)->toBe('EUR')
+        ->and($this->manager->open($user->fresh(), CarbonImmutable::parse('2026-03-01'))->currency)->toBe('USD');
+});
+
+it('does not copy figures from a plan in another currency', function () {
+    $groceries = budgetMgrCategory($this->user, 'Groceries');
+    $january = budgetMgrPlan($this->user, '2026-01', total: 200000, expectedIncome: 300000);
+    $january->update(['currency' => 'USD']);
+    budgetMgrLine($january, $groceries, 40000);
+    $february = budgetMgrPlan($this->user, '2026-02', initialised: false);
+    $february->update(['currency' => 'EUR']);
+
+    expect(fn () => $this->manager->copyFrom($this->user, $february))->toThrow(BudgetPlanRefusedException::class)
+        ->and($february->fresh()->initialised_at)->toBeNull()
+        ->and($february->fresh()->total_amount)->toBe(0);
+});

@@ -128,17 +128,18 @@ final readonly class BudgetPlanCalculator
      * Median monthly spend and income over the user's last twelve complete months, counting
      * months with any spending (one refunded in full counts as 0) or any income; 0 for each
      * when there is no history. Spend and income net per
-     * top-level category as a plan does.
+     * top-level category as a plan does. Converted into $currency, the user's base currency
+     * when omitted, when multi-currency is on.
      *
      * @return array{spending: int, income: int}
      */
-    public function historyMedians(User $user): array
+    public function historyMedians(User $user, ?string $currency = null): array
     {
         $thisMonth = $user->today()->startOfMonth();
         $tree = $this->categoryTree($user->id);
         $byMonth = [];
 
-        foreach ($this->flowRows($user->id, $thisMonth->subMonthsNoOverflow(self::HISTORY_MONTHS), $thisMonth->subDay()) as $row) {
+        foreach ($this->flowRows($user->id, $thisMonth->subMonthsNoOverflow(self::HISTORY_MONTHS), $thisMonth->subDay(), $currency ?? $user->base_currency) as $row) {
             $byMonth[$row['ym']][] = $row;
         }
 
@@ -257,7 +258,7 @@ final readonly class BudgetPlanCalculator
      */
     private function ownFlows(BudgetPlan $plan, array $tree): array
     {
-        return $this->groupFlows($this->flowRows($plan->user_id, $plan->period_start, $plan->period_end), $tree);
+        return $this->groupFlows($this->flowRows($plan->user_id, $plan->period_start, $plan->period_end, $plan->currency), $tree);
     }
 
     /**
@@ -435,6 +436,7 @@ final readonly class BudgetPlanCalculator
             $plan->user_id,
             $plan->period_start->subMonthsNoOverflow(self::HISTORY_MONTHS),
             $plan->period_start->subDay(),
+            $plan->currency,
         );
 
         foreach ($rows as $row) {
@@ -517,7 +519,6 @@ final readonly class BudgetPlanCalculator
             ->groupBy('planned_transaction_id');
 
         $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
-        $base = $converter === null ? null : (string) User::query()->whereKey($plan->user_id)->value('base_currency');
         $reserved = 0;
 
         $occurrencesByPlan = (new OccurrenceSchedule)->between($plans->collect(), $plan->period_start->subDays($tolerance * 2), $plan->period_end->addDays($tolerance * 2));
@@ -526,7 +527,7 @@ final readonly class BudgetPlanCalculator
             foreach ($this->unpaidOccurrences($occurrencesByPlan[$planned->id], $postingsByPlan->get($planned->id)?->values()->all() ?? [], $plan, $tolerance) as $occurrence) {
                 $reserved += $converter === null
                     ? $occurrence->amount
-                    : $converter->convert($occurrence->amount, $planned->account->currency, (string) $base, $occurrence->date);
+                    : $converter->convert($occurrence->amount, $planned->account->currency, $plan->currency, $occurrence->date);
             }
         }
 
@@ -601,19 +602,18 @@ final readonly class BudgetPlanCalculator
     }
 
     /**
-     * Countable cents per month, category and direction, converted to the user's base currency
-     * when multi-currency is on.
+     * Countable cents per month, category and direction, converted into $currency when
+     * multi-currency is on.
      *
      * @return list<array{ym: string, category: int, direction: string, total: int}>
      */
-    private function flowRows(int $userId, CarbonImmutable $start, CarbonImmutable $end): array
+    private function flowRows(int $userId, CarbonImmutable $start, CarbonImmutable $end, string $currency): array
     {
         $month = Transaction::query()->getModel()->getConnection()->getDriverName() === 'sqlite'
             ? "strftime('%Y-%m', post_date)"
             : "DATE_FORMAT(post_date, '%Y-%m')";
 
         $converter = CurrencyConverter::enabled() ? app(CurrencyConverter::class) : null;
-        $base = $converter === null ? null : (string) User::query()->whereKey($userId)->value('base_currency');
 
         $query = $this->countedAtoms($userId, $start, $end)
             ->selectRaw("{$month} as ym, category_id, direction, SUM(ABS(amount)) as total")
@@ -621,7 +621,7 @@ final readonly class BudgetPlanCalculator
             ->groupBy('category_id', 'direction');
 
         if ($converter !== null) {
-            $query->selectRaw("currency, case when currency = ? then '' else date(post_date) end as fx_day", [$base])
+            $query->selectRaw("currency, case when currency = ? then '' else date(post_date) end as fx_day", [$currency])
                 ->groupBy('currency', 'fx_day');
         }
 
@@ -631,7 +631,7 @@ final readonly class BudgetPlanCalculator
             $total = (int) $row->total;
 
             if ($converter !== null && $row->fx_day !== '') {
-                $total = $converter->convert($total, (string) $row->currency, (string) $base, CarbonImmutable::parse((string) $row->fx_day));
+                $total = $converter->convert($total, (string) $row->currency, $currency, CarbonImmutable::parse((string) $row->fx_day));
             }
 
             $rows[] = [
