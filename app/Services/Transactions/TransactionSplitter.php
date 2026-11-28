@@ -111,13 +111,26 @@ final readonly class TransactionSplitter
                 throw new TransactionSplitRefusedException(__('This transaction is not split.'));
             }
 
-            $this->deleteChildren($current);
-            $current->update(['excluded' => false]);
+            $this->dissolve($current);
 
             $this->history->rebuildForTransactions($current);
 
             return $current;
         });
+    }
+
+    /**
+     * Removes the lines of a split whose parent the caller has already locked, under the
+     * account lock, and counts the parent again. It writes the parent's pending changes too.
+     * Callers that cannot refuse, such as a bank sync, pass false so receipts on the lines
+     * move to the parent even past the attachment limit.
+     *
+     * @throws TransactionSplitRefusedException when the receipts would exceed the limit and it is enforced
+     */
+    public function dissolve(Transaction $parent, bool $enforceReceiptLimit = true): void
+    {
+        $this->deleteChildren($parent, $enforceReceiptLimit);
+        $parent->update(['excluded' => false]);
     }
 
     /**
@@ -238,7 +251,7 @@ final readonly class TransactionSplitter
      *
      * @throws TransactionSplitRefusedException
      */
-    private function deleteChildren(Transaction $parent): void
+    private function deleteChildren(Transaction $parent, bool $enforceReceiptLimit = true): void
     {
         $children = Transaction::query()
             ->where('user_id', $parent->user_id)
@@ -247,7 +260,7 @@ final readonly class TransactionSplitter
             ->lockForUpdate()
             ->get();
 
-        $this->moveReceiptsToParent($parent, $children->modelKeys());
+        $this->moveReceiptsToParent($parent, $children->modelKeys(), $enforceReceiptLimit);
 
         foreach ($children as $child) {
             $child->delete();
@@ -259,7 +272,7 @@ final readonly class TransactionSplitter
      *
      * @throws TransactionSplitRefusedException
      */
-    private function moveReceiptsToParent(Transaction $parent, array $childIds): void
+    private function moveReceiptsToParent(Transaction $parent, array $childIds, bool $enforceReceiptLimit): void
     {
         if ($childIds === []) {
             return;
@@ -273,7 +286,7 @@ final readonly class TransactionSplitter
 
         $onParent = TransactionAttachment::query()->where('transaction_id', $parent->id)->count();
 
-        if ($onParent + $moving > TransactionAttachment::MAX_PER_TRANSACTION) {
+        if ($enforceReceiptLimit && $onParent + $moving > TransactionAttachment::MAX_PER_TRANSACTION) {
             throw new TransactionSplitRefusedException(__('The transaction would have more than :max attachments once the receipts on its split lines move to it. Nothing was changed.', ['max' => TransactionAttachment::MAX_PER_TRANSACTION]));
         }
 
