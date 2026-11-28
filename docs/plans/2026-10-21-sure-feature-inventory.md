@@ -2098,7 +2098,7 @@ The remaining features have no ordering constraint beyond the conventions above.
 - **Unreadable dates:** dates that can't be parsed are offered for import and flagged in review, not dropped.
 - **Re-uploading the same PDF:**
   - The statement is reused, and so is any import that has not failed, as long as the account and date format are unchanged.
-  - A duplicate of a statement the user can't access gives "This PDF is already stored as a statement you cannot access".
+  - A statement another login holds with the same content is invisible to the user. The user's own copy is stored and imported, and nothing tells them whether another login has the file (statement identity is per user).
 - **Stuck imports and search:**
   - An import idle for over an hour can be marked failed.
   - The PDF is also added to the family document store (F35).
