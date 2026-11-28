@@ -424,3 +424,40 @@ it('does nothing while insights are disabled', function () {
 
     expect(Insight::query()->count())->toBe(0);
 });
+
+it('does not report idle cash for an old account whose balance changed inside the idle window', function () {
+    $user = User::factory()->create();
+    $changed = Account::factory()->for($user)->create(['balance' => 10000, 'created_at' => '2026-01-01 00:00:00']);
+    $untouched = Account::factory()->for($user)->create(['balance' => 800000, 'created_at' => '2026-01-01 00:00:00']);
+    $this->travelTo('2026-11-10 12:00:00');
+    $changed->update(['balance' => 900000]);
+    $this->travelTo('2026-11-15 12:00:00');
+
+    GenerateInsightsJob::dispatchSync($user);
+
+    expect(Insight::query()->where('type', InsightType::IdleCash)->pluck('dedup_key')->all())->toBe(["idle_cash:{$untouched->id}"]);
+});
+
+it('reports idle cash again once a balance change is older than the idle window', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 10000, 'created_at' => '2026-01-01 00:00:00']);
+    $this->travelTo('2026-08-01 12:00:00');
+    $account->update(['balance' => 900000]);
+    $this->travelTo('2026-11-15 12:00:00');
+
+    GenerateInsightsJob::dispatchSync($user);
+
+    expect(Insight::query()->where('type', InsightType::IdleCash)->pluck('dedup_key')->all())->toBe(["idle_cash:{$account->id}"]);
+});
+
+it('keeps an unchanged balance refresh from resetting the idle clock', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create(['balance' => 900000, 'created_at' => '2026-01-01 00:00:00']);
+    $this->travelTo('2026-11-14 12:00:00');
+    $account->update(['balance' => 900000, 'balance_updated_at' => now()]);
+    $this->travelTo('2026-11-15 12:00:00');
+
+    GenerateInsightsJob::dispatchSync($user);
+
+    expect(Insight::query()->where('type', InsightType::IdleCash)->pluck('dedup_key')->all())->toBe(["idle_cash:{$account->id}"]);
+});
