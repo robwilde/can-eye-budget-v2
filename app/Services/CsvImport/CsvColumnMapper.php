@@ -22,6 +22,8 @@ final class CsvColumnMapper
 
     public const string FIELD_TAG = 'tag';
 
+    public const string FIELD_SPLIT_AMOUNT = 'split_amount';
+
     /**
      * Canonical fields → keyword fragments that commonly appear in headers.
      * Order matters: more-specific patterns should win.

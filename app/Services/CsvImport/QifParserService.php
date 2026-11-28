@@ -76,7 +76,7 @@ final class QifParserService
      *
      * @throws RuntimeException when the file is not a QIF file or holds no bank or credit-card transactions
      */
-    public function rows(string $path, string $order = self::ORDER_AUTO): Generator
+    public function rows(string $path, string $order = self::ORDER_AUTO, ?CsvNumberFormat $numberFormat = null): Generator
     {
         $records = $this->records($path);
 
@@ -85,6 +85,7 @@ final class QifParserService
         }
 
         $order = $this->resolveOrder($records, $order);
+        $numberFormat ??= $this->resolveNumberFormat($records);
         $number = 0;
 
         foreach ($records as $record) {
@@ -109,7 +110,7 @@ final class QifParserService
             if ($rawAmount === '') {
                 $errors['amount'] = 'Missing amount';
             } else {
-                $amount = $this->numbers->parse($rawAmount, CsvNumberFormat::CommaThousandsDotDecimal);
+                $amount = $this->numbers->parse($rawAmount, $numberFormat);
 
                 if ($amount === null) {
                     $errors['amount'] = sprintf('Amount "%s" is not a number', $rawAmount);
@@ -131,6 +132,39 @@ final class QifParserService
                 'errors' => $errors,
             ];
         }
+    }
+
+    /**
+     * The number format the amounts of a file are read in: the one its amounts settle, or 1,234.56.
+     *
+     * @throws RuntimeException
+     */
+    public function numberFormatFor(string $path): CsvNumberFormat
+    {
+        return $this->resolveNumberFormat($this->records($path));
+    }
+
+    /**
+     * @param  list<string>  $amounts
+     * @return CsvNumberFormat|null 1.234,56 or 1,234.56 when the amounts settle it, otherwise null
+     */
+    public function detectNumberFormat(array $amounts): ?CsvNumberFormat
+    {
+        $commaDecimal = false;
+        $dotDecimal = false;
+
+        foreach ($amounts as $amount) {
+            $digits = (string) preg_replace('/[^\d.,]/u', '', $amount);
+
+            $commaDecimal = $commaDecimal || preg_match('/,\d{1,2}$|\.\d{3}.*,\d+$/', $digits) === 1;
+            $dotDecimal = $dotDecimal || preg_match('/\.\d{1,2}$|,\d{3}.*\.\d+$/', $digits) === 1;
+        }
+
+        return match (true) {
+            $commaDecimal && ! $dotDecimal => CsvNumberFormat::DotThousandsCommaDecimal,
+            $dotDecimal && ! $commaDecimal => CsvNumberFormat::CommaThousandsDotDecimal,
+            default => null,
+        };
     }
 
     /**
@@ -178,6 +212,14 @@ final class QifParserService
         }
 
         return $this->detectOrder(array_map(fn (array $record): string => $record['D'] ?? '', $records)) ?? self::ORDER_DAY_FIRST;
+    }
+
+    /**
+     * @param  list<array<string, string>>  $records
+     */
+    private function resolveNumberFormat(array $records): CsvNumberFormat
+    {
+        return $this->detectNumberFormat(array_map(fn (array $record): string => $record['T'] ?? $record['U'] ?? '', $records)) ?? CsvNumberFormat::CommaThousandsDotDecimal;
     }
 
     /**

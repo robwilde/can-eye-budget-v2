@@ -37,6 +37,7 @@ final class ImportPresetMapper
             CsvColumnMapper::FIELD_DESCRIPTION => ['Payee', 'Notes'],
             CsvColumnMapper::FIELD_AMOUNT => ['Amount'],
             CsvColumnMapper::FIELD_CATEGORY => ['Category'],
+            CsvColumnMapper::FIELD_SPLIT_AMOUNT => ['Split_Amount'],
         ],
     ];
 

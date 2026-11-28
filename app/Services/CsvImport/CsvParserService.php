@@ -79,8 +79,14 @@ final class CsvParserService
         $occurrences = [];
 
         foreach ($this->records($path, $format) as $offset => $record) {
+            $row = $this->normalizeRow($record);
+
+            if ($this->isSplitParent($row, $mapping)) {
+                continue;
+            }
+
             try {
-                $parsed = $this->parseRow($this->normalizeRow($record), $mapping, $format, $occurrences);
+                $parsed = $this->parseRow($row, $mapping, $format, $occurrences);
             } catch (InvalidArgumentException) {
                 continue;
             }
@@ -111,6 +117,11 @@ final class CsvParserService
         foreach ($this->records($path, $format) as $record) {
             $number++;
             $row = $this->normalizeRow($record);
+
+            if ($this->isSplitParent($row, $mapping)) {
+                continue;
+            }
+
             $errors = [];
             $date = null;
             $amount = null;
@@ -163,8 +174,13 @@ final class CsvParserService
         $occurrences = [];
 
         foreach ($this->records($path, $format) as $offset => $record) {
+            $row = $this->normalizeRow($record);
+
+            if ($this->isSplitParent($row, $mapping)) {
+                continue;
+            }
+
             try {
-                $row = $this->normalizeRow($record);
                 $parsed = $this->parseRow($row, $mapping, $format, $occurrences);
             } catch (Throwable $e) {
                 $errors[] = ['row' => (int) $offset, 'error' => $e->getMessage()];
@@ -332,6 +348,26 @@ final class CsvParserService
         }
 
         return $normalized;
+    }
+
+    /**
+     * A split parent of an Actual Budget export: it writes the total in the Split_Amount column and 0 in
+     * Amount, and its children carry the amounts. A row with no Split_Amount, or a zero one, is never a parent.
+     *
+     * @param  array<string, string>  $row
+     * @param  array<string, string|null>  $mapping
+     */
+    private function isSplitParent(array $row, array $mapping): bool
+    {
+        $splitColumn = $mapping[CsvColumnMapper::FIELD_SPLIT_AMOUNT] ?? null;
+
+        if ($splitColumn === null || $splitColumn === '') {
+            return false;
+        }
+
+        $isZero = static fn (string $cell): bool => preg_match('/[1-9]/', $cell) !== 1;
+
+        return ! $isZero($row[$splitColumn] ?? '') && $isZero($row[$mapping[CsvColumnMapper::FIELD_AMOUNT] ?? ''] ?? '');
     }
 
     /**
