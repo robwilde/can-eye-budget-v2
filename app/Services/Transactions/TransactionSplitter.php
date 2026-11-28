@@ -12,6 +12,7 @@ use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\TransactionAttachment;
 use App\Services\Projection\AccountBalanceHistoryBuilder;
+use App\Services\Transfers\TransferKinds;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
@@ -37,6 +38,10 @@ final readonly class TransactionSplitter
     public const int MIN_LINES = 2;
 
     public const int MAX_NAME_LENGTH = 255;
+
+    public const int MAX_NOTES_LENGTH = 1000;
+
+    public const int MAX_LINES = 50;
 
     public function __construct(private AccountBalanceHistoryBuilder $history) {}
 
@@ -88,7 +93,7 @@ final readonly class TransactionSplitter
             $this->history->rebuildForTransactions($current);
 
             return $children;
-        });
+        }, TransferKinds::TRANSACTION_ATTEMPTS);
     }
 
     /**
@@ -117,7 +122,7 @@ final readonly class TransactionSplitter
             $this->history->rebuildForTransactions($current);
 
             return $current;
-        });
+        }, TransferKinds::TRANSACTION_ATTEMPTS);
     }
 
     /**
@@ -188,7 +193,7 @@ final readonly class TransactionSplitter
 
     private function isTransfer(Transaction $transaction): bool
     {
-        return ! Transaction::query()->whereKey($transaction->id)->excludingTransfers()->exists();
+        return ! Transaction::query()->where('user_id', $transaction->user_id)->whereKey($transaction->id)->excludingTransfers()->exists();
     }
 
     /**
@@ -202,6 +207,10 @@ final readonly class TransactionSplitter
             throw new TransactionSplitRefusedException(__('A split needs at least two lines.'));
         }
 
+        if (count($lines) > self::MAX_LINES) {
+            throw new TransactionSplitRefusedException(__('A split can have at most :max lines.', ['max' => self::MAX_LINES]));
+        }
+
         $total = 0;
         $categoryIds = [];
 
@@ -212,6 +221,10 @@ final readonly class TransactionSplitter
 
             if (mb_strlen(mb_trim((string) $line->name)) > self::MAX_NAME_LENGTH) {
                 throw new TransactionSplitRefusedException(__('Split names must be :max characters or fewer.', ['max' => self::MAX_NAME_LENGTH]));
+            }
+
+            if (mb_strlen(mb_trim((string) $line->notes)) > self::MAX_NOTES_LENGTH) {
+                throw new TransactionSplitRefusedException(__('Split notes must be :max characters or fewer.', ['max' => self::MAX_NOTES_LENGTH]));
             }
 
             $total += $line->amount;
