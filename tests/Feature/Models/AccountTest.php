@@ -204,3 +204,29 @@ test('amountOwed is zero when a credit-limit account is in credit', function () 
 
     expect($account->amountOwed())->toBe(0);
 });
+
+test('a new account has no balance change recorded', function () {
+    $account = Account::factory()->create(['balance' => 10000]);
+
+    expect($account->balance_changed_at)->toBeNull();
+});
+
+test('a write that changes the balance records when it changed', function () {
+    $this->travelTo('2026-11-15 12:00:00');
+    $account = Account::factory()->create(['balance' => 10000]);
+
+    $account->update(['balance' => 900000]);
+
+    expect($account->fresh()->balance_changed_at?->toDateTimeString())->toBe('2026-11-15 12:00:00');
+});
+
+test('a write that leaves the balance as it was does not move the balance change time', function () {
+    $this->travelTo('2026-11-15 12:00:00');
+    $account = Account::factory()->create(['balance' => 10000]);
+    $account->update(['balance' => 20000]);
+
+    $this->travelTo('2026-11-20 12:00:00');
+    $account->update(['balance' => 20000, 'balance_updated_at' => now(), 'name' => 'Renamed']);
+
+    expect($account->fresh()->balance_changed_at?->toDateTimeString())->toBe('2026-11-15 12:00:00');
+});

@@ -34,6 +34,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property int $balance
  * @property ImportSource|null $balance_source
  * @property CarbonImmutable|null $balance_updated_at
+ * @property CarbonImmutable|null $balance_changed_at
  * @property int|null $credit_limit
  * @property int|null $available_funds
  * @property string|null $description
@@ -332,6 +333,12 @@ final class Account extends Model
                 ->update(['suggestion_confidence' => null]);
         });
 
+        self::updating(static function (self $account): void {
+            if ($account->isDirty('balance')) {
+                $account->balance_changed_at = CarbonImmutable::now();
+            }
+        });
+
         self::deleted(static function (self $account): void {
             TransactionAttachment::purgeRemembered($account);
         });
@@ -351,6 +358,7 @@ final class Account extends Model
             'balance' => MoneyCast::class,
             'balance_source' => ImportSource::class,
             'balance_updated_at' => 'immutable_datetime',
+            'balance_changed_at' => 'immutable_datetime',
             'is_tracked' => 'boolean',
             'exclude_from_reports' => 'boolean',
             'reconciled_on' => 'immutable_date',
