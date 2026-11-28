@@ -4,6 +4,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\CsvNumberFormat;
 use App\Enums\TransactionDirection;
 use App\Services\CsvImport\QifParserService;
 
@@ -84,6 +85,21 @@ it('detects the date order from a date that settles it', function () {
     expect($parser->detectOrder(['31/01/2024', '02/03/2024']))->toBe(QifParserService::ORDER_DAY_FIRST)
         ->and($parser->detectOrder(['01/31/2024', '02/03/2024']))->toBe(QifParserService::ORDER_MONTH_FIRST)
         ->and($parser->detectOrder(['01/02/2024', '02/03/2024']))->toBeNull();
+});
+
+it('detects the number format from an amount that settles it', function () {
+    $parser = app(QifParserService::class);
+
+    expect($parser->detectNumberFormat(['-12,50', '10.000,00', '7']))->toBe(CsvNumberFormat::DotThousandsCommaDecimal)
+        ->and($parser->detectNumberFormat(['-1,234.56', '12.50', '7']))->toBe(CsvNumberFormat::CommaThousandsDotDecimal)
+        ->and($parser->detectNumberFormat(['12', '-7']))->toBeNull()
+        ->and($parser->detectNumberFormat(['12,50', '12.50']))->toBeNull();
+});
+
+it('reads comma-decimal amounts in the format the file settles', function () {
+    $parsed = app(QifParserService::class)->parse(qifFile("!Type:Bank\nD01/03/2024\nT-12,50\nPOne\n^\nD02/03/2024\nT10.000,00\nPTwo\n^\nD03/03/2024\nT7\nPThree\n^\n"));
+
+    expect(array_map(fn ($row) => $row->amount, $parsed))->toBe([-1250, 1000000, 700]);
 });
 
 it('reads Quicken apostrophe years and padded dates', function () {

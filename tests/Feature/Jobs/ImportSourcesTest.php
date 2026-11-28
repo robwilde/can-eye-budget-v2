@@ -5,6 +5,7 @@
 declare(strict_types=1);
 
 use App\Enums\BankImportStatus;
+use App\Enums\CsvNumberFormat;
 use App\Enums\ImportPreset;
 use App\Enums\TransactionDirection;
 use App\Jobs\ImportCsvTransactionsJob;
@@ -376,4 +377,44 @@ it('cannot close the rows table of a qif import', function () {
         ->set('file', UploadedFile::fake()->createWithContent('export.qif', SOURCES_QIF))
         ->call('uploadAndDetectHeaders')
         ->assertDontSeeHtml('wire:click="closeRows"');
+});
+
+it('reads the amounts of a comma-decimal qif file and stores its number format', function () {
+    $import = sourcesQifImport($this->user, $this->account, "!Type:Bank\nD15/03/2024\nT-12,50\nPCoffee Shop\n^\nD16/03/2024\nT10.000,00\nPEmployer\n^\n");
+
+    $done = sourcesRunImport($import);
+
+    expect($done->status)->toBe(BankImportStatus::Completed)
+        ->and($done->column_mapping['number_format'])->toBe(CsvNumberFormat::DotThousandsCommaDecimal->value)
+        ->and(Transaction::query()->where('account_id', $this->account->id)->orderBy('post_date')->pluck('amount')->all())->toBe([-1250, 1000000]);
+});
+
+it('takes an edited amount of a comma-decimal qif file in the file\'s format', function () {
+    $content = "!Type:Bank\nD15/03/2024\nT-12,50\nPCoffee Shop\n^\nD16/03/2024\nTabc\nPEmployer\n^\n";
+
+    $component = Livewire::actingAs($this->user)->test(ImportBank::class)
+        ->set('importPreset', 'qif')
+        ->set('accountId', $this->account->id)
+        ->set('file', UploadedFile::fake()->createWithContent('export.qif', $content))
+        ->call('uploadAndDetectHeaders');
+
+    $row = BankImport::query()->sole()->rows()->where('row_number', 2)->sole();
+    $component->call('updateRow', $row->id, 'amount', '1.234,56');
+
+    expect($row->fresh()->amount)->toBe(123456)
+        ->and($row->fresh()->errors)->toBeNull();
+});
+
+it('keeps the dot-decimal number format of a qif file written that way', function () {
+    $done = sourcesRunImport(sourcesQifImport($this->user, $this->account));
+
+    expect($done->column_mapping['number_format'])->toBe(CsvNumberFormat::CommaThousandsDotDecimal->value)
+        ->and(Transaction::query()->where('account_id', $this->account->id)->orderBy('post_date')->pluck('amount')->all())->toBe([-450, -120000, 250000]);
+});
+
+it('keeps the default number format when the qif amounts do not settle it', function () {
+    $done = sourcesRunImport(sourcesQifImport($this->user, $this->account, "!Type:Bank\nD15/03/2024\nT-12\nPCoffee Shop\n^\nD16/03/2024\nT7\nPEmployer\n^\n"));
+
+    expect($done->column_mapping['number_format'])->toBe(CsvNumberFormat::CommaThousandsDotDecimal->value)
+        ->and(Transaction::query()->where('account_id', $this->account->id)->orderBy('post_date')->pluck('amount')->all())->toBe([-1200, 700]);
 });

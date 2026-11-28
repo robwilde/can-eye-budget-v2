@@ -39,6 +39,7 @@ final readonly class BankImportRowBuilder
             $import->column_mapping = [
                 self::QIF_DATE_ORDER => (string) ($import->column_mapping[self::QIF_DATE_ORDER] ?? QifParserService::ORDER_AUTO),
                 CsvFormat::KEY_DATE => $order === QifParserService::ORDER_MONTH_FIRST ? 'm/d/Y' : 'd/m/Y',
+                CsvFormat::KEY_NUMBER => $this->qif->numberFormatFor($path)->value,
             ];
             $import->save();
         }
@@ -76,7 +77,7 @@ final readonly class BankImportRowBuilder
     private function cells(BankImport $import, array $mapping, string $path): Generator
     {
         if ($import->preset === ImportPreset::Qif) {
-            foreach ($this->qif->rows($path, ($mapping[CsvFormat::KEY_DATE] ?? null) === 'm/d/Y' ? QifParserService::ORDER_MONTH_FIRST : QifParserService::ORDER_DAY_FIRST) as $number => $result) {
+            foreach ($this->qif->rows($path, ($mapping[CsvFormat::KEY_DATE] ?? null) === 'm/d/Y' ? QifParserService::ORDER_MONTH_FIRST : QifParserService::ORDER_DAY_FIRST, CsvFormat::fromMapping($mapping)?->numberFormat) as $number => $result) {
                 yield $number => [
                     'date' => $result['date'],
                     'amount' => $result['amount'],
